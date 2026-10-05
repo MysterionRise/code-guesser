@@ -99,4 +99,21 @@ describe("bounded retry controller", () => {
       .rejects.toBeInstanceOf(RetryError);
     expect(JSON.stringify(artifact)).toBe(before);
   });
+
+  it("preserves the original failure as the cause when no retry signal exists", async () => {
+    const retry = controller();
+    const original = new Error("UNSUPPORTED_STATUS");
+
+    let caught: unknown;
+    try {
+      await retry.execute(async () => { throw original; });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(RetryError);
+    expect((caught as RetryError).code).toBe("RETRY_SIGNAL_MISSING");
+    expect((caught as Error).cause).toBe(original);
+    expect(retry.state()).toEqual({ retries: 0, waitedMilliseconds: 0 });
+  });
 });

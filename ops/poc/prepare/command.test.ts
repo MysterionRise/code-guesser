@@ -3,7 +3,9 @@ import { readFile } from "node:fs/promises";
 import { canonicalHash } from "./canonical";
 import { createCapacityMeter } from "./capacity";
 import { accepted, classificationsFor, hash, loadProfile, makeHarness } from "./command-test-harness";
+import { RetryError } from "./retry";
 import { createRunReport } from "./run-report";
+import { TransportError } from "./transport";
 import {
   prepareLocalExperiment,
   projectPreparationEnvironment,
@@ -429,6 +431,44 @@ describe("local experiment preparation command", () => {
       AWS_SECRET_ACCESS_KEY: "secret", AWS_SESSION_TOKEN: "session", AWS_PROFILE: "poc",
       AWS_SHARED_CREDENTIALS_FILE: "/external/credentials",
     });
+  });
+
+  it("logs stage, reason code, and status class only for coded failures", async () => {
+    const diagnostic = { provider: "github", hostClass: "github", method: "GET", pathTemplate: "/search/commits",
+      statusClass: "4xx", reasonCode: "UNSUPPORTED_STATUS" } as const;
+    const search = await makeHarness({
+      searchGitHub: async () => { throw new RetryError("RETRY_SIGNAL_MISSING", new TransportError("UNSUPPORTED_STATUS", diagnostic)); },
+    });
+    await expect(prepareLocalExperiment(search.dependencies)).rejects.toThrow("PREPARATION_FAILED");
+    expect(search.calls.filter((call) => call.startsWith("log:"))).toEqual([
+      "log:PREPARATION_STAGE_FAILED DISCOVERY RETRY_SIGNAL_MISSING 4xx",
+      "log:PREPARATION_FAILED",
+    ]);
+
+    const preflight = await makeHarness({
+      preflight: async () => { throw new TransportError("TIMEOUT", { ...diagnostic, provider: "huggingFace", hostClass: "huggingFace",
+        pathTemplate: "/datasets/bigcode/the-stack-v2/{resource}", statusClass: "none", reasonCode: "TIMEOUT" }); },
+    });
+    await expect(prepareLocalExperiment(preflight.dependencies)).rejects.toThrow("PREPARATION_FAILED");
+    expect(preflight.calls.filter((call) => call.startsWith("log:"))).toEqual([
+      "log:PREPARATION_STAGE_FAILED PREFLIGHT TIMEOUT none",
+      "log:PREPARATION_FAILED",
+    ]);
+
+    const publication = await makeHarness({
+      publishArtifact: async () => { throw Object.assign(new Error("PUBLICATION_FAILED"), { code: "PUBLICATION_FAILED" }); },
+    });
+    await expect(prepareLocalExperiment(publication.dependencies)).rejects.toThrow("PREPARATION_FAILED");
+    expect(publication.calls.filter((call) => call.startsWith("log:"))).toEqual([
+      "log:PREPARATION_STAGE_FAILED PUBLICATION PUBLICATION_FAILED none",
+      "log:PREPARATION_FAILED",
+    ]);
+
+    const unsafe = await makeHarness({
+      searchGitHub: async () => { throw Object.assign(new Error("leak"), { code: "Bearer raw-secret", diagnostic: { statusClass: "https://x/?q=1" } }); },
+    });
+    await expect(prepareLocalExperiment(unsafe.dependencies)).rejects.toThrow("PREPARATION_FAILED");
+    expect(unsafe.calls.filter((call) => call.startsWith("log:"))).toEqual(["log:PREPARATION_FAILED"]);
   });
 
   it("keeps game and browser code out of the command and redacts top-level failures", async () => {

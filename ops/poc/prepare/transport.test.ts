@@ -1,3 +1,4 @@
+import { RetryRequestError } from "./retry";
 import { createBoundedTransport, TransportError } from "./transport";
 
 const testModuleName: string = "vitest";
@@ -202,6 +203,69 @@ describe("bounded preparation transport", () => {
     await expect(status.requestBytes(githubRequest())).rejects.toMatchObject({ code: "UNSUPPORTED_STATUS" });
   });
 
+
+  it("translates a GitHub 403/429 with an integer retry-after into a retry request without reading the body", async () => {
+    for (const status of [403, 429]) {
+      let pulled = false;
+      const body = new ReadableStream<Uint8Array>({ pull() { pulled = true; throw new Error("BODY_READ"); } }, { highWaterMark: 0 });
+      const transport = transportReturning(new Response(body, { status, headers: { "retry-after": "2" } }));
+
+      let caught: unknown;
+      try { await transport.requestJson(githubRequest()); } catch (error) { caught = error; }
+      expect(caught).toBeInstanceOf(RetryRequestError);
+      expect((caught as RetryRequestError).retryAfterMilliseconds).toBe(2000);
+      expect(pulled).toBe(false);
+    }
+  });
+
+  it("derives the wait from x-ratelimit-reset when the remaining budget is zero", async () => {
+    const now = 1_700_000_000_000;
+    const transport = createBoundedTransport({
+      limits,
+      now: () => now,
+      fetch: async () => new Response(null, { status: 403, headers: {
+        "x-ratelimit-remaining": "0", "x-ratelimit-reset": String(now / 1000 + 5),
+      } }),
+    });
+
+    await expect(transport.requestJson(githubRequest())).rejects.toMatchObject({ retryAfterMilliseconds: 5000 });
+  });
+
+  it("reports a malformed or elapsed retry instruction as a malformed signal, never as a network failure", async () => {
+    const now = 1_700_000_000_000;
+    const malformedCases = [
+      { "retry-after": "soon" },
+      { "retry-after": "0" },
+      { "retry-after": "Wed, 21 Oct 2026 07:28:00 GMT" },
+      { "x-ratelimit-remaining": "0", "x-ratelimit-reset": "not-a-number" },
+      { "x-ratelimit-remaining": "0", "x-ratelimit-reset": String(now / 1000 - 1) },
+    ];
+    for (const headers of malformedCases) {
+      const transport = createBoundedTransport({ limits, now: () => now,
+        fetch: async () => new Response(null, { status: 429, headers }) });
+      let caught: unknown;
+      try { await transport.requestBytes(githubRequest()); } catch (error) { caught = error; }
+      expect(caught).toBeInstanceOf(RetryRequestError);
+      const wait = (caught as RetryRequestError).retryAfterMilliseconds;
+      expect(Number.isSafeInteger(wait) && (wait as number) > 0).toBe(false);
+    }
+  });
+
+  it("keeps UNSUPPORTED_STATUS for a GitHub 403 without an instruction and for non-GitHub rate limits", async () => {
+    const github = transportReturning(new Response(null, { status: 403, headers: { "x-ratelimit-remaining": "7" } }));
+    await expect(github.requestBytes(githubRequest())).rejects.toMatchObject({
+      code: "UNSUPPORTED_STATUS", diagnostic: { statusClass: "4xx", provider: "github" },
+    });
+
+    const huggingFace = transportReturning(new Response(null, { status: 429, headers: { "retry-after": "1" } }));
+    await expect(huggingFace.requestBytes({
+      provider: "huggingFace", method: "GET", url: "https://huggingface.co/api/datasets/bigcode/the-stack-v2",
+    })).rejects.toMatchObject({ code: "UNSUPPORTED_STATUS", diagnostic: { statusClass: "4xx", provider: "huggingFace" } });
+
+    const github500 = transportReturning(new Response(null, { status: 500, headers: { "retry-after": "1" } }));
+    await expect(github500.requestBytes(githubRequest())).rejects.toMatchObject({ code: "UNSUPPORTED_STATUS", diagnostic: { statusClass: "5xx" } });
+  });
+
   it("keeps credentials, URLs, queries, and response bodies out of errors and diagnostics", async () => {
     const secret = "credential-value-123";
     const fullUrl = `https://api.github.com/search/commits?q=${secret}`;
@@ -223,5 +287,22 @@ describe("bounded preparation transport", () => {
     expect(serialized).not.toContain(fullUrl);
     expect(serialized).not.toContain("private-body");
     expect(serialized).toContain("/search/commits");
+
+    const rateLimited = createBoundedTransport({
+      limits,
+      credentials: { github: `Bearer ${secret}` },
+      fetch: async () => new Response(`private-body-${secret}`, { status: 429, headers: { "retry-after": "3" } }),
+    });
+    let retrySignal: unknown;
+    try {
+      await rateLimited.requestBytes({ provider: "github", method: "GET", url: fullUrl });
+    } catch (error) {
+      retrySignal = error;
+    }
+    expect(retrySignal).toBeInstanceOf(RetryRequestError);
+    const serializedSignal = JSON.stringify({ ...(retrySignal as object), message: (retrySignal as Error).message });
+    expect(serializedSignal).not.toContain(secret);
+    expect(serializedSignal).not.toContain(fullUrl);
+    expect(serializedSignal).not.toContain("private-body");
   });
 });

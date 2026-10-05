@@ -2,6 +2,8 @@ import { readFile } from "node:fs/promises";
 
 import { canonicalHash } from "./canonical";
 import { parseCrawlProfile } from "./profile";
+import { createRetryController } from "./retry";
+import { createBoundedTransport } from "./transport";
 
 const testModuleName: string = "vitest";
 const { describe, expect, it } = await import(testModuleName) as any;
@@ -455,5 +457,80 @@ describe("GitHub commit search adapter", () => {
       retry: { execute: async (operation: () => Promise<unknown>) => operation() },
     });
     await expect(repeatedAcrossQueries).rejects.toBeInstanceOf(searchModule.GitHubSearchError);
+  });
+
+  describe("live retry instructions through the bounded transport", () => {
+    const singleQueryProfile = async () => {
+      const raw = JSON.parse(await readFile(profilePath, "utf8")) as Record<string, any>;
+      raw.github.queries = [raw.github.queries[0]];
+      Object.assign(raw.capacity, { githubPages: 1, githubResults: 1 });
+      return parseCrawlProfile(raw);
+    };
+    const okResponse = () => new Response(JSON.stringify({
+      total_count: 1, incomplete_results: false,
+      documentation_url: "https://docs.github.com/rest/search/search",
+      items: [searchItem("a".repeat(40))],
+    }), { status: 200, headers: { "content-type": "application/json" } });
+    const liveHarness = (responses: (() => Response)[]) => {
+      let fetches = 0;
+      const waits: number[] = [];
+      const transport = createBoundedTransport({
+        limits: { timeoutMilliseconds: 1000, concurrentRequests: 4, requestCount: 200, responseBytes: 8_388_608, pages: 3 },
+        credentials: { github: "Bearer external-gh" },
+        fetch: async () => { const next = responses[fetches] ?? responses.at(-1)!; fetches += 1; return next(); },
+      });
+      const retry = createRetryController({ maxRunRetries: 3, maxWaitMilliseconds: 15_000, maxTotalWaitMilliseconds: 30_000,
+        sleep: async (milliseconds) => { waits.push(milliseconds); } });
+      return { transport, retry, waits, fetches: () => fetches };
+    };
+
+    it("retries one page once after a GitHub rate-limit instruction and keeps the run ceilings", async () => {
+      const profile = await singleQueryProfile();
+      const live = liveHarness([
+        () => new Response("limited", { status: 429, headers: { "retry-after": "1" } }),
+        okResponse,
+      ]);
+
+      const pool = await crawlGitHubCommitSearch({ profile, transport: live.transport, retry: live.retry });
+
+      expect(pool.candidates).toHaveLength(1);
+      expect(live.fetches()).toBe(2);
+      expect(live.waits).toEqual([1000]);
+      expect(live.retry.state()).toEqual({ retries: 1, waitedMilliseconds: 1000 });
+    });
+
+    it("fails closed with WAIT_LIMIT on an instruction longer than the signed single wait", async () => {
+      const profile = await singleQueryProfile();
+      const live = liveHarness([() => new Response(null, { status: 403, headers: { "retry-after": "16" } })]);
+
+      await expect(crawlGitHubCommitSearch({ profile, transport: live.transport, retry: live.retry }))
+        .rejects.toMatchObject({ code: "WAIT_LIMIT" });
+      expect(live.fetches()).toBe(1);
+      expect(live.waits).toEqual([]);
+    });
+
+    it("fails with RETRY_SIGNAL_MISSING carrying only the status class when no instruction exists", async () => {
+      const profile = await singleQueryProfile();
+      const fullUrl = "https://api.github.com/search/commits?q=";
+      const live = liveHarness([() => new Response("private-body external-gh", { status: 403 })]);
+
+      let caught: unknown;
+      try {
+        await crawlGitHubCommitSearch({ profile, transport: live.transport, retry: live.retry });
+      } catch (error) {
+        caught = error;
+      }
+
+      expect(caught).toMatchObject({ code: "RETRY_SIGNAL_MISSING" });
+      expect((caught as Error).cause).toMatchObject({
+        code: "UNSUPPORTED_STATUS", diagnostic: { provider: "github", statusClass: "4xx", pathTemplate: "/search/commits" },
+      });
+      const serialized = JSON.stringify({ error: caught, cause: (caught as Error).cause, message: (caught as Error).message });
+      expect(serialized).not.toContain("external-gh");
+      expect(serialized).not.toContain("private-body");
+      expect(serialized).not.toContain(fullUrl);
+      expect(serialized).not.toContain(profile.github.queries[0]!.query);
+      expect(live.fetches()).toBe(1);
+    });
   });
 });

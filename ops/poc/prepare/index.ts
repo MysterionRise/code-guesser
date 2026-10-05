@@ -26,6 +26,7 @@ type StageResult<Value> = Readonly<{ value: Value; acceptedResponseHashes: reado
 type Context = Readonly<{ profile: CrawlProfile; canonicalProfileBytes: Uint8Array; profileHash: string; environment: Environment; capacity: CapacityMeter; runtime: unknown }>;
 type StackSelection = Readonly<{ row: unknown; blob: unknown; candidate: unknown }>;
 type DiagnosticStage = "DISCOVERY" | "ADMISSION" | "BLOB_RETRIEVAL" | "GITHUB_REVALIDATION" | "SCREENING" | "DEDUPLICATION";
+type FailureStage = "PREFLIGHT" | "DISCOVERY" | "ADMISSION" | "STACK_METADATA" | "BLOB_RETRIEVAL" | "SELECTION" | "PUBLICATION";
 interface RunState { readonly diagnostics: Map<string, number>; repositoriesAdmitted: number; githubRevalidations: number; screened: number; duplicatesRejected: number }
 export interface PreparationDependencies {
   loadProfile(): Promise<Readonly<{ profile: CrawlProfile; canonicalProfileBytes: Uint8Array }>>; environment(): Environment;
@@ -51,6 +52,19 @@ const addHashes = (target: string[], values: readonly string[]): void => { for (
   if (!SHA256.test(value)) throw new PreparationError(); if (!target.includes(value)) target.push(value);
 } };
 const QUERY_COMPLETENESS = new Set(["COMPLETE", "PROVIDER_REPORTED_INCOMPLETE"]);
+const REASON_CODE = /^[A-Z][A-Z0-9_]*$/u; const STATUS_CLASS = /^(?:none|[1-5]xx)$/u; const FAILURE_CAUSE_DEPTH = 4;
+/** Retains only a stable reason code and status class from a failure chain; anything else is dropped before logging. */
+const failureDiagnostic = (error: unknown): Readonly<{ code: string; statusClass: string }> | undefined => {
+  let code: string | undefined; let statusClass = "none"; let current: unknown = error;
+  for (let depth = 0; depth < FAILURE_CAUSE_DEPTH && typeof current === "object" && current !== null; depth += 1) {
+    const { code: candidate, diagnostic, cause } = current as Record<string, unknown>;
+    if (code === undefined && typeof candidate === "string" && REASON_CODE.test(candidate)) code = candidate;
+    const observed = typeof diagnostic === "object" && diagnostic !== null ? (diagnostic as Record<string, unknown>).statusClass : undefined;
+    if (statusClass === "none" && typeof observed === "string" && STATUS_CLASS.test(observed)) statusClass = observed;
+    current = cause;
+  }
+  return code === undefined ? undefined : Object.freeze({ code, statusClass });
+};
 const validateClassifications = (profile: CrawlProfile, values: unknown): readonly GitHubQueryClassification[] => {
   if (!Array.isArray(values) || values.length !== profile.github.queries.length) throw new PreparationError(); const seen = new Set<string>();
   for (const [index, value] of values.entries()) { if (typeof value !== "object" || value === null) throw new PreparationError();
@@ -142,6 +156,7 @@ const reportInput = (context: Context, composed: ComposedExperiment, executionId
   };
 };
 export const prepareLocalExperiment = async (deps: PreparationDependencies = defaultDependencies()): Promise<PreparationResult> => {
+  let stage: FailureStage = "PREFLIGHT";
   try {
     const loaded = await deps.loadProfile();
     const profileHash = canonicalHash(loaded.profile);
@@ -154,15 +169,20 @@ export const prepareLocalExperiment = async (deps: PreparationDependencies = def
     const hashes: string[] = [];
     const state: RunState = { diagnostics: new Map(), repositoriesAdmitted: 0, githubRevalidations: 0, screened: 0, duplicatesRejected: 0 };
     addHashes(hashes, (await deps.preflight(context)).acceptedResponseHashes);
+    stage = "DISCOVERY";
     const search = await deps.searchGitHub(context); addHashes(hashes, search.acceptedResponseHashes);
     const classifications = validateClassifications(loaded.profile, search.value.queryClassifications);
+    stage = "ADMISSION";
     const provenanceCandidates = await selectGitHub(context, deps, hashes, search.value.candidates, state);
     const metadata: unknown[] = [];
+    stage = "STACK_METADATA";
     for (const { configuration } of loaded.profile.stack.configurations) {
       const result = await deps.collectStackMetadata({ ...context, configuration });
       addHashes(hashes, result.acceptedResponseHashes); metadata.push(...result.value);
     }
+    stage = "BLOB_RETRIEVAL";
     const languageSelections = await selectStack(context, deps, hashes, metadata, provenanceCandidates, state);
+    stage = "SELECTION";
     const crawlSnapshotId = provisionalSnapshot(profileHash, hashes);
     const finalized = deps.finalizeBindings
       ? await deps.finalizeBindings({ ...context, crawlSnapshotId, provenanceCandidates, languageSelections })
@@ -176,11 +196,16 @@ export const prepareLocalExperiment = async (deps: PreparationDependencies = def
       acceptedResponseHashes: Object.freeze(hashes), provenance, language });
     if (composed.artifact.crawlSnapshot.id !== crawlSnapshotId) throw new PreparationError();
     const report = deps.createReport(reportInput(context, composed, deps.uuid(), deps.now().toISOString(), state, classifications));
+    stage = "PUBLICATION";
     const publication = await publishWithReport(deps, composed, report);
     if (classifications.some(({ completeness }) => completeness === "PROVIDER_REPORTED_INCOMPLETE")) deps.log("GITHUB_SEARCH_INCOMPLETE");
     deps.log("PREPARATION_COMPLETE");
     return Object.freeze({ artifactHash: composed.artifactHash, crawlSnapshotId, publication });
-  } catch { deps.log("PREPARATION_FAILED"); throw new PreparationError(); }
+  } catch (error) {
+    const diagnostic = failureDiagnostic(error);
+    if (diagnostic) deps.log(`PREPARATION_STAGE_FAILED ${stage} ${diagnostic.code} ${diagnostic.statusClass}`);
+    deps.log("PREPARATION_FAILED"); throw new PreparationError();
+  }
 };
 interface Runtime { readonly capacity: CapacityMeter; transport: BoundedTransport; readonly retry: RetryController; readonly environment: Environment; readonly responses: Map<string, unknown[]>; readonly hashes: string[]; readonly replayCursors: Map<string, number>; replay: boolean; beginReplay(): void }
 const runtimeOf = (context: Context): Runtime => context.runtime as Runtime;
