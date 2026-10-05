@@ -1,9 +1,9 @@
-import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { publishArtifact } from "./artifact-store";
+import { fetchSelectedBlob, projectBlobWorkerEnvironment, type BlobWorkerLimits } from "./blob-worker";
 import { canonicalBytes, canonicalHash } from "./canonical";
 import { createCapacityMeter, type CapacityMeter, type CapacitySnapshot } from "./capacity";
 import { composeExperimentArtifact, type ComposedExperiment } from "./compose";
@@ -40,14 +40,14 @@ export interface PreparationDependencies {
   compose(options: Parameters<typeof composeExperimentArtifact>[0]): ComposedExperiment; createReport(input: Readonly<Record<string, unknown>>): unknown;
   stageReport(report: unknown): Promise<StagedRunReport>; publishArtifact(input: Readonly<{ artifact: unknown; expectedHash: string; beforeCommit?: () => Promise<void> }>): Promise<unknown>;
   now(): Date; uuid(): string; log(message: string): void; }
-interface BlobLimits { readonly blobAttempts: number; readonly successfulBlobs: number; readonly perBlobBytes: number; readonly totalBlobBytes: number; readonly temporaryDiskBytes: number }
+type BlobLimits = BlobWorkerLimits;
+export { projectBlobWorkerEnvironment };
 export interface PreparationResult { readonly artifactHash: string; readonly crawlSnapshotId: string; readonly publication: unknown }
 export class PreparationError extends Error { public constructor() { super("PREPARATION_FAILED"); this.name = "PreparationError"; } }
 const PROFILE_URL = new URL("../profiles/local-real-rounds.v1.json", import.meta.url); const ARTIFACT_PATH = fileURLToPath(new URL("../../../apps/game/src/demo/generated/local-real-rounds.json", import.meta.url));
 const REPORT_PATH = fileURLToPath(new URL("../stack/tmp/local-experiment-run.json", import.meta.url)); const SHA256 = /^[0-9a-f]{64}$/u;
 const projectEnvironment = (source: Environment, keys: readonly string[]): Environment => Object.freeze(Object.fromEntries(keys.filter((key) => source[key] !== undefined).map((key) => [key, source[key]])));
 export const projectPreparationEnvironment = (source: Environment): Environment => projectEnvironment(source, ["PATH", "HOME", "HF_TOKEN", "GITHUB_TOKEN", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_PROFILE", "AWS_SHARED_CREDENTIALS_FILE", "AWS_CONFIG_FILE", "STACK_V2_ACKNOWLEDGED_USABLE_REVISION"]);
-export const projectBlobWorkerEnvironment = (source: Environment): Environment => projectEnvironment(source, ["PATH", "HOME", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_PROFILE", "AWS_SHARED_CREDENTIALS_FILE", "AWS_CONFIG_FILE"]);
 const addHashes = (target: string[], values: readonly string[]): void => { for (const value of values) {
   if (!SHA256.test(value)) throw new PreparationError(); if (!target.includes(value)) target.push(value);
 } };
@@ -78,8 +78,9 @@ const noteRejection = (state: RunState, stage: DiagnosticStage, error: unknown):
 };
 const markerOutcome = (candidate: unknown, profile: CrawlProfile): boolean => String((candidate as any).lineage?.commitMessage ?? (candidate as any).commitMessage ?? "").split(/\r?\n/u).some((line) => profile.markers.includes(line));
 const provisionalSnapshot = (profileHash: string, hashes: readonly string[]): string => canonicalHash({ profileHash, acceptedResponseHashes: hashes.length > 0 ? hashes : [canonicalHash("capture")] });
-const remainingBlobLimits = (profile: CrawlProfile, snapshot: CapacitySnapshot): BlobLimits => Object.freeze({
-  blobAttempts: Math.max(1, profile.capacity.blobAttempts - snapshot.blobAttempts + 1), successfulBlobs: Math.max(1, profile.capacity.successfulBlobs - snapshot.successfulBlobs), perBlobBytes: profile.capacity.perBlobBytes, totalBlobBytes: Math.max(1, profile.capacity.totalBlobBytes - snapshot.totalBlobBytes), temporaryDiskBytes: Math.max(1, profile.capacity.temporaryDiskBytes - snapshot.temporaryDiskBytes) });
+const remainingBlobLimits = (profile: CrawlProfile, snapshot: CapacitySnapshot): BlobLimits => { const totalBlobBytes = Math.max(1, profile.capacity.totalBlobBytes - snapshot.totalBlobBytes); return Object.freeze({
+  blobAttempts: Math.max(1, profile.capacity.blobAttempts - snapshot.blobAttempts + 1), successfulBlobs: Math.max(1, profile.capacity.successfulBlobs - snapshot.successfulBlobs), perBlobBytes: profile.capacity.perBlobBytes, totalBlobBytes, temporaryDiskBytes: Math.max(1, profile.capacity.temporaryDiskBytes - snapshot.temporaryDiskBytes),
+  requestLimit: Math.max(1, profile.capacity.requestCount - snapshot.requestCount), networkByteLimit: Math.min(profile.capacity.perBlobBytes, totalBlobBytes) }); };
 const stackOrder = (left: any, right: any): number => {
   for (const key of ["stableRowId", "repository", "swhRevisionId", "path", "swhContentId"]) {
     const order = String(left[key]) < String(right[key]) ? -1 : String(left[key]) > String(right[key]) ? 1 : 0;
@@ -245,31 +246,6 @@ export const createPreparationRuntime = (profile: CrawlProfile, environment: Env
   runtime.transport = Object.freeze({ requestJson: (input: RequestInput, page?: number) => request("json", input, page), requestBytes: (input: RequestInput, page?: number) => request("bytes", input, page) as Promise<Uint8Array> });
   return runtime;
 };
-const runBlobWorker = async (row: StackMetadataRow, limits: BlobLimits, environment: Environment): Promise<SelectedStackBlob> => {
-  const directory = fileURLToPath(new URL("../stack/", import.meta.url)).replace(/\/$/u, "");
-  const script = fileURLToPath(new URL("../stack/fetch_blob.py", import.meta.url));
-  const projected = projectBlobWorkerEnvironment(environment) as Record<string, string>;
-  const inputRow = Object.fromEntries(["stableRowId", "swhBlobId", "swhContentId", "sourceEncoding", "byteLength"]
-    .map((key) => [key, row[key]]));
-  return new Promise((resolveWorker, reject) => {
-    const child = spawn("uv", ["run", "--project", directory, "--locked", "python", script],
-      { cwd: directory, env: projected, shell: false, stdio: ["pipe", "pipe", "pipe"] });
-    const output: Buffer[] = []; let bytes = 0; let failed = false;
-    child.stdout.on("data", (chunk: Buffer) => { bytes += chunk.byteLength; if (bytes > limits.perBlobBytes * 2) { failed = true; child.kill(); } else output.push(chunk); });
-    child.stderr.on("data", () => { failed = true; }); child.once("error", reject);
-    child.once("close", (code) => {
-      try {
-        if (failed || code !== 0) throw new PreparationError();
-        const lines = Buffer.concat(output).toString("utf8").trimEnd().split("\n");
-        const value = JSON.parse(lines.length === 1 ? lines[0]! : "null") as SelectedStackBlob;
-        if (value.stableRowId !== row.stableRowId || value.swhBlobId !== row.swhBlobId
-          || value.byteLength !== row.byteLength) throw new PreparationError();
-        resolveWorker(Object.freeze(value));
-      } catch { reject(new PreparationError()); }
-    });
-    child.stdin.end(`${JSON.stringify({ rows: [inputRow], limits })}\n`);
-  });
-};
 const publishWithReport = async (deps: PreparationDependencies, composed: ComposedExperiment, report: unknown): Promise<unknown> => {
   const staged = await deps.stageReport(report);
   let publication: unknown;
@@ -304,8 +280,8 @@ const defaultDependencies = (): PreparationDependencies => ({
     profile: options.profile, capacity: options.capacity, configuration: options.configuration,
     rowLimit: options.profile.capacity.stackRowsPerLanguage, environment: options.environment,
     blobAccess: async () => undefined })),
-  fetchStackBlob: (options) => workerStage(() =>
-    runBlobWorker(options.row as StackMetadataRow, options.limits, options.environment)),
+  fetchStackBlob: (options) => workerStage(() => fetchSelectedBlob({
+    row: options.row as StackMetadataRow, limits: options.limits, environment: options.environment, capacity: options.capacity })),
   revalidateStackCandidate: (options) => { const runtime = runtimeOf(options); return stage(runtime, () =>
     revalidateStackCandidate({ profile: options.profile, profileHash: options.profileHash,
       crawlSnapshotId: options.crawlSnapshotId, metadata: options.row as StackMetadataRow,

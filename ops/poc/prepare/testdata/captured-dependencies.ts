@@ -167,7 +167,9 @@ const githubLane = (
   }),
 });
 
-const metadataOutput = (row: StackMetadataRow): Uint8Array => Buffer.from(`${JSON.stringify(row)}\n`);
+const CAPTURED_METADATA_COUNTERS = { counters: { networkBytes: 2048, peakTemporaryDiskBytes: 512, redirectsFollowed: 0, requests: 2 } };
+const metadataOutput = (row: StackMetadataRow): Uint8Array =>
+  Buffer.from(`${JSON.stringify(row)}\n${JSON.stringify(CAPTURED_METADATA_COUNTERS)}\n`);
 const stackLane = (
   state: CapturedDependencyState, reference: RuntimeReference,
 ): Pick<PreparationDependencies, "collectStackMetadata" | "fetchStackBlob"

@@ -20,6 +20,7 @@ const ROW_KEYS = [
   "generated", "vendor", "sourceEncoding", "byteLength", "visitDate", "revisionDate",
   "committerDate",
 ] as const;
+const COUNTER_KEYS = ["networkBytes", "peakTemporaryDiskBytes", "redirectsFollowed", "requests"] as const;
 const HEX_40 = /^[0-9a-f]{40}$/u;
 const HEX_64 = /^[0-9a-f]{64}$/u;
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u;
@@ -62,6 +63,14 @@ export interface WorkerRequest {
   readonly stderrByteLimit: number;
 }
 
+/** Bounded counts a locked worker reports on its final stdout line so Node can meter them. */
+export interface WorkerCounters {
+  readonly networkBytes: number;
+  readonly peakTemporaryDiskBytes: number;
+  readonly redirectsFollowed: number;
+  readonly requests: number;
+}
+
 export interface WorkerResult {
   readonly exitCode: number;
   readonly stdout: Uint8Array;
@@ -71,7 +80,7 @@ export interface WorkerResult {
 
 export interface StackMetadataOptions {
   readonly profile: CrawlProfile;
-  readonly capacity: Pick<CapacityMeter, "recordStackRows" | "snapshot">;
+  readonly capacity: Pick<CapacityMeter, "recordStackRows" | "recordWorkerRequests" | "reserveTemporaryDisk" | "snapshot">;
   readonly configuration: "Python" | "TypeScript";
   readonly rowLimit: number;
   readonly environment: Readonly<Record<string, string | undefined>>;
@@ -82,7 +91,7 @@ export interface StackMetadataOptions {
 
 const fail = (code: string): never => { throw new StackMetadataError(code); };
 
-const runLockedWorker = (request: WorkerRequest): Promise<WorkerResult> => new Promise((resolve, reject) => {
+export const runLockedWorker = (request: WorkerRequest): Promise<WorkerResult> => new Promise((resolve, reject) => {
   const child = spawn(request.command, [...request.args], {
     cwd: request.cwd,
     env: request.environment,
@@ -139,10 +148,13 @@ const workerRequest = (options: StackMetadataOptions): WorkerRequest => {
   const path = options.environment.PATH ?? fail("ENVIRONMENT_REJECTED");
   const token = options.environment.HF_TOKEN ?? fail("ENVIRONMENT_REJECTED");
   if (path.trim().length === 0 || token.trim().length === 0) fail("ENVIRONMENT_REJECTED");
-  const used = options.capacity.snapshot().stackMetadataBytes;
-  const remaining = options.profile.capacity.stackMetadataBytes - used;
+  const snapshot = options.capacity.snapshot();
+  const remaining = options.profile.capacity.stackMetadataBytes - snapshot.stackMetadataBytes;
+  const requestLimit = options.profile.capacity.requestCount - snapshot.requestCount;
+  const temporaryDiskBytes = options.profile.capacity.temporaryDiskBytes - snapshot.temporaryDiskBytes;
   if (!Number.isSafeInteger(options.rowLimit) || options.rowLimit < 1
-    || options.rowLimit > options.profile.capacity.stackRowsPerLanguage || remaining < 1) {
+    || options.rowLimit > options.profile.capacity.stackRowsPerLanguage || remaining < 1
+    || requestLimit < 1 || temporaryDiskBytes < 1) {
     fail("LIMIT_REJECTED");
   }
   return Object.freeze({
@@ -157,10 +169,56 @@ const workerRequest = (options: StackMetadataOptions): WorkerRequest => {
       revision: REVISION,
       rowLimit: options.rowLimit,
       perBlobByteLimit: options.profile.capacity.perBlobBytes,
+      requestLimit,
+      networkByteLimit: remaining,
+      temporaryDiskBytes,
     })}\n`,
     stdoutByteLimit: remaining,
     stderrByteLimit: STDERR_LIMIT,
   });
+};
+
+const nonNegativeInteger = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0;
+
+/** Parses the canonical trailer line `{"counters":{...}}`; any shape, order, sign, or consistency drift rejects. */
+export const parseWorkerCounters = (line: string): WorkerCounters => {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(line);
+  } catch {
+    return fail("COUNTERS_REJECTED");
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return fail("COUNTERS_REJECTED");
+  const outer = parsed as Record<string, unknown>;
+  if (Object.keys(outer).join("|") !== "counters") fail("COUNTERS_REJECTED");
+  const counters = outer.counters;
+  if (typeof counters !== "object" || counters === null || Array.isArray(counters)) return fail("COUNTERS_REJECTED");
+  const record = counters as Record<string, unknown>;
+  if (Object.keys(record).join("|") !== COUNTER_KEYS.join("|")) fail("COUNTERS_REJECTED");
+  if (COUNTER_KEYS.some((key) => !nonNegativeInteger(record[key]))) fail("COUNTERS_REJECTED");
+  const result = Object.freeze({
+    networkBytes: record.networkBytes as number,
+    peakTemporaryDiskBytes: record.peakTemporaryDiskBytes as number,
+    redirectsFollowed: record.redirectsFollowed as number,
+    requests: record.requests as number,
+  });
+  if (result.redirectsFollowed > result.requests) fail("COUNTERS_REJECTED");
+  if (line !== JSON.stringify({ counters: result })) fail("COUNTERS_REJECTED");
+  return result;
+};
+
+/** Splits decoded worker stdout into its payload lines and the mandatory counters trailer. */
+export const splitWorkerOutput = (bytes: Uint8Array): Readonly<{ lines: readonly string[]; trailer: string }> => {
+  let text: string;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    return fail("OUTPUT_MALFORMED");
+  }
+  if (!text.endsWith("\n") || text.includes("\r")) fail("OUTPUT_MALFORMED");
+  const lines = text.slice(0, -1).split("\n");
+  if (lines.length < 2 || lines.some((line) => line.length === 0)) fail("OUTPUT_MALFORMED");
+  return Object.freeze({ lines: Object.freeze(lines.slice(0, -1)), trailer: lines.at(-1)! });
 };
 
 const exactRecord = (value: unknown): Record<string, unknown> => {
@@ -238,18 +296,16 @@ const validateRow = (
   }) as StackMetadataRow;
 };
 
-const parseOutput = (bytes: Uint8Array, options: StackMetadataOptions): readonly StackMetadataRow[] => {
+interface ParsedMetadataOutput {
+  readonly rows: readonly StackMetadataRow[];
+  readonly counters: WorkerCounters;
+}
+
+const parseOutput = (bytes: Uint8Array, options: StackMetadataOptions): ParsedMetadataOutput => {
   if (bytes.byteLength > options.profile.capacity.stackMetadataBytes) fail("METADATA_BYTES");
-  let text: string;
-  try {
-    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-  } catch {
-    return fail("OUTPUT_MALFORMED");
-  }
-  if (!text.endsWith("\n") || text.includes("\r")) fail("OUTPUT_MALFORMED");
-  const lines = text.slice(0, -1).split("\n");
+  const { lines, trailer } = splitWorkerOutput(bytes);
   if (lines.length > options.rowLimit) fail("ROW_OVERRUN");
-  if (lines.length !== options.rowLimit || lines.some((line) => line.length === 0)) fail("OUTPUT_MALFORMED");
+  if (lines.length !== options.rowLimit) fail("OUTPUT_MALFORMED");
   const rows = lines.map((line) => {
     try {
       const row = validateRow(JSON.parse(line), options.configuration, options.profile.capacity.perBlobBytes);
@@ -262,7 +318,32 @@ const parseOutput = (bytes: Uint8Array, options: StackMetadataOptions): readonly
   });
   const ids = rows.map(({ stableRowId }) => stableRowId);
   if (new Set(ids).size !== ids.length) fail("ROW_DUPLICATE");
-  return Object.freeze(rows);
+  return Object.freeze({ rows: Object.freeze(rows), counters: parseWorkerCounters(trailer) });
+};
+
+const meterWorkerCounters = (
+  options: StackMetadataOptions,
+  request: WorkerRequest,
+  parsed: ParsedMetadataOutput,
+): void => {
+  const budget = JSON.parse(request.stdin) as Record<string, number>;
+  const { counters } = parsed;
+  if (counters.requests > budget.requestLimit!) fail("METADATA_CAPACITY");
+  if (counters.networkBytes > budget.networkByteLimit!) fail("METADATA_BYTES");
+  if (counters.peakTemporaryDiskBytes > budget.temporaryDiskBytes!) fail("TEMPORARY_DISK");
+  try {
+    options.capacity.recordWorkerRequests(counters.requests);
+    options.capacity.recordStackRows(options.configuration, parsed.rows.length, counters.networkBytes);
+  } catch {
+    return fail("METADATA_CAPACITY");
+  }
+  if (counters.peakTemporaryDiskBytes > 0) {
+    try {
+      options.capacity.reserveTemporaryDisk(counters.peakTemporaryDiskBytes)();
+    } catch {
+      return fail("TEMPORARY_DISK");
+    }
+  }
 };
 
 export const collectStackMetadata = async (
@@ -282,14 +363,10 @@ export const collectStackMetadata = async (
     if (result.stderr.byteLength > request.stderrByteLimit) fail("WORKER_STDERR");
     if (result.exitCode !== 0) fail("WORKER_EXIT");
     if (result.stderr.byteLength !== 0) fail("WORKER_STDERR");
-    const rows = parseOutput(result.stdout, options);
-    try {
-      options.capacity.recordStackRows(options.configuration, rows.length, result.stdout.byteLength);
-    } catch {
-      return fail("METADATA_CAPACITY");
-    }
+    const parsed = parseOutput(result.stdout, options);
+    meterWorkerCounters(options, request, parsed);
     await options.blobAccess();
-    return rows;
+    return parsed.rows;
   } finally {
     await result.cleanup?.();
   }

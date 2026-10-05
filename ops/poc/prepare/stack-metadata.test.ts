@@ -49,8 +49,12 @@ const metadataRow = (overrides: Record<string, unknown> = {}) => {
   };
 };
 
-const ndjson = (...rows: Record<string, unknown>[]): Uint8Array =>
-  Buffer.from(rows.map((row) => JSON.stringify(row)).join("\n") + "\n");
+const counters = (overrides: Record<string, unknown> = {}) => ({
+  counters: { networkBytes: 4096, peakTemporaryDiskBytes: 1024, redirectsFollowed: 0, requests: 3, ...overrides },
+});
+const lines = (...objects: Record<string, unknown>[]): Uint8Array =>
+  Buffer.from(objects.map((object) => JSON.stringify(object)).join("\n") + "\n");
+const ndjson = (...rows: Record<string, unknown>[]): Uint8Array => lines(...rows, counters());
 
 const setup = async (overrides: Record<string, unknown> = {}) => {
   const profile = await loadProfile();
@@ -108,11 +112,12 @@ describe("Stack metadata worker bridge", () => {
     const row = metadataRow();
     const canonical = JSON.stringify(row);
     const prefix = `{"stableRowId":"${row.stableRowId}"`;
-    const spaced = Buffer.from(canonical.replace(",\"swhBlobId\"", ", \"swhBlobId\"") + "\n");
+    const trailer = `${JSON.stringify(counters())}\n`;
+    const spaced = Buffer.from(canonical.replace(",\"swhBlobId\"", ", \"swhBlobId\"") + "\n" + trailer);
     const duplicated = Buffer.from(canonical.replace(
       prefix,
       `${prefix},"stableRowId":"${row.stableRowId}"`,
-    ) + "\n");
+    ) + "\n" + trailer);
     for (const stdout of [spaced, duplicated]) {
       await expectBeforeBlob("OUTPUT_NONCANONICAL", {
         runWorker: async () => ({ exitCode: 0, stdout, stderr: new Uint8Array() }),
@@ -153,6 +158,9 @@ describe("Stack metadata worker bridge", () => {
         revision: "e565caa3a78c2423bd374333a472b049eb090e47",
         rowLimit: 1,
         perBlobByteLimit: 262_144,
+        requestLimit: 200,
+        networkByteLimit: 67_108_864,
+        temporaryDiskBytes: 33_554_432,
       }) + "\n",
       stdoutByteLimit: 67_108_864,
       stderrByteLimit: 4096,
@@ -160,6 +168,69 @@ describe("Stack metadata worker bridge", () => {
     expect(rows).toEqual([metadataRow()]);
     expect(Object.isFrozen(rows)).toBe(true);
     expect(Object.isFrozen(rows[0])).toBe(true);
+  });
+
+  it("passes only the remaining request, network-byte, and temporary-disk budgets to the worker", async () => {
+    const calls: any[] = [];
+    const options = await setup({
+      configuration: "TypeScript",
+      runWorker: async (request: unknown) => {
+        calls.push(request);
+        return { exitCode: 0, stdout: ndjson(metadataRow({ detectedLanguage: "TypeScript", path: "src/example.ts" })), stderr: new Uint8Array() };
+      },
+    });
+    for (let index = 0; index < 5; index += 1) options.capacity.beginRequest().release();
+    options.capacity.recordStackRows("Python", 1, 1000);
+    const release = options.capacity.reserveTemporaryDisk(1024);
+
+    await collectStackMetadata(options);
+    release();
+
+    expect(JSON.parse(calls[0].stdin)).toMatchObject({
+      requestLimit: 195,
+      networkByteLimit: 67_107_864,
+      temporaryDiskBytes: 33_553_408,
+    });
+    expect(calls[0].stdoutByteLimit).toBe(67_107_864);
+
+    let spawns = 0;
+    const exhausted = await setup({ runWorker: async () => { spawns += 1; return { exitCode: 0, stdout: ndjson(metadataRow()), stderr: new Uint8Array() }; } });
+    for (let index = 0; index < 200; index += 1) exhausted.capacity.beginRequest().release();
+    await expect(collectStackMetadata(exhausted)).rejects.toMatchObject({ code: "LIMIT_REJECTED" });
+    expect(spawns).toBe(0);
+  });
+
+  it("requires the counters trailer and records requests, network bytes, and peak temporary disk", async () => {
+    const options = await setup({
+      runWorker: async () => ({ exitCode: 0, stdout: ndjson(metadataRow()), stderr: new Uint8Array() }),
+    });
+
+    const rows = await collectStackMetadata(options);
+
+    expect(rows).toHaveLength(1);
+    expect(options.capacity.snapshot()).toMatchObject({
+      requestCount: 3, stackMetadataBytes: 4096, peakTemporaryDiskBytes: 1024, temporaryDiskBytes: 0,
+    });
+  });
+
+  it("rejects a missing, malformed, over-budget, or inconsistent counters trailer before blobs", async () => {
+    const row = metadataRow();
+    const cases = [
+      ["OUTPUT_MALFORMED", lines(row)],
+      ["COUNTERS_REJECTED", lines(row, { counters: { requests: 1 } })],
+      ["COUNTERS_REJECTED", lines(row, { counters: { requests: 3, redirectsFollowed: 0, peakTemporaryDiskBytes: 0, networkBytes: 1 } })],
+      ["COUNTERS_REJECTED", lines(row, { counters: { ...counters().counters, extra: 1 } })],
+      ["COUNTERS_REJECTED", lines(row, counters({ networkBytes: -1 }))],
+      ["COUNTERS_REJECTED", lines(row, counters({ requests: 1.5 }))],
+      ["COUNTERS_REJECTED", lines(row, counters({ redirectsFollowed: 4 }))],
+      ["COUNTERS_REJECTED", lines(row, { trailer: counters().counters })],
+      ["METADATA_CAPACITY", lines(row, counters({ requests: 201 }))],
+      ["METADATA_BYTES", lines(row, counters({ networkBytes: 67_108_865 }))],
+      ["TEMPORARY_DISK", lines(row, counters({ peakTemporaryDiskBytes: 33_554_433 }))],
+    ] as const;
+    for (const [code, stdout] of cases) {
+      await expectBeforeBlob(code, { runWorker: async () => ({ exitCode: 0, stdout, stderr: new Uint8Array() }) });
+    }
   });
 
   it("records exact rows and metadata bytes with the accepted capacity meter before blobs", async () => {
@@ -174,7 +245,7 @@ describe("Stack metadata worker bridge", () => {
     await collectStackMetadata(options);
     expect(order).toEqual(["worker", "blob"]);
     expect(options.capacity.snapshot().stackRows.Python).toBe(1);
-    expect(options.capacity.snapshot().stackMetadataBytes).toBe(ndjson(metadataRow()).byteLength);
+    expect(options.capacity.snapshot().stackMetadataBytes).toBe(4096);
   });
 
   it("rejects missing uv, a wrong lock, or a wrong Python pin before blobs", async () => {

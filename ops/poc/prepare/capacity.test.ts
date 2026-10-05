@@ -148,4 +148,19 @@ describe("preparation capacity", () => {
     expect(Object.isFrozen(released.github.first)).toBe(true);
     expect(Object.isFrozen(released.stackRows)).toBe(true);
   });
+
+  it("meters worker-reported requests against the shared request ceiling", () => {
+    const capacity = meter();
+    capacity.recordWorkerRequests(0);
+    capacity.recordWorkerRequests(199);
+    expect(capacity.snapshot().requestCount).toBe(199);
+    capacity.beginRequest().release();
+    expect(capacity.snapshot().requestCount).toBe(200);
+    expect(() => capacity.recordWorkerRequests(1)).toThrow(CapacityError);
+    expect(() => capacity.recordWorkerRequests(1)).toThrow("REQUEST_COUNT");
+    expect(() => capacity.recordWorkerRequests(-1)).toThrow(CapacityError);
+    expect(() => capacity.recordWorkerRequests(1.5)).toThrow(CapacityError);
+    expect(capacity.snapshot().requestCount).toBe(200);
+    expect(() => capacity.beginRequest()).toThrow(CapacityError);
+  });
 });

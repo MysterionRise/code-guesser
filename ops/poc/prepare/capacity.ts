@@ -51,6 +51,8 @@ export interface CapacityMeter {
   recordStackRows(language: StackLanguage, rows: number, metadataBytes: number): void;
   beginBlob(): BlobCapacityLease;
   beginRequest(): RequestCapacityLease;
+  /** Charges requests a locked worker reports having made against the shared request ceiling. */
+  recordWorkerRequests(count: number): void;
   recordRetryWait(milliseconds: number): void;
   reserveTemporaryDisk(bytes: number): () => void;
   snapshot(): CapacitySnapshot;
@@ -213,6 +215,9 @@ export const createCapacityMeter = (options: CapacityOptions): CapacityMeter => 
     },
     beginBlob: (): BlobCapacityLease => createBlobLease(state, limits),
     beginRequest: (): RequestCapacityLease => createRequestLease(state, limits),
+    recordWorkerRequests: (count: number): void => {
+      state.requestCount = addWithin(state.requestCount, count, limits.requestCount, "REQUEST_COUNT");
+    },
     recordRetryWait: (milliseconds: number): void => {
       const wait = positive(milliseconds, "WAIT_VALUE");
       if (wait > limits.waitMilliseconds) fail("WAIT_VALUE");
