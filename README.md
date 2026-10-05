@@ -1,5 +1,7 @@
 # CodeGuessr
 
+[![CI](https://github.com/MysterionRise/code-guesser/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/MysterionRise/code-guesser/actions/workflows/ci.yml)
+
 CodeGuessr is “GeoGuessr for code”: inspect an unfamiliar code sample, reveal
 progressive clues, and guess where it came from.
 
