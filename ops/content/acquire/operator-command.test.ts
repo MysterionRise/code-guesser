@@ -361,11 +361,14 @@ describe("operator-only acquisition command", () => {
     ], { cwd: join(root, "packages/content"), encoding: "utf8" });
     expect(resolution.status).toBe(0);
     expect(resolution.stdout.trim()).toBe("false:true");
-    const scan = spawnSync("rg", [
-      "-n", "@codeguessr/content/operator/acquisition", "apps/game", "packages/domain",
+    // git grep ships with every checkout; a stock CI runner has no ripgrep.
+    const scan = spawnSync("git", [
+      "grep", "-n", "-e", "@codeguessr/content/operator/acquisition", "--", "apps/game", "packages/domain",
       "packages/measurement", "packages/content/src/index.ts",
     ], { cwd: root, encoding: "utf8" });
+    expect(scan.error).toBe(undefined);
     expect(scan.status).toBe(1);
+    expect(scan.stdout).toBe("");
     const temporary = await mkdtemp(join(tmpdir(), "operator-run-"));
     try {
       const descriptorPath = join(temporary, "run.json");
