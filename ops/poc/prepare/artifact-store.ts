@@ -30,6 +30,8 @@ export interface PublishArtifactOptions {
   readonly targetPath: string;
   readonly fileSystem?: ArtifactStoreFileSystem;
   readonly uniqueId?: () => string;
+  /** Runs after the new artifact is in place and before its backup is discarded; a rejection restores the previous artifact. */
+  readonly beforeCommit?: () => Promise<void>;
 }
 
 export interface PublishedArtifact {
@@ -157,6 +159,7 @@ export const publishArtifact = async (options: PublishArtifactOptions): Promise<
     state.temporary = false;
     state.published = true;
     await directoryHandle.sync();
+    if (options.beforeCommit) await options.beforeCommit();
     if (state.backup) {
       await fileSystem.unlink(backupPath);
       state.backup = false;

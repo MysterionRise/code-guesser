@@ -222,15 +222,28 @@ const finalizeLane = (
 });
 
 const outputLane = (state: CapturedDependencyState): Pick<PreparationDependencies,
-  "generateProvenance" | "generateLanguage" | "compose" | "createReport" | "writeReport"
+  "generateProvenance" | "generateLanguage" | "compose" | "createReport" | "stageReport"
   | "publishArtifact" | "now" | "uuid" | "log"> => ({
   generateProvenance: (context) => generateProvenanceRounds(context as any),
   generateLanguage: (context) => generateLanguageRounds(context as any),
   compose: composeExperimentArtifact,
   createReport: createRunReport,
-  writeReport: async (report) => { state.events.push("report"); state.reports.push(canonicalBytes(report)); },
-  publishArtifact: ({ artifact, expectedHash }) => record(state, "publish", () => publishArtifact({
+  stageReport: async (report) => {
+    state.events.push("report");
+    const bytes = canonicalBytes(report);
+    return Object.freeze({
+      commit: async () => { state.events.push("report:commit"); state.reports.push(bytes); },
+      rollback: async () => {
+        state.events.push("report:rollback");
+        const index = state.reports.indexOf(bytes);
+        if (index >= 0) state.reports.splice(index, 1);
+      },
+      finalize: async () => { state.events.push("report:finalize"); },
+    });
+  },
+  publishArtifact: ({ artifact, expectedHash, beforeCommit }) => record(state, "publish", () => publishArtifact({
     artifact, expectedHash, targetPath: state.artifactPath, uniqueId: () => "captured-publication",
+    ...(beforeCommit ? { beforeCommit } : {}),
   })),
   now: () => new Date(state.observedAt),
   uuid: () => state.executionId,

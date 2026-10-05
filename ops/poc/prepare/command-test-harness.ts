@@ -163,11 +163,28 @@ const makeArtifactDependencies = (
 
 const makeOutputDependencies = (
   state: HarnessState,
-): Pick<PreparationDependencies, "createReport" | "writeReport" | "publishArtifact" | "now" | "uuid" | "log"> => ({
+): Pick<PreparationDependencies, "createReport" | "stageReport" | "publishArtifact" | "now" | "uuid" | "log"> => ({
   createReport: (input) => { state.calls.push("report:create"); return input as any; },
-  writeReport: async (report) => { state.calls.push("report:write"); state.reports.push(report); },
+  stageReport: async (report) => {
+    state.calls.push("report:stage");
+    return {
+      commit: async () => { state.calls.push("report:commit"); state.reports.push(report); },
+      rollback: async () => {
+        state.calls.push("report:rollback");
+        const index = state.reports.indexOf(report);
+        if (index >= 0) state.reports.splice(index, 1);
+      },
+      finalize: async () => { state.calls.push("report:finalize"); },
+    };
+  },
   publishArtifact: async (input) => {
     state.calls.push("publish");
+    try {
+      await input.beforeCommit?.();
+    } catch (error) {
+      state.calls.push("publish:rollback");
+      throw error;
+    }
     state.published.push(input);
     return { path: "artifact", hash: hash("9"), bytes: 1 };
   },

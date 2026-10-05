@@ -40,7 +40,11 @@ describe("local experiment preparation command", () => {
     expect(harness.calls).toContain("provenance:3");
     expect(harness.calls).toContain("language:2");
     expect(harness.calls).toContain("compose:3/2");
-    expect(harness.calls.indexOf("report:write")).toBeLessThan(harness.calls.indexOf("publish"));
+    expect(harness.calls.indexOf("report:stage")).toBeLessThan(harness.calls.indexOf("publish"));
+    expect(harness.calls.indexOf("publish")).toBeLessThan(harness.calls.indexOf("report:commit"));
+    expect(harness.calls.indexOf("report:commit")).toBeLessThan(harness.calls.indexOf("report:finalize"));
+    expect(harness.calls.indexOf("report:finalize")).toBeLessThan(harness.calls.indexOf("log:PREPARATION_COMPLETE"));
+    expect(harness.calls).not.toContain("report:rollback");
     expect(result.artifactHash).toBe(hash("9"));
     expect(harness.published).toHaveLength(1);
     expect(harness.reports).toHaveLength(1);
@@ -182,7 +186,7 @@ describe("local experiment preparation command", () => {
     const failures: Partial<PreparationDependencies>[] = [
       { collectStackMetadata: async ({ configuration }) => accepted(configuration === "Python" ? [] : [], "5") },
       { compose: () => { throw new Error("COMPOSE_REJECTED"); } },
-      { writeReport: async () => { throw new Error("REPORT_REJECTED"); } },
+      { stageReport: async () => { throw new Error("REPORT_REJECTED"); } },
     ];
     for (const override of failures) {
       const harness = await makeHarness(override);
@@ -233,7 +237,7 @@ describe("local experiment preparation command", () => {
     });
   });
 
-  it("warns exactly once after report write and publication, then completes", async () => {
+  it("warns exactly once after report commit and publication, then completes", async () => {
     const profile = await loadProfile();
     const harness = await makeHarness({ searchGitHub: searchWith(classificationsFor(profile, 1)) });
 
@@ -243,8 +247,9 @@ describe("local experiment preparation command", () => {
       "log:GITHUB_SEARCH_INCOMPLETE",
       "log:PREPARATION_COMPLETE",
     ]);
-    expect(harness.calls.indexOf("report:write")).toBeLessThan(harness.calls.indexOf("publish"));
-    expect(harness.calls.indexOf("publish")).toBeLessThan(harness.calls.indexOf("log:GITHUB_SEARCH_INCOMPLETE"));
+    expect(harness.calls.indexOf("report:stage")).toBeLessThan(harness.calls.indexOf("publish"));
+    expect(harness.calls.indexOf("publish")).toBeLessThan(harness.calls.indexOf("report:commit"));
+    expect(harness.calls.indexOf("report:commit")).toBeLessThan(harness.calls.indexOf("log:GITHUB_SEARCH_INCOMPLETE"));
   });
 
   it("does not emit the incomplete warning for a complete search", async () => {
@@ -273,7 +278,7 @@ describe("local experiment preparation command", () => {
       const harness = await makeHarness({ searchGitHub: searchWith(classifications) });
       await expect(prepareLocalExperiment(harness.dependencies)).rejects.toThrow("PREPARATION_FAILED");
       expect(harness.calls.filter((call) => call.startsWith("log:"))).toEqual(["log:PREPARATION_FAILED"]);
-      expect(harness.calls).not.toContain("report:write");
+      expect(harness.calls).not.toContain("report:stage");
       expect(harness.calls).not.toContain("publish");
     }
   });
@@ -290,6 +295,40 @@ describe("local experiment preparation command", () => {
     expect(harness.calls.filter((call) => call.startsWith("log:"))).toEqual([
       "log:PREPARATION_FAILED",
     ]);
+  });
+
+  it("never leaves a success report when artifact publication fails", async () => {
+    const harness = await makeHarness({
+      publishArtifact: async () => { throw new Error("PUBLICATION_REJECTED"); },
+    });
+
+    await expect(prepareLocalExperiment(harness.dependencies)).rejects.toThrow("PREPARATION_FAILED");
+
+    expect(harness.reports).toEqual([]);
+    expect(harness.published).toEqual([]);
+    expect(harness.calls).toContain("report:stage");
+    expect(harness.calls).toContain("report:rollback");
+    expect(harness.calls).not.toContain("report:commit");
+    expect(harness.calls.indexOf("report:stage")).toBeLessThan(harness.calls.indexOf("report:rollback"));
+  });
+
+  it("rolls back a published artifact when the report cannot be committed", async () => {
+    const harness = await makeHarness({
+      stageReport: async () => {
+        return {
+          commit: async () => { throw new Error("REPORT_COMMIT_FAILED"); },
+          rollback: async () => {},
+          finalize: async () => {},
+        };
+      },
+    });
+
+    await expect(prepareLocalExperiment(harness.dependencies)).rejects.toThrow("PREPARATION_FAILED");
+
+    expect(harness.published).toEqual([]);
+    expect(harness.reports).toEqual([]);
+    expect(harness.calls).toContain("publish:rollback");
+    expect(harness.calls.filter((call) => call.startsWith("log:"))).toEqual(["log:PREPARATION_FAILED"]);
   });
 
   it("replays captured responses in order without a second live request", async () => {
@@ -395,6 +434,7 @@ describe("local experiment preparation command", () => {
   it("keeps game and browser code out of the command and redacts top-level failures", async () => {
     const source = await readFile(sourcePath, "utf8");
     expect(source).not.toMatch(/from\s+["'][^"']*(?:apps\/game|next\/|playwright)|startGame|demo-game/u);
+    expect(source).toMatch(/publishArtifact: async \(\{ artifact, expectedHash, beforeCommit \}\)[\s\S]*?targetPath: ARTIFACT_PATH, \.\.\.\(beforeCommit \? \{ beforeCommit \} : \{\}\)/u);
     const messages: string[] = [];
     const harness = await makeHarness({
       preflight: async () => { throw new Error("Bearer raw-secret account@example.test"); },

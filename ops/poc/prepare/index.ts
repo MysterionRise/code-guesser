@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { publishArtifact } from "./artifact-store";
@@ -14,6 +14,7 @@ import { generateLanguageRounds, validateLanguageCandidate, type GeneratedLangua
 import { parseCrawlProfile, type CrawlProfile } from "./profile";
 import { generateProvenanceRounds, type GeneratedProvenanceRounds } from "./provenance-rounds";
 import { createRetryController, type RetryController } from "./retry";
+import { stageRunReport, type StagedRunReport } from "./report-store";
 import { createRunReport } from "./run-report";
 import { preflightStackAccess } from "./stack-access";
 import { collectStackMetadata, type StackMetadataRow } from "./stack-metadata";
@@ -36,7 +37,7 @@ export interface PreparationDependencies {
   validateLanguageCandidate(options: Context & Readonly<{ candidate: unknown }>): unknown; finalizeBindings?(options: Context & Readonly<{ crawlSnapshotId: string; provenanceCandidates: readonly unknown[]; languageSelections: readonly StackSelection[] }>): Promise<Readonly<{ provenanceCandidates: readonly unknown[]; languageCandidates: readonly unknown[] }>>;
   generateProvenance(options: Readonly<{ profile: CrawlProfile; candidates: readonly unknown[] }>): GeneratedProvenanceRounds; generateLanguage(options: Readonly<{ profile: CrawlProfile; candidates: readonly unknown[] }>): GeneratedLanguageRounds;
   compose(options: Parameters<typeof composeExperimentArtifact>[0]): ComposedExperiment; createReport(input: Readonly<Record<string, unknown>>): unknown;
-  writeReport(report: unknown): Promise<void>; publishArtifact(input: Readonly<{ artifact: unknown; expectedHash: string }>): Promise<unknown>;
+  stageReport(report: unknown): Promise<StagedRunReport>; publishArtifact(input: Readonly<{ artifact: unknown; expectedHash: string; beforeCommit?: () => Promise<void> }>): Promise<unknown>;
   now(): Date; uuid(): string; log(message: string): void; }
 interface BlobLimits { readonly blobAttempts: number; readonly successfulBlobs: number; readonly perBlobBytes: number; readonly totalBlobBytes: number; readonly temporaryDiskBytes: number }
 export interface PreparationResult { readonly artifactHash: string; readonly crawlSnapshotId: string; readonly publication: unknown }
@@ -175,8 +176,7 @@ export const prepareLocalExperiment = async (deps: PreparationDependencies = def
       acceptedResponseHashes: Object.freeze(hashes), provenance, language });
     if (composed.artifact.crawlSnapshot.id !== crawlSnapshotId) throw new PreparationError();
     const report = deps.createReport(reportInput(context, composed, deps.uuid(), deps.now().toISOString(), state, classifications));
-    await deps.writeReport(report);
-    const publication = await deps.publishArtifact({ artifact: composed.artifact, expectedHash: composed.artifactHash });
+    const publication = await publishWithReport(deps, composed, report);
     if (classifications.some(({ completeness }) => completeness === "PROVIDER_REPORTED_INCOMPLETE")) deps.log("GITHUB_SEARCH_INCOMPLETE");
     deps.log("PREPARATION_COMPLETE");
     return Object.freeze({ artifactHash: composed.artifactHash, crawlSnapshotId, publication });
@@ -245,8 +245,17 @@ const runBlobWorker = async (row: StackMetadataRow, limits: BlobLimits, environm
     child.stdin.end(`${JSON.stringify({ rows: [inputRow], limits })}\n`);
   });
 };
-const writeReport = async (report: unknown): Promise<void> => { await mkdir(dirname(REPORT_PATH), { recursive: true });
-  const temporary = `${REPORT_PATH}.${randomUUID()}.tmp`; await writeFile(temporary, canonicalBytes(report), { mode: 0o600 }); await rename(temporary, REPORT_PATH); };
+const publishWithReport = async (deps: PreparationDependencies, composed: ComposedExperiment, report: unknown): Promise<unknown> => {
+  const staged = await deps.stageReport(report);
+  let publication: unknown;
+  try {
+    publication = await deps.publishArtifact({ artifact: composed.artifact, expectedHash: composed.artifactHash, beforeCommit: () => staged.commit() });
+  } catch (error) { await staged.rollback(); throw error; }
+  await staged.finalize();
+  return publication;
+};
+const stageReport = async (report: unknown): Promise<StagedRunReport> => { await mkdir(dirname(REPORT_PATH), { recursive: true });
+  return stageRunReport({ bytes: canonicalBytes(report), targetPath: REPORT_PATH }); };
 const defaultDependencies = (): PreparationDependencies => ({
   loadProfile: async () => { const raw = await readFile(PROFILE_URL); const profile = parseCrawlProfile(JSON.parse(raw.toString("utf8")));
     return { profile, canonicalProfileBytes: canonicalBytes(profile) }; },
@@ -291,9 +300,9 @@ const defaultDependencies = (): PreparationDependencies => ({
   },
   generateProvenance: (options) => generateProvenanceRounds(options as any),
   generateLanguage: (options) => generateLanguageRounds(options as any), compose: composeExperimentArtifact,
-  createReport: createRunReport, writeReport,
-  publishArtifact: async ({ artifact, expectedHash }) => { await mkdir(dirname(ARTIFACT_PATH), { recursive: true });
-    return publishArtifact({ artifact, expectedHash, targetPath: ARTIFACT_PATH }); },
+  createReport: createRunReport, stageReport,
+  publishArtifact: async ({ artifact, expectedHash, beforeCommit }) => { await mkdir(dirname(ARTIFACT_PATH), { recursive: true });
+    return publishArtifact({ artifact, expectedHash, targetPath: ARTIFACT_PATH, ...(beforeCommit ? { beforeCommit } : {}) }); },
   now: () => new Date(), uuid: randomUUID, log: (message) => console.info(message),
 });
 export const runPreparationCli = async (): Promise<PreparationResult> => process.argv.slice(2).length === 0 ? prepareLocalExperiment() : Promise.reject(new Error("COMMAND_ARGUMENTS_REJECTED"));
