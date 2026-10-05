@@ -8,9 +8,12 @@ progressive clues, and guess where it came from.
 This branch contains two distinct local experiences:
 
 - The synthetic five-round demo is runnable now.
-- The real-round experiment pipeline is implemented and tested, but its live
-  five-round artifact has not been generated. The latest bounded attempt stops
-  at GitHub Search with `TransportError: UNSUPPORTED_STATUS`.
+- The real-round experiment pipeline is implemented and tested offline, but its
+  live five-round artifact has not been generated. The last authorized live
+  attempt (2026-08-29) stopped at GitHub Search with an unsupported HTTP
+  status; a headers-only probe on 2026-10-05 found the same query answering
+  HTTP 200, so that failure was environment-specific rather than a dead
+  endpoint.
 
 The real experiment is therefore a work in progress, not a runnable real-data
 demo yet. It remains localhost-only, automatically prepared, unreviewed, and
@@ -52,10 +55,32 @@ requests during rounds.
 
 The signed design requires bounded selected-blob access and forbids complete
 Stack datasets, language shards, and repository archives. The TypeScript and
-GitHub path enforces its declared request and response ceilings, but the Python
-Stack workers do not yet enforce or demonstrate the same endpoint, redirect,
-network-byte, request, credential-forwarding, and temporary-disk boundaries.
-Treat this as a blocking implementation gap, not as a completed safety claim.
+GitHub path enforces its declared request and response ceilings. Both Python
+Stack workers now enforce the same boundaries in-process and report their
+counts back to the preparer:
+
+- The metadata worker installs a bounded HTTP transport as the Hugging Face
+  client factory. Only HTTPS GET/HEAD to exact `huggingface.co` dataset
+  endpoints at the pinned revision pass; requests and received bytes are
+  charged against the budget the preparer hands over; no retryable status or
+  transport exception ever reaches the Hub client's own backoff loop; the
+  temporary cache is metered against the 32 MiB ceiling; and the worker
+  disables xet, telemetry, implicit tokens, and the dataset-viewer shortcut.
+- The selected-blob worker pins the Software Heritage bucket endpoint, region,
+  signature version, timeouts, and a single attempt. A before-send guard allows
+  exactly one GET per object to the exact bucket host and key path with no
+  query string, and compressed bytes are metered against the network budget.
+- Each worker ends its output with a canonical counters line. The preparer
+  charges the reported requests to the shared request ceiling, the reported
+  bytes to the metadata or blob ceilings, and the reported peak temporary disk
+  to the signed 32 MiB reservation, and rejects the run on any overrun.
+
+One boundary is deliberately closed rather than open: the Contract requires
+exact redirect target hosts, and the host that Hugging Face parquet reads
+redirect to has never been observed under authorization. The metadata worker's
+redirect allowlist is therefore empty, and a live metadata stage will fail
+closed with `REDIRECT_REJECTED` until one authorized observation records that
+host and it is added as a literal on both the Python and TypeScript sides.
 
 ### Access prerequisites
 
@@ -67,7 +92,7 @@ credential stores. Never add them to repository files or command arguments.
 | `HF_TOKEN` | Required token for the already-accepted `bigcode/the-stack-v2` gated dataset. |
 | `STACK_V2_ACKNOWLEDGED_USABLE_REVISION` | Required non-secret acknowledgement. Its exact value must be `e565caa3a78c2423bd374333a472b049eb090e47`. |
 | Software Heritage AWS access | Required through the standard AWS credential chain, such as `~/.aws/credentials` or the normal AWS environment variables. |
-| `GITHUB_TOKEN` | Optional read-only token. Whether authentication was supplied has not yet been classified for the latest GitHub failure. |
+| `GITHUB_TOKEN` | Optional read-only token. The 2026-10-05 probe succeeded with authentication supplied; an unauthenticated run has a much smaller search quota. |
 
 Run preparation with:
 
@@ -80,37 +105,46 @@ The intended successful outputs are:
 - `apps/game/src/demo/generated/local-real-rounds.json`
 - `ops/poc/stack/tmp/local-experiment-run.json`
 
-Neither file exists in this handoff. The artifact publisher is atomic, but the
-current orchestration writes a success report before publishing the artifact;
-a publication failure can therefore leave an orphan success report. Do not
-manually fabricate or substitute either output. The real experiment must not be
-mounted as the active route until preparation succeeds, report/artifact
-publication is transactional, and the artifact passes the existing server-side
-validation and browser/containment sweep.
+Neither file exists in this handoff. Publication is transactional: the run
+report is staged beside its target, committed from inside the artifact
+publisher while the previous artifact's backup still exists, and rolled back on
+any publication failure, so no success report can outlive a failed artifact and
+no artifact can be published without its report. Do not manually fabricate or
+substitute either output. The real experiment must not be mounted as the active
+route until preparation succeeds and the artifact passes the existing
+server-side validation and browser/containment sweep.
 
 ## Current blockers
 
-The Stack access preflight completes. The first GitHub Search request receives
-an HTTP status outside the transport's accepted success range, classified as
-`GITHUB_SEARCH | TransportError | UNSUPPORTED_STATUS`. The response body was
-not used for diagnosis, no retry was made, and failed attempts left no partial
-artifact, report, or temporary output.
+The two implementation blockers from the 2026-09-04 handoff audit are closed:
+report/artifact publication is transactional, and both Python workers enforce
+and test the signed network and temporary-disk ceilings. Two further defects
+found on 2026-10-05 are also closed: the preparer could never retry on a
+provider instruction because nothing in production produced the retry signal,
+and it logged only a bare failure line. A GitHub 403 or 429 with an integer
+`retry-after`, or an exhausted rate-limit budget with a future reset, now
+yields exactly the one bounded retry the Contract permits, and a failed run
+logs one line of the form
+`PREPARATION_STAGE_FAILED <stage> <reason-code> <status-class>` before
+`PREPARATION_FAILED`, never a body, URL, or credential.
 
-The next investigation should determine the HTTP status and whether it is an
-authentication or rate-limit condition without exposing credentials, provider
-bodies, repository identities, or source content. Provider access requires the
-operator's explicit authorization.
+What still prevents a live run:
 
-An independent handoff audit found two additional blockers:
+- Provider access requires the operator's explicit authorization and the
+  operator's own Hugging Face, Software Heritage, and optional GitHub
+  credentials.
+- The Hugging Face parquet redirect target host is unobserved, so the metadata
+  stage fails closed with `REDIRECT_REJECTED` by design. The next external
+  action is one authorized request to the pinned `resolve` endpoint, without
+  following the redirect or reading a body, recording only the redirect target
+  host so it can be allowlisted on both sides.
 
-- The Python Stack metadata and selected-blob workers bypass the bounded
-  TypeScript transport and do not yet prove the signed network and temporary-
-  disk ceilings.
-- The success report is written before artifact publication and is not rolled
-  back if publication fails.
-
-See the [handoff audit](docs/gangsta/codeguessr-poc-readiness/reviews/2026-09-04-handoff-audit.md)
-for exact code references. Both require failing regression tests before fixes.
+The 2026-10-05 GitHub probe sent one authenticated GET for the first profile
+query with no retry and discarded the body unread. It observed HTTP 200, no
+exhausted rate limit, and no retry delay. The probe's token and proxy were the
+session's, not the operator's, so it does not reproduce the operator's exact
+conditions; the new stage log line makes the next operator failure
+self-describing.
 
 ## Verification
 
@@ -134,20 +168,18 @@ pnpm exec node --test tests/containment/acquisition-boundary.test.mjs
 pnpm --filter @codeguessr/game build
 ```
 
-Fresh handoff verification on 2026-09-04 produced:
+Fresh verification on 2026-10-05 produced:
 
-- 2,279/2,279 workspace tests on the final full rerun;
+- 2,307/2,307 workspace tests across 87 files, plus 4/4 workspace checks;
 - all workspace and operator TypeScript checks passing;
-- 16/16 locked Python worker tests;
+- 34/34 locked Python worker tests;
 - 37/37 accessibility checks and 6/6 performance checks;
 - 3/3 acquisition-containment checks;
 - a successful production build; and
 - 13/13 Playwright scenarios against the local Next server.
 
-An immediately preceding full workspace run reproduced the known intermittent
-audit-chain concurrency assertion: both append operations succeeded when the
-test expects one rejection. Its focused rerun and the final full rerun passed.
-This remains engineering debt and is not represented as resolved.
+The previously intermittent audit-chain concurrency test is fixed at its root
+(a synchronous head snapshot per append) and passed twenty consecutive runs.
 
 If Playwright reports that Chromium is missing on a fresh machine:
 
@@ -158,7 +190,8 @@ pnpm exec playwright install chromium
 ## Handoff and project record
 
 Claude-based agents should begin with [CLAUDE.md](CLAUDE.md), then read the
-[latest checkpoint](docs/gangsta/codeguessr-poc-readiness/checkpoints/2026-09-04-checkpoint-handoff.md),
+[latest checkpoint](docs/gangsta/codeguessr-poc-readiness/checkpoints/2026-10-05-checkpoint-the-hit-boundaries.md),
+the [handoff checkpoint](docs/gangsta/codeguessr-poc-readiness/checkpoints/2026-09-04-checkpoint-handoff.md),
 the [handoff audit](docs/gangsta/codeguessr-poc-readiness/reviews/2026-09-04-handoff-audit.md),
 the [signed revision-11 Contract](docs/gangsta/codeguessr-poc-readiness/specs/2026-08-15-contract-revision-11-signed.md),
 and the [execution plan](docs/gangsta/codeguessr-poc-readiness/plans/2026-07-31-execution-plan.md).
@@ -172,7 +205,7 @@ The signed Contract SHA-256 is
 | --- | --- |
 | `apps/game` | Next.js game, arcade UI, reveal authorization, and local experiment validation |
 | `ops/poc/prepare` | GitHub/Stack orchestration, validation, selection, reporting, and publication |
-| `ops/poc/stack` | Locked Python worker for streamed Stack metadata and selected blob retrieval |
+| `ops/poc/stack` | Locked Python workers for streamed Stack metadata and selected blob retrieval, with the bounded HTTP backend |
 | `ops/poc/profiles` | Versioned local experiment crawl profile |
 | `packages/content` | Server-only acquisition support and broader content boundaries |
 | `tests` | Accessibility, browser, performance, and containment suites |
