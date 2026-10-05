@@ -202,8 +202,15 @@ const loadAuditChain = async (events: string): Promise<readonly Json[]> => {
   validateChain(chain);
   return freeze(JSON.parse(canonical(chain)) as Json[]);
 };
-const appendToSink = async (events: string, raw: unknown): Promise<readonly Json[]> => {
+/**
+ * Appends against the chain length the caller observed when it issued the append. Any append
+ * that lands in between, from this handle or another, shows up as a longer directory or chain
+ * and fails as AUDIT_CONFLICT before the exclusive create is attempted.
+ */
+const appendToSink = async (events: string, raw: unknown, expectedLength: number): Promise<readonly Json[]> => {
+  if ((await readdir(events)).length !== expectedLength) fail("AUDIT_CONFLICT");
   const chain = await loadAuditChain(events);
+  if (chain.length !== expectedLength) fail("AUDIT_CONFLICT");
   const next = appendAuditEvent(chain, raw);
   const record = next.at(-1) ?? fail("AUDIT_CHAIN_INVALID");
   const name = `${String(next.length).padStart(12, "0")}.json`;
@@ -262,13 +269,20 @@ export const openAuditSink = (config: AuditSinkConfig) =>
     await chmod(root, 0o700);
     const events = join(root, "events");
     await secureDirectory(events);
-    await loadAuditChain(events);
+    let knownLength = (await loadAuditChain(events)).length;
     return Object.freeze({
-      append: (raw: unknown) =>
-        categorical(
-          () => appendToSink(events, bindAuthorizedRun(raw, config.authorizedRun)),
-          "AUDIT_WRITE_REJECTED",
-        ),
-      read: () => categorical(() => loadAuditChain(events), "AUDIT_READ_REJECTED"),
+      append: (raw: unknown) => {
+        const expectedLength = knownLength;
+        return categorical(async () => {
+          const chain = await appendToSink(events, bindAuthorizedRun(raw, config.authorizedRun), expectedLength);
+          knownLength = chain.length;
+          return chain;
+        }, "AUDIT_WRITE_REJECTED");
+      },
+      read: () => categorical(async () => {
+        const chain = await loadAuditChain(events);
+        knownLength = chain.length;
+        return chain;
+      }, "AUDIT_READ_REJECTED"),
     });
   }, "AUDIT_OPEN_REJECTED");

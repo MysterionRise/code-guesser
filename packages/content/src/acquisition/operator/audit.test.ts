@@ -91,6 +91,37 @@ describe("metadata audit chain", () => {
     })).toThrow("AUDIT_AUTHORIZATION_EXPIRED");
   });
 
+  it("advances the head for sequential appends and conflicts a stale handle until it re-reads", async () => {
+    const created = await mkdtemp(join(tmpdir(), "codeguessr-audit-owned-"));
+    const root = await (await import("node:fs/promises")).realpath(created);
+    try {
+      const config = {
+        root, ownershipAttestation: "ACQUISITION_OWNED", authorizedRun,
+        projectOperatorRegisterHash: canonicalSha256(operatorRegister),
+      } as const;
+      const first = await openAuditSink(config);
+      const stale = await openAuditSink(config);
+      const event = (digit: string, eventType: string = "RUN_STARTED") => ({
+        eventType, eventTime: "2026-01-01T00:00:00Z",
+        eventIdentity: digit.repeat(64), subjectHash: h64, reasonCode: "RUN_AUTHORIZED", run,
+      });
+
+      expect(await first.append(event("3"))).toHaveLength(1);
+      expect(await first.append(event("4", "RUN_PAUSED"))).toHaveLength(2);
+      expect(await first.read()).toHaveLength(2);
+
+      await expect(stale.append(event("5", "RUN_RESUMED"))).rejects.toThrow("AUDIT_CONFLICT");
+      expect(await stale.read()).toHaveLength(2);
+      expect(await stale.append(event("5", "RUN_RESUMED"))).toHaveLength(3);
+      await expect(first.append(event("6", "RUN_REJECTED"))).rejects.toThrow("AUDIT_CONFLICT");
+      expect(await first.read()).toHaveLength(3);
+      const files = await (await import("node:fs/promises")).readdir(join(root, "events"));
+      expect(files.sort()).toEqual(["000000000001.json", "000000000002.json", "000000000003.json"]);
+    } finally {
+      await rm(created, { recursive: true, force: true });
+    }
+  });
+
   it("persists an exclusive external chain and validates reopen, modes, tamper and symlinks", async () => {
     const created = await mkdtemp(join(tmpdir(), "codeguessr-audit-owned-"));
     const root = await (await import("node:fs/promises")).realpath(created);
@@ -109,6 +140,9 @@ describe("metadata audit chain", () => {
       ]);
       expect(results.filter(({ status }) => status === "fulfilled").length).toBe(1);
       expect(results.filter(({ status }) => status === "rejected").length).toBe(1);
+      const conflict = results.find(({ status }) => status === "rejected") as PromiseRejectedResult;
+      expect(conflict.reason).toBeInstanceOf(AuditError);
+      expect(conflict.reason.message).toBe("AUDIT_CONFLICT");
       await expect(sink.append({
         ...event,
         eventIdentity: "5".repeat(64),
