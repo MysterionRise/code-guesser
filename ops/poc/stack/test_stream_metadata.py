@@ -52,13 +52,30 @@ def request(**overrides):
         "revision": REVISION,
         "rowLimit": 1,
         "perBlobByteLimit": 262_144,
+        "requestLimit": 200,
+        "networkByteLimit": 64 * 1024 * 1024,
+        "temporaryDiskBytes": 32 * 1024 * 1024,
     }
     value.update(overrides)
     return value
 
 
+class RecordingInstaller:
+    def __init__(self, requests=0, network_bytes=0):
+        self.budgets = []
+        self.requests = requests
+        self.network_bytes = network_bytes
+
+    def __call__(self, budget):
+        self.budgets.append(budget)
+        for _index in range(self.requests):
+            budget.begin_request()
+        if self.network_bytes:
+            budget.add_bytes(self.network_bytes)
+
+
 class StreamMetadataTests(unittest.TestCase):
-    def run_stream(self, rows, request_value=None, token="external-token"):
+    def run_stream(self, rows, request_value=None, token="external-token", installer=None):
         calls = []
         output = io.StringIO()
         environment = {"HF_TOKEN": token}
@@ -70,8 +87,15 @@ class StreamMetadataTests(unittest.TestCase):
         count = stream_metadata(
             request_value or request(), load_dataset_fn=loader,
             environment=environment, output=output,
+            install_backend_fn=installer or RecordingInstaller(),
         )
         return count, calls, output.getvalue(), environment
+
+    def rows_of(self, text):
+        return [json.loads(line) for line in text.splitlines()[:-1]]
+
+    def trailer_of(self, text):
+        return text.splitlines()[-1]
 
     def assert_code(self, code, callback):
         with self.assertRaises(MetadataStreamError) as caught:
@@ -110,7 +134,7 @@ class StreamMetadataTests(unittest.TestCase):
                 )
 
         count, _calls, text, _environment = self.run_stream(rows(), request(rowLimit=2))
-        emitted = [json.loads(line) for line in text.splitlines()]
+        emitted = self.rows_of(text)
         self.assertEqual(count, 2)
         self.assertEqual(pulled, [0, 1])
         self.assertEqual([entry["swhBlobId"] for entry in emitted], ["1" * 40, "2" * 40])
@@ -128,7 +152,7 @@ class StreamMetadataTests(unittest.TestCase):
 
     def test_normalizes_documented_datetime_and_iso_representations_to_utc(self):
         _count, _calls, text, _environment = self.run_stream([row()])
-        emitted = json.loads(text)
+        emitted = self.rows_of(text)[0]
         self.assertEqual(emitted["visitDate"], "2023-09-06T10:44:38.631000Z")
         self.assertEqual(emitted["revisionDate"], "2023-09-05T09:30:00Z")
         self.assertEqual(emitted["committerDate"], "2023-09-05T09:30:00Z")
@@ -142,15 +166,23 @@ class StreamMetadataTests(unittest.TestCase):
             ("ROW_LIMIT_REJECTED", request(rowLimit=True), "external-token"),
             ("ROW_LIMIT_REJECTED", request(rowLimit=10_001), "external-token"),
             ("BYTE_LIMIT_REJECTED", request(perBlobByteLimit=262_145), "external-token"),
+            ("REQUEST_MALFORMED", {key: value for key, value in request().items() if key != "requestLimit"},
+             "external-token"),
+            ("REQUEST_LIMIT_REJECTED", request(requestLimit=0), "external-token"),
+            ("REQUEST_LIMIT_REJECTED", request(requestLimit=201), "external-token"),
+            ("NETWORK_LIMIT_REJECTED", request(networkByteLimit=64 * 1024 * 1024 + 1), "external-token"),
+            ("DISK_LIMIT_REJECTED", request(temporaryDiskBytes=32 * 1024 * 1024 + 1), "external-token"),
             ("TOKEN_MISSING", request(), ""),
         ]
         for code, request_value, token in failures:
             calls = []
+            installer = RecordingInstaller()
             self.assert_code(code, lambda rv=request_value, tk=token: stream_metadata(
                 rv, load_dataset_fn=lambda *_args, **_kwargs: calls.append(True),
-                environment={"HF_TOKEN": tk}, output=io.StringIO(),
+                environment={"HF_TOKEN": tk}, output=io.StringIO(), install_backend_fn=installer,
             ))
             self.assertEqual(calls, [])
+            self.assertEqual(installer.budgets, [])
 
     def test_rejects_schema_identity_and_metadata_screening_failures(self):
         failures = [
@@ -197,6 +229,7 @@ class StreamMetadataTests(unittest.TestCase):
         self.assert_code("DATASET_LOAD_FAILED", lambda: stream_metadata(
             request(), load_dataset_fn=load_failure,
             environment={"HF_TOKEN": "external-token"}, output=io.StringIO(),
+            install_backend_fn=RecordingInstaller(),
         ))
 
         def failed_rows():
@@ -220,7 +253,7 @@ class StreamMetadataTests(unittest.TestCase):
 
             callback = lambda: stream_metadata(
                 request(), load_dataset_fn=loader, environment=environment,
-                output=io.StringIO(),
+                output=io.StringIO(), install_backend_fn=RecordingInstaller(),
             )
             if rows:
                 callback()
@@ -228,6 +261,110 @@ class StreamMetadataTests(unittest.TestCase):
                 self.assert_code("EARLY_STOP", callback)
             self.assertEqual(environment, {"HF_TOKEN": "external-token", "HF_HOME": "prior-home"})
             self.assertTrue(all(not os.path.exists(path) for path in observed_paths))
+
+    def test_installs_the_bounded_backend_with_the_request_budget_before_loading(self):
+        order = []
+        installer = RecordingInstaller()
+
+        def recording_installer(budget):
+            order.append("install")
+            installer(budget)
+
+        def loader(*_args, **_kwargs):
+            order.append("load")
+            return iter([row()])
+
+        stream_metadata(
+            request(requestLimit=7, networkByteLimit=4096), load_dataset_fn=loader,
+            environment={"HF_TOKEN": "external-token"}, output=io.StringIO(),
+            install_backend_fn=recording_installer,
+        )
+        self.assertEqual(order, ["install", "load"])
+        self.assertEqual(len(installer.budgets), 1)
+        budget = installer.budgets[0]
+        self.assertEqual((budget.request_limit, budget.byte_limit), (7, 4096))
+        for _index in range(7):
+            budget.begin_request()
+        with self.assertRaises(Exception) as caught:
+            budget.begin_request()
+        self.assertEqual(caught.exception.code, "REQUEST_COUNT")
+        budget.add_bytes(4096)
+        with self.assertRaises(Exception) as caught:
+            budget.add_bytes(1)
+        self.assertEqual(caught.exception.code, "NETWORK_BYTES")
+
+    def test_emits_a_canonical_counters_trailer_after_the_rows(self):
+        installer = RecordingInstaller(requests=2, network_bytes=1000)
+        count, _calls, text, _environment = self.run_stream([row()], installer=installer)
+        self.assertEqual(count, 1)
+        lines = text.splitlines()
+        self.assertEqual(len(lines), 2)
+        trailer = json.loads(lines[-1])
+        self.assertEqual(set(trailer), {"counters"})
+        self.assertEqual(list(trailer["counters"]), [
+            "networkBytes", "peakTemporaryDiskBytes", "redirectsFollowed", "requests",
+        ])
+        self.assertEqual(trailer["counters"]["networkBytes"], 1000)
+        self.assertEqual(trailer["counters"]["requests"], 2)
+        self.assertEqual(trailer["counters"]["redirectsFollowed"], 0)
+        self.assertIsInstance(trailer["counters"]["peakTemporaryDiskBytes"], int)
+        self.assertGreaterEqual(trailer["counters"]["peakTemporaryDiskBytes"], 0)
+        self.assertEqual(lines[-1], json.dumps(trailer, separators=(",", ":"), sort_keys=True))
+
+    def test_fails_closed_when_temporary_disk_exceeds_the_ceiling_and_cleans_up(self):
+        observed = []
+
+        def loader(*_args, **_kwargs):
+            path = os.path.join(environment["HF_HOME"], "oversized.bin")
+            with open(path, "wb") as handle:
+                handle.write(b"\0" * (2 * 1024 * 1024))
+            observed.append(path)
+            return iter([row()])
+
+        environment = {"HF_TOKEN": "external-token"}
+        self.assert_code("TEMPORARY_DISK", lambda: stream_metadata(
+            request(temporaryDiskBytes=1024 * 1024), load_dataset_fn=loader,
+            environment=environment, output=io.StringIO(), install_backend_fn=RecordingInstaller(),
+        ))
+        self.assertFalse(os.path.exists(observed[0]))
+        self.assertEqual(environment, {"HF_TOKEN": "external-token"})
+
+        def slow_growth(*_args, **_kwargs):
+            def rows():
+                for index in range(3):
+                    if index == 2:
+                        with open(os.path.join(environment["HF_HOME"], "late.bin"), "wb") as handle:
+                            handle.write(b"\0" * (2 * 1024 * 1024))
+                    name = f"example{index}.py"
+                    yield row(blob_id=str(index + 1) * 40, path=f"/src/{name}", filename=name)
+            return rows()
+
+        self.assert_code("TEMPORARY_DISK", lambda: stream_metadata(
+            request(rowLimit=3, temporaryDiskBytes=1024 * 1024), load_dataset_fn=slow_growth,
+            environment=environment, output=io.StringIO(), install_backend_fn=RecordingInstaller(),
+        ))
+
+    def test_sets_hub_hardening_environment_during_load_and_restores_it(self):
+        environment = {"HF_TOKEN": "external-token", "HF_HUB_DISABLE_XET": "0", "TMPDIR": "/prior"}
+        observed = {}
+
+        def loader(*_args, **_kwargs):
+            observed.update(environment)
+            return iter([row()])
+
+        stream_metadata(
+            request(), load_dataset_fn=loader, environment=environment,
+            output=io.StringIO(), install_backend_fn=RecordingInstaller(),
+        )
+        for key in ("HF_HUB_DISABLE_XET", "HF_HUB_DISABLE_TELEMETRY", "HF_HUB_DISABLE_IMPLICIT_TOKEN",
+                    "HF_HUB_DISABLE_PROGRESS_BARS"):
+            self.assertEqual(observed[key], "1")
+        self.assertEqual(observed["HF_HUB_ETAG_TIMEOUT"], "15")
+        self.assertEqual(observed["HF_HUB_DOWNLOAD_TIMEOUT"], "15")
+        self.assertTrue(observed["TMPDIR"].startswith(observed["HF_HOME"].rsplit("/", 1)[0]))
+        self.assertTrue(observed["HF_TOKEN_PATH"].startswith(observed["HF_HOME"].rsplit("/", 1)[0]))
+        self.assertFalse(os.path.exists(observed["HF_TOKEN_PATH"]))
+        self.assertEqual(environment, {"HF_TOKEN": "external-token", "HF_HUB_DISABLE_XET": "0", "TMPDIR": "/prior"})
 
 
 if __name__ == "__main__":

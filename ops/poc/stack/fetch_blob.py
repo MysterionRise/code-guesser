@@ -3,16 +3,24 @@ import codecs
 import gzip
 import hashlib
 import json
+import re
 import sys
 from dataclasses import dataclass
+from urllib.parse import urlsplit
 
 
 BUCKET = "softwareheritage"
 KEY_PREFIX = "content/"
+REGION = "us-east-1"
+ENDPOINT_URL = "https://s3.amazonaws.com"
+BUCKET_HOST = f"{BUCKET}.s3.amazonaws.com"
+KEY_PATH = re.compile(r"^/content/[0-9a-f]{40}$")
+TIMEOUT_SECONDS = 15
 MAXIMUM_ATTEMPTS = 50
 MAXIMUM_BLOB_BYTES = 256 * 1024
 MAXIMUM_TOTAL_BYTES = 16 * 1024 * 1024
 MAXIMUM_TEMPORARY_BYTES = 32 * 1024 * 1024
+MAXIMUM_REQUESTS = 200
 MAXIMUM_REQUEST_BYTES = 64 * 1024
 READ_BYTES = 64 * 1024
 ROW_KEYS = {
@@ -20,7 +28,7 @@ ROW_KEYS = {
 }
 LIMIT_KEYS = {
     "blobAttempts", "successfulBlobs", "perBlobBytes", "totalBlobBytes",
-    "temporaryDiskBytes",
+    "temporaryDiskBytes", "requestLimit", "networkByteLimit",
 }
 
 
@@ -31,11 +39,13 @@ class BlobLimits:
     per_blob_bytes: int
     total_blob_bytes: int
     temporary_disk_bytes: int
+    request_limit: int
+    network_byte_limit: int
 
 
 SIGNED_LIMITS = BlobLimits(
     MAXIMUM_ATTEMPTS, MAXIMUM_ATTEMPTS, MAXIMUM_BLOB_BYTES,
-    MAXIMUM_TOTAL_BYTES, MAXIMUM_TEMPORARY_BYTES,
+    MAXIMUM_TOTAL_BYTES, MAXIMUM_TEMPORARY_BYTES, MAXIMUM_REQUESTS, MAXIMUM_BLOB_BYTES,
 )
 
 
@@ -68,6 +78,8 @@ def _parse_limits(value):
         "perBlobBytes": MAXIMUM_BLOB_BYTES,
         "totalBlobBytes": MAXIMUM_TOTAL_BYTES,
         "temporaryDiskBytes": MAXIMUM_TEMPORARY_BYTES,
+        "requestLimit": MAXIMUM_REQUESTS,
+        "networkByteLimit": MAXIMUM_BLOB_BYTES,
     }
     for key, maximum in maxima.items():
         if isinstance(value[key], bool) or not isinstance(value[key], int) or value[key] < 1:
@@ -77,6 +89,7 @@ def _parse_limits(value):
     return BlobLimits(
         value["blobAttempts"], value["successfulBlobs"], value["perBlobBytes"],
         value["totalBlobBytes"], value["temporaryDiskBytes"],
+        value["requestLimit"], value["networkByteLimit"],
     )
 
 
@@ -115,11 +128,107 @@ def _default_session():
     return boto3.Session()
 
 
-def _response_body(client, row):
+def _client_configuration():
+    from botocore.config import Config
+    return {
+        "region_name": REGION,
+        "endpoint_url": ENDPOINT_URL,
+        "config": Config(
+            retries={"total_max_attempts": 1, "mode": "standard"},
+            connect_timeout=TIMEOUT_SECONDS, read_timeout=TIMEOUT_SECONDS,
+            max_pool_connections=1, signature_version="s3v4",
+            s3={"addressing_style": "virtual"},
+        ),
+    }
+
+
+class _NetworkBudget:
+    def __init__(self, limits):
+        self.request_limit = limits.request_limit
+        self.byte_limit = limits.network_byte_limit
+        self.requests = 0
+        self.network_bytes = 0
+
+    def begin_request(self):
+        if self.requests >= self.request_limit:
+            _fail("REQUEST_COUNT")
+        self.requests += 1
+
+    def add_bytes(self, count):
+        if count < 0 or self.network_bytes + count > self.byte_limit:
+            _fail("NETWORK_BYTES")
+        self.network_bytes += count
+
+    def remaining_bytes(self):
+        return self.byte_limit - self.network_bytes
+
+    def counters(self):
+        return {
+            "networkBytes": self.network_bytes,
+            "peakTemporaryDiskBytes": 0,
+            "redirectsFollowed": 0,
+            "requests": self.requests,
+        }
+
+
+class _SendGuard:
+    """Runs on botocore's before-send hook: exact endpoint, one send per operation, request budget."""
+
+    def __init__(self, budget):
+        self.budget = budget
+        self.sends = 0
+
+    def begin_operation(self):
+        self.sends = 0
+
+    def __call__(self, request, **_kwargs):
+        method = getattr(request, "method", None)
+        url = getattr(request, "url", None)
+        if method != "GET" or not isinstance(url, str):
+            _fail("ENDPOINT_REJECTED")
+        parts = urlsplit(url)
+        if (parts.scheme != "https" or parts.netloc != BUCKET_HOST or parts.username is not None
+                or parts.port is not None or parts.query or parts.fragment
+                or not KEY_PATH.fullmatch(parts.path)):
+            _fail("ENDPOINT_REJECTED")
+        self.sends += 1
+        if self.sends > 1:
+            _fail("REQUEST_COUNT")
+        self.budget.begin_request()
+
+
+class _MeteredBody:
+    def __init__(self, body, budget):
+        self._body = body
+        self._budget = budget
+
+    def read(self, amount=None):
+        chunk = self._body.read(amount)
+        self._budget.add_bytes(len(chunk))
+        return chunk
+
+    def close(self):
+        _close(self._body)
+
+
+def _create_client(factory, budget):
+    try:
+        client = factory().client("s3", **_client_configuration())
+        guard = _SendGuard(budget)
+        client.meta.events.register("before-send.s3.GetObject", guard)
+    except Exception:
+        _fail("BLOB_UNAVAILABLE")
+    return client, guard
+
+
+def _response_body(client, guard, budget, row):
+    guard.begin_operation()
     try:
         response = client.get_object(
             Bucket=BUCKET, Key=KEY_PREFIX + row["swhBlobId"],
         )
+    except BlobFetchError:
+        raise
     except Exception:
         _fail("BLOB_UNAVAILABLE")
     if not isinstance(response, dict):
@@ -138,7 +247,15 @@ def _response_body(client, row):
         _fail("BLOB_UNAVAILABLE")
     if not callable(getattr(body, "read", None)) or not callable(getattr(body, "close", None)):
         _fail("BLOB_UNAVAILABLE")
-    return body
+    declared = response.get("ContentLength")
+    if declared is not None:
+        if isinstance(declared, bool) or not isinstance(declared, int) or declared < 0:
+            _close(body)
+            _fail("BLOB_UNAVAILABLE")
+        if declared > budget.remaining_bytes():
+            _close(body)
+            _fail("NETWORK_BYTES")
+    return _MeteredBody(body, budget)
 
 
 def _close(body):
@@ -190,18 +307,16 @@ def _validate_content(row, content):
         _fail("CONTENT_ID_MISMATCH")
 
 
-def fetch_selected_blobs(rows, *, limits=None, session_factory=None):
+def fetch_selected_blobs_with_counters(rows, *, limits=None, session_factory=None):
     bounded = _parse_limits(limits)
     selected = _validate_rows(rows, bounded)
     factory = _default_session if session_factory is None else session_factory
-    try:
-        client = factory().client("s3")
-    except Exception:
-        _fail("BLOB_UNAVAILABLE")
+    budget = _NetworkBudget(bounded)
+    client, guard = _create_client(factory, budget)
     results = []
     total = 0
     for row in selected:
-        body = _response_body(client, row)
+        body = _response_body(client, guard, budget, row)
         content = None
         try:
             content = _decompress(body, bounded.total_blob_bytes - total, bounded.per_blob_bytes)
@@ -217,7 +332,14 @@ def fetch_selected_blobs(rows, *, limits=None, session_factory=None):
             if content is not None:
                 content[:] = b"\0" * len(content)
             _close(body)
-    return tuple(results)
+    return tuple(results), budget.counters()
+
+
+def fetch_selected_blobs(rows, *, limits=None, session_factory=None):
+    results, _counters = fetch_selected_blobs_with_counters(
+        rows, limits=limits, session_factory=session_factory,
+    )
+    return results
 
 
 def _read_request(stream):
@@ -238,11 +360,12 @@ def _main(*, stdin=None, stdout=None, stderr=None, session_factory=None):
         request = _read_request(active_input)
         if not isinstance(request, dict) or set(request) != {"rows", "limits"}:
             _fail("REQUEST_MALFORMED")
-        results = fetch_selected_blobs(
+        results, counters = fetch_selected_blobs_with_counters(
             request["rows"], limits=request["limits"], session_factory=session_factory,
         )
         for result in results:
             active_output.write(json.dumps(result, separators=(",", ":")) + "\n")
+        active_output.write(json.dumps({"counters": counters}, separators=(",", ":"), sort_keys=True) + "\n")
         return 0
     except BlobFetchError as error:
         active_error.write(error.code + "\n")

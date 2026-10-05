@@ -11,7 +11,14 @@ DATASET_NAME = "bigcode/the-stack-v2"
 PINNED_REVISION = "e565caa3a78c2423bd374333a472b049eb090e47"
 MAXIMUM_ROWS = 10_000
 MAXIMUM_BLOB_BYTES = 256 * 1024
-REQUEST_KEYS = {"configuration", "revision", "rowLimit", "perBlobByteLimit"}
+MAXIMUM_REQUESTS = 200
+MAXIMUM_NETWORK_BYTES = 64 * 1024 * 1024
+MAXIMUM_TEMPORARY_BYTES = 32 * 1024 * 1024
+DISK_CHECK_INTERVAL = 256
+REQUEST_KEYS = {
+    "configuration", "revision", "rowLimit", "perBlobByteLimit",
+    "requestLimit", "networkByteLimit", "temporaryDiskBytes",
+}
 PROVIDER_KEYS = {
     "blob_id", "directory_id", "path", "content_id", "detected_licenses",
     "license_type", "repo_name", "snapshot_id", "revision_id", "branch_name",
@@ -21,7 +28,15 @@ PROVIDER_KEYS = {
     "language", "is_vendor", "is_generated", "length_bytes", "extension",
     "filename",
 }
-CACHE_KEYS = ("HF_HOME", "HF_DATASETS_CACHE", "HUGGINGFACE_HUB_CACHE")
+CACHE_KEYS = ("HF_HOME", "HF_DATASETS_CACHE", "HUGGINGFACE_HUB_CACHE", "HF_TOKEN_PATH", "TMPDIR")
+HUB_HARDENING = {
+    "HF_HUB_DISABLE_XET": "1",
+    "HF_HUB_DISABLE_TELEMETRY": "1",
+    "HF_HUB_DISABLE_IMPLICIT_TOKEN": "1",
+    "HF_HUB_DISABLE_PROGRESS_BARS": "1",
+    "HF_HUB_ETAG_TIMEOUT": "15",
+    "HF_HUB_DOWNLOAD_TIMEOUT": "15",
+}
 HEX_40 = re.compile(r"^[0-9a-f]{40}$")
 REPOSITORY = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 
@@ -48,10 +63,17 @@ def _parse_request(value, environment):
     byte_limit = _bounded_integer(
         value["perBlobByteLimit"], MAXIMUM_BLOB_BYTES, "BYTE_LIMIT_REJECTED"
     )
+    request_limit = _bounded_integer(value["requestLimit"], MAXIMUM_REQUESTS, "REQUEST_LIMIT_REJECTED")
+    network_limit = _bounded_integer(
+        value["networkByteLimit"], MAXIMUM_NETWORK_BYTES, "NETWORK_LIMIT_REJECTED"
+    )
+    disk_limit = _bounded_integer(
+        value["temporaryDiskBytes"], MAXIMUM_TEMPORARY_BYTES, "DISK_LIMIT_REJECTED"
+    )
     token = environment.get("HF_TOKEN")
     if not isinstance(token, str) or not token.strip():
         _fail("TOKEN_MISSING")
-    return configuration, row_limit, byte_limit, token
+    return configuration, row_limit, byte_limit, token, request_limit, network_limit, disk_limit
 
 
 def _bounded_integer(value, maximum, code):
@@ -177,12 +199,14 @@ def _project(value, configuration, repository, path, length):
 
 
 def _cache_environment(environment, root):
-    previous = {key: environment.get(key) for key in CACHE_KEYS}
+    previous = {key: environment.get(key) for key in CACHE_KEYS + tuple(HUB_HARDENING)}
     for key, directory in (("HF_HOME", "home"), ("HF_DATASETS_CACHE", "datasets"),
-                           ("HUGGINGFACE_HUB_CACHE", "hub")):
+                           ("HUGGINGFACE_HUB_CACHE", "hub"), ("TMPDIR", "tmp")):
         path = os.path.join(root, directory)
         os.makedirs(path, mode=0o700)
         environment[key] = path
+    environment["HF_TOKEN_PATH"] = os.path.join(root, "no-token")
+    environment.update(HUB_HARDENING)
     return previous
 
 
@@ -195,18 +219,45 @@ def _restore_environment(environment, previous):
 
 
 def _default_loader(*args, **kwargs):
+    import datasets.config
     from datasets import load_dataset
+    # The dataset-viewer shortcut would contact a second host; the signed allowlist has one.
+    datasets.config.USE_PARQUET_EXPORT = False
     return load_dataset(*args, **kwargs)
 
 
-def stream_metadata(request, *, load_dataset_fn=None, environment=None, output=None):
+def _default_installer(budget):
+    from bounded_http import install_bounded_backend
+    install_bounded_backend(budget)
+
+
+def _default_measure(root):
+    from bounded_http import measure_tree
+    return measure_tree(root)
+
+
+def _check_temporary_disk(budget, measure, cache_root, disk_limit):
+    measured = measure(cache_root)
+    budget.observe_temporary_disk(measured)
+    if measured > disk_limit:
+        _fail("TEMPORARY_DISK")
+
+
+def stream_metadata(request, *, load_dataset_fn=None, environment=None, output=None,
+                    install_backend_fn=None, measure_disk_fn=None):
+    from bounded_http import NetworkBudget
     active_environment = os.environ if environment is None else environment
     active_output = sys.stdout if output is None else output
-    configuration, row_limit, byte_limit, token = _parse_request(request, active_environment)
+    (configuration, row_limit, byte_limit, token,
+     request_limit, network_limit, disk_limit) = _parse_request(request, active_environment)
     loader = _default_loader if load_dataset_fn is None else load_dataset_fn
+    installer = _default_installer if install_backend_fn is None else install_backend_fn
+    measure = _default_measure if measure_disk_fn is None else measure_disk_fn
+    budget = NetworkBudget(request_limit, network_limit)
     with tempfile.TemporaryDirectory(prefix="codeguessr-stack-metadata-") as cache_root:
         previous = _cache_environment(active_environment, cache_root)
         try:
+            installer(budget)
             try:
                 dataset = loader(
                     DATASET_NAME, configuration, split="train", streaming=True,
@@ -214,8 +265,9 @@ def stream_metadata(request, *, load_dataset_fn=None, environment=None, output=N
                 )
             except Exception:
                 _fail("DATASET_LOAD_FAILED")
+            _check_temporary_disk(budget, measure, cache_root, disk_limit)
             iterator = iter(dataset)
-            for _index in range(row_limit):
+            for index in range(row_limit):
                 try:
                     source_row = next(iterator)
                 except StopIteration:
@@ -224,6 +276,12 @@ def stream_metadata(request, *, load_dataset_fn=None, environment=None, output=N
                     _fail("STREAM_FAILED")
                 projected = _validate_row(source_row, configuration, byte_limit)
                 active_output.write(json.dumps(projected, ensure_ascii=False, separators=(",", ":")) + "\n")
+                if (index + 1) % DISK_CHECK_INTERVAL == 0:
+                    _check_temporary_disk(budget, measure, cache_root, disk_limit)
+            _check_temporary_disk(budget, measure, cache_root, disk_limit)
+            active_output.write(json.dumps(
+                {"counters": budget.counters()}, separators=(",", ":"), sort_keys=True,
+            ) + "\n")
             return row_limit
         finally:
             _restore_environment(active_environment, previous)
@@ -236,8 +294,9 @@ def _main():
     except MetadataStreamError as error:
         sys.stderr.write(error.code + "\n")
         return 1
-    except Exception:
-        sys.stderr.write("REQUEST_MALFORMED\n")
+    except Exception as error:
+        code = getattr(error, "code", None)
+        sys.stderr.write((code if isinstance(code, str) and code.isupper() else "REQUEST_MALFORMED") + "\n")
         return 1
 
 
