@@ -51,12 +51,19 @@ const createCapturedPair = (providerIncompleteQueryId?: string): Promise<[any, a
 ]);
 const expectCompletionSequence = (harness: any): void => {
   const report = harness.events.indexOf("report");
+  const publicationStart = harness.events.indexOf("publish:start");
+  const commit = harness.events.indexOf("report:commit");
   const publication = harness.events.indexOf("publish:complete");
+  const finalize = harness.events.indexOf("report:finalize");
   const warning = harness.events.indexOf("log:GITHUB_SEARCH_INCOMPLETE");
   const completion = harness.events.indexOf("log:PREPARATION_COMPLETE");
-  expect([report, publication, warning, completion].every((index) => index >= 0)).toBe(true);
-  expect(report).toBeLessThan(publication);
-  expect(publication).toBeLessThan(warning);
+  expect([report, publicationStart, commit, publication, finalize, warning, completion].every((index) => index >= 0)).toBe(true);
+  expect(harness.events).not.toContain("report:rollback");
+  expect(report).toBeLessThan(publicationStart);
+  expect(publicationStart).toBeLessThan(commit);
+  expect(commit).toBeLessThan(publication);
+  expect(publication).toBeLessThan(finalize);
+  expect(finalize).toBeLessThan(warning);
   expect(warning).toBeLessThan(completion);
 };
 

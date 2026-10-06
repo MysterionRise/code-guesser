@@ -2,6 +2,7 @@
   "name": "codeguessr",
   "version": "0.0.0",
   "private": true,
+  "license": "MIT",
   "packageManager": "pnpm@9.15.9",
   "engines": {
     "node": "20.18.0",

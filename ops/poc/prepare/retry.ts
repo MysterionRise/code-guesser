@@ -1,6 +1,6 @@
 export class RetryError extends Error {
-  public constructor(public readonly code: string) {
-    super(code);
+  public constructor(public readonly code: string, cause?: unknown) {
+    super(code, cause === undefined ? undefined : { cause });
     this.name = "RetryError";
   }
 }
@@ -55,7 +55,7 @@ export const createRetryController = (options: RetryOptions): RetryController =>
       try {
         return await operation();
       } catch (error) {
-        if (!(error instanceof RetryRequestError)) throw new RetryError("RETRY_SIGNAL_MISSING");
+        if (!(error instanceof RetryRequestError)) throw new RetryError("RETRY_SIGNAL_MISSING", error);
         const wait = error.retryAfterMilliseconds;
         if (!Number.isSafeInteger(wait) || (wait as number) <= 0) {
           throw new RetryError("RETRY_SIGNAL_MALFORMED");

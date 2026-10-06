@@ -5,12 +5,13 @@ import io
 import json
 import os
 import tempfile
+import types
 import unittest
 from unittest.mock import patch
 
 try:
-    from fetch_blob import BlobFetchError, _main, fetch_selected_blobs
-except ModuleNotFoundError:
+    from fetch_blob import BlobFetchError, _main, fetch_selected_blobs, fetch_selected_blobs_with_counters
+except (ModuleNotFoundError, ImportError):
     class BlobFetchError(Exception):
         def __init__(self, code):
             super().__init__(code)
@@ -18,6 +19,9 @@ except ModuleNotFoundError:
 
     def fetch_selected_blobs(*_args, **_kwargs):
         return []
+
+    def fetch_selected_blobs_with_counters(*_args, **_kwargs):
+        return [], {}
 
     def _main(*_args, **_kwargs):
         return 1
@@ -33,9 +37,22 @@ def limits(**overrides):
         "perBlobBytes": MAXIMUM_BLOB_BYTES,
         "totalBlobBytes": 16 * 1024 * 1024,
         "temporaryDiskBytes": 32 * 1024 * 1024,
+        "requestLimit": 200,
+        "networkByteLimit": MAXIMUM_BLOB_BYTES,
     }
     value.update(overrides)
     return value
+
+
+BUCKET_HOST = "softwareheritage.s3.amazonaws.com"
+
+
+def prepared_request(key, method="GET", url=None, query=""):
+    return types.SimpleNamespace(
+        method=method,
+        url=url or f"https://{BUCKET_HOST}/{key}{query}",
+        headers={"authorization": "AWS4-HMAC-SHA256 Credential=secret", "x-amz-date": "now"},
+    )
 
 
 def blob_id(content):
@@ -83,28 +100,50 @@ class RawBody(StreamingBody):
         self.closed = False
 
 
+class FakeEvents:
+    def __init__(self):
+        self.registrations = []
+
+    def register(self, event_name, handler):
+        self.registrations.append((event_name, handler))
+
+    def emit(self, emitted_name, **kwargs):
+        for registered_name, handler in self.registrations:
+            if registered_name == emitted_name:
+                handler(**kwargs)
+
+
 class FakeS3:
-    def __init__(self, contents=None, responses=None, failure=None):
+    def __init__(self, contents=None, responses=None, failure=None, sends_per_call=1, prepare=None):
         self.contents = contents or {}
         self.responses = responses or {}
         self.failure = failure
+        self.sends_per_call = sends_per_call
+        self.prepare = prepare or prepared_request
         self.calls = []
         self.bodies = []
+        self.meta = types.SimpleNamespace(events=FakeEvents())
 
     def get_object(self, **request):
         self.calls.append(request)
         if self.failure is not None:
             raise self.failure
         key = request["Key"]
+        for _send in range(self.sends_per_call):
+            self.meta.events.emit(
+                "before-send.s3.GetObject", request=self.prepare(key), event_name="before-send.s3.GetObject",
+            )
         if key in self.responses:
             response = self.responses[key]
             if "Body" in response:
                 self.bodies.append(response["Body"])
             return response
+        compressed = gzip.compress(self.contents[key])
         body = StreamingBody(self.contents[key])
         self.bodies.append(body)
         return {
             "Body": body,
+            "ContentLength": len(compressed),
             "ResponseMetadata": {"HTTPStatusCode": 200, "HTTPHeaders": {}},
         }
 
@@ -150,7 +189,20 @@ class FetchSelectedBlobTests(unittest.TestCase):
         result, factory_calls, session = self.run_fetch(rows, client)
 
         self.assertEqual(factory_calls, [()])
-        self.assertEqual(session.calls, [(('s3',), {})])
+        self.assertEqual(len(session.calls), 1)
+        args, kwargs = session.calls[0]
+        self.assertEqual(args, ("s3",))
+        self.assertEqual(set(kwargs), {"region_name", "endpoint_url", "config"})
+        self.assertEqual(kwargs["region_name"], "us-east-1")
+        self.assertEqual(kwargs["endpoint_url"], "https://s3.amazonaws.com")
+        config = kwargs["config"]
+        self.assertEqual(config.retries, {"total_max_attempts": 1, "mode": "standard"})
+        self.assertEqual((config.connect_timeout, config.read_timeout, config.max_pool_connections), (15, 15, 1))
+        self.assertEqual(config.signature_version, "s3v4")
+        self.assertEqual(config.s3, {"addressing_style": "virtual"})
+        self.assertEqual(
+            [name for name, _handler in client.meta.events.registrations], ["before-send.s3.GetObject"],
+        )
         self.assertEqual(client.calls, [
             {"Bucket": "softwareheritage", "Key": f"content/{blob_id(first)}"},
             {"Bucket": "softwareheritage", "Key": f"content/{blob_id(second)}"},
@@ -173,8 +225,12 @@ class FetchSelectedBlobTests(unittest.TestCase):
             ("DECLARED_SIZE_REJECTED", limits(perBlobBytes=3)),
             ("TOTAL_BLOB_BYTES", limits(totalBlobBytes=7)),
             ("LIMIT_RAISED", limits(blobAttempts=51)),
+            ("LIMIT_RAISED", limits(requestLimit=201)),
+            ("LIMIT_RAISED", limits(networkByteLimit=MAXIMUM_BLOB_BYTES + 1)),
             ("LIMIT_VALUE", limits(temporaryDiskBytes=0)),
+            ("LIMIT_VALUE", limits(requestLimit=0)),
             ("LIMIT_SHAPE", {**limits(), "endpoint": "https://forbidden.test"}),
+            ("LIMIT_SHAPE", {key: value for key, value in limits().items() if key != "requestLimit"}),
         ]
         for code, bounded in failures:
             calls = []
@@ -285,6 +341,82 @@ class FetchSelectedBlobTests(unittest.TestCase):
         self.assertEqual(len(client.calls), 2)
         self.assertTrue(all(body.closed for body in client.bodies))
 
+    def test_before_send_guard_allows_exactly_one_send_per_get_object(self):
+        content = b"print('guarded')\n"
+        key = f"content/{blob_id(content)}"
+        single = FakeS3({key: content})
+        result, _calls, _session = self.run_fetch([selected_row(content)], single)
+        self.assertEqual(len(result), 1)
+
+        resent = FakeS3({key: content}, sends_per_call=2)
+        self.assert_code("REQUEST_COUNT", lambda: self.run_fetch([selected_row(content)], resent))
+        self.assertEqual(len(resent.calls), 1)
+        self.assertEqual(resent.bodies, [])
+
+    def test_before_send_rejects_unexpected_host_path_method_scheme_or_presigned_query(self):
+        content = b"print('endpoint')\n"
+        key = f"content/{blob_id(content)}"
+        rejected = [
+            lambda k: prepared_request(k, url=f"https://softwareheritage.s3.eu-west-1.amazonaws.com/{k}"),
+            lambda k: prepared_request(k, url=f"https://s3.amazonaws.com/softwareheritage/{k}"),
+            lambda k: prepared_request(k, url=f"http://{BUCKET_HOST}/{k}"),
+            lambda k: prepared_request(k, url=f"https://{BUCKET_HOST}:8443/{k}"),
+            lambda k: prepared_request(k, url=f"https://user:pass@{BUCKET_HOST}/{k}"),
+            lambda k: prepared_request(k, url=f"https://{BUCKET_HOST}/other/{k[8:]}"),
+            lambda k: prepared_request(k, url=f"https://{BUCKET_HOST}/{k}/extra"),
+            lambda k: prepared_request(k, query="?X-Amz-Signature=abc&X-Amz-Credential=secret"),
+            lambda k: prepared_request(k, method="PUT"),
+            lambda k: prepared_request(k, method="HEAD"),
+        ]
+        for prepare in rejected:
+            client = FakeS3({key: content}, prepare=prepare)
+            self.assert_code("ENDPOINT_REJECTED", lambda c=client: self.run_fetch([selected_row(content)], c))
+            self.assertEqual(client.bodies, [])
+
+    def test_meters_compressed_network_bytes_and_rejects_declared_or_streamed_overrun(self):
+        content = b"print('network metering is exact')\n"
+        compressed = len(gzip.compress(content))
+        key = f"content/{blob_id(content)}"
+        row = selected_row(content)
+
+        client = FakeS3({key: content})
+        results, counters = fetch_selected_blobs_with_counters(
+            [row], limits=limits(), session_factory=lambda: FakeSession(client),
+        )
+        self.assertEqual(len(results), 1)
+        self.assertEqual(counters, {
+            "networkBytes": compressed, "peakTemporaryDiskBytes": 0, "redirectsFollowed": 0, "requests": 1,
+        })
+
+        declared = FakeS3({key: content})
+        self.assert_code("NETWORK_BYTES", lambda: fetch_selected_blobs(
+            [row], limits=limits(networkByteLimit=compressed - 1), session_factory=lambda: FakeSession(declared),
+        ))
+        self.assertTrue(all(body.closed for body in declared.bodies))
+        self.assertTrue(all(body.read_sizes == [] for body in declared.bodies))
+
+        undeclared = FakeS3(responses={key: {
+            "Body": StreamingBody(content),
+            "ResponseMetadata": {"HTTPStatusCode": 200, "HTTPHeaders": {}},
+        }})
+        self.assert_code("NETWORK_BYTES", lambda: fetch_selected_blobs(
+            [row], limits=limits(networkByteLimit=compressed - 1), session_factory=lambda: FakeSession(undeclared),
+        ))
+        self.assertTrue(all(body.closed for body in undeclared.bodies))
+
+    def test_enforces_the_request_budget_across_rows(self):
+        first = b"print('first')\n"
+        second = b"print('second')\n"
+        rows = [selected_row(first), selected_row(second)]
+        client = FakeS3({f"content/{blob_id(value)}": value for value in (first, second)})
+
+        self.assert_code("REQUEST_COUNT", lambda: fetch_selected_blobs(
+            rows, limits=limits(requestLimit=1), session_factory=lambda: FakeSession(client),
+        ))
+        self.assertEqual(len(client.calls), 2)
+        self.assertEqual(len(client.bodies), 1)
+        self.assertTrue(client.bodies[0].closed)
+
     def test_bounded_cli_accepts_only_rows_and_limits_and_emits_canonical_ndjson(self):
         content = b"print('cli')\n"
         row = selected_row(content)
@@ -303,11 +435,17 @@ class FetchSelectedBlobTests(unittest.TestCase):
 
         self.assertEqual(exit_code, 0)
         self.assertEqual(stderr.getvalue(), "")
-        line = stdout.getvalue()
-        self.assertTrue(line.endswith("\n"))
-        self.assertNotIn(" ", line)
+        text = stdout.getvalue()
+        self.assertTrue(text.endswith("\n"))
+        self.assertNotIn(" ", text)
+        line, trailer = text.splitlines()
         self.assertEqual(base64.b64decode(json.loads(line)["contentBase64"]), content)
-        self.assertEqual(line, json.dumps(json.loads(line), separators=(",", ":")) + "\n")
+        self.assertEqual(line, json.dumps(json.loads(line), separators=(",", ":")))
+        self.assertEqual(json.loads(trailer), {"counters": {
+            "networkBytes": len(gzip.compress(content)), "peakTemporaryDiskBytes": 0,
+            "redirectsFollowed": 0, "requests": 1,
+        }})
+        self.assertEqual(trailer, json.dumps(json.loads(trailer), separators=(",", ":"), sort_keys=True))
 
         for value, code in [
             (b"x" * 65_537, "REQUEST_BYTES"),

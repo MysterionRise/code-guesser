@@ -10,11 +10,12 @@ language rounds. The goal is demo testing on one machine, not public play.
 
 Treat these as the durable source of truth, in this order:
 
-1. `docs/gangsta/codeguessr-poc-readiness/checkpoints/2026-09-04-checkpoint-handoff.md`
-2. `docs/gangsta/codeguessr-poc-readiness/reviews/2026-09-04-handoff-audit.md`
-3. `docs/gangsta/codeguessr-poc-readiness/specs/2026-08-15-contract-revision-11-signed.md`
-4. `docs/gangsta/codeguessr-poc-readiness/plans/2026-07-31-execution-plan.md`
-5. `README.md`
+1. `docs/gangsta/codeguessr-poc-readiness/checkpoints/2026-10-05-checkpoint-the-hit-boundaries.md`
+2. `docs/gangsta/codeguessr-poc-readiness/checkpoints/2026-09-04-checkpoint-handoff.md`
+3. `docs/gangsta/codeguessr-poc-readiness/reviews/2026-09-04-handoff-audit.md`
+4. `docs/gangsta/codeguessr-poc-readiness/specs/2026-08-15-contract-revision-11-signed.md`
+5. `docs/gangsta/codeguessr-poc-readiness/plans/2026-07-31-execution-plan.md`
+6. `README.md`
 
 Verify the signed Contract before relying on it:
 
@@ -27,21 +28,31 @@ Expected SHA-256:
 
 ## Current state
 
-- Branch: `codex/heist/codeguessr-poc-readiness`.
+- Branch: `claude/clever-curie-d7rv1m` (continues the merged
+  `codex/heist/codeguessr-poc-readiness` work on `main`).
 - Baseline before this work: `fd6f34cd0d8b4a344fb537e87256bc8f8e69837a`.
-- The crawler, Stack worker, five-round artifact schema, server-only game
-  authority, tests, and operator command exist.
+- The crawler, Stack workers, five-round artifact schema, server-only game
+  authority, tests, operator command, MIT licence, and CI workflow exist.
 - The root route still uses the synthetic rehearsal catalogue.
 - The generated real-round artifact and live run report are intentionally
   absent.
-- Stack preflight passes, but the first GitHub Search request currently stops
-  with `TransportError: UNSUPPORTED_STATUS`.
-- The last diagnostic made one provider flow with zero retries and did not read
-  or disclose the response body.
-- The Python Stack workers do not yet enforce the signed endpoint, redirect,
-  network-byte, request, credential-forwarding, and temporary-disk ceilings.
-- The orchestration writes a success report before artifact publication, so a
-  failed publication can leave a report that incorrectly says `SUCCESS`.
+- Report/artifact publication is transactional (staged report, commit inside
+  the artifact publisher, rollback on failure).
+- Both Python Stack workers enforce the signed endpoint, redirect, network-byte,
+  request, credential-forwarding, and temporary-disk ceilings in-process and
+  report counters the preparer meters. The Hugging Face redirect allowlist is
+  intentionally empty because no target host has been observed under
+  authorization; a live metadata stage fails closed with `REDIRECT_REJECTED`
+  until that host is recorded and added as a literal in
+  `ops/poc/stack/bounded_http.py` and `ops/poc/prepare/request-policy.ts`.
+- The bounded transport translates a GitHub 403/429 `retry-after` or exhausted
+  rate-limit budget into the controller's single bounded retry; everything else
+  still fails closed. A failed run logs
+  `PREPARATION_STAGE_FAILED <stage> <code> <statusClass>` before
+  `PREPARATION_FAILED`.
+- The 2026-10-05 authorized headers-only GitHub probe observed HTTP 200 with
+  authentication supplied, no exhausted rate limit, and no retry delay, using
+  the session's proxy-injected token rather than the operator's.
 
 This is a resumable engineering handoff, not a completed or production-ready
 real-data demo.
@@ -66,27 +77,27 @@ real-data demo.
 
 ## Immediate next steps
 
-Before another full live run, use failing regression tests to:
-
-1. Enforce and prove the signed Stack network, credential, and temporary-disk
-   limits around both Python workers.
-2. Make report and artifact publication transactional, or roll the report back
-   when artifact publication fails.
-
-These are implementation defects against the existing signed Contract; do not
-weaken the Contract to accommodate them.
-
 The next external action requires explicit operator authorization. Perform one
-GitHub-only request with no retry and no response-body read, reporting only:
+authenticated request to the pinned Hugging Face `resolve` endpoint for one
+parquet shard of the Stack dataset, with redirects disabled, no retry, and no
+response-body read, reporting only:
 
 - Numeric HTTP status.
-- Whether authentication was supplied.
-- Whether the rate limit is exhausted.
-- Whether a retry delay is present.
+- The redirect target host, if a `Location` header is present (host only; no
+  path, query, or signature).
 
-Use that evidence to establish root cause before proposing any code change. Do
-not rerun the complete preparation command until the blocker is understood and
-the signed Contract permits the response.
+Then add that host as a literal to `REDIRECT_HOSTS` in
+`ops/poc/stack/bounded_http.py` and to the redirect policy in
+`ops/poc/prepare/request-policy.ts`, test-first, before any full live run.
+
+If a later operator run fails at GitHub Search, read the
+`PREPARATION_STAGE_FAILED` line: `RETRY_SIGNAL_MISSING 4xx` means a 403/429
+without a usable instruction (likely secondary throttling or missing token),
+`WAIT_LIMIT` means the instruction exceeded the signed fifteen-second wait, and
+`UNSUPPORTED_STATUS` with another class means a non-rate-limit status.
+
+Do not rerun the complete preparation command until the redirect host is
+recorded and the signed Contract permits the response.
 
 ## Commands
 
@@ -95,7 +106,7 @@ Offline preparation verification:
 ```bash
 pnpm exec vitest run ops/poc/prepare
 pnpm exec tsc --noEmit -p ops/tsconfig.json
-uv run --project ops/poc/stack python -m unittest discover -s ops/poc/stack
+uv run --project ops/poc/stack --locked python -m unittest discover -s ops/poc/stack
 ```
 
 Complete workspace verification:

@@ -1,9 +1,9 @@
-import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { publishArtifact } from "./artifact-store";
+import { fetchSelectedBlob, projectBlobWorkerEnvironment, type BlobWorkerLimits } from "./blob-worker";
 import { canonicalBytes, canonicalHash } from "./canonical";
 import { createCapacityMeter, type CapacityMeter, type CapacitySnapshot } from "./capacity";
 import { composeExperimentArtifact, type ComposedExperiment } from "./compose";
@@ -14,6 +14,7 @@ import { generateLanguageRounds, validateLanguageCandidate, type GeneratedLangua
 import { parseCrawlProfile, type CrawlProfile } from "./profile";
 import { generateProvenanceRounds, type GeneratedProvenanceRounds } from "./provenance-rounds";
 import { createRetryController, type RetryController } from "./retry";
+import { stageRunReport, type StagedRunReport } from "./report-store";
 import { createRunReport } from "./run-report";
 import { preflightStackAccess } from "./stack-access";
 import { collectStackMetadata, type StackMetadataRow } from "./stack-metadata";
@@ -25,6 +26,7 @@ type StageResult<Value> = Readonly<{ value: Value; acceptedResponseHashes: reado
 type Context = Readonly<{ profile: CrawlProfile; canonicalProfileBytes: Uint8Array; profileHash: string; environment: Environment; capacity: CapacityMeter; runtime: unknown }>;
 type StackSelection = Readonly<{ row: unknown; blob: unknown; candidate: unknown }>;
 type DiagnosticStage = "DISCOVERY" | "ADMISSION" | "BLOB_RETRIEVAL" | "GITHUB_REVALIDATION" | "SCREENING" | "DEDUPLICATION";
+type FailureStage = "PREFLIGHT" | "DISCOVERY" | "ADMISSION" | "STACK_METADATA" | "BLOB_RETRIEVAL" | "SELECTION" | "PUBLICATION";
 interface RunState { readonly diagnostics: Map<string, number>; repositoriesAdmitted: number; githubRevalidations: number; screened: number; duplicatesRejected: number }
 export interface PreparationDependencies {
   loadProfile(): Promise<Readonly<{ profile: CrawlProfile; canonicalProfileBytes: Uint8Array }>>; environment(): Environment;
@@ -36,20 +38,33 @@ export interface PreparationDependencies {
   validateLanguageCandidate(options: Context & Readonly<{ candidate: unknown }>): unknown; finalizeBindings?(options: Context & Readonly<{ crawlSnapshotId: string; provenanceCandidates: readonly unknown[]; languageSelections: readonly StackSelection[] }>): Promise<Readonly<{ provenanceCandidates: readonly unknown[]; languageCandidates: readonly unknown[] }>>;
   generateProvenance(options: Readonly<{ profile: CrawlProfile; candidates: readonly unknown[] }>): GeneratedProvenanceRounds; generateLanguage(options: Readonly<{ profile: CrawlProfile; candidates: readonly unknown[] }>): GeneratedLanguageRounds;
   compose(options: Parameters<typeof composeExperimentArtifact>[0]): ComposedExperiment; createReport(input: Readonly<Record<string, unknown>>): unknown;
-  writeReport(report: unknown): Promise<void>; publishArtifact(input: Readonly<{ artifact: unknown; expectedHash: string }>): Promise<unknown>;
+  stageReport(report: unknown): Promise<StagedRunReport>; publishArtifact(input: Readonly<{ artifact: unknown; expectedHash: string; beforeCommit?: () => Promise<void> }>): Promise<unknown>;
   now(): Date; uuid(): string; log(message: string): void; }
-interface BlobLimits { readonly blobAttempts: number; readonly successfulBlobs: number; readonly perBlobBytes: number; readonly totalBlobBytes: number; readonly temporaryDiskBytes: number }
+type BlobLimits = BlobWorkerLimits;
+export { projectBlobWorkerEnvironment };
 export interface PreparationResult { readonly artifactHash: string; readonly crawlSnapshotId: string; readonly publication: unknown }
 export class PreparationError extends Error { public constructor() { super("PREPARATION_FAILED"); this.name = "PreparationError"; } }
 const PROFILE_URL = new URL("../profiles/local-real-rounds.v1.json", import.meta.url); const ARTIFACT_PATH = fileURLToPath(new URL("../../../apps/game/src/demo/generated/local-real-rounds.json", import.meta.url));
 const REPORT_PATH = fileURLToPath(new URL("../stack/tmp/local-experiment-run.json", import.meta.url)); const SHA256 = /^[0-9a-f]{64}$/u;
 const projectEnvironment = (source: Environment, keys: readonly string[]): Environment => Object.freeze(Object.fromEntries(keys.filter((key) => source[key] !== undefined).map((key) => [key, source[key]])));
 export const projectPreparationEnvironment = (source: Environment): Environment => projectEnvironment(source, ["PATH", "HOME", "HF_TOKEN", "GITHUB_TOKEN", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_PROFILE", "AWS_SHARED_CREDENTIALS_FILE", "AWS_CONFIG_FILE", "STACK_V2_ACKNOWLEDGED_USABLE_REVISION"]);
-export const projectBlobWorkerEnvironment = (source: Environment): Environment => projectEnvironment(source, ["PATH", "HOME", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_PROFILE", "AWS_SHARED_CREDENTIALS_FILE", "AWS_CONFIG_FILE"]);
 const addHashes = (target: string[], values: readonly string[]): void => { for (const value of values) {
   if (!SHA256.test(value)) throw new PreparationError(); if (!target.includes(value)) target.push(value);
 } };
 const QUERY_COMPLETENESS = new Set(["COMPLETE", "PROVIDER_REPORTED_INCOMPLETE"]);
+const REASON_CODE = /^[A-Z][A-Z0-9_]*$/u; const STATUS_CLASS = /^(?:none|[1-5]xx)$/u; const FAILURE_CAUSE_DEPTH = 4;
+/** Retains only a stable reason code and status class from a failure chain; anything else is dropped before logging. */
+const failureDiagnostic = (error: unknown): Readonly<{ code: string; statusClass: string }> | undefined => {
+  let code: string | undefined; let statusClass = "none"; let current: unknown = error;
+  for (let depth = 0; depth < FAILURE_CAUSE_DEPTH && typeof current === "object" && current !== null; depth += 1) {
+    const { code: candidate, diagnostic, cause } = current as Record<string, unknown>;
+    if (code === undefined && typeof candidate === "string" && REASON_CODE.test(candidate)) code = candidate;
+    const observed = typeof diagnostic === "object" && diagnostic !== null ? (diagnostic as Record<string, unknown>).statusClass : undefined;
+    if (statusClass === "none" && typeof observed === "string" && STATUS_CLASS.test(observed)) statusClass = observed;
+    current = cause;
+  }
+  return code === undefined ? undefined : Object.freeze({ code, statusClass });
+};
 const validateClassifications = (profile: CrawlProfile, values: unknown): readonly GitHubQueryClassification[] => {
   if (!Array.isArray(values) || values.length !== profile.github.queries.length) throw new PreparationError(); const seen = new Set<string>();
   for (const [index, value] of values.entries()) { if (typeof value !== "object" || value === null) throw new PreparationError();
@@ -63,8 +78,9 @@ const noteRejection = (state: RunState, stage: DiagnosticStage, error: unknown):
 };
 const markerOutcome = (candidate: unknown, profile: CrawlProfile): boolean => String((candidate as any).lineage?.commitMessage ?? (candidate as any).commitMessage ?? "").split(/\r?\n/u).some((line) => profile.markers.includes(line));
 const provisionalSnapshot = (profileHash: string, hashes: readonly string[]): string => canonicalHash({ profileHash, acceptedResponseHashes: hashes.length > 0 ? hashes : [canonicalHash("capture")] });
-const remainingBlobLimits = (profile: CrawlProfile, snapshot: CapacitySnapshot): BlobLimits => Object.freeze({
-  blobAttempts: Math.max(1, profile.capacity.blobAttempts - snapshot.blobAttempts + 1), successfulBlobs: Math.max(1, profile.capacity.successfulBlobs - snapshot.successfulBlobs), perBlobBytes: profile.capacity.perBlobBytes, totalBlobBytes: Math.max(1, profile.capacity.totalBlobBytes - snapshot.totalBlobBytes), temporaryDiskBytes: Math.max(1, profile.capacity.temporaryDiskBytes - snapshot.temporaryDiskBytes) });
+const remainingBlobLimits = (profile: CrawlProfile, snapshot: CapacitySnapshot): BlobLimits => { const totalBlobBytes = Math.max(1, profile.capacity.totalBlobBytes - snapshot.totalBlobBytes); return Object.freeze({
+  blobAttempts: Math.max(1, profile.capacity.blobAttempts - snapshot.blobAttempts + 1), successfulBlobs: Math.max(1, profile.capacity.successfulBlobs - snapshot.successfulBlobs), perBlobBytes: profile.capacity.perBlobBytes, totalBlobBytes, temporaryDiskBytes: Math.max(1, profile.capacity.temporaryDiskBytes - snapshot.temporaryDiskBytes),
+  requestLimit: Math.max(1, profile.capacity.requestCount - snapshot.requestCount), networkByteLimit: Math.min(profile.capacity.perBlobBytes, totalBlobBytes) }); };
 const stackOrder = (left: any, right: any): number => {
   for (const key of ["stableRowId", "repository", "swhRevisionId", "path", "swhContentId"]) {
     const order = String(left[key]) < String(right[key]) ? -1 : String(left[key]) > String(right[key]) ? 1 : 0;
@@ -141,6 +157,7 @@ const reportInput = (context: Context, composed: ComposedExperiment, executionId
   };
 };
 export const prepareLocalExperiment = async (deps: PreparationDependencies = defaultDependencies()): Promise<PreparationResult> => {
+  let stage: FailureStage = "PREFLIGHT";
   try {
     const loaded = await deps.loadProfile();
     const profileHash = canonicalHash(loaded.profile);
@@ -153,15 +170,20 @@ export const prepareLocalExperiment = async (deps: PreparationDependencies = def
     const hashes: string[] = [];
     const state: RunState = { diagnostics: new Map(), repositoriesAdmitted: 0, githubRevalidations: 0, screened: 0, duplicatesRejected: 0 };
     addHashes(hashes, (await deps.preflight(context)).acceptedResponseHashes);
+    stage = "DISCOVERY";
     const search = await deps.searchGitHub(context); addHashes(hashes, search.acceptedResponseHashes);
     const classifications = validateClassifications(loaded.profile, search.value.queryClassifications);
+    stage = "ADMISSION";
     const provenanceCandidates = await selectGitHub(context, deps, hashes, search.value.candidates, state);
     const metadata: unknown[] = [];
+    stage = "STACK_METADATA";
     for (const { configuration } of loaded.profile.stack.configurations) {
       const result = await deps.collectStackMetadata({ ...context, configuration });
       addHashes(hashes, result.acceptedResponseHashes); metadata.push(...result.value);
     }
+    stage = "BLOB_RETRIEVAL";
     const languageSelections = await selectStack(context, deps, hashes, metadata, provenanceCandidates, state);
+    stage = "SELECTION";
     const crawlSnapshotId = provisionalSnapshot(profileHash, hashes);
     const finalized = deps.finalizeBindings
       ? await deps.finalizeBindings({ ...context, crawlSnapshotId, provenanceCandidates, languageSelections })
@@ -175,12 +197,16 @@ export const prepareLocalExperiment = async (deps: PreparationDependencies = def
       acceptedResponseHashes: Object.freeze(hashes), provenance, language });
     if (composed.artifact.crawlSnapshot.id !== crawlSnapshotId) throw new PreparationError();
     const report = deps.createReport(reportInput(context, composed, deps.uuid(), deps.now().toISOString(), state, classifications));
-    await deps.writeReport(report);
-    const publication = await deps.publishArtifact({ artifact: composed.artifact, expectedHash: composed.artifactHash });
+    stage = "PUBLICATION";
+    const publication = await publishWithReport(deps, composed, report);
     if (classifications.some(({ completeness }) => completeness === "PROVIDER_REPORTED_INCOMPLETE")) deps.log("GITHUB_SEARCH_INCOMPLETE");
     deps.log("PREPARATION_COMPLETE");
     return Object.freeze({ artifactHash: composed.artifactHash, crawlSnapshotId, publication });
-  } catch { deps.log("PREPARATION_FAILED"); throw new PreparationError(); }
+  } catch (error) {
+    const diagnostic = failureDiagnostic(error);
+    if (diagnostic) deps.log(`PREPARATION_STAGE_FAILED ${stage} ${diagnostic.code} ${diagnostic.statusClass}`);
+    deps.log("PREPARATION_FAILED"); throw new PreparationError();
+  }
 };
 interface Runtime { readonly capacity: CapacityMeter; transport: BoundedTransport; readonly retry: RetryController; readonly environment: Environment; readonly responses: Map<string, unknown[]>; readonly hashes: string[]; readonly replayCursors: Map<string, number>; replay: boolean; beginReplay(): void }
 const runtimeOf = (context: Context): Runtime => context.runtime as Runtime;
@@ -220,33 +246,17 @@ export const createPreparationRuntime = (profile: CrawlProfile, environment: Env
   runtime.transport = Object.freeze({ requestJson: (input: RequestInput, page?: number) => request("json", input, page), requestBytes: (input: RequestInput, page?: number) => request("bytes", input, page) as Promise<Uint8Array> });
   return runtime;
 };
-const runBlobWorker = async (row: StackMetadataRow, limits: BlobLimits, environment: Environment): Promise<SelectedStackBlob> => {
-  const directory = fileURLToPath(new URL("../stack/", import.meta.url)).replace(/\/$/u, "");
-  const script = fileURLToPath(new URL("../stack/fetch_blob.py", import.meta.url));
-  const projected = projectBlobWorkerEnvironment(environment) as Record<string, string>;
-  const inputRow = Object.fromEntries(["stableRowId", "swhBlobId", "swhContentId", "sourceEncoding", "byteLength"]
-    .map((key) => [key, row[key]]));
-  return new Promise((resolveWorker, reject) => {
-    const child = spawn("uv", ["run", "--project", directory, "--locked", "python", script],
-      { cwd: directory, env: projected, shell: false, stdio: ["pipe", "pipe", "pipe"] });
-    const output: Buffer[] = []; let bytes = 0; let failed = false;
-    child.stdout.on("data", (chunk: Buffer) => { bytes += chunk.byteLength; if (bytes > limits.perBlobBytes * 2) { failed = true; child.kill(); } else output.push(chunk); });
-    child.stderr.on("data", () => { failed = true; }); child.once("error", reject);
-    child.once("close", (code) => {
-      try {
-        if (failed || code !== 0) throw new PreparationError();
-        const lines = Buffer.concat(output).toString("utf8").trimEnd().split("\n");
-        const value = JSON.parse(lines.length === 1 ? lines[0]! : "null") as SelectedStackBlob;
-        if (value.stableRowId !== row.stableRowId || value.swhBlobId !== row.swhBlobId
-          || value.byteLength !== row.byteLength) throw new PreparationError();
-        resolveWorker(Object.freeze(value));
-      } catch { reject(new PreparationError()); }
-    });
-    child.stdin.end(`${JSON.stringify({ rows: [inputRow], limits })}\n`);
-  });
+const publishWithReport = async (deps: PreparationDependencies, composed: ComposedExperiment, report: unknown): Promise<unknown> => {
+  const staged = await deps.stageReport(report);
+  let publication: unknown;
+  try {
+    publication = await deps.publishArtifact({ artifact: composed.artifact, expectedHash: composed.artifactHash, beforeCommit: () => staged.commit() });
+  } catch (error) { await staged.rollback(); throw error; }
+  await staged.finalize();
+  return publication;
 };
-const writeReport = async (report: unknown): Promise<void> => { await mkdir(dirname(REPORT_PATH), { recursive: true });
-  const temporary = `${REPORT_PATH}.${randomUUID()}.tmp`; await writeFile(temporary, canonicalBytes(report), { mode: 0o600 }); await rename(temporary, REPORT_PATH); };
+const stageReport = async (report: unknown): Promise<StagedRunReport> => { await mkdir(dirname(REPORT_PATH), { recursive: true });
+  return stageRunReport({ bytes: canonicalBytes(report), targetPath: REPORT_PATH }); };
 const defaultDependencies = (): PreparationDependencies => ({
   loadProfile: async () => { const raw = await readFile(PROFILE_URL); const profile = parseCrawlProfile(JSON.parse(raw.toString("utf8")));
     return { profile, canonicalProfileBytes: canonicalBytes(profile) }; },
@@ -270,8 +280,8 @@ const defaultDependencies = (): PreparationDependencies => ({
     profile: options.profile, capacity: options.capacity, configuration: options.configuration,
     rowLimit: options.profile.capacity.stackRowsPerLanguage, environment: options.environment,
     blobAccess: async () => undefined })),
-  fetchStackBlob: (options) => workerStage(() =>
-    runBlobWorker(options.row as StackMetadataRow, options.limits, options.environment)),
+  fetchStackBlob: (options) => workerStage(() => fetchSelectedBlob({
+    row: options.row as StackMetadataRow, limits: options.limits, environment: options.environment, capacity: options.capacity })),
   revalidateStackCandidate: (options) => { const runtime = runtimeOf(options); return stage(runtime, () =>
     revalidateStackCandidate({ profile: options.profile, profileHash: options.profileHash,
       crawlSnapshotId: options.crawlSnapshotId, metadata: options.row as StackMetadataRow,
@@ -291,9 +301,9 @@ const defaultDependencies = (): PreparationDependencies => ({
   },
   generateProvenance: (options) => generateProvenanceRounds(options as any),
   generateLanguage: (options) => generateLanguageRounds(options as any), compose: composeExperimentArtifact,
-  createReport: createRunReport, writeReport,
-  publishArtifact: async ({ artifact, expectedHash }) => { await mkdir(dirname(ARTIFACT_PATH), { recursive: true });
-    return publishArtifact({ artifact, expectedHash, targetPath: ARTIFACT_PATH }); },
+  createReport: createRunReport, stageReport,
+  publishArtifact: async ({ artifact, expectedHash, beforeCommit }) => { await mkdir(dirname(ARTIFACT_PATH), { recursive: true });
+    return publishArtifact({ artifact, expectedHash, targetPath: ARTIFACT_PATH, ...(beforeCommit ? { beforeCommit } : {}) }); },
   now: () => new Date(), uuid: randomUUID, log: (message) => console.info(message),
 });
 export const runPreparationCli = async (): Promise<PreparationResult> => process.argv.slice(2).length === 0 ? prepareLocalExperiment() : Promise.reject(new Error("COMMAND_ARGUMENTS_REJECTED"));

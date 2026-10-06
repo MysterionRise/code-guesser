@@ -4,6 +4,7 @@ import {
   type Provider,
   type RequestInput,
 } from "./request-policy";
+import { RetryRequestError } from "./retry";
 
 export type TransportErrorCode =
   | "POLICY"
@@ -48,11 +49,15 @@ const MINIMUM_SUCCESS_STATUS = 200;
 const MAXIMUM_SUCCESS_STATUS = 299;
 const STATUS_CLASS_DIVISOR = 100;
 const FIRST_PAGE_NUMBER = 1;
+const MILLISECONDS_PER_SECOND = 1000;
+const RATE_LIMIT_STATUSES = new Set([403, 429]);
+const MALFORMED_RETRY_SIGNAL = "MALFORMED";
 
 export interface TransportOptions {
   readonly fetch: FetchLike;
   readonly limits: TransportLimits;
   readonly credentials?: CredentialPolicy;
+  readonly now?: () => number;
 }
 
 export interface BoundedTransport {
@@ -161,6 +166,38 @@ const withinDeadline = async <Value>(
   }
 };
 
+const positiveInteger = (value: string | null): number | undefined => {
+  if (value === null || !/^[1-9]\d*$/u.test(value)) return undefined;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : undefined;
+};
+
+/**
+ * Translates a GitHub rate-limit instruction into the retry controller's wait. Only an explicit
+ * provider instruction yields a wait; an absent instruction returns undefined so the status still
+ * fails closed, and a present-but-unusable instruction is surfaced as a malformed signal.
+ */
+const retryInstruction = (headers: Headers, now: number): number | typeof MALFORMED_RETRY_SIGNAL | undefined => {
+  const retryAfter = headers.get("retry-after");
+  if (retryAfter !== null) {
+    const seconds = positiveInteger(retryAfter);
+    return seconds === undefined ? MALFORMED_RETRY_SIGNAL : seconds * MILLISECONDS_PER_SECOND;
+  }
+  if (headers.get("x-ratelimit-remaining") !== "0") return undefined;
+  const reset = positiveInteger(headers.get("x-ratelimit-reset"));
+  if (reset === undefined) return MALFORMED_RETRY_SIGNAL;
+  const wait = reset * MILLISECONDS_PER_SECOND - now;
+  return Number.isSafeInteger(wait) && wait > 0 ? wait : MALFORMED_RETRY_SIGNAL;
+};
+
+const discardBody = async (response: Response): Promise<void> => {
+  try {
+    await response.body?.cancel();
+  } catch {
+    // The body is never read; a failed cancel changes nothing about the signal.
+  }
+};
+
 const fetchResponse = async (
   options: TransportOptions,
   request: RequestInput,
@@ -173,6 +210,13 @@ const fetchResponse = async (
     redirect: "manual",
     signal,
   });
+  if (request.provider === "github" && RATE_LIMIT_STATUSES.has(response.status)) {
+    const instruction = retryInstruction(response.headers, (options.now ?? Date.now)());
+    if (instruction !== undefined) {
+      await discardBody(response);
+      throw new RetryRequestError(instruction);
+    }
+  }
   if (response.status < MINIMUM_SUCCESS_STATUS || response.status > MAXIMUM_SUCCESS_STATUS) {
     return reject(request, "UNSUPPORTED_STATUS", response.status);
   }
@@ -207,7 +251,7 @@ const performRequest = async (
     return await withinDeadline(request, limits.timeoutMilliseconds, controller, () =>
       fetchResponse(options, request, authorized, controller.signal));
   } catch (error) {
-    if (error instanceof TransportError) throw error;
+    if (error instanceof TransportError || error instanceof RetryRequestError) throw error;
     return reject(request, controller.signal.aborted ? "TIMEOUT" : "NETWORK");
   } finally {
     state.activeRequests -= 1;

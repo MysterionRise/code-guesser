@@ -242,4 +242,49 @@ describe("atomic artifact publication", () => {
       if (stage === "rename") expect(events).toContain("link");
     }
   });
+
+  it("invokes beforeCommit after the new bytes are in place and while the backup still exists", async () => {
+    const { directory, target } = await makeTarget();
+    const candidate = artifact();
+    const observed: { bytes: Buffer; names: string[] }[] = [];
+
+    await publishArtifact({
+      artifact: candidate,
+      expectedHash: canonicalArtifactHash(candidate),
+      targetPath: target,
+      uniqueId: () => "11111111-1111-4111-8111-111111111111",
+      beforeCommit: async () => { observed.push({ bytes: await readFile(target), names: await readdir(directory) }); },
+    });
+
+    expect(observed).toHaveLength(1);
+    expect(observed[0]!.bytes).toEqual(Buffer.from(canonicalArtifactBytes(candidate)));
+    expect(observed[0]!.names).toEqual([".local-real-rounds.json.11111111-1111-4111-8111-111111111111.bak", "local-real-rounds.json"]);
+    expect(await readdir(directory)).toEqual(["local-real-rounds.json"]);
+  });
+
+  it("restores the previous artifact and reports PUBLICATION_FAILED when beforeCommit rejects", async () => {
+    const { directory, target } = await makeTarget();
+    const candidate = artifact();
+
+    await expect(publishArtifact({
+      artifact: candidate,
+      expectedHash: canonicalArtifactHash(candidate),
+      targetPath: target,
+      uniqueId: () => "11111111-1111-4111-8111-111111111111",
+      beforeCommit: async () => { throw new Error("REPORT_COMMIT_FAILED"); },
+    })).rejects.toMatchObject({ code: "PUBLICATION_FAILED" });
+
+    expect(await readFile(target, "utf8")).toBe("previous-artifact");
+    expect(await readdir(directory)).toEqual(["local-real-rounds.json"]);
+
+    const missing = await makeMissingTarget();
+    await expect(publishArtifact({
+      artifact: candidate,
+      expectedHash: canonicalArtifactHash(candidate),
+      targetPath: missing.target,
+      uniqueId: () => "11111111-1111-4111-8111-111111111111",
+      beforeCommit: async () => { throw new Error("REPORT_COMMIT_FAILED"); },
+    })).rejects.toMatchObject({ code: "PUBLICATION_FAILED" });
+    expect(await readdir(missing.directory)).toEqual([]);
+  });
 });

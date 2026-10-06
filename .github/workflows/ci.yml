@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CI: "1"
+  NEXT_TELEMETRY_DISABLED: "1"
+
+jobs:
+  node:
+    name: Node workspace
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.18.0
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Unit tests
+        run: pnpm test
+
+      - name: Production build
+        run: pnpm --filter @codeguessr/game build
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Accessibility checks
+        run: pnpm test:a11y
+
+      - name: Performance checks
+        run: pnpm test:performance
+
+      - name: Acquisition containment
+        run: pnpm exec node --test tests/containment/acquisition-boundary.test.mjs
+
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Browser scenarios
+        run: pnpm test:e2e
+
+  python:
+    name: Stack worker
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.9.25"
+
+      - name: Provision locked Python
+        run: uv python install 3.12
+
+      - name: Sync locked worker environment
+        run: uv sync --locked --project ops/poc/stack
+
+      - name: Worker unit tests
+        run: uv run --project ops/poc/stack --locked python -m unittest discover -s ops/poc/stack
