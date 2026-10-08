@@ -85,9 +85,12 @@ test("public attribution can enter the browser only through authorized reveal", 
   const action = read(join(game, "src", "app", "actions.ts"));
 
   assert.doesNotMatch(publicContract, /\battribution\b/iu);
+  const loader = read(join(game, "src", "demo", "local-real-experiment-loader.server.ts"));
   assert.doesNotMatch(page, /\battribution\b|github\.com|commitSha|licenseSpdx/iu);
-  assert.match(action, /authorizeRehearsalReveal/iu);
-  assert.match(action, /ACTIVE_REHEARSAL_CATALOGUE/iu);
+  assert.doesNotMatch(page, /generated\/local-real-rounds\.json/u);
+  assert.match(action, /authorizeLocalExperimentReveal/u);
+  assert.match(action, /activeLocalRealExperiment/u);
+  assert.match(loader, /^import "server-only";/u);
   assert.match(shell, /session\.reveal\s*&&/u);
   assert.match(shell, /session\.reveal\.attribution/u);
 
@@ -96,6 +99,7 @@ test("public attribution can enter the browser only through authorized reveal", 
     assert.doesNotMatch(read(path), /"sourceUrl"\s*:\s*"https:\/\/github\.com\//iu);
     assert.doesNotMatch(read(path), /"commitSha"\s*:/iu);
     assert.doesNotMatch(read(path), /"licenseSpdx"\s*:/iu);
+    assert.doesNotMatch(read(path), /crawlSnapshot|correctCandidateId|"attribution"\s*:|LOCAL_UNREVIEWED_EXPERIMENT/u);
   }
 });
 

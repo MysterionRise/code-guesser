@@ -1,6 +1,7 @@
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 
 import { artifact, hashValue } from "./support/local-real-artifact";
@@ -52,6 +53,18 @@ describe("server-only local real experiment loader", () => {
     for (const options of cases) {
       expect(loadLocalRealExperiment(options)).toEqual({ ok: false, reason: "ARTIFACT_REJECTED" });
     }
+  });
+
+  it("binds the committed artifact to the operator-pinned hash with the exact source split", async () => {
+    const { TRUSTED_ARTIFACT_HASH } = await import("../src/demo/local-real-experiment.pin.server");
+    const loaded = loadLocalRealExperiment({ artifactPath: fileURLToPath(new URL("../src/demo/generated/local-real-rounds.json", import.meta.url)) });
+
+    expect(loaded.ok).toBe(true);
+    if (!loaded.ok) return;
+    expect(loaded.experiment.artifactHash).toBe(TRUSTED_ARTIFACT_HASH);
+    expect(loaded.experiment.mode.rounds.map((round: any) => round.mode.kind)).toEqual([
+      "provenance", "provenance", "provenance", "language", "language",
+    ]);
   });
 
   it("resolves the default artifact beside the game sources and memoizes the active authority", () => {
