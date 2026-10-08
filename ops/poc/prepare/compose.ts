@@ -24,9 +24,13 @@ const LANGUAGE_COUNT = 2;
 const SHA256 = /^[0-9a-f]{64}$/u;
 
 export class ComposeError extends Error {
-  public constructor() {
+  /** A safe, data-free reason code such as PUBLIC_CONTAINMENT_LICENSESPDX_IN_EXCERPT, when one is known. */
+  public readonly code: string | undefined;
+
+  public constructor(code?: string) {
     super("EXPERIMENT_COMPOSITION_REJECTED");
     this.name = "ComposeError";
+    this.code = code;
   }
 }
 
@@ -134,9 +138,19 @@ const requirePublicContainment = (
     "commitUrl", "blobUrl",
   ] as const;
   for (const fixture of fixtures) {
-    const protectedValues = [fixture.evidence, fixture.explanation, fixture.attribution,
-      ...protectedKeys.map((key) => fixture.source[key])];
-    if (protectedValues.some((value) => typeof value === "string" && containsProtected(publicText, value))) fail();
+    const protectedEntries: readonly (readonly [string, unknown])[] = [
+      ["evidence", fixture.evidence], ["explanation", fixture.explanation], ["attribution", fixture.attribution],
+      ...protectedKeys.map((key) => [key, fixture.source[key]] as const),
+    ];
+    for (const [name, value] of protectedEntries) {
+      if (typeof value !== "string" || !containsProtected(publicText, value)) continue;
+      // A whole-file excerpt makes rawContentHash equal the public excerpt hash: a hash of public text.
+      if (name === "rawContentHash" && value === fixture.source.excerptHash) continue;
+      // Name only the protected key and the public field that exposed it; never the value.
+      const field = publicRounds.flatMap((round) => Object.entries(round))
+        .find(([, part]) => containsProtected(new TextDecoder().decode(canonicalBytes(part)), value))?.[0] ?? "UNKNOWN";
+      throw new ComposeError(`PUBLIC_CONTAINMENT_${name.toUpperCase()}_IN_${field.toUpperCase()}`);
+    }
   }
 };
 

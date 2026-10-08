@@ -134,7 +134,8 @@ const revealsProtected = (profile: CrawlProfile, candidate: any, selected: reado
   const all = [...selected, candidate];
   const publicText = `${JSON.stringify(profile.templates)}\n${all.map(excerptOf).join("\n")}`;
   return all.some((item: any) => { const source = item.source ?? item;
-    return PROTECTED_SOURCE_KEYS.some((key) => typeof source[key] === "string" && source[key].length > 0 && containsProtected(publicText, source[key])); });
+    return PROTECTED_SOURCE_KEYS.some((key) => typeof source[key] === "string" && source[key].length > 0
+      && !(key === "rawContentHash" && source[key] === source.excerptHash) && containsProtected(publicText, source[key])); });
 };
 const collidesWithSelected = (profile: CrawlProfile, candidate: any, selected: readonly unknown[]): boolean => { const source = candidate.source ?? candidate;
   return profile.deduplication.some((key) => selected.some((value: any) => typeof source[key] === "string" && source[key] === (value.source ?? value)[key])); };

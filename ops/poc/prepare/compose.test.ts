@@ -241,6 +241,25 @@ const duplicateAcrossSources = (options: any, key: string): void => {
     leaked.provenance.publicRounds[0]!.mode.prompt = leaked.provenance.fixtures[0]!.source.repository;
     leaked.provenance.fixtures[0]!.prompt = leaked.provenance.fixtures[0]!.source.repository;
     expect(() => composeExperimentArtifact(leaked)).toThrow(composeModule.ComposeError);
+    let caught: any;
+    try { composeExperimentArtifact(leaked); } catch (error) { caught = error; }
+    expect(caught.code).toBe("PUBLIC_CONTAINMENT_REPOSITORY_IN_MODE");
+    expect(JSON.stringify(caught)).not.toContain(leaked.provenance.fixtures[0]!.source.repository);
+    const licenceInExcerpt = structuredClone(options);
+    const target = licenceInExcerpt.language.fixtures[0]!;
+    target.excerpt = `# ${target.source.licenseSpdx as string}\n${target.excerpt}`;
+    target.source.excerptHash = sha256(target.excerpt);
+    licenceInExcerpt.language.publicRounds[0]!.excerpt = { versionId: target.source.excerptHash, text: target.excerpt };
+    caught = undefined;
+    try { composeExperimentArtifact(licenceInExcerpt); } catch (error) { caught = error; }
+    expect(caught?.code).toBe("PUBLIC_CONTAINMENT_LICENSESPDX_IN_EXCERPT");
+
+    // A file short enough to be excerpted whole has excerptHash === rawContentHash; the public
+    // excerpt version id then equals a hash of public text, which exposes nothing further.
+    const wholeFile = structuredClone(options);
+    const whole = wholeFile.language.fixtures[1]!;
+    whole.source.rawContentHash = whole.source.excerptHash;
+    expect(() => composeExperimentArtifact(wholeFile)).not.toThrow();
 
     const output = composeExperimentArtifact(options);
     expect(Object.isFrozen(output)).toBe(true);
