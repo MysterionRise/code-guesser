@@ -6,7 +6,7 @@ import { parseCrawlProfile, type CrawlProfile } from "./profile";
 
 const testModuleName: string = "vitest";
 const { describe, expect, it } = await import(testModuleName) as any;
-const PROFILE_URL = new URL("../profiles/local-real-rounds.v1.json", import.meta.url);
+const PROFILE_URL = new URL("../profiles/local-real-rounds.v2.json", import.meta.url);
 
 const loadProfile = async (): Promise<CrawlProfile> =>
   parseCrawlProfile(JSON.parse(await readFile(PROFILE_URL, "utf8")));
@@ -83,7 +83,7 @@ describe("GitHub search completeness classifications", () => {
     const profile = await loadProfile();
     const rawResponse = response(0, false, []);
 
-    const pool = await crawl(profile, [rawResponse, rawResponse, rawResponse]);
+    const pool = await crawl(profile, profile.github.queries.map(() => rawResponse));
 
     expect(pool.queryClassifications).toEqual(profile.github.queries.map(({ id }) => ({
       queryId: id,
@@ -94,20 +94,14 @@ describe("GitHub search completeness classifications", () => {
     expect(pool.acceptedResponseHashes).toEqual([canonicalHash(rawResponse)]);
   });
 
-  it("accepts provider-incomplete returned sets for the authorized query tuples", async () => {
+  it("rejects provider-incomplete pages because revision 12 authorizes no incomplete query tuple", async () => {
     const profile = await loadProfile();
     const incompleteResponse = response(0, true, []);
 
-    const pool = await crawl(profile, [incompleteResponse, incompleteResponse, incompleteResponse]);
-
-    expect(pool.queryClassifications).toEqual(profile.github.queries.map(({ id }) => ({
-      queryId: id,
-      completeness: "PROVIDER_REPORTED_INCOMPLETE",
-    })));
-    expect(pool.acceptedResponseHashes).toEqual([canonicalHash(incompleteResponse)]);
+    await expect(crawl(profile, profile.github.queries.map(() => incompleteResponse))).rejects.toBeInstanceOf(GitHubSearchError);
   });
 
-  it("classifies a mixed-page query as provider-reported incomplete", async () => {
+  it("rejects a mixed-page query because any incomplete page fails closed", async () => {
     const profile = await loadProfile();
     const firstPage = response(
       101,
@@ -117,13 +111,8 @@ describe("GitHub search completeness classifications", () => {
     const lastPage = response(101, false, [commitItem(101)]);
     const completeEmpty = response(0, false, []);
 
-    const pool = await crawl(profile, [firstPage, lastPage, completeEmpty, completeEmpty]);
-
-    expect(pool.queryClassifications).toEqual([
-      { queryId: profile.github.queries[0]?.id, completeness: "PROVIDER_REPORTED_INCOMPLETE" },
-      { queryId: profile.github.queries[1]?.id, completeness: "COMPLETE" },
-      { queryId: profile.github.queries[2]?.id, completeness: "COMPLETE" },
-    ]);
+    await expect(crawl(profile, [firstPage, lastPage, ...profile.github.queries.slice(1).map(() => completeEmpty)]))
+      .rejects.toBeInstanceOf(GitHubSearchError);
   });
 
   it("rejects provider-incomplete results when the authorized profile tuple set drifts", async () => {

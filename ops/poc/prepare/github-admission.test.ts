@@ -26,7 +26,7 @@ const licenseBytes = new TextEncoder().encode("MIT License\n\nPermission is here
 const licenseBlob = gitBlob(licenseBytes);
 
 const profile = async () => parseCrawlProfile(JSON.parse(
-  await readFile(new URL("../profiles/local-real-rounds.v1.json", import.meta.url), "utf8"),
+  await readFile(new URL("../profiles/local-real-rounds.v2.json", import.meta.url), "utf8"),
 ));
 
 const lineage = Object.freeze({
@@ -176,7 +176,7 @@ describe("GitHub public repository admission", () => {
         licenseFileUrl: `${web}/blob/${childCommit}/LICENSE`,
         commit: childCommit,
         blobUrl: `${web}/blob/${childCommit}/${path}`,
-        profileVersion: "local-real-rounds.v1",
+        profileVersion: "local-real-rounds.v2",
         crawlSnapshotId: hash("f"),
       },
     });

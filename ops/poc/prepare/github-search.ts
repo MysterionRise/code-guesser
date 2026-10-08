@@ -17,27 +17,6 @@ const LEAP_YEAR_INTERVAL = 4;
 const LEAP_YEAR_CENTURY = 100;
 const LEAP_YEAR_CYCLE = 400;
 const FEBRUARY = 2;
-const AUTHORIZED_INCOMPLETE_PROFILE_VERSION = "local-real-rounds.v1";
-const AUTHORIZED_INCOMPLETE_QUERIES = Object.freeze([
-  Object.freeze({
-    id: "microsoft-generated-trailer",
-    query: "\"Generated-by: Copilot\" org:microsoft committer-date:2026-07-31 merge:false is:public",
-    sort: "committer-date",
-    order: "desc",
-  }),
-  Object.freeze({
-    id: "github-generated-trailer",
-    query: "\"Generated-by: Copilot\" org:github committer-date:2026-01-01..2026-07-31 merge:false is:public",
-    sort: "committer-date",
-    order: "desc",
-  }),
-  Object.freeze({
-    id: "facebook-ordinary-change",
-    query: "refactor org:facebook committer-date:2026-07-01..2026-07-31 merge:false is:public",
-    sort: "committer-date",
-    order: "desc",
-  }),
-] as const);
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -104,17 +83,12 @@ const searchResponse = (value: unknown): Readonly<{
   });
 };
 
-const hasAuthorizedIncompleteProfile = (profile: CrawlProfile): boolean =>
-  profile.profileVersion === AUTHORIZED_INCOMPLETE_PROFILE_VERSION
-  && profile.github.queries.length === AUTHORIZED_INCOMPLETE_QUERIES.length
-  && profile.github.queries.every((query, index) => {
-    const authorized = AUTHORIZED_INCOMPLETE_QUERIES[index];
-    return authorized !== undefined
-      && query.id === authorized.id
-      && query.query === authorized.query
-      && query.sort === authorized.sort
-      && query.order === authorized.order;
-  });
+/**
+ * Revision 11 authorized provider-reported incomplete pages only for its three literal query tuples.
+ * Revision 12 replaced that query set and authorized no incomplete tuple, so every incomplete page
+ * now fails closed.
+ */
+const hasAuthorizedIncompleteProfile = (_profile: CrawlProfile): boolean => false;
 
 const repositoryName = (value: unknown): string => {
   if (typeof value !== "string") return fail();

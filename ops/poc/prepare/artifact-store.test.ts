@@ -2,6 +2,8 @@ import { link, mkdtemp, open, readFile, readdir, rename, rm, unlink, writeFile }
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { canonicalArtifactBytes, canonicalArtifactHash } from "./canonical";
+import { composeExperimentArtifact } from "./compose";
+import { composeInput } from "./testdata/v2-builders";
 import {
   ArtifactStoreError,
   publishArtifact,
@@ -15,62 +17,7 @@ const temporaryDirectories: string[] = [];
 afterEach(async () => Promise.all(temporaryDirectories.splice(0).map((path) => rm(path, { recursive: true }))));
 
 const hash = (digit: string): string => digit.repeat(64);
-const commit = (digit: string): string => digit.repeat(40);
-const source = (digit: string) => ({
-  repository: "owner/project", repositoryUrl: "https://github.com/owner/project",
-  authorName: "Example Author", authorLogin: "example", authorBasis: "SELECTED_COMMIT",
-  authorSourceUrl: `https://github.com/owner/project/commit/${commit(digit)}`,
-  path: `src/file-${digit}.ts`, blob: commit(digit), rawContentHash: hash(digit),
-  excerptHash: hash(digit === "a" ? "b" : digit), licenseName: "MIT License",
-  licenseSpdx: "MIT", licenseFileUrl: `https://github.com/owner/project/blob/${commit(digit)}/LICENSE`,
-  commit: commit(digit), commitUrl: `https://github.com/owner/project/commit/${commit(digit)}`,
-  blobUrl: `https://github.com/owner/project/blob/${commit(digit)}/src/file-${digit}.ts`,
-  profileVersion: "local-real-rounds.v1", crawlSnapshotId: hash("f"),
-});
-const fixtureBase = (kind: "PROVENANCE" | "LANGUAGE", index: number) => ({
-  kind, roundId: `${kind.toLowerCase()}-${index}`, roundVersion: "1", excerpt: `const value = ${index};`,
-  prompt: "Choose the recorded result.", candidates: [{ id: "one", label: "One" }, { id: "two", label: "Two" }],
-  clues: ["First clue", "Second clue"], correctCandidateId: "one", evidence: "Pinned evidence",
-  explanation: "Recorded explanation", attribution: "owner/project — Example Author — MIT License (MIT) — pinned file",
-  helpfulSignals: ["Pinned record"], misleadingSignals: ["Style"],
-});
-const provenance = (index: number, digit: string) => ({
-  ...fixtureBase("PROVENANCE", index),
-  source: {
-    discoverySource: "GITHUB_COMMIT_SEARCH", ...source(digit), queryId: "copilot-trailer",
-    childCommit: commit(digit), childTree: commit("b"), parentCommit: commit("c"), parentTree: commit("d"),
-    parentPath: `src/file-${digit}.ts`, childPath: `src/file-${digit}.ts`, parentMode: "100644", childMode: "100644",
-    parentBlob: commit("e"), childBlob: commit(digit), parentRawContentHash: hash("e"),
-    childRawContentHash: hash(digit), changedLineHash: hash("9"), markerMatched: index === 1,
-  },
-});
-const language = (index: number, name: "Python" | "TypeScript", digit: string) => ({
-  ...fixtureBase("LANGUAGE", index),
-  source: {
-    discoverySource: "STACK_V2", ...source(digit), stackRelease: "v2.2.0",
-    stackRevision: "e565caa3a78c2423bd374333a472b049eb090e47", configuration: name,
-    stableRowId: hash(digit), swhBlobId: commit(digit), swhContentId: commit(digit),
-    swhDirectoryId: commit("b"), swhSnapshotId: commit("c"),
-    swhRevisionId: commit("d"), stackRepository: "owner/project",
-    stackPath: `src/file-${digit}.ts`, detectedLicenses: ["MIT"], detectedLanguage: name,
-    generated: false, vendor: false, sourceEncoding: "UTF-8", byteLength: 128,
-    visitDate: "2023-09-06T10:44:38.631000Z", revisionDate: "2023-09-05T09:30:00Z",
-    committerDate: "2023-09-05T09:30:00Z",
-  },
-});
-const artifact = () => ({
-  schemaVersion: "local-experiment-artifact.v1", contentClass: "LOCAL_UNREVIEWED_EXPERIMENT",
-  profileHash: hash("1"),
-  crawlSnapshot: {
-    id: hash("f"), profileVersion: "local-real-rounds.v1", profileHash: hash("1"),
-    github: { apiVersion: "2022-11-28", queries: [{
-      id: "copilot-trailer", query: "marker", sort: "committer-date", order: "desc", pages: 3, resultCeiling: 300,
-    }] },
-    stack: { release: "v2.2.0", revision: "e565caa3a78c2423bd374333a472b049eb090e47", configurations: ["Python", "TypeScript"] },
-    acceptedResponseHashes: [hash("2"), hash("3")],
-  },
-  fixtures: [provenance(1, "1"), provenance(2, "2"), provenance(3, "3"), language(1, "Python", "4"), language(2, "TypeScript", "5")],
-});
+const artifact = () => structuredClone(composeExperimentArtifact(composeInput()).artifact) as Record<string, any>;
 
 const makeTarget = async (): Promise<{ directory: string; target: string }> => {
   const directory = await mkdtemp(join(tmpdir(), "codeguessr-artifact-"));

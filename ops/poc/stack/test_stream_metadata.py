@@ -121,6 +121,23 @@ class StreamMetadataTests(unittest.TestCase):
             self.assertEqual((args[0], args[1], args[3]), (configuration, "external-token", 1))
             self.assertIsInstance(args[2], NetworkBudget)
 
+    def test_accepts_the_five_signed_languages_with_their_exact_extensions(self):
+        for configuration, path, extension in [
+            ("Go", "/cmd/main.go", "go"),
+            ("Rust", "/src/lib.rs", "rs"),
+            ("Ruby", "/lib/app.rb", "rb"),
+            ("TypeScript", "/src/view.tsx", "tsx"),
+        ]:
+            record = row(language=configuration, path=path, extension=extension, gha_language=configuration)
+            count, _calls, text, _environment = self.run_stream([record], request(configuration=configuration))
+            self.assertEqual(count, 1)
+            self.assertEqual(self.rows_of(text)[0]["detectedLanguage"], configuration)
+        screened = row(language="Go", path="/cmd/main.rs", extension="rs", gha_language="Go")
+        count, _calls, _text, _environment = self.run_stream([screened], request(configuration="Go"))
+        self.assertEqual(count, 0)
+        for configuration in ("JavaScript", "C", "go"):
+            self.assert_code("CONFIGURATION_REJECTED", lambda value=configuration: self.run_stream([row()], request(configuration=value)))
+
     def test_projects_only_documented_fields_in_input_order_and_stops_at_limit(self):
         pulled = []
 

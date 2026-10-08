@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { CapacityMeter } from "./capacity";
-import type { CrawlProfile } from "./profile";
+import { STACK_LANGUAGES, type CrawlProfile, type StackLanguage } from "./profile";
 
 const RUNTIME_DIRECTORY = fileURLToPath(new URL("../stack/", import.meta.url)).replace(/\/$/u, "");
 const WORKER_PATH = join(RUNTIME_DIRECTORY, "stream_metadata.py");
@@ -45,7 +45,7 @@ export interface StackMetadataRow extends Readonly<Record<string, unknown>> {
   readonly repository: string;
   readonly path: string;
   readonly detectedLicenses: readonly string[];
-  readonly detectedLanguage: "Python" | "TypeScript";
+  readonly detectedLanguage: StackLanguage;
   readonly generated: false;
   readonly vendor: false;
   readonly sourceEncoding: "UTF-8";
@@ -88,7 +88,7 @@ export interface WorkerResult {
 export interface StackMetadataOptions {
   readonly profile: CrawlProfile;
   readonly capacity: Pick<CapacityMeter, "recordStackRows" | "recordWorkerRequests" | "reserveTemporaryDisk" | "snapshot">;
-  readonly configuration: "Python" | "TypeScript";
+  readonly configuration: StackLanguage;
   readonly rowLimit: number;
   readonly environment: Readonly<Record<string, string | undefined>>;
   readonly runWorker?: (request: WorkerRequest) => Promise<WorkerResult>;
@@ -149,7 +149,7 @@ const validateRuntime = async (
 };
 
 const workerRequest = (options: StackMetadataOptions): WorkerRequest => {
-  if (options.configuration !== "Python" && options.configuration !== "TypeScript") {
+  if (!(STACK_LANGUAGES as readonly string[]).includes(options.configuration)) {
     fail("CONFIGURATION_REJECTED");
   }
   const path = options.environment.PATH ?? fail("ENVIRONMENT_REJECTED");
@@ -242,10 +242,14 @@ const exactRecord = (value: unknown): Record<string, unknown> => {
 const validText = (value: unknown): value is string =>
   typeof value === "string" && value.length > 0 && value.trim() === value;
 
-const validPath = (value: unknown, language: "Python" | "TypeScript"): boolean => {
+const EXTENSIONS: Readonly<Record<StackLanguage, readonly string[]>> = Object.freeze({
+  Python: [".py"], TypeScript: [".ts", ".tsx"], Go: [".go"], Rust: [".rs"], Ruby: [".rb"],
+});
+
+const validPath = (value: unknown, language: StackLanguage): boolean => {
   if (!validText(value) || value.startsWith("/") || value.includes("\\")) return false;
   if (value.split("/").some((part) => part === "" || part === "." || part === "..")) return false;
-  return language === "Python" ? value.endsWith(".py") : /\.tsx?$/u.test(value);
+  return EXTENSIONS[language].some((extension) => value.endsWith(extension));
 };
 
 const validUtcDate = (value: unknown): value is string => {
@@ -261,7 +265,7 @@ const validUtcDate = (value: unknown): value is string => {
 
 const validateIdentity = (
   row: Record<string, unknown>,
-  language: "Python" | "TypeScript",
+  language: StackLanguage,
 ): void => {
   const identities = [
     row.swhBlobId, row.swhContentId, row.swhDirectoryId, row.swhSnapshotId, row.swhRevisionId,
@@ -284,7 +288,7 @@ const validateDates = (row: Record<string, unknown>): void => {
 
 const validateRow = (
   value: unknown,
-  language: "Python" | "TypeScript",
+  language: StackLanguage,
   byteLimit: number,
 ): StackMetadataRow => {
   const row = exactRecord(value);

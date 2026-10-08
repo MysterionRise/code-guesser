@@ -2,7 +2,8 @@ import { readFile } from "node:fs/promises";
 
 import { canonicalHash } from "./canonical";
 import { createCapacityMeter } from "./capacity";
-import { accepted, classificationsFor, hash, loadProfile, makeHarness } from "./command-test-harness";
+import { HARNESS_CANDIDATES, HARNESS_CREDIT, accepted, classificationsFor, hash, loadProfile, makeHarness } from "./command-test-harness";
+import { STACK_LANGUAGES } from "./profile";
 import { RetryError } from "./retry";
 import { createRunReport } from "./run-report";
 import { TransportError } from "./transport";
@@ -19,8 +20,23 @@ const { afterEach, describe, expect, it } = await import(testModuleName) as any;
 const sourcePath = new URL("./index.ts", import.meta.url);
 const originalArguments = [...process.argv];
 afterEach(() => { process.argv.splice(0, process.argv.length, ...originalArguments); });
+const admittedWith = (candidate: any, source: Record<string, unknown> = {}) => accepted({
+  admissionDecision: "AUTOMATED_POC_ADMISSION_ONLY", lineage: candidate, source: {
+    repository: candidate.repository, commit: String(candidate.id).padStart(40, "c"), path: `src/file-${candidate.id}.ts`,
+    blob: String(candidate.id).padStart(40, "b"), rawContentHash: String(candidate.id).padStart(64, "r"),
+    excerptHash: String(candidate.id).padStart(64, "e"), queryId: candidate.queryId, ...source,
+  },
+}, "4");
+const stackRowsWith = (python: readonly object[], others: Partial<Record<string, readonly object[]>> = {}) =>
+  Object.fromEntries(STACK_LANGUAGES.map((language) => [language, language === "Python" ? python
+    : others[language] ?? [{ id: language.toLowerCase(), detectedLanguage: language }]])) as Record<string, readonly object[]>;
+const metadataFrom = (rows: Record<string, readonly object[]>): PreparationDependencies["collectStackMetadata"] =>
+  async ({ configuration, capacity }) => {
+    capacity.recordStackRows(configuration, rows[configuration]!.length, 100);
+    return accepted(rows[configuration]!, String(5 + STACK_LANGUAGES.indexOf(configuration)));
+  };
 const searchWith = (queryClassifications: unknown): PreparationDependencies["searchGitHub"] => async () => accepted({
-  candidates: [0, 1, 2, 3, 4].map((id) => ({ id })),
+  candidates: HARNESS_CANDIDATES,
   queryClassifications,
 } as any, "2");
 
@@ -36,16 +52,17 @@ const logLines = (calls: readonly string[]): string[] =>
     expect(manifest.scripts["prepare:poc"]).toBe("node --import tsx ops/poc/prepare/index.ts");
   });
 
-  it("runs preflight first, both mandatory lanes, exact 3/2 composition, report, then publication", async () => {
+  it("runs preflight first, both mandatory lanes, the exact 5/5/5 deck composition, report, then publication", async () => {
     const harness = await makeHarness();
     const result = await prepareLocalExperiment(harness.dependencies) as PreparationResult;
 
     expect(harness.calls.indexOf("preflight")).toBeLessThan(harness.calls.indexOf("search"));
     expect(harness.calls.indexOf("preflight")).toBeLessThan(harness.calls.indexOf("metadata:Python"));
-    expect(harness.calls).toContain("metadata:TypeScript");
-    expect(harness.calls).toContain("provenance:3");
-    expect(harness.calls).toContain("language:2");
-    expect(harness.calls).toContain("compose:3/2");
+    expect(harness.calls.filter((call) => call.startsWith("metadata:"))).toEqual(STACK_LANGUAGES.map((language) => `metadata:${language}`));
+    expect(harness.calls).toContain("project:5:8");
+    expect(harness.calls).toContain("language:5");
+    expect(harness.calls).toContain("ai:5");
+    expect(harness.calls).toContain("compose:5/5/5");
     expect(harness.calls.indexOf("report:stage")).toBeLessThan(harness.calls.indexOf("publish"));
     expect(harness.calls.indexOf("publish")).toBeLessThan(harness.calls.indexOf("report:commit"));
     expect(harness.calls.indexOf("report:commit")).toBeLessThan(harness.calls.indexOf("report:finalize"));
@@ -62,127 +79,113 @@ const logLines = (calls: readonly string[]): string[] =>
 
     expect(new Set(harness.dependencyMeters).size).toBe(1);
     expect(harness.calls.filter((call) => call.startsWith("fetch:"))).toEqual([
-      "fetch:py-reject:50:16777216",
-      "fetch:py:49:16777136",
-      "fetch:ts:48:16777056",
+      "fetch:py-reject:50:16777216", "fetch:py:49:16777136", "fetch:typescript:48:16777056",
+      "fetch:go:47:16776976", "fetch:rust:46:16776896", "fetch:ruby:45:16776816",
     ]);
     expect(harness.calls.filter((call) => call.startsWith("eligible:"))).toEqual([
-      "eligible:py-reject", "eligible:py", "eligible:ts",
+      "eligible:py-reject", "eligible:py", "eligible:typescript", "eligible:go", "eligible:rust", "eligible:ruby",
     ]);
     expect(harness.leases).toEqual([
       { accepted: false, released: true, bytes: 80 },
-      { accepted: true, released: false, bytes: 80 },
-      { accepted: true, released: false, bytes: 80 },
+      ...Array(5).fill({ accepted: true, released: false, bytes: 80 }),
     ]);
   });
 
-  it("continues GitHub rejection until three candidates include both marker outcomes", async () => {
+  it("continues past rejected admissions until the project deck has five repositories, then fills the AI deck", async () => {
     const rejected: number[] = [];
+    let projectIds: unknown[] = []; let aiIds: unknown[] = [];
     const harness = await makeHarness({
       admitGitHubCandidate: async ({ candidate }) => {
         const id = (candidate as any).id as number;
         if (id === 1) { rejected.push(id); throw new Error("REPOSITORY_REJECTED"); }
-        return accepted({ admissionDecision: "AUTOMATED_POC_ADMISSION_ONLY", lineage: candidate }, "4");
+        return admittedWith(candidate);
       },
+      generateProject: ({ candidates }) => { projectIds = candidates.map((candidate: any) => candidate.lineage.id); return { fixtures: Array(5).fill({ kind: "PROJECT" }) } as any; },
+      generateAi: ({ candidates }) => { aiIds = candidates.map((candidate: any) => candidate.lineage.id); return { fixtures: Array(5).fill({ kind: "AI_CREDIT" }) } as any; },
     });
 
     await prepareLocalExperiment(harness.dependencies);
     expect(rejected).toEqual([1]);
-    expect(harness.calls).toContain("lineage:3");
-    expect(harness.calls).not.toContain("lineage:4");
+    expect(projectIds).toEqual([0, 2, 3, 4, 5]);
+    expect(aiIds).toEqual([20, 21, 22, 6, 7]);
   });
 
-  it("selects an exact stable three after leading candidates share one marker outcome", async () => {
-    const visited: number[] = [];
-    const profile = await loadProfile();
+  it("keeps at least two credited and two uncredited AI rounds, filling from ordinary commits", async () => {
+    let aiIds: unknown[] = [];
+    const lineageFor = (uncredited: number) => async ({ candidate }: any) => {
+      const id = candidate.id as number;
+      return accepted({ ...candidate, excerpt: `value_${id} = compute(${id}) + 1000`,
+        commitMessage: id >= 20 && id !== uncredited ? `Fix\n\n${HARNESS_CREDIT}` : "ordinary refactor" }, "3");
+    };
     const harness = await makeHarness({
-      bindGitHubLineage: async ({ candidate }) => {
-        const id = (candidate as any).id as number;
-        visited.push(id);
-        return accepted({ ...(candidate as object), commitMessage: id < 3 ? profile.markers[0] : "ordinary refactor" }, "3");
-      },
+      bindGitHubLineage: lineageFor(21),
+      generateAi: ({ candidates }) => { aiIds = candidates.map((candidate: any) => candidate.lineage.id); return { fixtures: Array(5).fill({ kind: "AI_CREDIT" }) } as any; },
     });
-
     await prepareLocalExperiment(harness.dependencies);
-    expect(visited).toEqual([0, 1, 2, 3]);
-    expect(harness.calls).toContain("provenance:3");
+    expect(aiIds).toEqual([20, 22, 5, 6, 7]);
+    expect((harness.reports[0] as any).diagnostics).toContainEqual({ stage: "SCREENING", reasonCode: "AI_CREDIT_ABSENT", count: 1 });
+
+    const scarce = await makeHarness({ bindGitHubLineage: async ({ candidate }: any) => accepted({ ...candidate,
+      excerpt: `value_${candidate.id} = compute(${candidate.id}) + 1000`,
+      commitMessage: candidate.id === 20 ? `Fix\n\n${HARNESS_CREDIT}` : "ordinary refactor" }, "3") });
+    await expect(prepareLocalExperiment(scarce.dependencies)).rejects.toThrow("PREPARATION_FAILED");
+    expect(scarce.published).toEqual([]);
   });
 
-  it("rejects duplicate admitted provenance and continues to a unique replacement", async () => {
-    const visited: number[] = [];
+  it("rejects a duplicate within the project deck and across decks, then continues to unique replacements", async () => {
+    let projectIds: unknown[] = []; let aiIds: unknown[] = [];
     const duplicateHash = hash("d");
     const harness = await makeHarness({
-      admitGitHubCandidate: async ({ candidate }) => {
-        const id = (candidate as any).id as number;
-        visited.push(id);
-        return accepted({ admissionDecision: "AUTOMATED_POC_ADMISSION_ONLY", lineage: candidate,
-          source: { repository: `github/${id}`, commit: String(id + 1).repeat(40), path: `src/${id}.ts`,
-            blob: String(id + 2).repeat(40), rawContentHash: id < 2 ? duplicateHash : hash(String(id + 1)),
-            excerptHash: hash(String(id + 5)) } }, "4");
-      },
+      admitGitHubCandidate: async ({ candidate }) => admittedWith(candidate,
+        (candidate as any).id < 2 ? { rawContentHash: duplicateHash } : {}),
+      generateProject: ({ candidates }) => { projectIds = candidates.map((candidate: any) => candidate.lineage.id); return { fixtures: Array(5).fill({ kind: "PROJECT" }) } as any; },
+      generateAi: ({ candidates }) => { aiIds = candidates.map((candidate: any) => candidate.lineage.id); return { fixtures: Array(5).fill({ kind: "AI_CREDIT" }) } as any; },
     });
 
     await prepareLocalExperiment(harness.dependencies);
-    expect(visited).toEqual([0, 1, 2, 3]);
+    expect(projectIds).toEqual([0, 2, 3, 4, 5]);
+    expect(aiIds).toEqual([20, 21, 22, 6, 7]);
     expect((harness.reports[0] as any).diagnostics).toContainEqual(
-      { stage: "DEDUPLICATION", reasonCode: "SOURCE_DUPLICATE", count: 1 },
+      { stage: "DEDUPLICATION", reasonCode: "SOURCE_DUPLICATE", count: 2 },
     );
   });
 
   it("orders Stack candidates by the profile keys and continues after cross-source deduplication", async () => {
     const collisionHash = hash("c");
-    const stackRows = {
-      Python: [
-        { id: "late", detectedLanguage: "Python", stableRowId: hash("2"), repository: "stack/late",
-          swhRevisionId: "2".repeat(40), path: "late.py", swhContentId: "2".repeat(40), rawContentHash: hash("d") },
-        { id: "collision", detectedLanguage: "Python", stableRowId: hash("1"), repository: "stack/collision",
-          swhRevisionId: "1".repeat(40), path: "collision.py", swhContentId: "1".repeat(40), rawContentHash: collisionHash },
-      ],
-      TypeScript: [{ id: "ts", detectedLanguage: "TypeScript", stableRowId: hash("3"), repository: "stack/ts",
-        swhRevisionId: "3".repeat(40), path: "round.ts", swhContentId: "3".repeat(40), rawContentHash: hash("e") }],
-    } as const;
+    const stackRows = stackRowsWith([
+      { id: "late", detectedLanguage: "Python", stableRowId: hash("2"), repository: "stack/late",
+        swhRevisionId: "2".repeat(40), path: "late.py", swhContentId: "2".repeat(40), rawContentHash: hash("d") },
+      { id: "collision", detectedLanguage: "Python", stableRowId: hash("1"), repository: "stack/collision",
+        swhRevisionId: "1".repeat(40), path: "collision.py", swhContentId: "1".repeat(40), rawContentHash: collisionHash },
+    ]);
     const harness = await makeHarness({
-      admitGitHubCandidate: async ({ candidate }) => accepted({
-        admissionDecision: "AUTOMATED_POC_ADMISSION_ONLY", lineage: candidate,
-        source: { repository: `github/${(candidate as any).id}`, commit: String((candidate as any).id + 1).repeat(40),
-          path: `src/round-${(candidate as any).id}.ts`, blob: String((candidate as any).id + 2).repeat(40),
-          rawContentHash: (candidate as any).id === 0 ? collisionHash : hash(String((candidate as any).id + 3)),
-          excerptHash: hash(String((candidate as any).id + 6)) },
-      }, "4"),
-      collectStackMetadata: async ({ configuration, capacity }) => {
-        capacity.recordStackRows(configuration, stackRows[configuration].length, 100);
-        return accepted(stackRows[configuration], configuration === "Python" ? "5" : "6");
-      },
+      admitGitHubCandidate: async ({ candidate }) => admittedWith(candidate,
+        (candidate as any).id === 0 ? { rawContentHash: collisionHash } : {}),
+      collectStackMetadata: metadataFrom(stackRows),
     });
 
     await prepareLocalExperiment(harness.dependencies);
-    expect(harness.calls.filter((call) => call.startsWith("fetch:"))).toEqual([
-      "fetch:collision:50:16777216", "fetch:late:49:16777136", "fetch:ts:48:16777056",
+    expect(harness.calls.filter((call) => call.startsWith("fetch:")).slice(0, 3)).toEqual([
+      "fetch:collision:50:16777216", "fetch:late:49:16777136", "fetch:typescript:48:16777056",
     ]);
     expect(harness.leases[0]).toMatchObject({ accepted: false, released: true });
   });
 
   it("continues after an independently duplicated Stack language candidate", async () => {
     const duplicateHash = hash("d");
-    const rows = {
-      Python: [{ id: "py", detectedLanguage: "Python", stableRowId: hash("1"), repository: "stack/py",
-        swhRevisionId: "1".repeat(40), path: "round.py", swhContentId: "1".repeat(40), rawContentHash: duplicateHash }],
+    const rows = stackRowsWith([{ id: "py", detectedLanguage: "Python", stableRowId: hash("1"), repository: "stack/py",
+      swhRevisionId: "1".repeat(40), path: "round.py", swhContentId: "1".repeat(40), rawContentHash: duplicateHash }], {
       TypeScript: [
         { id: "ts-late", detectedLanguage: "TypeScript", stableRowId: hash("3"), repository: "stack/late",
           swhRevisionId: "3".repeat(40), path: "late.ts", swhContentId: "3".repeat(40), rawContentHash: hash("e") },
         { id: "ts-duplicate", detectedLanguage: "TypeScript", stableRowId: hash("2"), repository: "stack/duplicate",
           swhRevisionId: "2".repeat(40), path: "duplicate.ts", swhContentId: "2".repeat(40), rawContentHash: duplicateHash },
       ],
-    } as const;
-    const harness = await makeHarness({
-      collectStackMetadata: async ({ configuration, capacity }) => {
-        capacity.recordStackRows(configuration, rows[configuration].length, 100);
-        return accepted(rows[configuration], configuration === "Python" ? "5" : "6");
-      },
     });
+    const harness = await makeHarness({ collectStackMetadata: metadataFrom(rows) });
 
     await prepareLocalExperiment(harness.dependencies);
-    expect(harness.calls.filter((call) => call.startsWith("fetch:"))).toEqual([
+    expect(harness.calls.filter((call) => call.startsWith("fetch:")).slice(0, 3)).toEqual([
       "fetch:py:50:16777216", "fetch:ts-duplicate:49:16777136", "fetch:ts-late:48:16777056",
     ]);
     expect(harness.leases[1]).toMatchObject({ accepted: false, released: true });
@@ -190,7 +193,7 @@ const logLines = (calls: readonly string[]): string[] =>
 
   it("never publishes on insufficient selection, composition, or report failure", async () => {
     const failures: Partial<PreparationDependencies>[] = [
-      { collectStackMetadata: async ({ configuration }) => accepted(configuration === "Python" ? [] : [], "5") },
+      { collectStackMetadata: async () => accepted([], "5") },
       { compose: () => { throw new Error("COMPOSE_REJECTED"); } },
       { stageReport: async () => { throw new Error("REPORT_REJECTED"); } },
     ];
@@ -207,8 +210,8 @@ const logLines = (calls: readonly string[]): string[] =>
     const report = harness.reports[0] as any;
 
     expect(report.counts).toMatchObject({
-      repositoriesAdmitted: 3, blobAttempts: 3, blobsRetrieved: 2,
-      githubRevalidations: 3, screened: 6, duplicatesRejected: 0, selected: 5,
+      repositoriesAdmitted: 10, blobAttempts: 6, blobsRetrieved: 5,
+      githubRevalidations: 6, screened: 16, duplicatesRejected: 0, selected: 15,
     });
     expect(report.diagnostics).toEqual([
       { stage: "SCREENING", reasonCode: "LANGUAGE_ROUNDS_REJECTED", count: 1 },
@@ -274,10 +277,10 @@ const logLines = (calls: readonly string[]): string[] =>
     const malformed = [
       ["missing", valid.slice(0, -1)],
       ["extra", [...valid, { queryId: "extra", completeness: "COMPLETE" }]],
-      ["misordered", [valid[1], valid[0], valid[2]]],
-      ["mismatched", [{ ...valid[0], queryId: "wrong" }, valid[1], valid[2]]],
-      ["duplicate", [valid[0], valid[0], valid[2]]],
-      ["unsupported", [{ ...valid[0], completeness: "INCOMPLETE" }, valid[1], valid[2]]],
+      ["misordered", [valid[1], valid[0], ...valid.slice(2)]],
+      ["mismatched", [{ ...valid[0], queryId: "wrong" }, ...valid.slice(1)]],
+      ["duplicate", [valid[0], valid[0], ...valid.slice(2)]],
+      ["unsupported", [{ ...valid[0], completeness: "INCOMPLETE" }, ...valid.slice(1)]],
     ] as const;
 
     for (const [_label, classifications] of malformed) {
@@ -348,7 +351,7 @@ const logLines = (calls: readonly string[]): string[] =>
     const command = await import("./index") as Record<string, any>;
     const profile = await loadProfile();
     const capacity = createCapacityMeter({ limits: profile.capacity,
-      githubQueryIds: profile.github.queries.map(({ id }) => id), stackLanguages: ["Python", "TypeScript"] });
+      githubQueryIds: profile.github.queries.map(({ id }) => id), stackLanguages: STACK_LANGUAGES });
     let liveRequests = 0;
     const runtime = command.createPreparationRuntime(profile, { PATH: "/bin" }, capacity,
       async () => new Response(JSON.stringify({ sequence: ++liveRequests }), {
@@ -368,10 +371,8 @@ const logLines = (calls: readonly string[]): string[] =>
 
   it("rejects a composed snapshot that disagrees with captured hashes before publication", async () => {
     const harness = await makeHarness({
-      compose: (options) => ({ artifact: { crawlSnapshot: { id: hash("e") },
-        fixtures: [...options.provenance.fixtures, ...options.language.fixtures].map((fixture, index) => ({
-          ...fixture, source: { repository: `owner/repo-${index}`, commit: String(index + 1).repeat(40), path: `src/file-${index}.ts` },
-        })) }, artifactHash: hash("9"), artifactBytes: new Uint8Array([1]), roundRecordSet: {} } as any),
+      compose: () => ({ artifact: { crawlSnapshot: { id: hash("e") }, decks: [] },
+        artifactHash: hash("9"), artifactBytes: new Uint8Array([1]), roundRecordSet: {} } as any),
     });
 
     await expect(prepareLocalExperiment(harness.dependencies)).rejects.toThrow("PREPARATION_FAILED");
@@ -380,9 +381,10 @@ const logLines = (calls: readonly string[]): string[] =>
 
   it("rejects replay-finalized source bindings that do not use the captured snapshot", async () => {
     const harness = await makeHarness({
-      finalizeBindings: async ({ provenanceCandidates, languageSelections }) => ({
-        provenanceCandidates: provenanceCandidates.map((candidate: any) => ({ ...candidate,
+      finalizeBindings: async ({ projectCandidates, aiCandidates, languageSelections }) => ({
+        projectCandidates: projectCandidates.map((candidate: any) => ({ ...candidate,
           source: { ...(candidate.source ?? {}), crawlSnapshotId: hash("e") } })),
+        aiCandidates,
         languageCandidates: languageSelections.map(({ candidate }: any) => ({ ...candidate, crawlSnapshotId: hash("e") })),
       }),
     });
@@ -394,17 +396,18 @@ const logLines = (calls: readonly string[]): string[] =>
   it("binds replayed sources, composition, report, publication, and result to one captured snapshot", async () => {
     let finalizedId = "";
     const harness = await makeHarness({
-      finalizeBindings: async ({ crawlSnapshotId, provenanceCandidates, languageSelections }) => {
+      finalizeBindings: async ({ crawlSnapshotId, projectCandidates, aiCandidates, languageSelections }) => {
         finalizedId = crawlSnapshotId;
+        const bind = (candidates: readonly unknown[]) => candidates.map((candidate: any) => ({ ...candidate,
+          source: { ...(candidate.source ?? {}), crawlSnapshotId } }));
         return {
-          provenanceCandidates: provenanceCandidates.map((candidate: any) => ({ ...candidate,
-            source: { ...(candidate.source ?? {}), crawlSnapshotId } })),
+          projectCandidates: bind(projectCandidates), aiCandidates: bind(aiCandidates),
           languageCandidates: languageSelections.map(({ candidate }: any) => ({ ...candidate, crawlSnapshotId })),
         };
       },
     });
     const profile = await loadProfile();
-    const acceptedResponseHashes = ["1", "2", "3", "4", "5", "6", "7", "8"].map(hash);
+    const acceptedResponseHashes = ["1", "2", "3", "4", "5", "6", "7", "8", "9"].map(hash);
     const expected = canonicalHash({ profileHash: canonicalHash(profile), acceptedResponseHashes });
 
     const result = await prepareLocalExperiment(harness.dependencies);
@@ -503,8 +506,8 @@ const logLines = (calls: readonly string[]): string[] =>
     await expect(prepareLocalExperiment(harness.dependencies)).rejects.toThrow("PREPARATION_FAILED");
     expect(logLines(harness.calls)).toEqual([
       "log:PREPARATION_STAGE_FAILED ADMISSION INVARIANT_REJECTED none",
-      "log:PREPARATION_COUNTS discovered=5 admitted=0 duplicates=0",
-      "log:PREPARATION_REJECTIONS ADMISSION:CANDIDATE_REJECTED=2 ADMISSION:LICENSE_REJECTED=3",
+      "log:PREPARATION_COUNTS discovered=11 admitted=0 duplicates=0",
+      "log:PREPARATION_REJECTIONS ADMISSION:CANDIDATE_REJECTED=4 ADMISSION:LICENSE_REJECTED=4",
       "log:PREPARATION_FAILED",
     ]);
     expect(harness.calls.join(" ")).not.toMatch(/owner\/repo|secret/u);
@@ -518,31 +521,25 @@ const logLines = (calls: readonly string[]): string[] =>
     });
     await expect(prepareLocalExperiment(harness.dependencies)).rejects.toThrow("PREPARATION_FAILED");
     expect(logLines(harness.calls)).toContain(
-      "log:PREPARATION_REJECTIONS DISCOVERY:REQUEST_LIMIT=5",
+      "log:PREPARATION_REJECTIONS DISCOVERY:REQUEST_LIMIT=8",
     );
   });
 
   it("screens Stack rows by the profile licence allowlist before any blob is fetched", async () => {
     const harness = await makeHarness({
-      collectStackMetadata: async ({ configuration, capacity }) => {
-        const rows = configuration === "Python"
-          ? [
-            { id: "py-gpl", detectedLanguage: "Python", detectedLicenses: ["GPL-3.0"] },
-            { id: "py-mixed", detectedLanguage: "Python", detectedLicenses: ["MIT", "GPL-3.0"] },
-            { id: "py-empty", detectedLanguage: "Python", detectedLicenses: [] },
-            { id: "py-reject", detectedLanguage: "Python", detectedLicenses: ["MIT"] },
-            { id: "py", detectedLanguage: "Python", detectedLicenses: ["Apache-2.0"] },
-          ]
-          : [{ id: "ts", detectedLanguage: "TypeScript", detectedLicenses: ["BSD-3-Clause"] }];
-        capacity.recordStackRows(configuration, rows.length, 100);
-        return { value: rows, acceptedResponseHashes: [(configuration === "Python" ? "5" : "6").repeat(64)] };
-      },
+      collectStackMetadata: metadataFrom(stackRowsWith([
+        { id: "py-gpl", detectedLanguage: "Python", detectedLicenses: ["GPL-3.0"] },
+        { id: "py-mixed", detectedLanguage: "Python", detectedLicenses: ["MIT", "GPL-3.0"] },
+        { id: "py-empty", detectedLanguage: "Python", detectedLicenses: [] },
+        { id: "py-reject", detectedLanguage: "Python", detectedLicenses: ["MIT"] },
+        { id: "py", detectedLanguage: "Python", detectedLicenses: ["Apache-2.0"] },
+      ])),
     });
 
     await prepareLocalExperiment(harness.dependencies);
 
     const fetched = harness.calls.filter((call) => call.startsWith("fetch:")).map((call) => call.split(":")[1]);
-    expect(fetched).toEqual(["py-reject", "py", "ts"]);
+    expect(fetched).toEqual(["py-reject", "py", "typescript", "go", "rust", "ruby"]);
     expect((harness.reports[0] as any).diagnostics).toContainEqual({ stage: "SCREENING", reasonCode: "LICENSE_REJECTED", count: 3 });
   });
 
@@ -556,25 +553,20 @@ const logLines = (calls: readonly string[]): string[] =>
   });
 
   it("skips candidates whose public excerpt would reveal a protected value and keeps selecting", async () => {
-    let provenanceIds: unknown[] = [];
+    let projectIds: unknown[] = [];
     const harness = await makeHarness({
       admitGitHubCandidate: async ({ candidate }) => {
         const id = (candidate as any).id;
         const lineage = { ...(candidate as object), excerpt: id === 1 ? "// Licensed under the MIT License\nexport const x = 1;" : `export const value${id} = ${id};` };
-        return { value: { admissionDecision: "AUTOMATED_POC_ADMISSION_ONLY", lineage, source: { repository: `owner/repo-${id}`, licenseSpdx: "MIT", path: `src/value-${id}.ts` } },
-          acceptedResponseHashes: ["4".repeat(64)] };
+        return admittedWith(lineage, { licenseSpdx: "MIT" });
       },
-      generateProvenance: ({ candidates }) => {
-        provenanceIds = candidates.map((candidate: any) => candidate.lineage.id);
-        return { fixtures: [{ kind: "PROVENANCE" }, { kind: "PROVENANCE" }, { kind: "PROVENANCE" }] } as any;
+      generateProject: ({ candidates }) => {
+        projectIds = candidates.map((candidate: any) => candidate.lineage.id);
+        return { fixtures: Array(5).fill({ kind: "PROJECT" }) } as any;
       },
-      collectStackMetadata: async ({ configuration, capacity }) => {
-        const rows = configuration === "Python"
-          ? [{ id: "py-leak", detectedLanguage: "Python" }, { id: "py-reject", detectedLanguage: "Python" }, { id: "py", detectedLanguage: "Python" }]
-          : [{ id: "ts", detectedLanguage: "TypeScript" }];
-        capacity.recordStackRows(configuration, rows.length, 100);
-        return { value: rows, acceptedResponseHashes: [(configuration === "Python" ? "5" : "6").repeat(64)] };
-      },
+      collectStackMetadata: metadataFrom(stackRowsWith([
+        { id: "py-leak", detectedLanguage: "Python" }, { id: "py-reject", detectedLanguage: "Python" }, { id: "py", detectedLanguage: "Python" },
+      ])),
       revalidateStackCandidate: async ({ row }) => {
         const id = (row as any).id;
         return { value: { ...(row as object), path: `src/${id}.py`, repository: `owner/${id}`, excerpt: id === "py-leak" ? `# see src/${id}.py\nprint(1)` : "print(1)" },
@@ -584,10 +576,11 @@ const logLines = (calls: readonly string[]): string[] =>
 
     await prepareLocalExperiment(harness.dependencies);
 
-    expect(provenanceIds).not.toContain(1);
-    expect(provenanceIds).toHaveLength(3);
+    expect(projectIds).not.toContain(1);
+    expect(projectIds).toHaveLength(5);
     expect(harness.calls).toContain("eligible:py");
-    expect((harness.reports[0] as any).diagnostics).toContainEqual({ stage: "SCREENING", reasonCode: "PUBLIC_CONTAINMENT_REJECTED", count: 2 });
+    // The leaky GitHub candidate is screened once for the project deck and once for the AI deck; the Stack row once.
+    expect((harness.reports[0] as any).diagnostics).toContainEqual({ stage: "SCREENING", reasonCode: "PUBLIC_CONTAINMENT_REJECTED", count: 3 });
   });
 
   it("keeps game and browser code out of the command and redacts top-level failures", async () => {

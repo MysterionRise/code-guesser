@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { isScreenablePath, patchFitsExcerptWindow, reconstructChangedLines, screenBlob } from "@codeguessr/content/local-poc-support";
+import { looksGenerated } from "./excerpt-window";
 import type { GitHubSearchCandidate } from "./github-search";
 import type { CrawlProfile } from "./profile";
 import type { RetryController } from "./retry";
@@ -38,6 +39,10 @@ export interface GitHubLineageCandidate extends GitHubSearchCandidate {
   readonly changedLineHash: string;
   readonly excerpt: string;
   readonly excerptHash: string;
+  /** Revision 12 AI-deck hints: the commit's changed-file count and line totals from its own record. */
+  readonly changedFileCount: number;
+  readonly commitAdditions: number;
+  readonly commitDeletions: number;
 }
 interface CommitRecord {
   readonly sha: string;
@@ -45,6 +50,7 @@ interface CommitRecord {
   readonly message: string;
   readonly parents: readonly string[];
   readonly files: readonly UnknownRecord[];
+  readonly stats: unknown;
 }
 interface TreeEntry {
   readonly path: string;
@@ -111,6 +117,7 @@ const parseCommit = (
     message: text(commit.message),
     parents: Object.freeze(parents),
     files: Object.freeze(Array.isArray(response.files) ? response.files.map(record) : fail()),
+    stats: response.stats,
   });
 };
 
@@ -143,6 +150,12 @@ const parseChangedPath = (
     || file.raw_url !== `${web}/raw/${commit.sha}/${encoded}`
     || file.contents_url !== `${api}/contents/${encoded}?ref=${commit.sha}`) fail();
   return Object.freeze({ path, blob });
+};
+
+const commitStats = (commit: CommitRecord): Readonly<{ additions: number; deletions: number }> => {
+  const stats = record(commit.stats);
+  const count = (value: unknown): number => Number.isSafeInteger(value) && (value as number) >= 0 ? value as number : fail();
+  return Object.freeze({ additions: count(stats.additions), deletions: count(stats.deletions) });
 };
 
 const treeHash = (entries: readonly TreeEntry[]): string => {
@@ -266,7 +279,10 @@ const bindCandidate = async (
   const childPath = await resolvePath(options, api, child.tree, changed.path);
   if (childPath.blob !== changed.blob) fail();
   const childBytes = await loadBlob(options, api, childPath.blob);
-  screenBlob({ path: changed.path, bytes: childBytes }, options.seenNormalizedHashes ?? new Set<string>());
+  const childScreen = screenBlob({ path: changed.path, bytes: childBytes }, options.seenNormalizedHashes ?? new Set<string>());
+  // FR-023 as amended: the experiment's stricter generated-file screen applies to every fixture.
+  if (looksGenerated(childScreen.text, options.profile.screening.generatedScanLines)) fail();
+  const stats = commitStats(child);
   const parentSha = child.parents[0]!;
   const parent = parseCommit(await requestJson(options, `${api}/commits/${parentSha}`), parentSha, api, web);
   const parentPath = await resolvePath(options, api, parent.tree, changed.path);
@@ -294,6 +310,9 @@ const bindCandidate = async (
     changedLineHash: sha256(JSON.stringify(diff.changedLines)),
     excerpt: diff.excerpt,
     excerptHash: diff.excerptSha256,
+    changedFileCount: child.files.length,
+    commitAdditions: stats.additions,
+    commitDeletions: stats.deletions,
   });
 };
 

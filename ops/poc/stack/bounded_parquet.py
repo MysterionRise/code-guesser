@@ -22,8 +22,8 @@ FOOTER_SUFFIX_BYTES = 64 * 1024
 PARQUET_MAGIC = b"PAR1"
 LEADING_MAGIC_BYTES = 4
 CONTENT_RANGE = re.compile(r"^bytes (\d+)-(\d+)/(\d+)$")
-SHARD_PATH = re.compile(r"^data/(Python|TypeScript)/train-\d{5}-of-\d{5}\.parquet$")
-CONFIGURATIONS = ("Python", "TypeScript")
+SHARD_PATH = re.compile(r"^data/(Python|TypeScript|Go|Rust|Ruby)/train-\d{5}-of-\d{5}\.parquet$")
+CONFIGURATIONS = ("Python", "TypeScript", "Go", "Rust", "Ruby")
 
 
 class ParquetReadError(Exception):

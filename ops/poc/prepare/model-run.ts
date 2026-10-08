@@ -10,9 +10,10 @@ import {
   texts,
   type RecordValue,
 } from "./model-validation";
-import { SIGNED_CAPACITY_CEILINGS } from "./profile";
+import { SIGNED_CAPACITY_CEILINGS, STACK_LANGUAGES } from "./profile";
 
-const EXPERIMENT_ROUND_COUNT = 5;
+/** Revision 12: three decks of five fixtures. */
+const EXPERIMENT_ROUND_COUNT = 15;
 const RUN_COUNT_KEYS = [
   "requests", "githubPages", "githubResults", "repositoriesAdmitted", "stackRows",
   "blobAttempts", "blobsRetrieved", "githubRevalidations", "screened",
@@ -23,7 +24,6 @@ const GITHUB_RESPONSE_STATES = new Set([
 ]);
 const STACK_RESPONSE_STATES = new Set(["COMPLETE", "INCOMPLETE", "NOT_STARTED"]);
 const SUCCESSFUL_GITHUB_STATES = new Set(["COMPLETE", "PROVIDER_REPORTED_INCOMPLETE"]);
-const STACK_LANGUAGES = ["Python", "TypeScript"] as const;
 const MAX_RUN_RETRIES = 3;
 const EXPERIMENT_SOURCE_ID = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+@[0-9a-f]{40}:[^?#\r\n]+$/u;
 const DIAGNOSTIC_STAGES = new Set([
@@ -59,9 +59,10 @@ const parseRunQueries = (value: unknown): readonly RecordValue[] => {
   if (!Array.isArray(value) || value.length === 0) return fail();
   const queries = value.map((entry) => {
     const query = record(entry, [
-      "id", "query", "sort", "order", "pageCeiling", "resultCeiling", "completeness",
+      "id", "role", "query", "sort", "order", "pageCeiling", "resultCeiling", "completeness",
     ]);
     text(query.id);
+    if (query.role !== "ai-credit" && query.role !== "ordinary") fail();
     text(query.query);
     exact(query.sort, "committer-date");
     exact(query.order, "desc");
@@ -155,7 +156,7 @@ export const parseRunRecord = (value: unknown): RunRecord => {
     "stackRelease", "stackRevision", "githubQueries", "stackConfigurations", "counts",
     "bytes", "waits", "diagnostics", "outcome", "result",
   ]);
-  exact(run.schemaVersion, "local-experiment-run.v1");
+  exact(run.schemaVersion, "local-experiment-run.v2");
   validateExecutionIdentity(run.executionId);
   validateObservationTime(run.observedAt);
   for (const key of ["profileVersion", "githubApiVersion"]) text(run[key]);

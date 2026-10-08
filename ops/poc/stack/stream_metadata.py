@@ -35,6 +35,14 @@ HUB_HARDENING = {
     "HF_HUB_ETAG_TIMEOUT": "15",
     "HF_HUB_DOWNLOAD_TIMEOUT": "15",
 }
+# Revision 12 FR-025/FR-028: the five configured language subsets and their exact extensions.
+EXTENSIONS = {
+    "Python": (".py",),
+    "TypeScript": (".ts", ".tsx"),
+    "Go": (".go",),
+    "Rust": (".rs",),
+    "Ruby": (".rb",),
+}
 HEX_40 = re.compile(r"^[0-9a-f]{40}$")
 REPOSITORY = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 
@@ -53,7 +61,7 @@ def _parse_request(value, environment):
     if not isinstance(value, dict) or set(value) != REQUEST_KEYS:
         _fail("REQUEST_MALFORMED")
     configuration = value["configuration"]
-    if configuration not in ("Python", "TypeScript"):
+    if configuration not in EXTENSIONS:
         _fail("CONFIGURATION_REJECTED")
     if value["revision"] != PINNED_REVISION:
         _fail("REVISION_REJECTED")
@@ -124,7 +132,7 @@ def _path(value):
 
 
 def _extensions(configuration):
-    return (".py",) if configuration == "Python" else (".ts", ".tsx")
+    return EXTENSIONS[configuration]
 
 
 def _licenses(value):

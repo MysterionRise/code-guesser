@@ -21,7 +21,7 @@ const failureMatrix = [
   ["redirect", "preflight:ACCESS_UNAVAILABLE"],
   ["retry", "github-search:LOGICAL_RETRY_LIMIT"],
   ["cleanup", "stack-metadata-Python:WORKER_EXIT"],
-  ["insufficient", "github-search:candidates-2"],
+  ["insufficient", "github-search:candidates-7"],
 ] as const;
 const rejectLiveNetwork = async (operation: (attempts: string[]) => Promise<void>): Promise<void> => {
   const attempts: string[] = [];
@@ -91,8 +91,10 @@ describe("captured two-source preparation", () => {
         expect(first.logs).toEqual(["PREPARATION_COMPLETE"]);
         expect(second.logs).toEqual(["PREPARATION_COMPLETE"]);
         const artifact = JSON.parse(new TextDecoder().decode(firstArtifact));
-        expect(artifact.fixtures.map(({ kind }: { kind: string }) => kind)).toEqual([
-          "PROVENANCE", "PROVENANCE", "PROVENANCE", "LANGUAGE", "LANGUAGE",
+        expect(artifact.decks.map(({ id, fixtures }: any) => `${id}:${fixtures.map(({ kind }: any) => kind).join(",")}`)).toEqual([
+          "project:PROJECT,PROJECT,PROJECT,PROJECT,PROJECT",
+          "language:LANGUAGE,LANGUAGE,LANGUAGE,LANGUAGE,LANGUAGE",
+          "ai:AI_CREDIT,AI_CREDIT,AI_CREDIT,AI_CREDIT,AI_CREDIT",
         ]);
         const outputText = [firstArtifact, ...first.reports, ...second.reports]
           .map((bytes) => new TextDecoder().decode(bytes)).join("\n");
@@ -102,8 +104,8 @@ describe("captured two-source preparation", () => {
         ]);
         for (const canary of first.sensitiveCanaries) expect(outputText).not.toContain(canary);
         expect(liveAttempts).toEqual([]);
-        expect(first.metadataConfigurations).toEqual(["Python", "TypeScript"]);
-        expect(first.selectedBlobRows).toHaveLength(2);
+        expect(first.metadataConfigurations).toEqual(["Python", "TypeScript", "Go", "Rust", "Ruby"]);
+        expect(first.selectedBlobRows).toHaveLength(5);
         expect(first.requests.some((url: string) => url.includes("/search/commits"))).toBe(true);
         expect(first.requests.some((url: string) => url.includes("/git/trees/"))).toBe(true);
         expect(first.requests.some((url: string) => url.includes("/license?ref="))).toBe(true);
@@ -116,49 +118,20 @@ describe("captured two-source preparation", () => {
 });
 
 describe("captured provider-incomplete preparation", () => {
-  it("records provider-incomplete captured searches without changing deterministic artifacts", async () => {
-    const incompleteQueryId = "microsoft-generated-trailer";
-    const [first, second] = await createCapturedPair(incompleteQueryId);
+  it("fails closed on a provider-incomplete page because revision 12 authorizes no incomplete query", async () => {
+    const [first] = await createCapturedPair("ai-copilot-github");
     try {
       await rejectLiveNetwork(async (liveAttempts) => {
-        const firstResult = await prepareLocalExperiment(first.dependencies);
-        const secondResult = await prepareLocalExperiment(second.dependencies);
-        const firstArtifact = await first.readArtifact();
-        const secondArtifact = await second.readArtifact();
-        const artifacts = [firstArtifact, secondArtifact]
-          .map((bytes) => JSON.parse(new TextDecoder().decode(bytes)));
-        const results = [firstResult, secondResult];
-        const reports = [first, second].map((harness) => decodeReport(harness.reports[0]));
-        expect(firstArtifact).toEqual(secondArtifact);
-        expect(firstResult.artifactHash).toBe(secondResult.artifactHash);
-        expect(first.reports[0]).not.toEqual(second.reports[0]);
-        expect(reports.map(({ githubQueries }: any) => githubQueries.map(({ id, completeness }: any) =>
-          ({ id, completeness })))).toEqual(Array(2).fill([
-          { id: incompleteQueryId, completeness: "PROVIDER_REPORTED_INCOMPLETE" },
-          { id: "github-generated-trailer", completeness: "COMPLETE" },
-          { id: "facebook-ordinary-change", completeness: "COMPLETE" },
-        ]));
-        for (const [index, result] of results.entries()) {
-          const artifact = artifacts[index];
-          const identity = {
-            artifactHash: canonicalArtifactHash(artifact),
-            crawlSnapshotId: artifact.crawlSnapshot.id,
-          };
-          expect(result).toMatchObject(identity);
-          expect(reports[index].result).toMatchObject(identity);
-        }
-        for (const harness of [first, second]) {
-          expect(harness.logs).toEqual(["GITHUB_SEARCH_INCOMPLETE", "PREPARATION_COMPLETE"]);
-          expectCompletionSequence(harness);
-        }
-        const outputText = [firstArtifact, ...first.reports, ...second.reports]
-          .map((bytes) => new TextDecoder().decode(bytes)).join("\n");
-        for (const canary of first.sensitiveCanaries) expect(outputText).not.toContain(canary);
+        const before = await first.readArtifact();
+        await expect(prepareLocalExperiment(first.dependencies)).rejects.toThrow("PREPARATION_FAILED");
+        expect(await first.readArtifact()).toEqual(before);
+        expect(first.reports).toHaveLength(0);
+        expect(first.events).toContain("github-search:GITHUB_SEARCH_REJECTED");
+        expect(first.logs).not.toContain("GITHUB_SEARCH_INCOMPLETE");
         expect(liveAttempts).toEqual([]);
       });
     } finally {
       await first.dispose();
-      await second.dispose();
     }
   });
 });

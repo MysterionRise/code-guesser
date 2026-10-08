@@ -56,6 +56,7 @@ const commitResponse = (
     url: `${api}/commits/${sha}`,
     html_url: `${web}/commit/${sha}`,
   })),
+  stats: { total: 3, additions: 2, deletions: 1 },
   files,
 });
 
@@ -78,7 +79,7 @@ const blobResponse = (sha: string, bytes: Uint8Array): Record<string, unknown> =
 });
 
 const profile = async () => parseCrawlProfile(JSON.parse(
-  await readFile(new URL("../profiles/local-real-rounds.v1.json", import.meta.url), "utf8"),
+  await readFile(new URL("../profiles/local-real-rounds.v2.json", import.meta.url), "utf8"),
 ));
 
 const validResponses = (): ReadonlyMap<string, unknown> => new Map([
@@ -344,6 +345,26 @@ describe("GitHub immutable lineage adapter", () => {
     const responses = responsesForBytes(parentBytes, binaryChild);
     responses.delete(`${api}/commits/${ids.parentCommit}`);
     await expect(invoke(responses)).rejects.toThrow("BINARY_CONTENT");
+  });
+
+  it("records the commit's changed-file count and line totals for the AI deck's hints", async () => {
+    const [bound] = await invoke();
+    expect(bound.changedFileCount).toBe(1);
+    expect(bound.commitAdditions).toBe(2);
+    expect(bound.commitDeletions).toBe(1);
+
+    for (const stats of [undefined, { additions: -1, deletions: 0 }, { additions: 1.5, deletions: 0 }, { additions: 1 }]) {
+      const responses = mutableResponses();
+      responses.get(`${api}/commits/${ids.childCommit}`).stats = stats;
+      await expect(invoke(responses)).rejects.toBeInstanceOf(lineageModule.GitHubLineageError);
+    }
+  });
+
+  it("rejects a generated child file before requesting anything about the parent", async () => {
+    const generated = encoder.encode("// This file was automatically generated and should not be edited.\nexport function value() {\n  return 2;\n}\n");
+    const responses = responsesForBytes(parentBytes, generated);
+    responses.delete(`${api}/commits/${ids.parentCommit}`);
+    await expect(invoke(responses)).rejects.toBeInstanceOf(lineageModule.GitHubLineageError);
   });
 
   it("rejects ambiguous changed-file populations and previous-path metadata", async () => {

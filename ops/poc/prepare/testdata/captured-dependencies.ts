@@ -7,7 +7,8 @@ import { bindGitHubLineage } from "../github-lineage";
 import { crawlGitHubCommitSearch } from "../github-search";
 import { createPreparationRuntime, type PreparationDependencies } from "../index";
 import { generateLanguageRounds, validateLanguageCandidate } from "../language-rounds";
-import { generateProvenanceRounds } from "../provenance-rounds";
+import { generateAiRounds } from "../ai-rounds";
+import { generateProjectRounds } from "../project-rounds";
 import { RetryRequestError } from "../retry";
 import { createRunReport } from "../run-report";
 import { preflightStackAccess } from "../stack-access";
@@ -74,7 +75,7 @@ const responseValue = (state: CapturedDependencyState, url: string): unknown => 
   if (state.failure === "freshness" && url === REVISION_URL) return { ...(value as object), sha: "0".repeat(40) };
   if (state.failure === "malformed" && url.includes("/search/commits")) return { unexpected: true };
   if (state.failure === "insufficient" && url.includes("/search/commits")
-    && new URL(url).searchParams.get("q") === state.profile.github.queries[2]!.query) {
+    && new URL(url).searchParams.get("q") === state.profile.github.queries.find(({ id }) => id === "ordinary-google")!.query) {
     return { total_count: 0, incomplete_results: false, items: [] };
   }
   return copy(value);
@@ -210,24 +211,27 @@ const finalizeLane = (
   finalizeBindings: (context) => record(state, "finalize", async () => {
     const runtime = runtimeOf(reference);
     runtime.beginReplay();
-    const provenanceCandidates = await Promise.all(context.provenanceCandidates.map(async (candidate: any) =>
+    const readmit = (candidates: readonly unknown[]) => Promise.all(candidates.map(async (candidate: any) =>
       (await admitGitHubCandidates({ profile: context.profile, profileHash: context.profileHash,
         crawlSnapshotId: context.crawlSnapshotId, candidates: [candidate.lineage],
         transport: runtime.transport, retry: runtime.retry }))[0]!));
+    const projectCandidates = await readmit(context.projectCandidates);
+    const aiCandidates = await readmit(context.aiCandidates);
     const languageCandidates = await Promise.all(context.languageSelections.map(({ row, blob }) =>
       revalidateStackCandidate({ profile: context.profile, profileHash: context.profileHash,
         crawlSnapshotId: context.crawlSnapshotId, metadata: row as StackMetadataRow,
         selectedBlob: blob as SelectedStackBlob, transport: runtime.transport, retry: runtime.retry })));
-    return Object.freeze({ provenanceCandidates: Object.freeze(provenanceCandidates),
+    return Object.freeze({ projectCandidates: Object.freeze(projectCandidates), aiCandidates: Object.freeze(aiCandidates),
       languageCandidates: Object.freeze(languageCandidates) });
   }),
 });
 
 const outputLane = (state: CapturedDependencyState): Pick<PreparationDependencies,
-  "generateProvenance" | "generateLanguage" | "compose" | "createReport" | "stageReport"
+  "generateProject" | "generateLanguage" | "generateAi" | "compose" | "createReport" | "stageReport"
   | "publishArtifact" | "now" | "uuid" | "log"> => ({
-  generateProvenance: (context) => generateProvenanceRounds(context as any),
+  generateProject: (context) => generateProjectRounds(context as any),
   generateLanguage: (context) => generateLanguageRounds(context as any),
+  generateAi: (context) => generateAiRounds(context as any),
   compose: composeExperimentArtifact,
   createReport: createRunReport,
   stageReport: async (report) => {

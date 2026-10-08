@@ -6,14 +6,18 @@ import { publishArtifact } from "./artifact-store";
 import { fetchSelectedBlob, projectBlobWorkerEnvironment, type BlobWorkerLimits } from "./blob-worker";
 import { canonicalBytes, canonicalHash } from "./canonical";
 import { createCapacityMeter, type CapacityMeter, type CapacitySnapshot } from "./capacity";
+import { aiCreditFor } from "./ai-credit";
+import { generateAiRounds } from "./ai-rounds";
 import { composeExperimentArtifact, containsProtected, type ComposedExperiment } from "./compose";
 import { admitGitHubCandidates } from "./github-admission";
 import { bindGitHubLineage } from "./github-lineage";
 import { crawlGitHubCommitSearch, type GitHubQueryClassification } from "./github-search";
-import { generateLanguageRounds, validateLanguageCandidate, type GeneratedLanguageRounds } from "./language-rounds";
-import { parseCrawlProfile, type CrawlProfile } from "./profile";
-import { generateProvenanceRounds, markerRecorded, type GeneratedProvenanceRounds } from "./provenance-rounds";
+import { generateLanguageRounds, validateLanguageCandidate } from "./language-rounds";
+import { artifactFixtures, CROSS_DECK_KEYS } from "./model";
+import { parseCrawlProfile, STACK_LANGUAGES, type CrawlProfile, type StackLanguage } from "./profile";
+import { generateProjectRounds, projectExcerptAllowed } from "./project-rounds";
 import { createRetryController, type RetryController } from "./retry";
+import type { GeneratedRounds } from "./round-projection";
 import { stageRunReport, type StagedRunReport } from "./report-store";
 import { createRunReport } from "./run-report";
 import { preflightStackAccess } from "./stack-access";
@@ -33,10 +37,13 @@ export interface PreparationDependencies {
   createCapacity(options: Parameters<typeof createCapacityMeter>[0]): CapacityMeter; createRuntime(options: Readonly<{ profile: CrawlProfile; environment: Environment; capacity: CapacityMeter }>): unknown;
   preflight(options: Context): Promise<StageResult<unknown>>; searchGitHub(options: Context): Promise<StageResult<Readonly<{ candidates: readonly unknown[]; queryClassifications: readonly GitHubQueryClassification[] }>>>;
   bindGitHubLineage(options: Context & Readonly<{ candidate: unknown }>): Promise<StageResult<unknown>>; admitGitHubCandidate(options: Context & Readonly<{ candidate: unknown; crawlSnapshotId: string }>): Promise<StageResult<unknown>>;
-  collectStackMetadata(options: Context & Readonly<{ configuration: "Python" | "TypeScript" }>): Promise<StageResult<readonly unknown[]>>; fetchStackBlob(options: Context & Readonly<{ row: unknown; limits: BlobLimits }>): Promise<StageResult<Readonly<{ byteLength: number }>>>;
+  collectStackMetadata(options: Context & Readonly<{ configuration: StackLanguage }>): Promise<StageResult<readonly unknown[]>>; fetchStackBlob(options: Context & Readonly<{ row: unknown; limits: BlobLimits }>): Promise<StageResult<Readonly<{ byteLength: number }>>>;
   revalidateStackCandidate(options: Context & Readonly<{ row: unknown; blob: unknown; crawlSnapshotId: string }>): Promise<StageResult<unknown>>;
-  validateLanguageCandidate(options: Context & Readonly<{ candidate: unknown }>): unknown; finalizeBindings?(options: Context & Readonly<{ crawlSnapshotId: string; provenanceCandidates: readonly unknown[]; languageSelections: readonly StackSelection[] }>): Promise<Readonly<{ provenanceCandidates: readonly unknown[]; languageCandidates: readonly unknown[] }>>;
-  generateProvenance(options: Readonly<{ profile: CrawlProfile; candidates: readonly unknown[] }>): GeneratedProvenanceRounds; generateLanguage(options: Readonly<{ profile: CrawlProfile; candidates: readonly unknown[] }>): GeneratedLanguageRounds;
+  validateLanguageCandidate(options: Context & Readonly<{ candidate: unknown }>): unknown;
+  finalizeBindings?(options: Context & Readonly<{ crawlSnapshotId: string; projectCandidates: readonly unknown[]; aiCandidates: readonly unknown[]; languageSelections: readonly StackSelection[] }>): Promise<Readonly<{ projectCandidates: readonly unknown[]; aiCandidates: readonly unknown[]; languageCandidates: readonly unknown[] }>>;
+  generateProject(options: Readonly<{ profile: CrawlProfile; candidates: readonly unknown[]; distractorPool: readonly string[] }>): GeneratedRounds;
+  generateLanguage(options: Readonly<{ profile: CrawlProfile; candidates: readonly unknown[] }>): GeneratedRounds;
+  generateAi(options: Readonly<{ profile: CrawlProfile; candidates: readonly unknown[] }>): GeneratedRounds;
   compose(options: Parameters<typeof composeExperimentArtifact>[0]): ComposedExperiment; createReport(input: Readonly<Record<string, unknown>>): unknown;
   stageReport(report: unknown): Promise<StagedRunReport>; publishArtifact(input: Readonly<{ artifact: unknown; expectedHash: string; beforeCommit?: () => Promise<void> }>): Promise<unknown>;
   now(): Date; uuid(): string; log(message: string): void; }
@@ -44,7 +51,7 @@ type BlobLimits = BlobWorkerLimits;
 export { projectBlobWorkerEnvironment };
 export interface PreparationResult { readonly artifactHash: string; readonly crawlSnapshotId: string; readonly publication: unknown }
 export class PreparationError extends Error { public constructor() { super("PREPARATION_FAILED"); this.name = "PreparationError"; } }
-const PROFILE_URL = new URL("../profiles/local-real-rounds.v1.json", import.meta.url); const ARTIFACT_PATH = fileURLToPath(new URL("../../../apps/game/src/demo/generated/local-real-rounds.json", import.meta.url));
+const PROFILE_URL = new URL("../profiles/local-real-rounds.v2.json", import.meta.url); const ARTIFACT_PATH = fileURLToPath(new URL("../../../apps/game/src/demo/generated/local-real-rounds.json", import.meta.url));
 const REPORT_PATH = fileURLToPath(new URL("../stack/tmp/local-experiment-run.json", import.meta.url)); const SHA256 = /^[0-9a-f]{64}$/u;
 const projectEnvironment = (source: Environment, keys: readonly string[]): Environment => Object.freeze(Object.fromEntries(keys.filter((key) => source[key] !== undefined).map((key) => [key, source[key]])));
 export const projectPreparationEnvironment = (source: Environment): Environment => projectEnvironment(source, ["PATH", "HOME", "HF_TOKEN", "GITHUB_TOKEN", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_PROFILE", "AWS_SHARED_CREDENTIALS_FILE", "AWS_CONFIG_FILE", "STACK_V2_ACKNOWLEDGED_USABLE_REVISION"]);
@@ -108,7 +115,8 @@ const rejectionCode = (error: unknown): string => {
 const noteRejection = (state: RunState, stage: DiagnosticStage, error: unknown): void => { const message = rejectionCode(error);
   const key = `${stage}\0${message}`; state.diagnostics.set(key, (state.diagnostics.get(key) ?? 0) + 1);
 };
-const markerOutcome = (candidate: unknown, profile: CrawlProfile): boolean => markerRecorded(String((candidate as any).lineage?.commitMessage ?? (candidate as any).commitMessage ?? ""), profile.markers);
+const aiCredited = (candidate: unknown, profile: CrawlProfile): boolean => aiCreditFor(String((candidate as any).lineage?.commitMessage ?? ""), profile.aiCredits).recorded;
+const queryRole = (profile: CrawlProfile, candidate: unknown): string | undefined => profile.github.queries.find(({ id }) => id === (candidate as any)?.queryId)?.role;
 const provisionalSnapshot = (profileHash: string, hashes: readonly string[]): string => canonicalHash({ profileHash, acceptedResponseHashes: hashes.length > 0 ? hashes : [canonicalHash("capture")] });
 const remainingBlobLimits = (profile: CrawlProfile, snapshot: CapacitySnapshot): BlobLimits => { const totalBlobBytes = Math.max(1, profile.capacity.totalBlobBytes - snapshot.totalBlobBytes); return Object.freeze({
   blobAttempts: Math.max(1, profile.capacity.blobAttempts - snapshot.blobAttempts + 1), successfulBlobs: Math.max(1, profile.capacity.successfulBlobs - snapshot.successfulBlobs), perBlobBytes: profile.capacity.perBlobBytes, totalBlobBytes, temporaryDiskBytes: Math.max(1, profile.capacity.temporaryDiskBytes - snapshot.temporaryDiskBytes),
@@ -137,30 +145,67 @@ const revealsProtected = (profile: CrawlProfile, candidate: any, selected: reado
     return PROTECTED_SOURCE_KEYS.some((key) => typeof source[key] === "string" && source[key].length > 0
       && !(key === "rawContentHash" && source[key] === source.excerptHash) && containsProtected(publicText, source[key])); });
 };
-const collidesWithSelected = (profile: CrawlProfile, candidate: any, selected: readonly unknown[]): boolean => { const source = candidate.source ?? candidate;
-  return profile.deduplication.some((key) => selected.some((value: any) => typeof source[key] === "string" && source[key] === (value.source ?? value)[key])); };
-const selectGitHub = async (context: Context, deps: PreparationDependencies, hashes: string[], pool: readonly unknown[], state: RunState) => {
-  const selected: unknown[] = []; const outcomes = new Set<boolean>();
-  for (const candidate of pool) {
+const sameIdentity = (keys: readonly string[], candidate: any, selected: readonly unknown[]): boolean => { const source = candidate.source ?? candidate;
+  return keys.some((key) => selected.some((value: any) => typeof source[key] === "string" && source[key] === (value.source ?? value)[key])); };
+/** FR-026 as amended: full deduplication within a deck; commit, blob, raw content, and excerpt across decks. */
+const collidesWithSelected = (profile: CrawlProfile, candidate: any, sameDeck: readonly unknown[], otherDecks: readonly unknown[] = []): boolean =>
+  sameIdentity(profile.deduplication, candidate, sameDeck) || sameIdentity(CROSS_DECK_KEYS, candidate, otherDecks);
+type GitHubDecks = Readonly<{ project: readonly unknown[]; ai: readonly unknown[] }>;
+/**
+ * Revision 12: five project rounds from `ordinary` queries with distinct repositories; five AI rounds with
+ * up to three credited commits from `ai-credit` queries and the rest uncredited from `ordinary` queries,
+ * at least two of each. Admitted ordinary candidates the project deck cannot use stay available to the AI deck.
+ */
+const selectGitHub = async (context: Context, deps: PreparationDependencies, hashes: string[], pool: readonly unknown[], state: RunState): Promise<GitHubDecks> => {
+  const { profile } = context; const { projectRounds, aiRounds, aiMinimumPerOutcome } = profile.selection;
+  const ordinary = pool.filter((candidate) => queryRole(profile, candidate) === "ordinary");
+  const credited = pool.filter((candidate) => queryRole(profile, candidate) === "ai-credit");
+  const project: unknown[] = []; const aiYes: unknown[] = []; const aiNo: unknown[] = []; const spare: unknown[] = [];
+  const all = (): unknown[] => [...project, ...aiYes, ...aiNo];
+  const admit = async (candidate: unknown): Promise<unknown | undefined> => {
     let lineage: StageResult<unknown>;
     try { lineage = await deps.bindGitHubLineage({ ...context, candidate }); addHashes(hashes, lineage.acceptedResponseHashes);
-    } catch (error) { noteRejection(state, "DISCOVERY", error); continue; }
+    } catch (error) { noteRejection(state, "DISCOVERY", error); return undefined; }
     try {
       const admitted = await deps.admitGitHubCandidate({ ...context, candidate: lineage.value, crawlSnapshotId: provisionalSnapshot(context.profileHash, hashes) });
-      addHashes(hashes, admitted.acceptedResponseHashes);
-      state.repositoriesAdmitted += 1; state.screened += 1;
-      if (collidesWithSelected(context.profile, admitted.value, selected)) { state.duplicatesRejected += 1; noteRejection(state, "DEDUPLICATION", new Error("SOURCE_DUPLICATE")); continue; }
-      if (revealsProtected(context.profile, admitted.value, selected)) { noteRejection(state, "SCREENING", new Error("PUBLIC_CONTAINMENT_REJECTED")); continue; }
-      selected.push(admitted.value);
-      outcomes.add(markerOutcome(admitted.value, context.profile)); if (selected.length >= 3 && outcomes.size === 2) break;
-    } catch (error) { noteRejection(state, "ADMISSION", error); }
+      addHashes(hashes, admitted.acceptedResponseHashes); state.repositoriesAdmitted += 1; state.screened += 1;
+      return admitted.value;
+    } catch (error) { noteRejection(state, "ADMISSION", error); return undefined; }
+  };
+  const accepts = (admitted: any, deck: readonly unknown[], others: readonly unknown[]): boolean => {
+    if (collidesWithSelected(profile, admitted, deck, others)) { state.duplicatesRejected += 1; noteRejection(state, "DEDUPLICATION", new Error("SOURCE_DUPLICATE")); return false; }
+    if (revealsProtected(profile, admitted, all())) { noteRejection(state, "SCREENING", new Error("PUBLIC_CONTAINMENT_REJECTED")); return false; }
+    return true;
+  };
+  const projectEligible = (admitted: any): boolean => {
+    if (!projectExcerptAllowed(String(admitted.lineage?.excerpt ?? ""), String(admitted.source?.repository ?? ""))) { noteRejection(state, "SCREENING", new Error("PROJECT_NAME_IN_EXCERPT")); return false; }
+    return accepts(admitted, project, [...aiYes, ...aiNo]);
+  };
+  const absentEligible = (admitted: any): boolean => !aiCredited(admitted, profile) && accepts(admitted, [...aiYes, ...aiNo], project);
+  let cursor = 0;
+  while (project.length < projectRounds && cursor < ordinary.length) {
+    const admitted = await admit(ordinary[cursor++]); if (admitted === undefined) continue;
+    if (projectEligible(admitted)) project.push(admitted); else spare.push(admitted);
   }
-  if (selected.length < 3 || outcomes.size !== 2) throw new PreparationError();
-  const required = new Set([selected.findIndex((value) => markerOutcome(value, context.profile)), selected.findIndex((value) => !markerOutcome(value, context.profile))]);
-  for (let index = 0; required.size < 3; index += 1) required.add(index);
-  return Object.freeze(selected.filter((_value, index) => required.has(index)));
+  if (project.length < projectRounds) throw new PreparationError();
+  const creditedTarget = aiRounds - aiMinimumPerOutcome;
+  for (const candidate of credited) {
+    if (aiYes.length >= creditedTarget) break;
+    const admitted = await admit(candidate); if (admitted === undefined) continue;
+    if (!aiCredited(admitted, profile)) { noteRejection(state, "SCREENING", new Error("AI_CREDIT_ABSENT")); continue; }
+    if (accepts(admitted, [...aiYes, ...aiNo], project)) aiYes.push(admitted);
+  }
+  if (aiYes.length < aiMinimumPerOutcome) throw new PreparationError();
+  const absentTarget = aiRounds - aiYes.length;
+  for (const admitted of spare) { if (aiNo.length >= absentTarget) break; if (absentEligible(admitted)) aiNo.push(admitted); }
+  while (aiNo.length < absentTarget && cursor < ordinary.length) {
+    const admitted = await admit(ordinary[cursor++]); if (admitted === undefined) continue;
+    if (absentEligible(admitted)) aiNo.push(admitted);
+  }
+  if (aiNo.length < absentTarget) throw new PreparationError();
+  return Object.freeze({ project: Object.freeze(project), ai: Object.freeze([...aiYes, ...aiNo]) });
 };
-const selectStack = async (context: Context, deps: PreparationDependencies, hashes: string[], rows: readonly unknown[], provenance: readonly unknown[], state: RunState) => {
+const selectStack = async (context: Context, deps: PreparationDependencies, hashes: string[], rows: readonly unknown[], github: readonly unknown[], state: RunState) => {
   const selected: StackSelection[] = [];
   for (const configuration of context.profile.stack.configurations) {
     const ordered = rows.filter((item) => (item as any).detectedLanguage === configuration.language).sort(stackOrder);
@@ -181,31 +226,32 @@ const selectStack = async (context: Context, deps: PreparationDependencies, hash
         stage = "SCREENING"; state.screened += 1;
         const eligible = deps.validateLanguageCandidate({ ...context, candidate: checked.value });
         stage = "DEDUPLICATION";
-        if (collidesWithSelected(context.profile, eligible, [...provenance, ...selected.map(({ candidate }) => candidate)])) { state.duplicatesRejected += 1; throw new Error("SOURCE_DUPLICATE"); }
+        if (collidesWithSelected(context.profile, eligible, selected.map(({ candidate }) => candidate), github)) { state.duplicatesRejected += 1; throw new Error("SOURCE_DUPLICATE"); }
         stage = "SCREENING";
-        if (revealsProtected(context.profile, eligible, [...provenance, ...selected.map(({ candidate }) => candidate)])) throw new Error("PUBLIC_CONTAINMENT_REJECTED");
+        if (revealsProtected(context.profile, eligible, [...github, ...selected.map(({ candidate }) => candidate)])) throw new Error("PUBLIC_CONTAINMENT_REJECTED");
         lease.accept();
         selected.push(Object.freeze({ row, blob: fetched.value, candidate: eligible }));
         break;
       } catch (error) { noteRejection(state, stage, error); lease.release(); }
     }
   }
-  if (selected.length !== 2) throw new PreparationError();
+  if (selected.length !== context.profile.selection.languageRounds) throw new PreparationError();
   return Object.freeze(selected);
 };
 const reportInput = (context: Context, composed: ComposedExperiment, executionId: string, observedAt: string, state: RunState, classifications: readonly GitHubQueryClassification[]) => {
   const snapshot = context.capacity.snapshot();
   const github = Object.values(snapshot.github);
-  const sources = (composed.artifact.fixtures as any[]).map(({ source }) => `${source.repository}@${source.commit}:${source.path}`);
+  const fixtures = artifactFixtures(composed.artifact);
+  const sources = fixtures.map(({ source }) => `${String(source.repository)}@${String(source.commit)}:${String(source.path)}`);
   return {
-    schemaVersion: "local-experiment-run.v1", executionId, observedAt, profileVersion: context.profile.profileVersion, githubApiVersion: context.profile.github.apiVersion,
+    schemaVersion: "local-experiment-run.v2", executionId, observedAt, profileVersion: context.profile.profileVersion, githubApiVersion: context.profile.github.apiVersion,
     stackRelease: context.profile.stack.release, stackRevision: context.profile.stack.revision,
     githubQueries: context.profile.github.queries.map((query, index) => ({ ...query, pageCeiling: context.profile.capacity.githubPages, resultCeiling: context.profile.capacity.githubResults, completeness: classifications[index]!.completeness })),
     stackConfigurations: context.profile.stack.configurations.map(({ language, configuration }) => ({ language, configuration, rowCeiling: context.profile.capacity.stackRowsPerLanguage, completeness: "COMPLETE" })),
     counts: { requests: snapshot.requestCount, githubPages: github.reduce((n, value) => n + value.pages, 0),
       githubResults: github.reduce((n, value) => n + value.results, 0), repositoriesAdmitted: state.repositoriesAdmitted,
       stackRows: snapshot.stackRows, blobAttempts: snapshot.blobAttempts, blobsRetrieved: snapshot.successfulBlobs,
-      githubRevalidations: state.githubRevalidations, screened: state.screened, duplicatesRejected: state.duplicatesRejected, selected: 5 },
+      githubRevalidations: state.githubRevalidations, screened: state.screened, duplicatesRejected: state.duplicatesRejected, selected: fixtures.length },
     bytes: { githubResponses: snapshot.responseBytes, stackMetadata: snapshot.stackMetadataBytes, stackBlobs: snapshot.totalBlobBytes },
     waits: { retries: snapshot.retryWaits, milliseconds: snapshot.waitedMilliseconds },
     diagnostics: [...state.diagnostics].map(([key, count]) => { const [stage, reasonCode] = key.split("\0"); return { stage, reasonCode, count }; }), outcome: "SUCCESS", result: { artifactHash: composed.artifactHash, crawlSnapshotId: composed.artifact.crawlSnapshot.id, sourceIdentities: sources },
@@ -220,7 +266,7 @@ export const prepareLocalExperiment = async (deps: PreparationDependencies = def
     if (canonicalHash(JSON.parse(new TextDecoder().decode(loaded.canonicalProfileBytes))) !== profileHash) throw new PreparationError();
     const environment = deps.environment();
     const capacity = deps.createCapacity({ limits: loaded.profile.capacity,
-      githubQueryIds: loaded.profile.github.queries.map(({ id }) => id), stackLanguages: ["Python", "TypeScript"] });
+      githubQueryIds: loaded.profile.github.queries.map(({ id }) => id), stackLanguages: STACK_LANGUAGES });
     const runtime = deps.createRuntime({ profile: loaded.profile, environment, capacity });
     const context = Object.freeze({ ...loaded, profileHash, environment, capacity, runtime });
     const hashes: string[] = [];
@@ -230,7 +276,9 @@ export const prepareLocalExperiment = async (deps: PreparationDependencies = def
     state.discovered = Array.isArray(search.value.candidates) ? search.value.candidates.length : 0;
     const classifications = validateClassifications(loaded.profile, search.value.queryClassifications);
     stage = "ADMISSION";
-    const provenanceCandidates = await selectGitHub(context, deps, hashes, search.value.candidates, state);
+    const githubDecks = await selectGitHub(context, deps, hashes, search.value.candidates, state);
+    const distractorPool = [...new Set(search.value.candidates.filter((candidate) => queryRole(loaded.profile, candidate) === "ordinary")
+      .map((candidate) => String((candidate as any).repository)))];
     const metadata: unknown[] = [];
     stage = "STACK_METADATA";
     for (const { configuration } of loaded.profile.stack.configurations) {
@@ -238,19 +286,21 @@ export const prepareLocalExperiment = async (deps: PreparationDependencies = def
       addHashes(hashes, result.acceptedResponseHashes); metadata.push(...result.value);
     }
     stage = "BLOB_RETRIEVAL";
-    const languageSelections = await selectStack(context, deps, hashes, metadata, provenanceCandidates, state);
+    const languageSelections = await selectStack(context, deps, hashes, metadata, [...githubDecks.project, ...githubDecks.ai], state);
     stage = "SELECTION";
     const crawlSnapshotId = provisionalSnapshot(profileHash, hashes);
     const finalized = deps.finalizeBindings
-      ? await deps.finalizeBindings({ ...context, crawlSnapshotId, provenanceCandidates, languageSelections })
-      : { provenanceCandidates, languageCandidates: languageSelections.map(({ candidate }) => candidate) };
-    if (deps.finalizeBindings && (finalized.provenanceCandidates.some((candidate: any) => candidate.source?.crawlSnapshotId !== crawlSnapshotId)
+      ? await deps.finalizeBindings({ ...context, crawlSnapshotId, projectCandidates: githubDecks.project, aiCandidates: githubDecks.ai, languageSelections })
+      : { projectCandidates: githubDecks.project, aiCandidates: githubDecks.ai, languageCandidates: languageSelections.map(({ candidate }) => candidate) };
+    if (deps.finalizeBindings && ([...finalized.projectCandidates, ...finalized.aiCandidates].some((candidate: any) => candidate.source?.crawlSnapshotId !== crawlSnapshotId)
       || finalized.languageCandidates.some((candidate: any) => candidate.crawlSnapshotId !== crawlSnapshotId))) throw new PreparationError();
-    const provenance = deps.generateProvenance({ profile: loaded.profile, candidates: finalized.provenanceCandidates });
+    const project = deps.generateProject({ profile: loaded.profile, candidates: finalized.projectCandidates, distractorPool });
     const language = deps.generateLanguage({ profile: loaded.profile, candidates: finalized.languageCandidates });
-    if (provenance.fixtures.length !== 3 || language.fixtures.length !== 2) throw new PreparationError();
+    const ai = deps.generateAi({ profile: loaded.profile, candidates: finalized.aiCandidates });
+    const { projectRounds, languageRounds, aiRounds } = loaded.profile.selection;
+    if (project.fixtures.length !== projectRounds || language.fixtures.length !== languageRounds || ai.fixtures.length !== aiRounds) throw new PreparationError();
     const composed = deps.compose({ profile: loaded.profile, canonicalProfileBytes: loaded.canonicalProfileBytes,
-      acceptedResponseHashes: Object.freeze(hashes), provenance, language });
+      acceptedResponseHashes: Object.freeze(hashes), project, language, ai });
     if (composed.artifact.crawlSnapshot.id !== crawlSnapshotId) throw new PreparationError();
     const report = deps.createReport(reportInput(context, composed, deps.uuid(), deps.now().toISOString(), state, classifications));
     stage = "PUBLICATION";
@@ -353,18 +403,21 @@ const defaultDependencies = (): PreparationDependencies => ({
   validateLanguageCandidate: (options) => validateLanguageCandidate({ profile: options.profile, candidate: options.candidate as any }),
   finalizeBindings: async (options) => {
     const runtime = runtimeOf(options); runtime.beginReplay();
-    const provenanceCandidates = await Promise.all(options.provenanceCandidates.map(async (candidate: any) =>
+    const readmit = (candidates: readonly unknown[]) => Promise.all(candidates.map(async (candidate: any) =>
       (await admitGitHubCandidates({ profile: options.profile, profileHash: options.profileHash,
         crawlSnapshotId: options.crawlSnapshotId, candidates: [candidate.lineage], transport: runtime.transport,
         retry: runtime.retry }))[0]!));
+    const projectCandidates = await readmit(options.projectCandidates);
+    const aiCandidates = await readmit(options.aiCandidates);
     const languageCandidates = await Promise.all(options.languageSelections.map(({ row, blob }) =>
       revalidateStackCandidate({ profile: options.profile, profileHash: options.profileHash,
         crawlSnapshotId: options.crawlSnapshotId, metadata: row as StackMetadataRow, selectedBlob: blob as SelectedStackBlob,
         transport: runtime.transport, retry: runtime.retry })));
-    return Object.freeze({ provenanceCandidates: Object.freeze(provenanceCandidates), languageCandidates: Object.freeze(languageCandidates) });
+    return Object.freeze({ projectCandidates: Object.freeze(projectCandidates), aiCandidates: Object.freeze(aiCandidates), languageCandidates: Object.freeze(languageCandidates) });
   },
-  generateProvenance: (options) => generateProvenanceRounds(options as any),
-  generateLanguage: (options) => generateLanguageRounds(options as any), compose: composeExperimentArtifact,
+  generateProject: (options) => generateProjectRounds(options as any),
+  generateLanguage: (options) => generateLanguageRounds(options as any),
+  generateAi: (options) => generateAiRounds(options as any), compose: composeExperimentArtifact,
   createReport: createRunReport, stageReport,
   publishArtifact: async ({ artifact, expectedHash, beforeCommit }) => { await mkdir(dirname(ARTIFACT_PATH), { recursive: true });
     return publishArtifact({ artifact, expectedHash, targetPath: ARTIFACT_PATH, ...(beforeCommit ? { beforeCommit } : {}) }); },
