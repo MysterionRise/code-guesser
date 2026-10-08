@@ -88,7 +88,15 @@ describe("static arcade shell", () => {
     expect(mode.rounds[3]!.mode.calibrationVersionId).toBe("calibration-4");
     const invalid = modeInput();
     invalid.rounds[2]!.mode.kind = "language";
-    expect(() => createPublicModeContract(invalid)).toThrow("session must contain exactly three provenance and two language rounds");
+    expect(() => createPublicModeContract(invalid)).toThrow("session must be one five-round deck or exactly three provenance and two language rounds");
+    const mixedDeck = modeInput();
+    mixedDeck.rounds.forEach((round, index) => { round.mode.kind = index === 0 ? "ai" : "project"; });
+    expect(() => createPublicModeContract(mixedDeck)).toThrow("session must be one five-round deck");
+    for (const kind of ["project", "language", "ai"] as const) {
+      const deck = modeInput();
+      deck.rounds.forEach((round) => { round.mode.kind = kind; });
+      expect(createPublicModeContract(deck).rounds.every((round) => round.mode.kind === kind)).toBe(true);
+    }
     const unknown = modeInput();
     unknown.rounds[4]!.mode.kind = "algorithm" as "language";
     expect(() => createPublicModeContract(unknown)).toThrow("unsupported round mode");
@@ -225,6 +233,7 @@ describe("static arcade shell", () => {
     expect(existsSync(new URL("../src/app/actions.ts", import.meta.url))).toBe(true);
     expect(shell).toContain('role="alert"');
     expect(shell).toContain("Play again");
+    expect(shell).toContain("Choose another deck");
   });
 });
 

@@ -1,7 +1,10 @@
 export interface Candidate { candidateId: string; label: string }
 export interface PublicClue { order: 1 | 2; label: string }
+/** Rehearsal sessions mix provenance and language; contract revision 12 decks are one kind each. */
+export type RoundModeKind = "provenance" | "language" | "project" | "ai";
+const DECK_KINDS: readonly RoundModeKind[] = ["project", "language", "ai"];
 export interface RoundModeInput {
-  kind: "provenance" | "language";
+  kind: RoundModeKind;
   contractVersionId: string;
   calibrationVersionId: string;
   prompt: string;
@@ -33,10 +36,13 @@ export function createPublicModeContract(input: PublicModeContractInput): Public
   if (input.rounds.length !== 5) throw new ArcadeShellRuleError("mode contract must define exactly five rounds");
   const roundIds = input.rounds.map((round) => canonical(round.roundId));
   if (new Set(roundIds).size !== roundIds.length) throw new ArcadeShellRuleError("round ids must be unique after canonicalization");
-  if (input.rounds.some((round) => round.mode.kind !== "provenance" && round.mode.kind !== "language")) throw new ArcadeShellRuleError("unsupported round mode");
+  if (input.rounds.some((round) => !["provenance", "language", "project", "ai"].includes(round.mode.kind))) throw new ArcadeShellRuleError("unsupported round mode");
   const provenance = input.rounds.filter((round) => round.mode.kind === "provenance").length;
   const language = input.rounds.filter((round) => round.mode.kind === "language").length;
-  if (provenance !== 3 || language !== 2) throw new ArcadeShellRuleError("session must contain exactly three provenance and two language rounds");
+  const singleDeck = DECK_KINDS.some((kind) => input.rounds.every((round) => round.mode.kind === kind));
+  if (!singleDeck && (provenance !== 3 || language !== 2)) {
+    throw new ArcadeShellRuleError("session must be one five-round deck or exactly three provenance and two language rounds");
+  }
   const rounds = input.rounds.map((round) => {
     const { mode } = round;
     if (mode.clues.length > 2) throw new ArcadeShellRuleError("a round may expose at most two clues");
