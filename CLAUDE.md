@@ -31,32 +31,26 @@ Expected SHA-256:
 - Branch: `claude/demoable-poc` (continues the merged
   `claude/clever-curie-d7rv1m` work on `main`).
 - Baseline before this work: `488aca571e7a05e7dc3aa6ae98c690b7ea69779b`.
-- The crawler, Stack workers, five-round artifact schema, server-only game
-  authority, a server-only artifact loader with an operator-pinned trusted hash,
-  a scripted demo recorder (`pnpm demo:record`, README GIFs and MP4), tests,
-  operator command, MIT licence, and CI workflow exist.
-- The root route still uses the synthetic rehearsal catalogue; the loader is
-  tested but not yet wired because no artifact exists.
-- The generated real-round artifact and live run report are intentionally
-  absent.
-- On 2026-10-08 eight authorized live runs moved the failing stage from
-  GitHub admission through Stack metadata to selected-blob retrieval. GitHub
-  discovery, lineage, admission (three candidates, both marker outcomes), and
-  both Stack metadata configurations (10,000 rows each) now pass against the
-  live providers within every ceiling. See
-  `docs/gangsta/codeguessr-poc-readiness/evidence/2026-10-08-live-preparation-attempts.md`.
-- The Hugging Face redirect host `us.aws.cdn.hf.co` is recorded and
-  allowlisted on both sides. The metadata worker reads one parquet row group
-  per exact range request instead of streaming through `datasets`.
-- A failed run logs `PREPARATION_STAGE_FAILED <stage> <code> <statusClass>`
-  for every failure, plus `PREPARATION_COUNTS` and `PREPARATION_REJECTIONS`
-  aggregates when selection fails.
-- The remaining blocker is the operator's AWS credential: the default profile
-  key is rejected by AWS itself (`InvalidClientTokenId`), so every Software
-  Heritage blob fetch exits with `WORKER_EXIT`.
+- The real five-round artifact exists at
+  `apps/game/src/demo/generated/local-real-rounds.json` (canonical SHA-256
+  `0eab7f489f311125b9a1ae8574fd2a3b072c3c954e48c8284aac39559a607498`, crawl
+  snapshot `9249eb590064490285f5f799acabb3fe56edf436fdc1d5b712262c99ca083713`),
+  produced by the fourteenth authorized live run on 2026-10-08 with the
+  accepted `GITHUB_SEARCH_INCOMPLETE` warning, and verified independently. See
+  `docs/gangsta/codeguessr-poc-readiness/evidence/2026-10-08-combined-live-run.md`.
+- The root route mounts that artifact through the server-only loader and the
+  operator-pinned hash in `apps/game/src/demo/local-real-experiment.pin.server.ts`;
+  there is no synthetic fallback. The synthetic catalogue stays in the codebase
+  and its own tests.
+- The README embeds three captioned GIFs and an MP4 recorded from the real
+  rounds by `pnpm demo:record`.
+- The run report lives at the ignored path `ops/poc/stack/tmp/local-experiment-run.json`.
+- Software Heritage blobs are read anonymously; no AWS credential is needed.
+- Every failure logs its stage, a safe code, the failing function and file,
+  and (for selection failures) pool counts and rejection aggregates.
 
-This is a resumable engineering handoff, not a completed or production-ready
-real-data demo.
+This is a demoable local real-data PoC, not production-ready and not
+authorized for public players.
 
 ## Non-negotiable boundaries
 
@@ -78,11 +72,11 @@ real-data demo.
 
 ## Immediate next steps
 
-1. The operator replaces the AWS default-profile credentials (or exports
-   `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`) with a key AWS accepts and that
-   may read the `softwareheritage` bucket. Verify with a single
-   `sts get-caller-identity` before any run; never record the values.
-2. Rerun the live preparation:
+1. The Don confirms or reverts two semantics refinements made during the live
+   attempts (see the 2026-10-08 checkpoint): trailer-aware marker matching and
+   the additive observed Copilot trailer names in the profile.
+2. Merge is a separate decision; this handoff authorizes none.
+3. To regenerate the artifact, rerun with the operator's credentials:
 
    ```bash
    HF_TOKEN="$(cat ~/.cache/huggingface/token)" \
@@ -91,28 +85,16 @@ real-data demo.
    pnpm prepare:poc
    ```
 
-   If blob retrieval still fails with `WORKER_EXIT`, reproduce one fetch with the
-   worker directly and check for a requester-pays requirement before changing
-   code.
-3. On `PREPARATION_COMPLETE`, verify the artifact independently (canonical hash
-   equals the report's `artifactHash`, three provenance then two language
-   fixtures, counts within ceilings), record the hash in
-   `apps/game/src/demo/local-real-experiment.pin.server.ts`, and commit the
-   artifact.
-4. Wire `apps/game/src/app/page.tsx` and `actions.ts` to
-   `local-real-experiment-loader.server.ts`, replace only the route-source
-   assertions (FR-015) in `rehearsal-catalogue.test.ts`, `demo-game.test.ts`,
-   and the containment test, and rewrite `tests/e2e/arcade-shell.spec.ts` to
-   derive answers from the artifact.
-5. Re-record the README media with `pnpm demo:record`, then update README,
-   checkpoint, and this file with fresh evidence.
+   then verify the new artifact independently, update the pinned hash, rerun
+   the full verification matrix, re-record the media, and update the evidence.
 
 Read the `PREPARATION_STAGE_FAILED` line first on any failure:
 `RETRY_SIGNAL_MISSING 4xx` means a 403/429 without a usable instruction,
 `WAIT_LIMIT` means the instruction exceeded the signed fifteen-second wait,
 `REQUEST_COUNT` or `REQUEST_LIMIT` in the rejections means the 200-request
-ceiling was spent, and `WORKER_EXIT` means a Python worker exited non-zero
-(reproduce it directly to read its code).
+ceiling was spent, `WORKER_EXIT` means a Python worker exited non-zero
+(reproduce it directly to read its code), and a `PUBLIC_CONTAINMENT_*` code
+names the protected key and public field that collided.
 
 ## Commands
 
