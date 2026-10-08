@@ -141,6 +141,21 @@ const invoke = async (
 };
 
 describe("GitHub public repository admission", () => {
+
+  it("decodes the provider's line-wrapped base64 licence content and rejects empty or non-string content", async () => {
+    const wrapped = Buffer.from(licenseBytes).toString("base64").replace(/(.{60})/gu, "$1\n") + "\n";
+    const providerResponses = mutableResponses();
+    providerResponses.get(`${api}/license?ref=${childCommit}`).content = wrapped;
+    const [admitted] = await invoke(providerResponses);
+    expect(admitted.source.licenseSpdx).toBe("MIT");
+
+    for (const content of ["", "   ", 42, null]) {
+      const broken = mutableResponses();
+      broken.get(`${api}/license?ref=${childCommit}`).content = content;
+      await expect(invoke(broken)).rejects.toBeInstanceOf(admissionModule.GitHubAdmissionError);
+    }
+  });
+
   it("binds public metadata, pinned licence evidence, and selected-commit author", async () => {
     const requests: Array<{ url: string; headers: Readonly<Record<string, string>> }> = [];
     const output = await invoke(responses(), requests);
