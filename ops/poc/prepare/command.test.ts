@@ -506,6 +506,18 @@ describe("local experiment preparation command", () => {
     expect(harness.calls.join(" ")).not.toMatch(/owner\/repo|secret/u);
   });
 
+  it("reports the transport cause behind a wrapped retry failure as the rejection code", async () => {
+    const diagnostic = { provider: "github", hostClass: "github", method: "GET", pathTemplate: "/repos/{owner}/{repository}/{resource}",
+      statusClass: "none", reasonCode: "REQUEST_LIMIT" } as const;
+    const harness = await makeHarness({
+      bindGitHubLineage: async () => { throw new RetryError("RETRY_SIGNAL_MISSING", new TransportError("REQUEST_LIMIT", diagnostic)); },
+    });
+    await expect(prepareLocalExperiment(harness.dependencies)).rejects.toThrow("PREPARATION_FAILED");
+    expect(harness.calls.filter((call) => call.startsWith("log:"))).toContain(
+      "log:PREPARATION_REJECTIONS DISCOVERY:REQUEST_LIMIT=5",
+    );
+  });
+
   it("keeps game and browser code out of the command and redacts top-level failures", async () => {
     const source = await readFile(sourcePath, "utf8");
     expect(source).not.toMatch(/from\s+["'][^"']*(?:apps\/game|next\/|playwright)|startGame|demo-game/u);

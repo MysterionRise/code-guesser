@@ -314,6 +314,38 @@ describe("GitHub immutable lineage adapter", () => {
     }
   });
 
+  it("skips modifications whose recorded patch cannot fit the excerpt window and rejects cheaply when none can", async () => {
+    const responses = mutableResponses();
+    const commit = responses.get(`${api}/commits/${ids.childCommit}`);
+    const original = commit.files[0];
+    const file = (filename: string, patch: string) => ({
+      ...structuredClone(original),
+      filename,
+      patch,
+      blob_url: `${web}/blob/${ids.childCommit}/${encodeURIComponent(filename)}`,
+      raw_url: `${web}/raw/${ids.childCommit}/${encodeURIComponent(filename)}`,
+      contents_url: `${api}/contents/${encodeURIComponent(filename)}?ref=${ids.childCommit}`,
+    });
+    const farHunks = "@@ -8,3 +8,3 @@\n a\n-b\n+c = 1\n d\n@@ -398,3 +398,3 @@\n e\n-f\n+g = 2\n h";
+    commit.files = [
+      file("src/alpha.ts", farHunks),
+      { ...original, patch: "@@ -1,3 +1,3 @@\n export function value() {\n-  return 1;\n+  return 2;\n }" },
+    ];
+    const [bound] = await invoke(responses);
+    expect(bound.path).toBe("src/value.ts");
+
+    const onlyCommit = new Map([[`${api}/commits/${ids.childCommit}`, structuredClone(commit)]]);
+    onlyCommit.get(`${api}/commits/${ids.childCommit}`)!.files = [file("src/alpha.ts", farHunks), file("src/beta.ts", "@@ -1,2 +1,3 @@\n a\n+// note\n b")];
+    await expect(invoke(onlyCommit)).rejects.toBeInstanceOf(lineageModule.GitHubLineageError);
+  });
+
+  it("screens the child blob before requesting anything about the parent", async () => {
+    const binaryChild = encoder.encode("export function value() {\n  return 2;\u0000\n}\n");
+    const responses = responsesForBytes(parentBytes, binaryChild);
+    responses.delete(`${api}/commits/${ids.parentCommit}`);
+    await expect(invoke(responses)).rejects.toThrow("BINARY_CONTENT");
+  });
+
   it("rejects ambiguous changed-file populations and previous-path metadata", async () => {
     const multiple = mutableResponses();
     multiple.get(`${api}/commits/${ids.childCommit}`).files.push(

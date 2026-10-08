@@ -38,6 +38,7 @@ describe("local experiment content support boundary", () => {
       "LicenseEvidenceError",
       "TreeWalkError",
       "isScreenablePath",
+      "patchFitsExcerptWindow",
       "reconstructChangedLines",
       "resolveApprovedSubtree",
       "screenBlob",

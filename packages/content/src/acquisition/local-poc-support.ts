@@ -6,6 +6,7 @@ export {
 } from "./github/blob-screen";
 export {
   ChangedLinesError,
+  patchFitsExcerptWindow,
   reconstructChangedLines,
   type ChangedLinesInput,
   type ChangedLinesResult,

@@ -80,7 +80,19 @@ const validateClassifications = (profile: CrawlProfile, values: unknown): readon
     seen.add(queryId); }
   return values as readonly GitHubQueryClassification[];
 };
-const noteRejection = (state: RunState, stage: DiagnosticStage, error: unknown): void => { const message = error instanceof Error && /^[A-Z][A-Z0-9_]*$/u.test(error.message) ? error.message : "CANDIDATE_REJECTED";
+/** The stable code of a candidate rejection: a wrapped retry failure reports its transport cause instead of the wrapper. */
+const rejectionCode = (error: unknown): string => {
+  const codeOf = (value: unknown): string | undefined => {
+    if (!(value instanceof Error)) return undefined;
+    const { code } = value as Error & { code?: unknown };
+    if (typeof code === "string" && REASON_CODE.test(code)) return code;
+    return REASON_CODE.test(value.message) ? value.message : undefined;
+  };
+  const own = codeOf(error);
+  if (own === "RETRY_SIGNAL_MISSING") return codeOf((error as Error).cause) ?? own;
+  return own ?? "CANDIDATE_REJECTED";
+};
+const noteRejection = (state: RunState, stage: DiagnosticStage, error: unknown): void => { const message = rejectionCode(error);
   const key = `${stage}\0${message}`; state.diagnostics.set(key, (state.diagnostics.get(key) ?? 0) + 1);
 };
 const markerOutcome = (candidate: unknown, profile: CrawlProfile): boolean => markerRecorded(String((candidate as any).lineage?.commitMessage ?? (candidate as any).commitMessage ?? ""), profile.markers);

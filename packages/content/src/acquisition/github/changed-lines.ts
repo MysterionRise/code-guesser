@@ -47,6 +47,42 @@ const CONTEXT_LINES = 2;
 const MAX_DIFF_LINES = 2_000;
 const MAX_EXCERPT_LINES = 21;
 
+const HUNK_HEADER = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/u;
+
+/**
+ * Cheap, deterministic pre-screen on the provider's recorded unified patch: true only when
+ * the added or modified child lines that would count as eligible changed lines fit the
+ * bounded excerpt window and touch no line beyond the diff ceiling. A patch that fails here
+ * could never pass reconstruction, so a caller may reject it before any further fetch; a
+ * patch that passes is still subject to the authoritative reconstruction from pinned blobs.
+ */
+export const patchFitsExcerptWindow = (patch: string): boolean => {
+  const eligible: number[] = [];
+  let childLine = 0;
+  let inHunk = false;
+  for (const line of patch.split("\n")) {
+    const header = HUNK_HEADER.exec(line);
+    if (header) {
+      childLine = Number(header[1]);
+      inHunk = true;
+      continue;
+    }
+    if (!inHunk) return false;
+    if (line.startsWith("+")) {
+      if (!INELIGIBLE_LINE.test(line.slice(1))) eligible.push(childLine);
+      childLine += 1;
+    } else if (line.startsWith(" ") || line === "") {
+      childLine += 1;
+    } else if (!line.startsWith("-") && !line.startsWith("\\")) {
+      return false;
+    }
+  }
+  if (eligible.length === 0) return false;
+  const first = Math.min(...eligible);
+  const last = Math.max(...eligible);
+  return last <= MAX_DIFF_LINES && last - first + 1 + 2 * CONTEXT_LINES <= MAX_EXCERPT_LINES;
+};
+
 const changedChildIndexes = (
   parentLines: readonly string[],
   childLines: readonly string[],
