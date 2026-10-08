@@ -177,6 +177,21 @@ const invoke = async (
 };
 
 describe("Stack candidate GitHub revalidation", () => {
+
+  it("decodes the provider's line-wrapped base64 for GitHub blobs and licence files", async () => {
+    const wrap = (value: string) => value.replace(/(.{60})/gu, "$1\n") + "\n";
+    const values = responses();
+    values.get(`${api}/git/blobs/${blob}`).content = wrap(values.get(`${api}/git/blobs/${blob}`).content);
+    values.get(`${api}/license?ref=${commit}`).content = wrap(values.get(`${api}/license?ref=${commit}`).content);
+    const result = await invoke(values);
+    expect(result.discoverySource).toBe("STACK_V2");
+    for (const broken of ["", " \n", 7]) {
+      const bad = responses();
+      bad.get(`${api}/git/blobs/${blob}`).content = broken;
+      await expect(invoke(bad)).rejects.toThrow("STACK_REVALIDATION_REJECTED");
+    }
+  });
+
   it("binds exact Stack bytes to a public pinned GitHub source and retains only a screened excerpt", async () => {
     const requests: string[] = [];
     const output = await invoke(responses(), row(), selected(), requests);

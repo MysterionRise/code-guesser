@@ -25,6 +25,10 @@ const searchWith = (queryClassifications: unknown): PreparationDependencies["sea
 } as any, "2");
 
 describe("local experiment preparation command", () => {
+/** Marker lines only; the failure-site line is asserted separately. */
+const logLines = (calls: readonly string[]): string[] =>
+  calls.filter((call) => call.startsWith("log:") && !call.startsWith("log:PREPARATION_FAILURE_SITE "));
+
   it("exposes one preparation entry point and one no-argument project command", async () => {
     expect(prepareLocalExperiment).toBeTypeOf("function");
     expect(runPreparationCli).toBeTypeOf("function");
@@ -245,7 +249,7 @@ describe("local experiment preparation command", () => {
 
     await prepareLocalExperiment(harness.dependencies);
 
-    expect(harness.calls.filter((call) => call.startsWith("log:"))).toEqual([
+    expect(logLines(harness.calls)).toEqual([
       "log:GITHUB_SEARCH_INCOMPLETE",
       "log:PREPARATION_COMPLETE",
     ]);
@@ -259,7 +263,7 @@ describe("local experiment preparation command", () => {
 
     await prepareLocalExperiment(harness.dependencies);
 
-    expect(harness.calls.filter((call) => call.startsWith("log:"))).toEqual([
+    expect(logLines(harness.calls)).toEqual([
       "log:PREPARATION_COMPLETE",
     ]);
   });
@@ -279,7 +283,7 @@ describe("local experiment preparation command", () => {
     for (const [_label, classifications] of malformed) {
       const harness = await makeHarness({ searchGitHub: searchWith(classifications) });
       await expect(prepareLocalExperiment(harness.dependencies)).rejects.toThrow("PREPARATION_FAILED");
-      expect(harness.calls.filter((call) => call.startsWith("log:"))).toEqual([
+      expect(logLines(harness.calls)).toEqual([
         "log:PREPARATION_STAGE_FAILED DISCOVERY INVARIANT_REJECTED none",
         "log:PREPARATION_FAILED",
       ]);
@@ -297,7 +301,7 @@ describe("local experiment preparation command", () => {
 
     await expect(prepareLocalExperiment(harness.dependencies)).rejects.toThrow("PREPARATION_FAILED");
 
-    expect(harness.calls.filter((call) => call.startsWith("log:"))).toEqual([
+    expect(logLines(harness.calls)).toEqual([
       "log:PREPARATION_STAGE_FAILED PUBLICATION PUBLICATION_REJECTED none",
       "log:PREPARATION_FAILED",
     ]);
@@ -334,7 +338,7 @@ describe("local experiment preparation command", () => {
     expect(harness.published).toEqual([]);
     expect(harness.reports).toEqual([]);
     expect(harness.calls).toContain("publish:rollback");
-    expect(harness.calls.filter((call) => call.startsWith("log:"))).toEqual([
+    expect(logLines(harness.calls)).toEqual([
       expect.stringMatching(/^log:PREPARATION_STAGE_FAILED PUBLICATION [A-Z][A-Z0-9_]* none$/u),
       "log:PREPARATION_FAILED",
     ]);
@@ -445,7 +449,7 @@ describe("local experiment preparation command", () => {
       searchGitHub: async () => { throw new TypeError("Cannot read properties of undefined (reading 'sha') https://example.test/?token=secret"); },
     });
     await expect(prepareLocalExperiment(uncoded.dependencies)).rejects.toThrow("PREPARATION_FAILED");
-    expect(uncoded.calls.filter((call) => call.startsWith("log:"))).toEqual([
+    expect(logLines(uncoded.calls)).toEqual([
       "log:PREPARATION_STAGE_FAILED DISCOVERY UNCODED_TYPEERROR none",
       "log:PREPARATION_FAILED",
     ]);
@@ -456,7 +460,7 @@ describe("local experiment preparation command", () => {
       searchGitHub: async () => { throw new RetryError("RETRY_SIGNAL_MISSING", new TransportError("UNSUPPORTED_STATUS", diagnostic)); },
     });
     await expect(prepareLocalExperiment(search.dependencies)).rejects.toThrow("PREPARATION_FAILED");
-    expect(search.calls.filter((call) => call.startsWith("log:"))).toEqual([
+    expect(logLines(search.calls)).toEqual([
       "log:PREPARATION_STAGE_FAILED DISCOVERY RETRY_SIGNAL_MISSING 4xx",
       "log:PREPARATION_FAILED",
     ]);
@@ -466,7 +470,7 @@ describe("local experiment preparation command", () => {
         pathTemplate: "/datasets/bigcode/the-stack-v2/{resource}", statusClass: "none", reasonCode: "TIMEOUT" }); },
     });
     await expect(prepareLocalExperiment(preflight.dependencies)).rejects.toThrow("PREPARATION_FAILED");
-    expect(preflight.calls.filter((call) => call.startsWith("log:"))).toEqual([
+    expect(logLines(preflight.calls)).toEqual([
       "log:PREPARATION_STAGE_FAILED PREFLIGHT TIMEOUT none",
       "log:PREPARATION_FAILED",
     ]);
@@ -475,7 +479,7 @@ describe("local experiment preparation command", () => {
       publishArtifact: async () => { throw Object.assign(new Error("PUBLICATION_FAILED"), { code: "PUBLICATION_FAILED" }); },
     });
     await expect(prepareLocalExperiment(publication.dependencies)).rejects.toThrow("PREPARATION_FAILED");
-    expect(publication.calls.filter((call) => call.startsWith("log:"))).toEqual([
+    expect(logLines(publication.calls)).toEqual([
       "log:PREPARATION_STAGE_FAILED PUBLICATION PUBLICATION_FAILED none",
       "log:PREPARATION_FAILED",
     ]);
@@ -484,7 +488,7 @@ describe("local experiment preparation command", () => {
       searchGitHub: async () => { throw Object.assign(new Error("leak"), { code: "Bearer raw-secret", diagnostic: { statusClass: "https://x/?q=1" } }); },
     });
     await expect(prepareLocalExperiment(unsafe.dependencies)).rejects.toThrow("PREPARATION_FAILED");
-    expect(unsafe.calls.filter((call) => call.startsWith("log:"))).toEqual([
+    expect(logLines(unsafe.calls)).toEqual([
       "log:PREPARATION_STAGE_FAILED DISCOVERY UNCODED_ERROR none",
       "log:PREPARATION_FAILED",
     ]);
@@ -497,7 +501,7 @@ describe("local experiment preparation command", () => {
       },
     });
     await expect(prepareLocalExperiment(harness.dependencies)).rejects.toThrow("PREPARATION_FAILED");
-    expect(harness.calls.filter((call) => call.startsWith("log:"))).toEqual([
+    expect(logLines(harness.calls)).toEqual([
       "log:PREPARATION_STAGE_FAILED ADMISSION INVARIANT_REJECTED none",
       "log:PREPARATION_COUNTS discovered=5 admitted=0 duplicates=0",
       "log:PREPARATION_REJECTIONS ADMISSION:CANDIDATE_REJECTED=2 ADMISSION:LICENSE_REJECTED=3",
@@ -513,9 +517,77 @@ describe("local experiment preparation command", () => {
       bindGitHubLineage: async () => { throw new RetryError("RETRY_SIGNAL_MISSING", new TransportError("REQUEST_LIMIT", diagnostic)); },
     });
     await expect(prepareLocalExperiment(harness.dependencies)).rejects.toThrow("PREPARATION_FAILED");
-    expect(harness.calls.filter((call) => call.startsWith("log:"))).toContain(
+    expect(logLines(harness.calls)).toContain(
       "log:PREPARATION_REJECTIONS DISCOVERY:REQUEST_LIMIT=5",
     );
+  });
+
+  it("screens Stack rows by the profile licence allowlist before any blob is fetched", async () => {
+    const harness = await makeHarness({
+      collectStackMetadata: async ({ configuration, capacity }) => {
+        const rows = configuration === "Python"
+          ? [
+            { id: "py-gpl", detectedLanguage: "Python", detectedLicenses: ["GPL-3.0"] },
+            { id: "py-mixed", detectedLanguage: "Python", detectedLicenses: ["MIT", "GPL-3.0"] },
+            { id: "py-empty", detectedLanguage: "Python", detectedLicenses: [] },
+            { id: "py-reject", detectedLanguage: "Python", detectedLicenses: ["MIT"] },
+            { id: "py", detectedLanguage: "Python", detectedLicenses: ["Apache-2.0"] },
+          ]
+          : [{ id: "ts", detectedLanguage: "TypeScript", detectedLicenses: ["BSD-3-Clause"] }];
+        capacity.recordStackRows(configuration, rows.length, 100);
+        return { value: rows, acceptedResponseHashes: [(configuration === "Python" ? "5" : "6").repeat(64)] };
+      },
+    });
+
+    await prepareLocalExperiment(harness.dependencies);
+
+    const fetched = harness.calls.filter((call) => call.startsWith("fetch:")).map((call) => call.split(":")[1]);
+    expect(fetched).toEqual(["py-reject", "py", "ts"]);
+    expect((harness.reports[0] as any).diagnostics).toContainEqual({ stage: "SCREENING", reasonCode: "LICENSE_REJECTED", count: 3 });
+  });
+
+  it("names the failing function and file after every stage failure, without line numbers or data", async () => {
+    function explodeInsideSearch(): never { throw new TypeError("Bearer leaked https://example.test/?token=x"); }
+    const harness = await makeHarness({ searchGitHub: async () => explodeInsideSearch() });
+    await expect(prepareLocalExperiment(harness.dependencies)).rejects.toThrow("PREPARATION_FAILED");
+    const site = harness.calls.find((call) => call.startsWith("log:PREPARATION_FAILURE_SITE "));
+    expect(site).toBe("log:PREPARATION_FAILURE_SITE explodeInsideSearch@command.test.ts");
+    expect(harness.calls.join(" ")).not.toMatch(/leaked|example\.test|token=|:\d+:\d+/u);
+  });
+
+  it("skips candidates whose public excerpt would reveal a protected value and keeps selecting", async () => {
+    let provenanceIds: unknown[] = [];
+    const harness = await makeHarness({
+      admitGitHubCandidate: async ({ candidate }) => {
+        const id = (candidate as any).id;
+        const lineage = { ...(candidate as object), excerpt: id === 1 ? "// Licensed under the MIT License\nexport const x = 1;" : `export const value${id} = ${id};` };
+        return { value: { admissionDecision: "AUTOMATED_POC_ADMISSION_ONLY", lineage, source: { repository: `owner/repo-${id}`, licenseSpdx: "MIT", path: `src/value-${id}.ts` } },
+          acceptedResponseHashes: ["4".repeat(64)] };
+      },
+      generateProvenance: ({ candidates }) => {
+        provenanceIds = candidates.map((candidate: any) => candidate.lineage.id);
+        return { fixtures: [{ kind: "PROVENANCE" }, { kind: "PROVENANCE" }, { kind: "PROVENANCE" }] } as any;
+      },
+      collectStackMetadata: async ({ configuration, capacity }) => {
+        const rows = configuration === "Python"
+          ? [{ id: "py-leak", detectedLanguage: "Python" }, { id: "py-reject", detectedLanguage: "Python" }, { id: "py", detectedLanguage: "Python" }]
+          : [{ id: "ts", detectedLanguage: "TypeScript" }];
+        capacity.recordStackRows(configuration, rows.length, 100);
+        return { value: rows, acceptedResponseHashes: [(configuration === "Python" ? "5" : "6").repeat(64)] };
+      },
+      revalidateStackCandidate: async ({ row }) => {
+        const id = (row as any).id;
+        return { value: { ...(row as object), path: `src/${id}.py`, repository: `owner/${id}`, excerpt: id === "py-leak" ? `# see src/${id}.py\nprint(1)` : "print(1)" },
+          acceptedResponseHashes: ["8".repeat(64)] };
+      },
+    });
+
+    await prepareLocalExperiment(harness.dependencies);
+
+    expect(provenanceIds).not.toContain(1);
+    expect(provenanceIds).toHaveLength(3);
+    expect(harness.calls).toContain("eligible:py");
+    expect((harness.reports[0] as any).diagnostics).toContainEqual({ stage: "SCREENING", reasonCode: "PUBLIC_CONTAINMENT_REJECTED", count: 2 });
   });
 
   it("keeps game and browser code out of the command and redacts top-level failures", async () => {
@@ -528,7 +600,8 @@ describe("local experiment preparation command", () => {
       log: (message) => { messages.push(message); },
     });
     await expect(prepareLocalExperiment(harness.dependencies)).rejects.toThrow("PREPARATION_FAILED");
-    expect(messages).toEqual(["PREPARATION_STAGE_FAILED PREFLIGHT UNCODED_ERROR none", "PREPARATION_FAILED"]);
+    expect(messages.filter((message) => !message.startsWith("PREPARATION_FAILURE_SITE "))).toEqual(["PREPARATION_STAGE_FAILED PREFLIGHT UNCODED_ERROR none", "PREPARATION_FAILED"]);
+    expect(messages.some((message) => /^PREPARATION_FAILURE_SITE [A-Za-z0-9_$.<>]+@[A-Za-z0-9_.-]+\.[cm]?[jt]sx?$/u.test(message))).toBe(true);
     expect(messages.join(" ")).not.toMatch(/raw-secret|@example|Bearer/u);
   });
 });

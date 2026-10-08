@@ -53,7 +53,8 @@ const sameBytes = (left: Uint8Array, right: Uint8Array): boolean =>
 const exactCanonical = (left: unknown, right: unknown): boolean =>
   canonicalHash(left) === canonicalHash(right);
 const rawHash = (value: string): string => createHash("sha256").update(value).digest("hex");
-const containsProtected = (publicText: string, value: string): boolean => {
+/** True when the protected value appears in public text as a whole token (non-alphanumeric boundaries). */
+export const containsProtected = (publicText: string, value: string): boolean => {
   const escaped = value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
   return new RegExp(`(^|[^A-Za-z0-9_])${escaped}([^A-Za-z0-9_]|$)`, "u").test(publicText);
 };

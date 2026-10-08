@@ -80,7 +80,10 @@ const validDate = (value: unknown): boolean => {
   return !Number.isNaN(instant.valueOf()) && expected.every((part, index) => part === observed[index]);
 };
 const decode = (value: unknown, size: unknown, whitespace = true): Uint8Array => {
-  const source = text(value);
+  // GitHub wraps base64 content at 60 columns with a trailing newline; the worker's own base64 is exact.
+  const source = whitespace
+    ? (typeof value === "string" && value.trim().length > 0 ? value : fail())
+    : text(value);
   const encoded = whitespace ? source.replace(/\s/gu, "") : source;
   if (!Number.isSafeInteger(size) || !/^[A-Za-z0-9+/]*={0,2}$/u.test(encoded)) fail();
   const bytes = Buffer.from(encoded, "base64");

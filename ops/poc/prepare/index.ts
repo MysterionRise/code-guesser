@@ -6,7 +6,7 @@ import { publishArtifact } from "./artifact-store";
 import { fetchSelectedBlob, projectBlobWorkerEnvironment, type BlobWorkerLimits } from "./blob-worker";
 import { canonicalBytes, canonicalHash } from "./canonical";
 import { createCapacityMeter, type CapacityMeter, type CapacitySnapshot } from "./capacity";
-import { composeExperimentArtifact, type ComposedExperiment } from "./compose";
+import { composeExperimentArtifact, containsProtected, type ComposedExperiment } from "./compose";
 import { admitGitHubCandidates } from "./github-admission";
 import { bindGitHubLineage } from "./github-lineage";
 import { crawlGitHubCommitSearch, type GitHubQueryClassification } from "./github-search";
@@ -72,6 +72,19 @@ const uncodedDiagnostic = (error: unknown): Readonly<{ code: string; statusClass
   const name = error instanceof Error ? error.constructor.name.replace(/[^A-Za-z0-9]/gu, "").toUpperCase() : "";
   return Object.freeze({ code: message ?? `UNCODED_${name || "ERROR"}`, statusClass: "none" });
 };
+const STACK_FRAME = /^\s*at (?:async )?([^\s(]+) \((.*?):\d+:\d+\)$/u;
+/** The first named frame outside the throw helpers: a function and file name only, never a line, URL, or value. */
+const failureSite = (error: unknown): string | undefined => {
+  const lines = error instanceof Error && typeof error.stack === "string" ? error.stack.split("\n") : [];
+  for (const line of lines) {
+    const match = STACK_FRAME.exec(line); if (!match) continue;
+    const name = match[1]!; const file = match[2]!.split("/").at(-1)!.replace(/\?.*$/u, "");
+    if (name === "fail" || name.endsWith(".fail") || name.startsWith("new ") || name.startsWith("node:")) continue;
+    if (!/^[A-Za-z0-9_.-]+\.[cm]?[jt]sx?$/u.test(file)) continue;
+    return `${name.replace(/[^A-Za-z0-9_$.<>]/gu, "")}@${file}`;
+  }
+  return undefined;
+};
 const validateClassifications = (profile: CrawlProfile, values: unknown): readonly GitHubQueryClassification[] => {
   if (!Array.isArray(values) || values.length !== profile.github.queries.length) throw new PreparationError(); const seen = new Set<string>();
   for (const [index, value] of values.entries()) { if (typeof value !== "object" || value === null) throw new PreparationError();
@@ -100,11 +113,29 @@ const provisionalSnapshot = (profileHash: string, hashes: readonly string[]): st
 const remainingBlobLimits = (profile: CrawlProfile, snapshot: CapacitySnapshot): BlobLimits => { const totalBlobBytes = Math.max(1, profile.capacity.totalBlobBytes - snapshot.totalBlobBytes); return Object.freeze({
   blobAttempts: Math.max(1, profile.capacity.blobAttempts - snapshot.blobAttempts + 1), successfulBlobs: Math.max(1, profile.capacity.successfulBlobs - snapshot.successfulBlobs), perBlobBytes: profile.capacity.perBlobBytes, totalBlobBytes, temporaryDiskBytes: Math.max(1, profile.capacity.temporaryDiskBytes - snapshot.temporaryDiskBytes),
   requestLimit: Math.max(1, profile.capacity.requestCount - snapshot.requestCount), networkByteLimit: Math.min(profile.capacity.perBlobBytes, totalBlobBytes) }); };
+/** FR-029: licence screening precedes any blob download. A row without a licence list is left to revalidation. */
+const licensesAllowed = (profile: CrawlProfile, row: unknown): boolean => { const licenses = (row as any)?.detectedLicenses;
+  if (!Array.isArray(licenses)) return true;
+  return licenses.length > 0 && licenses.every((identifier) => profile.licenses.includes(identifier)); };
 const stackOrder = (left: any, right: any): number => {
   for (const key of ["stableRowId", "repository", "swhRevisionId", "path", "swhContentId"]) {
     const order = String(left[key]) < String(right[key]) ? -1 : String(left[key]) > String(right[key]) ? 1 : 0;
     if (order !== 0) return order;
   } return 0; };
+const PROTECTED_SOURCE_KEYS = ["repository", "repositoryUrl", "authorName", "authorLogin", "authorSourceUrl", "path", "blob", "rawContentHash",
+  "licenseName", "licenseSpdx", "licenseFileUrl", "commit", "commitUrl", "blobUrl"] as const;
+const excerptOf = (candidate: any): string => String(candidate.lineage?.excerpt ?? candidate.excerpt ?? "");
+/**
+ * FR-009 applied per candidate: the public text the five rounds would expose (fixed templates plus every
+ * selected excerpt) may not contain any selected source's protected values as a whole token. Checking at
+ * selection time lets the run move to the next candidate instead of failing at composition.
+ */
+const revealsProtected = (profile: CrawlProfile, candidate: any, selected: readonly unknown[]): boolean => {
+  const all = [...selected, candidate];
+  const publicText = `${JSON.stringify(profile.templates)}\n${all.map(excerptOf).join("\n")}`;
+  return all.some((item: any) => { const source = item.source ?? item;
+    return PROTECTED_SOURCE_KEYS.some((key) => typeof source[key] === "string" && source[key].length > 0 && containsProtected(publicText, source[key])); });
+};
 const collidesWithSelected = (profile: CrawlProfile, candidate: any, selected: readonly unknown[]): boolean => { const source = candidate.source ?? candidate;
   return profile.deduplication.some((key) => selected.some((value: any) => typeof source[key] === "string" && source[key] === (value.source ?? value)[key])); };
 const selectGitHub = async (context: Context, deps: PreparationDependencies, hashes: string[], pool: readonly unknown[], state: RunState) => {
@@ -118,6 +149,7 @@ const selectGitHub = async (context: Context, deps: PreparationDependencies, has
       addHashes(hashes, admitted.acceptedResponseHashes);
       state.repositoriesAdmitted += 1; state.screened += 1;
       if (collidesWithSelected(context.profile, admitted.value, selected)) { state.duplicatesRejected += 1; noteRejection(state, "DEDUPLICATION", new Error("SOURCE_DUPLICATE")); continue; }
+      if (revealsProtected(context.profile, admitted.value, selected)) { noteRejection(state, "SCREENING", new Error("PUBLIC_CONTAINMENT_REJECTED")); continue; }
       selected.push(admitted.value);
       outcomes.add(markerOutcome(admitted.value, context.profile)); if (selected.length >= 3 && outcomes.size === 2) break;
     } catch (error) { noteRejection(state, "ADMISSION", error); }
@@ -132,6 +164,7 @@ const selectStack = async (context: Context, deps: PreparationDependencies, hash
   for (const configuration of context.profile.stack.configurations) {
     const ordered = rows.filter((item) => (item as any).detectedLanguage === configuration.language).sort(stackOrder);
     for (const row of ordered) {
+      if (!licensesAllowed(context.profile, row)) { noteRejection(state, "SCREENING", new Error("LICENSE_REJECTED")); continue; }
       const lease = context.capacity.beginBlob();
       let stage: DiagnosticStage = "BLOB_RETRIEVAL";
       try {
@@ -148,6 +181,8 @@ const selectStack = async (context: Context, deps: PreparationDependencies, hash
         const eligible = deps.validateLanguageCandidate({ ...context, candidate: checked.value });
         stage = "DEDUPLICATION";
         if (collidesWithSelected(context.profile, eligible, [...provenance, ...selected.map(({ candidate }) => candidate)])) { state.duplicatesRejected += 1; throw new Error("SOURCE_DUPLICATE"); }
+        stage = "SCREENING";
+        if (revealsProtected(context.profile, eligible, [...provenance, ...selected.map(({ candidate }) => candidate)])) throw new Error("PUBLIC_CONTAINMENT_REJECTED");
         lease.accept();
         selected.push(Object.freeze({ row, blob: fetched.value, candidate: eligible }));
         break;
@@ -225,6 +260,8 @@ export const prepareLocalExperiment = async (deps: PreparationDependencies = def
   } catch (error) {
     const diagnostic = failureDiagnostic(error) ?? uncodedDiagnostic(error);
     deps.log(`PREPARATION_STAGE_FAILED ${stage} ${diagnostic.code} ${diagnostic.statusClass}`);
+    const site = failureSite(error);
+    if (site) deps.log(`PREPARATION_FAILURE_SITE ${site}`);
     if (stage === "ADMISSION" || stage === "BLOB_RETRIEVAL" || stage === "SELECTION") {
       // Counts and stable rejection codes only: the same aggregates a successful run report carries.
       deps.log(`PREPARATION_COUNTS discovered=${state.discovered} admitted=${state.repositoriesAdmitted} duplicates=${state.duplicatesRejected}`);
