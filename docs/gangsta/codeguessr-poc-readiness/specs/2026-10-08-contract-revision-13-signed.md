@@ -1,11 +1,12 @@
 ---
 heist: codeguessr-poc-readiness
 date: 2026-10-08
-status: draft
+status: signed
 revision: 13
 approach: "Three Guessing Decks with date-disjoint discovery windows"
 signatories: [Don]
-review-status: awaiting-signature
+review-status: approved
+revision-13-approved-at: 2026-10-08T20:50:11Z
 revision-12-baseline: docs/gangsta/codeguessr-poc-readiness/specs/2026-10-08-contract-revision-12-signed.md
 revision-12-baseline-sha256: 045ff6a7801f07096f0eb178fa358458e9661ed11d2de7830747538c7ce30e78
 ---
@@ -46,4 +47,4 @@ revision 12.
 
 | Role | Decision | Timestamp |
 | --- | --- | --- |
-| Don | pending | |
+| Don | signed as drafted | 2026-10-08T20:50:11Z |

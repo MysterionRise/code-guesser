@@ -14,7 +14,9 @@ Treat these as the durable source of truth, in this order:
 2. `docs/gangsta/codeguessr-poc-readiness/checkpoints/2026-09-04-checkpoint-handoff.md`
 3. `docs/gangsta/codeguessr-poc-readiness/reviews/2026-09-04-handoff-audit.md`
 4. `docs/gangsta/codeguessr-poc-readiness/specs/2026-10-08-contract-revision-12-signed.md`
-   (amends revision 11, which stays binding where not amended:
+   and its correction
+   `docs/gangsta/codeguessr-poc-readiness/specs/2026-10-08-contract-revision-13-signed.md`
+   (both amend revision 11, which stays binding where not amended:
    `docs/gangsta/codeguessr-poc-readiness/specs/2026-08-15-contract-revision-11-signed.md`)
 5. `docs/gangsta/codeguessr-poc-readiness/plans/2026-07-31-execution-plan.md`
 6. `README.md`
@@ -23,13 +25,15 @@ Verify both signed Contract files before relying on them:
 
 ```bash
 shasum -a 256 docs/gangsta/codeguessr-poc-readiness/specs/2026-08-15-contract-revision-11-signed.md \
-  docs/gangsta/codeguessr-poc-readiness/specs/2026-10-08-contract-revision-12-signed.md
+  docs/gangsta/codeguessr-poc-readiness/specs/2026-10-08-contract-revision-12-signed.md \
+  docs/gangsta/codeguessr-poc-readiness/specs/2026-10-08-contract-revision-13-signed.md
 ```
 
 Expected SHA-256:
 
 - Revision 11: `3acc586d8fb479e6edfd2dd43e9f38ed5d8d6268ee5b025b449d3a564b32fe41`
 - Revision 12 amendment: `045ff6a7801f07096f0eb178fa358458e9661ed11d2de7830747538c7ce30e78`
+- Revision 13 correction: `2af256ad391f3e91de8e5be3ce58a35a468d32a7f9c363a26f22481b81dfcc43`
 
 ## Current state
 
