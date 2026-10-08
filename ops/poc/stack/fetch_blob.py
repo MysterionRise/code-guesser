@@ -129,14 +129,17 @@ def _default_session():
 
 
 def _client_configuration():
+    from botocore import UNSIGNED
     from botocore.config import Config
+    # The Software Heritage content bucket serves objects anonymously (observed 2026-10-08),
+    # so requests carry no AWS signing material and no credential can cross to the bucket host.
     return {
         "region_name": REGION,
         "endpoint_url": ENDPOINT_URL,
         "config": Config(
             retries={"total_max_attempts": 1, "mode": "standard"},
             connect_timeout=TIMEOUT_SECONDS, read_timeout=TIMEOUT_SECONDS,
-            max_pool_connections=1, signature_version="s3v4",
+            max_pool_connections=1, signature_version=UNSIGNED,
             s3={"addressing_style": "virtual"},
         ),
     }

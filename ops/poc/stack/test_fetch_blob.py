@@ -198,7 +198,9 @@ class FetchSelectedBlobTests(unittest.TestCase):
         config = kwargs["config"]
         self.assertEqual(config.retries, {"total_max_attempts": 1, "mode": "standard"})
         self.assertEqual((config.connect_timeout, config.read_timeout, config.max_pool_connections), (15, 15, 1))
-        self.assertEqual(config.signature_version, "s3v4")
+        # The content bucket serves objects anonymously; no AWS signing material is ever attached.
+        from botocore import UNSIGNED
+        self.assertIs(config.signature_version, UNSIGNED)
         self.assertEqual(config.s3, {"addressing_style": "virtual"})
         self.assertEqual(
             [name for name, _handler in client.meta.events.registrations], ["before-send.s3.GetObject"],
