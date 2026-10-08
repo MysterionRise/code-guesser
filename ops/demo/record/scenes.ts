@@ -31,7 +31,19 @@ const verdict: Step = { kind: "expectHeading", pattern: "^(?:Nice read\\.|Not th
  * indexes are a fixed choreography rather than known-correct answers; a wrong
  * pick shows the "Not this time." branch, which is part of the demo.
  */
-export const ANSWER_CHOREOGRAPHY: readonly number[] = Object.freeze([0, 0, 0, 1, 0]);
+export const DEFAULT_ANSWER_CHOREOGRAPHY: readonly number[] = Object.freeze([0, 0, 0, 1, 0]);
+
+/** Parses DEMO_ANSWERS ("0,1,1,0,1"): five radio indexes, one per round; blank means the default. */
+export const parseAnswerChoreography = (value: string | undefined): readonly number[] => {
+  if (value === undefined || value.trim() === "") return DEFAULT_ANSWER_CHOREOGRAPHY;
+  const indexes = value.split(",").map((part) => Number(part.trim()));
+  if (indexes.length !== 5 || indexes.some((index) => !Number.isInteger(index) || index < 0 || index > 3)) {
+    throw new RangeError("DEMO_ANSWERS must list five radio indexes between 0 and 3");
+  }
+  return Object.freeze(indexes);
+};
+
+const ANSWER_CHOREOGRAPHY = parseAnswerChoreography(process.env.DEMO_ANSWERS);
 
 const playRound = (round: number, hints: number): Step[] => [
   { kind: "expectText", pattern: `Round ${round} of 5` },
@@ -66,7 +78,7 @@ export const SCENES: readonly Scene[] = Object.freeze([
   },
   {
     id: "02-lock-in",
-    gif: {},
+    gif: { width: 360, maximumColors: 96 },
     steps: [
       { kind: "goto" },
       { kind: "expectText", pattern: "Round 1 of 5" },
@@ -87,7 +99,7 @@ export const SCENES: readonly Scene[] = Object.freeze([
   },
   {
     id: "03-full-run",
-    gif: { speed: 2, framesPerSecond: 12, width: 360, maximumColors: 96 },
+    gif: { speed: 2, framesPerSecond: 12, width: 360, maximumColors: 80 },
     mp4: "codeguessr-demo",
     steps: [
       { kind: "goto" },
