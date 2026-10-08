@@ -26,6 +26,8 @@ const STACK_RESPONSE_STATES = new Set(["COMPLETE", "INCOMPLETE", "NOT_STARTED"])
 const SUCCESSFUL_GITHUB_STATES = new Set(["COMPLETE", "PROVIDER_REPORTED_INCOMPLETE"]);
 const MAX_RUN_RETRIES = 3;
 const EXPERIMENT_SOURCE_ID = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+@[0-9a-f]{40}:[^?#\r\n]+$/u;
+/** True when the run report can record `repository@commit:path` as a source identity. */
+export const isReportableSourceIdentity = (identity: string): boolean => EXPERIMENT_SOURCE_ID.test(identity);
 const DIAGNOSTIC_STAGES = new Set([
   "DISCOVERY", "ADMISSION", "STACK_METADATA", "BLOB_RETRIEVAL",
   "GITHUB_REVALIDATION", "SCREENING", "DEDUPLICATION", "SELECTION",

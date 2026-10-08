@@ -14,6 +14,7 @@ import { bindGitHubLineage } from "./github-lineage";
 import { crawlGitHubCommitSearch, type GitHubQueryClassification } from "./github-search";
 import { generateLanguageRounds, validateLanguageCandidate } from "./language-rounds";
 import { artifactFixtures, CROSS_DECK_KEYS } from "./model";
+import { isReportableSourceIdentity } from "./model-run";
 import { parseCrawlProfile, STACK_LANGUAGES, type CrawlProfile, type StackLanguage } from "./profile";
 import { generateProjectRounds, projectExcerptAllowed } from "./project-rounds";
 import { createRetryController, type RetryController } from "./retry";
@@ -156,6 +157,12 @@ type GitHubDecks = Readonly<{ project: readonly unknown[]; ai: readonly unknown[
  * up to three credited commits from `ai-credit` queries and the rest uncredited from `ordinary` queries,
  * at least two of each. Admitted ordinary candidates the project deck cannot use stay available to the AI deck.
  */
+/** A selected source must fit the run report's identity pattern, or publication would fail after every request was spent. */
+const unreportable = (value: unknown): boolean => {
+  const { repository, commit, path } = (value ?? {}) as Record<string, unknown>;
+  return typeof repository === "string" && typeof commit === "string" && typeof path === "string"
+    && !isReportableSourceIdentity(`${repository}@${commit}:${path}`);
+};
 const selectGitHub = async (context: Context, deps: PreparationDependencies, hashes: string[], pool: readonly unknown[], state: RunState): Promise<GitHubDecks> => {
   const { profile } = context; const { projectRounds, aiRounds, aiMinimumPerOutcome } = profile.selection;
   const ordinary = pool.filter((candidate) => queryRole(profile, candidate) === "ordinary");
@@ -169,6 +176,7 @@ const selectGitHub = async (context: Context, deps: PreparationDependencies, has
     try {
       const admitted = await deps.admitGitHubCandidate({ ...context, candidate: lineage.value, crawlSnapshotId: provisionalSnapshot(context.profileHash, hashes) });
       addHashes(hashes, admitted.acceptedResponseHashes); state.repositoriesAdmitted += 1; state.screened += 1;
+      if (unreportable((admitted.value as { source?: unknown }).source)) { noteRejection(state, "SCREENING", new Error("SOURCE_IDENTITY_UNREPORTABLE")); return undefined; }
       return admitted.value;
     } catch (error) { noteRejection(state, "ADMISSION", error); return undefined; }
   };
@@ -192,7 +200,8 @@ const selectGitHub = async (context: Context, deps: PreparationDependencies, has
   const repeatsRepository = (candidate: unknown, deck: readonly unknown[]): boolean => {
     const repository = (candidate as { repository?: unknown } | undefined)?.repository;
     if (typeof repository !== "string" || !deck.some((admitted: any) => admitted?.source?.repository === repository)) return false;
-    state.duplicatesRejected += 1; noteRejection(state, "DEDUPLICATION", new Error("REPOSITORY_REPEATED"));
+    // A diagnostic only: the run report bounds duplicatesRejected by screened candidates, and this one was never screened.
+    noteRejection(state, "DEDUPLICATION", new Error("REPOSITORY_REPEATED"));
     return true;
   };
   let cursor = 0;
@@ -241,6 +250,7 @@ const selectStack = async (context: Context, deps: PreparationDependencies, hash
         addHashes(hashes, checked.acceptedResponseHashes); state.githubRevalidations += 1;
         if ((checked.value as any).detectedLanguage !== configuration.language) throw new PreparationError();
         stage = "SCREENING"; state.screened += 1;
+        if (unreportable(checked.value)) throw new Error("SOURCE_IDENTITY_UNREPORTABLE");
         const eligible = deps.validateLanguageCandidate({ ...context, candidate: checked.value });
         stage = "DEDUPLICATION";
         if (collidesWithSelected(context.profile, eligible, selected.map(({ candidate }) => candidate), github)) { state.duplicatesRejected += 1; throw new Error("SOURCE_DUPLICATE"); }

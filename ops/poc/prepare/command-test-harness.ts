@@ -1,3 +1,4 @@
+import { createRunReport } from "./run-report";
 import { readFile } from "node:fs/promises";
 
 import { canonicalBytes, canonicalHash } from "./canonical";
@@ -185,7 +186,7 @@ const makeArtifactDependencies = (
 const makeOutputDependencies = (
   state: HarnessState,
 ): Pick<PreparationDependencies, "createReport" | "stageReport" | "publishArtifact" | "now" | "uuid" | "log"> => ({
-  createReport: (input) => { state.calls.push("report:create"); return input as any; },
+  createReport: (input) => { state.calls.push("report:create"); return createRunReport(input); },
   stageReport: async (report) => {
     state.calls.push("report:stage");
     return {

@@ -112,10 +112,11 @@ const logLines = (calls: readonly string[]): string[] =>
 
   it("skips a search candidate whose repository the deck already holds before spending any lineage request", async () => {
     const profile = await loadProfile();
+    // More skipped repeats than screened candidates: skips are diagnostics, not screened duplicates.
+    const repeats = Array.from({ length: 30 }, (_, index) => ({ id: 100 + index, queryId: "ordinary-facebook", repository: "same/repo" }));
     const candidates = [
       { id: 0, queryId: "ordinary-facebook", repository: "same/repo" },
-      { id: 1, queryId: "ordinary-facebook", repository: "same/repo" },
-      { id: 2, queryId: "ordinary-facebook", repository: "same/repo" },
+      ...repeats,
       ...[3, 4, 5, 6, 7, 8].map((id) => ({ id, queryId: "ordinary-facebook", repository: `org${id}/repo-${id}` })),
       { id: 20, queryId: "ai-copilot-github", repository: "ai/repo" },
       { id: 21, queryId: "ai-copilot-github", repository: "ai/repo" },
@@ -127,6 +128,11 @@ const logLines = (calls: readonly string[]): string[] =>
       searchGitHub: async () => accepted({ candidates, queryClassifications: classificationsFor(profile) }, "2"),
       generateProject: ({ candidates: selected }) => { projectIds = selected.map((candidate: any) => candidate.lineage.id); return { fixtures: Array(5).fill({ kind: "PROJECT" }) } as any; },
       generateAi: ({ candidates: selected }) => { aiIds = selected.map((candidate: any) => candidate.lineage.id); return { fixtures: Array(5).fill({ kind: "AI_CREDIT" }) } as any; },
+      createReport: (input) => {
+        const report = createRunReport(input) as any;
+        expect(report.counts.duplicatesRejected).toBeLessThanOrEqual(report.counts.screened);
+        return report;
+      },
     });
 
     await prepareLocalExperiment(harness.dependencies);
@@ -136,8 +142,8 @@ const logLines = (calls: readonly string[]): string[] =>
     expect(projectIds).toEqual([0, 3, 4, 5, 6]);
     expect(aiIds).toEqual([20, 22, 23, 7, 8]);
     const report = harness.reports[0] as any;
-    expect(report.diagnostics).toContainEqual({ stage: "DEDUPLICATION", reasonCode: "REPOSITORY_REPEATED", count: 3 });
-    expect(report.counts.duplicatesRejected).toBe(3);
+    expect(report.diagnostics).toContainEqual({ stage: "DEDUPLICATION", reasonCode: "REPOSITORY_REPEATED", count: 31 });
+    expect(report.counts.duplicatesRejected).toBe(0);
   });
 
   it("stops spending project requests on a repository whose excerpt already named its own project", async () => {
@@ -165,6 +171,25 @@ const logLines = (calls: readonly string[]): string[] =>
     const diagnostics = (harness.reports[0] as any).diagnostics;
     expect(diagnostics).toContainEqual({ stage: "SCREENING", reasonCode: "PROJECT_NAME_IN_EXCERPT", count: 1 });
     expect(diagnostics).toContainEqual({ stage: "SCREENING", reasonCode: "PROJECT_REPOSITORY_SKIPPED", count: 1 });
+  });
+
+  it("screens out a source whose identity the run report could not record, before it can fail publication", async () => {
+    let projectIds: unknown[] = [];
+    const harness = await makeHarness({
+      admitGitHubCandidate: async ({ candidate }) => admittedWith(candidate,
+        (candidate as any).id === 1 ? { path: "src/c#/file-1.ts" } : {}),
+      collectStackMetadata: metadataFrom(stackRowsWith([
+        { id: "py-hash", detectedLanguage: "Python" }, { id: "py-reject", detectedLanguage: "Python" }, { id: "py", detectedLanguage: "Python" },
+      ])),
+      revalidateStackCandidate: async ({ row }: any) => accepted({ ...row, repository: `stack/${row.id}`,
+        commit: String(Object.keys(stackRowsWith([])).indexOf(row.detectedLanguage) * 10 + row.id.length).padStart(40, "d"),
+        path: row.id === "py-hash" ? "pkg/a?b.py" : `pkg/${row.id}.py` }, "7"),
+      generateProject: ({ candidates }) => { projectIds = candidates.map((candidate: any) => candidate.lineage.id); return { fixtures: Array(5).fill({ kind: "PROJECT" }) } as any; },
+    });
+
+    await prepareLocalExperiment(harness.dependencies);
+    expect(projectIds).not.toContain(1);
+    expect((harness.reports[0] as any).diagnostics).toContainEqual({ stage: "SCREENING", reasonCode: "SOURCE_IDENTITY_UNREPORTABLE", count: 2 });
   });
 
   it("keeps at least two credited and two uncredited AI rounds, filling from ordinary commits", async () => {
