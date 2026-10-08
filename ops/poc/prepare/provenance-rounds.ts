@@ -43,10 +43,19 @@ const text = (value: unknown): string =>
 const codeText = (value: unknown): string =>
   typeof value === "string" && value.trim().length > 0 ? value : fail();
 
-const markerRecorded = (message: string, markers: readonly string[]): boolean => {
+const TRAILER_ADDRESS = /^<[^\s<>]+>$/u;
+
+/**
+ * A configured marker is recorded when one full line of the commit message equals it,
+ * or when a trailer line consists of the marker followed by exactly one space and one
+ * angle-bracket address (the Git trailer form, e.g. `Co-authored-by: Copilot <id@host>`).
+ * Nothing else matches: no substrings, prefixes, case folding, or surrounding text.
+ */
+export const markerRecorded = (message: string, markers: readonly string[]): boolean => {
   if (markers.some((marker) => marker.includes("\n") || marker.includes("\r"))) fail();
   const lines = message.split(/\r?\n/u);
-  return lines.some((line) => markers.includes(line));
+  return lines.some((line) => markers.some((marker) => line === marker
+    || (line.startsWith(`${marker} `) && TRAILER_ADDRESS.test(line.slice(marker.length + 1)))));
 };
 
 const sourceIdentity = (candidate: GitHubAdmissionCandidate, profile: CrawlProfile): string =>

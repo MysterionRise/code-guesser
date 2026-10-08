@@ -1,5 +1,6 @@
 export {
   BlobScreenError,
+  isScreenablePath,
   screenBlob,
   type ScreenedBlob,
 } from "./github/blob-screen";

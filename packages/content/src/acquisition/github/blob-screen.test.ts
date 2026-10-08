@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { BlobScreenError, screenBlob } from "./blob-screen";
+import { BlobScreenError, isScreenablePath, screenBlob } from "./blob-screen";
 
 const testModuleName: string = "vitest";
 interface Expectation {
@@ -16,6 +16,13 @@ const { describe, expect, it } = await import(testModuleName) as TestApi;
 const bytes = (value: string): Uint8Array => new TextEncoder().encode(value);
 
 describe("deterministic source blob screening", () => {
+  it("answers path eligibility without content: safe, supported, and not excluded", () => {
+    for (const path of ["src/value.ts", "lib/alpha.go", "a/b/c.py", "Main.java", "x.sh"]) expect(isScreenablePath(path)).toBe(true);
+    for (const path of [
+      "/src/value.ts", "src/../value.ts", "src\\value.ts", "src/notes.md", "docs/guide.ts", ".github/workflows/ci.ts",
+      "vendor/lib.js", "app.min.js", "package-lock.json", "src/sp ace.ts", "",
+    ]) expect(isScreenablePath(path)).toBe(false);
+  });
   it("normalizes line endings while preserving distinct raw and normalized hashes", () => {
     const raw = bytes("const x = 1;\r\nconst y = 2;\r");
     const result = screenBlob({ path: "src/code.ts", bytes: raw }, new Set());

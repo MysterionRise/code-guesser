@@ -200,6 +200,25 @@ describe("honest provenance round generation", () => {
     expect(output.fixtures.map(({ source }: any) => source.markerMatched)).toEqual([true, false, false]);
   });
 
+  it("matches a configured trailer marker followed only by its angle-bracket address", async () => {
+    const markers = ["Co-authored-by: Copilot", "Generated-by: Copilot"];
+    const { markerRecorded } = roundsModule;
+    expect(markerRecorded("Subject\n\nCo-authored-by: Copilot <198982749+Copilot@users.noreply.github.com>", markers)).toBe(true);
+    expect(markerRecorded("Subject\r\nCo-authored-by: Copilot <copilot@github.com>\r\n", markers)).toBe(true);
+    expect(markerRecorded("Generated-by: Copilot", markers)).toBe(true);
+    for (const message of [
+      "Co-authored-by: Copilot App <x@example.test>",
+      "Co-authored-by: Copilot <>",
+      "Co-authored-by: Copilot <with space>",
+      "Co-authored-by: Copilot  <x@example.test>",
+      "Co-authored-by: Copilot <x@example.test> trailing",
+      "Co-authored-by: Copilot extra",
+      "co-authored-by: copilot <x@example.test>",
+      "Generated-by: Copilot <x@example.test>?",
+    ]) expect(markerRecorded(message, markers)).toBe(false);
+    expect(() => markerRecorded("x", ["multi\nline"])).toThrow();
+  });
+
   it("is byte-stable for the same admitted ordered pool", async () => {
     const parsedProfile = await profile();
     const first = generateProvenanceRounds({ profile: parsedProfile, candidates: pool() });

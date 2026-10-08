@@ -114,6 +114,8 @@ describe("local crawl profile", () => {
     expect(profile.stack.revision).toBe("e565caa3a78c2423bd374333a472b049eb090e47");
     expect(profile.markers).toEqual([
       "Co-authored-by: GitHub Copilot",
+      "Co-authored-by: Copilot",
+      "Co-authored-by: Copilot App",
       "Generated-by: Copilot",
     ]);
   });

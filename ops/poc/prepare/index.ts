@@ -12,7 +12,7 @@ import { bindGitHubLineage } from "./github-lineage";
 import { crawlGitHubCommitSearch, type GitHubQueryClassification } from "./github-search";
 import { generateLanguageRounds, validateLanguageCandidate, type GeneratedLanguageRounds } from "./language-rounds";
 import { parseCrawlProfile, type CrawlProfile } from "./profile";
-import { generateProvenanceRounds, type GeneratedProvenanceRounds } from "./provenance-rounds";
+import { generateProvenanceRounds, markerRecorded, type GeneratedProvenanceRounds } from "./provenance-rounds";
 import { createRetryController, type RetryController } from "./retry";
 import { stageRunReport, type StagedRunReport } from "./report-store";
 import { createRunReport } from "./run-report";
@@ -27,7 +27,7 @@ type Context = Readonly<{ profile: CrawlProfile; canonicalProfileBytes: Uint8Arr
 type StackSelection = Readonly<{ row: unknown; blob: unknown; candidate: unknown }>;
 type DiagnosticStage = "DISCOVERY" | "ADMISSION" | "BLOB_RETRIEVAL" | "GITHUB_REVALIDATION" | "SCREENING" | "DEDUPLICATION";
 type FailureStage = "PREFLIGHT" | "DISCOVERY" | "ADMISSION" | "STACK_METADATA" | "BLOB_RETRIEVAL" | "SELECTION" | "PUBLICATION";
-interface RunState { readonly diagnostics: Map<string, number>; repositoriesAdmitted: number; githubRevalidations: number; screened: number; duplicatesRejected: number }
+interface RunState { readonly diagnostics: Map<string, number>; discovered: number; repositoriesAdmitted: number; githubRevalidations: number; screened: number; duplicatesRejected: number }
 export interface PreparationDependencies {
   loadProfile(): Promise<Readonly<{ profile: CrawlProfile; canonicalProfileBytes: Uint8Array }>>; environment(): Environment;
   createCapacity(options: Parameters<typeof createCapacityMeter>[0]): CapacityMeter; createRuntime(options: Readonly<{ profile: CrawlProfile; environment: Environment; capacity: CapacityMeter }>): unknown;
@@ -65,6 +65,13 @@ const failureDiagnostic = (error: unknown): Readonly<{ code: string; statusClass
   }
   return code === undefined ? undefined : Object.freeze({ code, statusClass });
 };
+/** Names an uncoded failure by its code-shaped message or its class, never by any other detail. */
+const uncodedDiagnostic = (error: unknown): Readonly<{ code: string; statusClass: string }> => {
+  if (error instanceof PreparationError) return Object.freeze({ code: "INVARIANT_REJECTED", statusClass: "none" });
+  const message = error instanceof Error && REASON_CODE.test(error.message) ? error.message : undefined;
+  const name = error instanceof Error ? error.constructor.name.replace(/[^A-Za-z0-9]/gu, "").toUpperCase() : "";
+  return Object.freeze({ code: message ?? `UNCODED_${name || "ERROR"}`, statusClass: "none" });
+};
 const validateClassifications = (profile: CrawlProfile, values: unknown): readonly GitHubQueryClassification[] => {
   if (!Array.isArray(values) || values.length !== profile.github.queries.length) throw new PreparationError(); const seen = new Set<string>();
   for (const [index, value] of values.entries()) { if (typeof value !== "object" || value === null) throw new PreparationError();
@@ -76,7 +83,7 @@ const validateClassifications = (profile: CrawlProfile, values: unknown): readon
 const noteRejection = (state: RunState, stage: DiagnosticStage, error: unknown): void => { const message = error instanceof Error && /^[A-Z][A-Z0-9_]*$/u.test(error.message) ? error.message : "CANDIDATE_REJECTED";
   const key = `${stage}\0${message}`; state.diagnostics.set(key, (state.diagnostics.get(key) ?? 0) + 1);
 };
-const markerOutcome = (candidate: unknown, profile: CrawlProfile): boolean => String((candidate as any).lineage?.commitMessage ?? (candidate as any).commitMessage ?? "").split(/\r?\n/u).some((line) => profile.markers.includes(line));
+const markerOutcome = (candidate: unknown, profile: CrawlProfile): boolean => markerRecorded(String((candidate as any).lineage?.commitMessage ?? (candidate as any).commitMessage ?? ""), profile.markers);
 const provisionalSnapshot = (profileHash: string, hashes: readonly string[]): string => canonicalHash({ profileHash, acceptedResponseHashes: hashes.length > 0 ? hashes : [canonicalHash("capture")] });
 const remainingBlobLimits = (profile: CrawlProfile, snapshot: CapacitySnapshot): BlobLimits => { const totalBlobBytes = Math.max(1, profile.capacity.totalBlobBytes - snapshot.totalBlobBytes); return Object.freeze({
   blobAttempts: Math.max(1, profile.capacity.blobAttempts - snapshot.blobAttempts + 1), successfulBlobs: Math.max(1, profile.capacity.successfulBlobs - snapshot.successfulBlobs), perBlobBytes: profile.capacity.perBlobBytes, totalBlobBytes, temporaryDiskBytes: Math.max(1, profile.capacity.temporaryDiskBytes - snapshot.temporaryDiskBytes),
@@ -158,6 +165,7 @@ const reportInput = (context: Context, composed: ComposedExperiment, executionId
 };
 export const prepareLocalExperiment = async (deps: PreparationDependencies = defaultDependencies()): Promise<PreparationResult> => {
   let stage: FailureStage = "PREFLIGHT";
+  const state: RunState = { diagnostics: new Map(), discovered: 0, repositoriesAdmitted: 0, githubRevalidations: 0, screened: 0, duplicatesRejected: 0 };
   try {
     const loaded = await deps.loadProfile();
     const profileHash = canonicalHash(loaded.profile);
@@ -168,10 +176,10 @@ export const prepareLocalExperiment = async (deps: PreparationDependencies = def
     const runtime = deps.createRuntime({ profile: loaded.profile, environment, capacity });
     const context = Object.freeze({ ...loaded, profileHash, environment, capacity, runtime });
     const hashes: string[] = [];
-    const state: RunState = { diagnostics: new Map(), repositoriesAdmitted: 0, githubRevalidations: 0, screened: 0, duplicatesRejected: 0 };
     addHashes(hashes, (await deps.preflight(context)).acceptedResponseHashes);
     stage = "DISCOVERY";
     const search = await deps.searchGitHub(context); addHashes(hashes, search.acceptedResponseHashes);
+    state.discovered = Array.isArray(search.value.candidates) ? search.value.candidates.length : 0;
     const classifications = validateClassifications(loaded.profile, search.value.queryClassifications);
     stage = "ADMISSION";
     const provenanceCandidates = await selectGitHub(context, deps, hashes, search.value.candidates, state);
@@ -203,8 +211,14 @@ export const prepareLocalExperiment = async (deps: PreparationDependencies = def
     deps.log("PREPARATION_COMPLETE");
     return Object.freeze({ artifactHash: composed.artifactHash, crawlSnapshotId, publication });
   } catch (error) {
-    const diagnostic = failureDiagnostic(error);
-    if (diagnostic) deps.log(`PREPARATION_STAGE_FAILED ${stage} ${diagnostic.code} ${diagnostic.statusClass}`);
+    const diagnostic = failureDiagnostic(error) ?? uncodedDiagnostic(error);
+    deps.log(`PREPARATION_STAGE_FAILED ${stage} ${diagnostic.code} ${diagnostic.statusClass}`);
+    if (stage === "ADMISSION" || stage === "BLOB_RETRIEVAL" || stage === "SELECTION") {
+      // Counts and stable rejection codes only: the same aggregates a successful run report carries.
+      deps.log(`PREPARATION_COUNTS discovered=${state.discovered} admitted=${state.repositoriesAdmitted} duplicates=${state.duplicatesRejected}`);
+      const rejections = [...state.diagnostics].map(([key, count]) => `${key.replace("\0", ":")}=${count}`).sort();
+      if (rejections.length > 0) deps.log(`PREPARATION_REJECTIONS ${rejections.join(" ")}`);
+    }
     deps.log("PREPARATION_FAILED"); throw new PreparationError();
   }
 };

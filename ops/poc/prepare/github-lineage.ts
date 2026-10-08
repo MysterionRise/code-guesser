@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { reconstructChangedLines, screenBlob } from "@codeguessr/content/local-poc-support";
+import { isScreenablePath, reconstructChangedLines, screenBlob } from "@codeguessr/content/local-poc-support";
 import type { GitHubSearchCandidate } from "./github-search";
 import type { CrawlProfile } from "./profile";
 import type { RetryController } from "./retry";
@@ -114,19 +114,31 @@ const parseCommit = (
   });
 };
 
+/**
+ * FR-024 requires a single-parent commit; the commit itself may touch several files.
+ * Exactly one same-path modification is bound: the first screenable one in path order,
+ * so the choice is deterministic for the pinned commit and recorded in the fixture.
+ */
 const parseChangedPath = (
   commit: CommitRecord,
   api: string,
   web: string,
 ): Readonly<{ path: string; blob: string }> => {
-  if (commit.parents.length !== 1 || commit.files.length !== 1) fail();
-  const file = commit.files[0]!;
+  if (commit.parents.length !== 1 || commit.files.length === 0) fail();
+  const modifications = commit.files.filter((entry) => entry.status === "modified"
+    && entry.previous_filename === undefined && typeof entry.filename === "string"
+    && isScreenablePath(entry.filename));
+  const names = modifications.map((entry) => text(entry.filename));
+  if (names.length === 0 || new Set(names).size !== names.length) fail();
+  const file = [...modifications].sort((left, right) => compareText(text(left.filename), text(right.filename)))[0]!;
   const path = text(file.filename);
   const blob = gitId(file.sha);
+  // GitHub percent-encodes the whole path (slashes included) inside these per-file URLs.
+  const encoded = encodeURIComponent(path);
   if (file.status !== "modified" || file.previous_filename !== undefined
-    || file.blob_url !== `${web}/blob/${commit.sha}/${path}`
-    || file.raw_url !== `${web}/raw/${commit.sha}/${path}`
-    || file.contents_url !== `${api}/contents/${path}?ref=${commit.sha}`) fail();
+    || file.blob_url !== `${web}/blob/${commit.sha}/${encoded}`
+    || file.raw_url !== `${web}/raw/${commit.sha}/${encoded}`
+    || file.contents_url !== `${api}/contents/${encoded}?ref=${commit.sha}`) fail();
   return Object.freeze({ path, blob });
 };
 

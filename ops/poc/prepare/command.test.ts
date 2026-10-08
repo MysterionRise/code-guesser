@@ -279,7 +279,10 @@ describe("local experiment preparation command", () => {
     for (const [_label, classifications] of malformed) {
       const harness = await makeHarness({ searchGitHub: searchWith(classifications) });
       await expect(prepareLocalExperiment(harness.dependencies)).rejects.toThrow("PREPARATION_FAILED");
-      expect(harness.calls.filter((call) => call.startsWith("log:"))).toEqual(["log:PREPARATION_FAILED"]);
+      expect(harness.calls.filter((call) => call.startsWith("log:"))).toEqual([
+        "log:PREPARATION_STAGE_FAILED DISCOVERY INVARIANT_REJECTED none",
+        "log:PREPARATION_FAILED",
+      ]);
       expect(harness.calls).not.toContain("report:stage");
       expect(harness.calls).not.toContain("publish");
     }
@@ -295,6 +298,7 @@ describe("local experiment preparation command", () => {
     await expect(prepareLocalExperiment(harness.dependencies)).rejects.toThrow("PREPARATION_FAILED");
 
     expect(harness.calls.filter((call) => call.startsWith("log:"))).toEqual([
+      "log:PREPARATION_STAGE_FAILED PUBLICATION PUBLICATION_REJECTED none",
       "log:PREPARATION_FAILED",
     ]);
   });
@@ -330,7 +334,10 @@ describe("local experiment preparation command", () => {
     expect(harness.published).toEqual([]);
     expect(harness.reports).toEqual([]);
     expect(harness.calls).toContain("publish:rollback");
-    expect(harness.calls.filter((call) => call.startsWith("log:"))).toEqual(["log:PREPARATION_FAILED"]);
+    expect(harness.calls.filter((call) => call.startsWith("log:"))).toEqual([
+      expect.stringMatching(/^log:PREPARATION_STAGE_FAILED PUBLICATION [A-Z][A-Z0-9_]* none$/u),
+      "log:PREPARATION_FAILED",
+    ]);
   });
 
   it("replays captured responses in order without a second live request", async () => {
@@ -433,7 +440,16 @@ describe("local experiment preparation command", () => {
     });
   });
 
-  it("logs stage, reason code, and status class only for coded failures", async () => {
+  it("logs stage, reason code, and status class for every failure, naming uncoded ones safely", async () => {
+    const uncoded = await makeHarness({
+      searchGitHub: async () => { throw new TypeError("Cannot read properties of undefined (reading 'sha') https://example.test/?token=secret"); },
+    });
+    await expect(prepareLocalExperiment(uncoded.dependencies)).rejects.toThrow("PREPARATION_FAILED");
+    expect(uncoded.calls.filter((call) => call.startsWith("log:"))).toEqual([
+      "log:PREPARATION_STAGE_FAILED DISCOVERY UNCODED_TYPEERROR none",
+      "log:PREPARATION_FAILED",
+    ]);
+
     const diagnostic = { provider: "github", hostClass: "github", method: "GET", pathTemplate: "/search/commits",
       statusClass: "4xx", reasonCode: "UNSUPPORTED_STATUS" } as const;
     const search = await makeHarness({
@@ -468,7 +484,26 @@ describe("local experiment preparation command", () => {
       searchGitHub: async () => { throw Object.assign(new Error("leak"), { code: "Bearer raw-secret", diagnostic: { statusClass: "https://x/?q=1" } }); },
     });
     await expect(prepareLocalExperiment(unsafe.dependencies)).rejects.toThrow("PREPARATION_FAILED");
-    expect(unsafe.calls.filter((call) => call.startsWith("log:"))).toEqual(["log:PREPARATION_FAILED"]);
+    expect(unsafe.calls.filter((call) => call.startsWith("log:"))).toEqual([
+      "log:PREPARATION_STAGE_FAILED DISCOVERY UNCODED_ERROR none",
+      "log:PREPARATION_FAILED",
+    ]);
+  });
+
+  it("logs pool counts and per-stage rejection codes when selection fails, never candidate detail", async () => {
+    const harness = await makeHarness({
+      admitGitHubCandidate: async ({ candidate }) => {
+        throw new Error((candidate as any).id % 2 === 0 ? "LICENSE_REJECTED" : "https://github.com/owner/repo secret");
+      },
+    });
+    await expect(prepareLocalExperiment(harness.dependencies)).rejects.toThrow("PREPARATION_FAILED");
+    expect(harness.calls.filter((call) => call.startsWith("log:"))).toEqual([
+      "log:PREPARATION_STAGE_FAILED ADMISSION INVARIANT_REJECTED none",
+      "log:PREPARATION_COUNTS discovered=5 admitted=0 duplicates=0",
+      "log:PREPARATION_REJECTIONS ADMISSION:CANDIDATE_REJECTED=2 ADMISSION:LICENSE_REJECTED=3",
+      "log:PREPARATION_FAILED",
+    ]);
+    expect(harness.calls.join(" ")).not.toMatch(/owner\/repo|secret/u);
   });
 
   it("keeps game and browser code out of the command and redacts top-level failures", async () => {
@@ -481,7 +516,7 @@ describe("local experiment preparation command", () => {
       log: (message) => { messages.push(message); },
     });
     await expect(prepareLocalExperiment(harness.dependencies)).rejects.toThrow("PREPARATION_FAILED");
-    expect(messages).toEqual(["PREPARATION_FAILED"]);
-    expect(messages.join(" ")).not.toMatch(/raw-secret|@example/u);
+    expect(messages).toEqual(["PREPARATION_STAGE_FAILED PREFLIGHT UNCODED_ERROR none", "PREPARATION_FAILED"]);
+    expect(messages.join(" ")).not.toMatch(/raw-secret|@example|Bearer/u);
   });
 });

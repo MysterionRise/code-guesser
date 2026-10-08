@@ -87,9 +87,9 @@ const validResponses = (): ReadonlyMap<string, unknown> => new Map([
       sha: childBlob,
       filename: "src/value.ts",
       status: "modified",
-      blob_url: `${web}/blob/${ids.childCommit}/src/value.ts`,
-      raw_url: `${web}/raw/${ids.childCommit}/src/value.ts`,
-      contents_url: `${api}/contents/src/value.ts?ref=${ids.childCommit}`,
+      blob_url: `${web}/blob/${ids.childCommit}/src%2Fvalue.ts`,
+      raw_url: `${web}/raw/${ids.childCommit}/src%2Fvalue.ts`,
+      contents_url: `${api}/contents/src%2Fvalue.ts?ref=${ids.childCommit}`,
     }])],
   [`${api}/commits/${ids.parentCommit}`, commitResponse(ids.parentCommit, parentTree, [], [])],
   [`${api}/git/trees/${childTree}`, treeResponse(childTree,
@@ -137,9 +137,9 @@ const responsesForBytes = (parent: Uint8Array, child: Uint8Array): Map<string, a
     [`${api}/commits/${ids.childCommit}`, commitResponse(ids.childCommit, childRoot,
       [ids.parentCommit], [{
         sha: childObject, filename: "src/value.ts", status: "modified",
-        blob_url: `${web}/blob/${ids.childCommit}/src/value.ts`,
-        raw_url: `${web}/raw/${ids.childCommit}/src/value.ts`,
-        contents_url: `${api}/contents/src/value.ts?ref=${ids.childCommit}`,
+        blob_url: `${web}/blob/${ids.childCommit}/src%2Fvalue.ts`,
+        raw_url: `${web}/raw/${ids.childCommit}/src%2Fvalue.ts`,
+        contents_url: `${api}/contents/src%2Fvalue.ts?ref=${ids.childCommit}`,
       }])],
     [`${api}/commits/${ids.parentCommit}`, commitResponse(ids.parentCommit, parentRoot, [], [])],
     [`${api}/git/trees/${childRoot}`, treeResponse(childRoot,
@@ -273,6 +273,46 @@ describe("GitHub immutable lineage adapter", () => {
       await expect(invoke(responses)).rejects.toBeInstanceOf(lineageModule.GitHubLineageError);
     },
   );
+
+  it("binds the first screenable same-path modification by path order from a multi-file commit", async () => {
+    const responses = mutableResponses();
+    const commit = responses.get(`${api}/commits/${ids.childCommit}`);
+    const original = commit.files[0];
+    const file = (filename: string, overrides: Record<string, unknown> = {}) => ({
+      ...structuredClone(original),
+      filename,
+      blob_url: `${web}/blob/${ids.childCommit}/${encodeURIComponent(filename)}`,
+      raw_url: `${web}/raw/${ids.childCommit}/${encodeURIComponent(filename)}`,
+      contents_url: `${api}/contents/${encodeURIComponent(filename)}?ref=${ids.childCommit}`,
+      ...overrides,
+    });
+    commit.files = [
+      file("src/zeta.ts"),
+      file("docs/guide.ts"),
+      file("src/a.ts", { status: "added" }),
+      file("src/b.ts", { previous_filename: "src/old.ts" }),
+      file("src/notes.md"),
+      original,
+    ];
+
+    const [bound] = await invoke(responses);
+
+    expect(bound.path).toBe("src/value.ts");
+    expect(bound.childBlob).toBe(childBlob);
+
+    const unsupportedOnly = mutableResponses();
+    unsupportedOnly.get(`${api}/commits/${ids.childCommit}`).files = [file("src/notes.md"), file("docs/guide.ts")];
+    await expect(invoke(unsupportedOnly)).rejects.toBeInstanceOf(lineageModule.GitHubLineageError);
+  });
+
+  it("requires the provider's percent-encoded file URLs and rejects literal-slash variants", async () => {
+    for (const key of ["blob_url", "raw_url", "contents_url"]) {
+      const responses = mutableResponses();
+      const file = responses.get(`${api}/commits/${ids.childCommit}`).files[0];
+      file[key] = String(file[key]).replace("src%2Fvalue.ts", "src/value.ts");
+      await expect(invoke(responses)).rejects.toBeInstanceOf(lineageModule.GitHubLineageError);
+    }
+  });
 
   it("rejects ambiguous changed-file populations and previous-path metadata", async () => {
     const multiple = mutableResponses();

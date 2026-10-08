@@ -33,6 +33,10 @@ const fail = (reasonCode: string): never => {
 const sha256 = (value: Uint8Array | string): string =>
   createHash("sha256").update(value).digest("hex");
 
+/** True when a repository path could pass screening on its own merits: safe, supported, not excluded. */
+export const isScreenablePath = (path: string): boolean =>
+  SAFE_PATH.test(path) && SUPPORTED_EXTENSION.test(path) && !EXCLUDED_PATH.test(path);
+
 export const screenBlob = (
   input: Readonly<{ path: string; bytes: Uint8Array }>,
   seenNormalizedHashes: ReadonlySet<string>,
