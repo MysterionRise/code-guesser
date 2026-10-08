@@ -110,6 +110,63 @@ const logLines = (calls: readonly string[]): string[] =>
     expect(aiIds).toEqual([20, 21, 22, 6, 7]);
   });
 
+  it("skips a search candidate whose repository the deck already holds before spending any lineage request", async () => {
+    const profile = await loadProfile();
+    const candidates = [
+      { id: 0, queryId: "ordinary-facebook", repository: "same/repo" },
+      { id: 1, queryId: "ordinary-facebook", repository: "same/repo" },
+      { id: 2, queryId: "ordinary-facebook", repository: "same/repo" },
+      ...[3, 4, 5, 6, 7, 8].map((id) => ({ id, queryId: "ordinary-facebook", repository: `org${id}/repo-${id}` })),
+      { id: 20, queryId: "ai-copilot-github", repository: "ai/repo" },
+      { id: 21, queryId: "ai-copilot-github", repository: "ai/repo" },
+      { id: 22, queryId: "ai-copilot-github", repository: "org22/repo-22" },
+      { id: 23, queryId: "ai-copilot-github", repository: "org23/repo-23" },
+    ];
+    let projectIds: unknown[] = []; let aiIds: unknown[] = [];
+    const harness = await makeHarness({
+      searchGitHub: async () => accepted({ candidates, queryClassifications: classificationsFor(profile) }, "2"),
+      generateProject: ({ candidates: selected }) => { projectIds = selected.map((candidate: any) => candidate.lineage.id); return { fixtures: Array(5).fill({ kind: "PROJECT" }) } as any; },
+      generateAi: ({ candidates: selected }) => { aiIds = selected.map((candidate: any) => candidate.lineage.id); return { fixtures: Array(5).fill({ kind: "AI_CREDIT" }) } as any; },
+    });
+
+    await prepareLocalExperiment(harness.dependencies);
+    expect(harness.calls.filter((call) => call.startsWith("lineage:"))).toEqual(
+      [0, 3, 4, 5, 6, 20, 22, 23, 7, 8].map((id) => `lineage:${id}`),
+    );
+    expect(projectIds).toEqual([0, 3, 4, 5, 6]);
+    expect(aiIds).toEqual([20, 22, 23, 7, 8]);
+    const report = harness.reports[0] as any;
+    expect(report.diagnostics).toContainEqual({ stage: "DEDUPLICATION", reasonCode: "REPOSITORY_REPEATED", count: 3 });
+    expect(report.counts.duplicatesRejected).toBe(3);
+  });
+
+  it("stops spending project requests on a repository whose excerpt already named its own project", async () => {
+    const profile = await loadProfile();
+    const candidates = [
+      { id: 0, queryId: "ordinary-facebook", repository: "widgets/gizmo" },
+      { id: 1, queryId: "ordinary-facebook", repository: "widgets/gizmo" },
+      ...[2, 3, 4, 5, 6, 7, 8].map((id) => ({ id, queryId: "ordinary-facebook", repository: `org${id}/repo-${id}` })),
+      ...[20, 21, 22].map((id) => ({ id, queryId: "ai-copilot-github", repository: `org${id}/repo-${id}` })),
+    ];
+    let projectIds: unknown[] = [];
+    const harness = await makeHarness({
+      searchGitHub: async () => accepted({ candidates, queryClassifications: classificationsFor(profile) }, "2"),
+      bindGitHubLineage: async ({ candidate }: any) => {
+        harness.calls.push(`lineage:${candidate.id}`);
+        return accepted({ ...candidate, excerpt: candidate.id === 0 ? "const gizmo = load(1000);" : `value_${candidate.id} = compute(${candidate.id}) + 1000`,
+          commitMessage: candidate.id >= 20 ? `Fix\n\n${HARNESS_CREDIT}` : "ordinary refactor" }, "3");
+      },
+      generateProject: ({ candidates: selected }) => { projectIds = selected.map((candidate: any) => candidate.lineage.id); return { fixtures: Array(5).fill({ kind: "PROJECT" }) } as any; },
+    });
+
+    await prepareLocalExperiment(harness.dependencies);
+    expect(harness.calls).not.toContain("lineage:1");
+    expect(projectIds).toEqual([2, 3, 4, 5, 6]);
+    const diagnostics = (harness.reports[0] as any).diagnostics;
+    expect(diagnostics).toContainEqual({ stage: "SCREENING", reasonCode: "PROJECT_NAME_IN_EXCERPT", count: 1 });
+    expect(diagnostics).toContainEqual({ stage: "SCREENING", reasonCode: "PROJECT_REPOSITORY_SKIPPED", count: 1 });
+  });
+
   it("keeps at least two credited and two uncredited AI rounds, filling from ordinary commits", async () => {
     let aiIds: unknown[] = [];
     const lineageFor = (uncredited: number) => async ({ candidate }: any) => {

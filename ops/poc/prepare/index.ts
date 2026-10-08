@@ -177,20 +177,36 @@ const selectGitHub = async (context: Context, deps: PreparationDependencies, has
     if (revealsProtected(profile, admitted, all())) { noteRejection(state, "SCREENING", new Error("PUBLIC_CONTAINMENT_REJECTED")); return false; }
     return true;
   };
+  // Stable ordering for the project deck: once an excerpt names its own project, later commits
+  // from that repository are skipped before lineage, because their files tend to name it too.
+  const selfNamed = new Set<string>();
   const projectEligible = (admitted: any): boolean => {
-    if (!projectExcerptAllowed(String(admitted.lineage?.excerpt ?? ""), String(admitted.source?.repository ?? ""))) { noteRejection(state, "SCREENING", new Error("PROJECT_NAME_IN_EXCERPT")); return false; }
+    const repository = String(admitted.source?.repository ?? "");
+    if (!projectExcerptAllowed(String(admitted.lineage?.excerpt ?? ""), repository)) {
+      selfNamed.add(repository); noteRejection(state, "SCREENING", new Error("PROJECT_NAME_IN_EXCERPT")); return false;
+    }
     return accepts(admitted, project, [...aiYes, ...aiNo]);
   };
   const absentEligible = (admitted: any): boolean => !aiCredited(admitted, profile) && accepts(admitted, [...aiYes, ...aiNo], project);
+  // FR-026 rejects a repository repeated within a deck; the search record already names it, so skip before any lineage request.
+  const repeatsRepository = (candidate: unknown, deck: readonly unknown[]): boolean => {
+    const repository = (candidate as { repository?: unknown } | undefined)?.repository;
+    if (typeof repository !== "string" || !deck.some((admitted: any) => admitted?.source?.repository === repository)) return false;
+    state.duplicatesRejected += 1; noteRejection(state, "DEDUPLICATION", new Error("REPOSITORY_REPEATED"));
+    return true;
+  };
   let cursor = 0;
   while (project.length < projectRounds && cursor < ordinary.length) {
-    const admitted = await admit(ordinary[cursor++]); if (admitted === undefined) continue;
+    const candidate = ordinary[cursor++]; if (repeatsRepository(candidate, project)) continue;
+    if (selfNamed.has(String((candidate as { repository?: unknown }).repository))) { noteRejection(state, "SCREENING", new Error("PROJECT_REPOSITORY_SKIPPED")); continue; }
+    const admitted = await admit(candidate); if (admitted === undefined) continue;
     if (projectEligible(admitted)) project.push(admitted); else spare.push(admitted);
   }
   if (project.length < projectRounds) throw new PreparationError();
   const creditedTarget = aiRounds - aiMinimumPerOutcome;
   for (const candidate of credited) {
     if (aiYes.length >= creditedTarget) break;
+    if (repeatsRepository(candidate, aiYes)) continue;
     const admitted = await admit(candidate); if (admitted === undefined) continue;
     if (!aiCredited(admitted, profile)) { noteRejection(state, "SCREENING", new Error("AI_CREDIT_ABSENT")); continue; }
     if (accepts(admitted, [...aiYes, ...aiNo], project)) aiYes.push(admitted);
@@ -199,7 +215,8 @@ const selectGitHub = async (context: Context, deps: PreparationDependencies, has
   const absentTarget = aiRounds - aiYes.length;
   for (const admitted of spare) { if (aiNo.length >= absentTarget) break; if (absentEligible(admitted)) aiNo.push(admitted); }
   while (aiNo.length < absentTarget && cursor < ordinary.length) {
-    const admitted = await admit(ordinary[cursor++]); if (admitted === undefined) continue;
+    const candidate = ordinary[cursor++]; if (repeatsRepository(candidate, [...aiYes, ...aiNo])) continue;
+    const admitted = await admit(candidate); if (admitted === undefined) continue;
     if (absentEligible(admitted)) aiNo.push(admitted);
   }
   if (aiNo.length < absentTarget) throw new PreparationError();
