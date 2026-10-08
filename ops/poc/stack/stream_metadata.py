@@ -137,8 +137,8 @@ def _licenses(value):
 def _validate_documented_columns(value, path):
     if value["license_type"] not in ("permissive", "no_license"):
         _fail("ROW_VALUE_REJECTED")
-    if not _text(value["branch_name"], "ROW_VALUE_REJECTED").startswith("refs/"):
-        _fail("ROW_VALUE_REJECTED")
+    # The card documents branch_name only as a name; values such as HEAD are data, not drift.
+    _text(value["branch_name"], "ROW_VALUE_REJECTED")
     # github_id is null when the GitHub Archive linkage is absent; event counts are always present.
     for name in ("github_id", "star_events_count", "fork_events_count"):
         if value[name] is None and name == "github_id":
@@ -150,8 +150,9 @@ def _validate_documented_columns(value, path):
             _text(value[name], "ROW_VALUE_REJECTED")
     _date(value["gha_event_created_at"], optional=True)
     _date(value["gha_created_at"], optional=True)
-    extension = _text(value["extension"], "ROW_VALUE_REJECTED")
-    if extension != path.rsplit(".", 1)[-1]:
+    # The extension column is typed here (it is empty for extensionless files); whether it
+    # agrees with the path is a screening question.
+    if not isinstance(value["extension"], str):
         _fail("ROW_VALUE_REJECTED")
 
 
@@ -179,6 +180,7 @@ def _validate_row(value, configuration, byte_limit):
         value["is_generated"] or value["is_vendor"] or encoding != "UTF-8"
         or not 1 <= length <= byte_limit or not licenses or len(set(licenses)) != len(licenses)
         or not path.endswith(_extensions(configuration))
+        or value["extension"] != path.rsplit(".", 1)[-1]
     )
     if screened_out:
         return None

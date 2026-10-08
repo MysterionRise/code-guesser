@@ -215,8 +215,11 @@ class StreamMetadataTests(unittest.TestCase):
             row(blob_id="6" * 40, length_bytes=262_145),
             row(blob_id="7" * 40, length_bytes=0),
             row(blob_id="8" * 40, path="/src/example.ts", extension="ts"),
+            row(blob_id="a" * 40, extension="txt"),
+            row(blob_id="b" * 40, path="/src/EXAMPLE.PY", extension="py"),
+            row(blob_id="c" * 40, extension=""),
         ]
-        eligible = row(blob_id="9" * 40, github_id=None)
+        eligible = row(blob_id="9" * 40, github_id=None, branch_name="HEAD")
         rows = [*screened_out[:4], eligible, *screened_out[4:]]
 
         count, _calls, text, _environment = self.run_stream(rows, request(rowLimit=len(rows)))
@@ -229,15 +232,15 @@ class StreamMetadataTests(unittest.TestCase):
     def test_rejects_changed_documented_column_types_and_relationships(self):
         failures = [
             ("ROW_VALUE_REJECTED", row(license_type="unknown")),
-            ("ROW_VALUE_REJECTED", row(branch_name="main")),
+            ("ROW_VALUE_REJECTED", row(branch_name="")),
+            ("ROW_VALUE_REJECTED", row(branch_name=None)),
+            ("ROW_VALUE_REJECTED", row(extension=None)),
             ("ROW_VALUE_REJECTED", row(github_id=True)),
             ("ROW_VALUE_REJECTED", row(github_id="123")),
             ("ROW_VALUE_REJECTED", row(star_events_count=None)),
             ("ROW_VALUE_REJECTED", row(star_events_count=-1)),
             ("ROW_VALUE_REJECTED", row(gha_license_id=7)),
             ("DATE_REJECTED", row(gha_created_at="not-a-date")),
-            ("ROW_VALUE_REJECTED", row(extension="txt")),
-            ("ROW_VALUE_REJECTED", row(extension="txt")),
         ]
         for code, bad_row in failures:
             self.assert_code(code, lambda value=bad_row: self.run_stream([value]))
