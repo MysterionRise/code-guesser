@@ -50,7 +50,7 @@ const metadataRow = (overrides: Record<string, unknown> = {}) => {
 };
 
 const counters = (overrides: Record<string, unknown> = {}) => ({
-  counters: { networkBytes: 4096, peakTemporaryDiskBytes: 1024, redirectsFollowed: 0, requests: 3, ...overrides },
+  counters: { networkBytes: 4096, peakTemporaryDiskBytes: 1024, redirectsFollowed: 0, requests: 3, rowsInspected: 1, ...overrides },
 });
 const lines = (...objects: Record<string, unknown>[]): Uint8Array =>
   Buffer.from(objects.map((object) => JSON.stringify(object)).join("\n") + "\n");
@@ -233,6 +233,27 @@ describe("Stack metadata worker bridge", () => {
     }
   });
 
+  it("charges every inspected row, accepts fewer emitted rows, and rejects inspected counts off the ceiling", async () => {
+    const options = await setup({
+      rowLimit: 3,
+      runWorker: async () => ({ exitCode: 0, stdout: lines(metadataRow(), counters({ rowsInspected: 3 })), stderr: new Uint8Array() }),
+    });
+
+    const rows = await collectStackMetadata(options);
+
+    expect(rows).toHaveLength(1);
+    expect(options.capacity.snapshot().stackRows.Python).toBe(3);
+    for (const [code, inspected] of [["OUTPUT_MALFORMED", 2], ["ROW_OVERRUN", 4], ["ROW_OVERRUN", 0]] as const) {
+      await expectBeforeBlob(code, {
+        rowLimit: 3,
+        runWorker: async () => ({ exitCode: 0, stdout: lines(metadataRow(), counters({ rowsInspected: inspected })), stderr: new Uint8Array() }),
+      });
+    }
+    await expectBeforeBlob("COUNTERS_REJECTED", {
+      runWorker: async () => ({ exitCode: 0, stdout: lines(metadataRow(), { counters: { networkBytes: 1, peakTemporaryDiskBytes: 0, redirectsFollowed: 0, requests: 1 } }), stderr: new Uint8Array() }),
+    });
+  });
+
   it("records exact rows and metadata bytes with the accepted capacity meter before blobs", async () => {
     const order: string[] = [];
     const options = await setup({
@@ -388,7 +409,7 @@ describe("Stack metadata worker bridge", () => {
     const rows = await collectStackMetadata(await setup({
       configuration: "TypeScript",
       rowLimit: 2,
-      runWorker: async () => ({ exitCode: 0, stdout: ndjson(first, second), stderr: new Uint8Array() }),
+      runWorker: async () => ({ exitCode: 0, stdout: lines(first, second, counters({ rowsInspected: 2 })), stderr: new Uint8Array() }),
     }));
     expect(rows.map(({ swhBlobId }: { swhBlobId: string }) => swhBlobId))
       .toEqual(["1".repeat(40), "2".repeat(40)]);

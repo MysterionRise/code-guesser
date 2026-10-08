@@ -135,6 +135,47 @@ describe("preparation request policy", () => {
     )).toThrow(RequestPolicyError);
   });
 
+  it("follows one observed Hugging Face CDN redirect without forwarding any credential", () => {
+    const origin = {
+      provider: "huggingFace" as const,
+      method: "GET" as const,
+      url: "https://huggingface.co/datasets/bigcode/the-stack-v2/resolve/" + "a".repeat(40) + "/data/Python/train-00000-of-00009.parquet",
+      headers: { authorization: "Bearer origin-secret", cookie: "session=origin-secret", range: "bytes=0-9" },
+    };
+    const location = "https://us.aws.cdn.hf.co/repos/ab/cd/ef0123?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Signature=target-signature&Expires=1";
+
+    const redirected = authorizeRedirect(origin, location, "huggingFace", credentials);
+
+    expect(redirected.provider).toBe("huggingFace");
+    expect(redirected.method).toBe("GET");
+    expect(redirected.url.href).toBe(location);
+    expect(redirected.headers).toEqual({});
+    expect(Object.isFrozen(redirected.headers)).toBe(true);
+    expect(authorizeRedirect({ ...origin, method: "HEAD" }, location, "huggingFace", credentials).method).toBe("HEAD");
+
+    for (const rejected of [
+      "http://us.aws.cdn.hf.co/repos/x?X-Amz-Signature=s",
+      "https://us.aws.cdn.hf.co:8443/repos/x?X-Amz-Signature=s",
+      "https://user:pw@us.aws.cdn.hf.co/repos/x?X-Amz-Signature=s",
+      "https://us.aws.cdn.hf.co/repos/x?X-Amz-Signature=s#fragment",
+      "https://us.aws.cdn.hf.co/repos/../x?X-Amz-Signature=s",
+      "https://cdn-lfs-us-1.hf.co/repos/x?X-Amz-Signature=s",
+      "https://cas-bridge.xethub.hf.co/repos/x?X-Amz-Signature=s",
+      "https://us.aws.cdn.hf.co.evil.test/repos/x?X-Amz-Signature=s",
+      "https://huggingface.co/datasets/bigcode/the-stack-v2/resolve/" + "a".repeat(40) + "/x?X-Amz-Signature=s",
+      "/relative/x",
+    ]) {
+      expect(() => authorizeRedirect(origin, rejected, "huggingFace", credentials)).toThrow(RequestPolicyError);
+    }
+    expect(() => authorizeRedirect(
+      { provider: "github", method: "GET", url: "https://api.github.com/search/commits?q=x" },
+      location,
+      "huggingFace",
+      credentials,
+    )).toThrow(RequestPolicyError);
+    expect(() => authorizeRedirect(origin, location, "softwareHeritage", credentials)).toThrow(RequestPolicyError);
+  });
+
   it("rejects sensitive headers supplied outside the credential policy", () => {
     for (const [header, value] of [
       ["authorization", "Bearer smuggled"],

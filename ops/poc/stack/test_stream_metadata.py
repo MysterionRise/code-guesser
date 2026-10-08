@@ -4,6 +4,7 @@ import json
 import os
 import unittest
 
+from bounded_http import NetworkBudget
 from stream_metadata import MetadataStreamError, stream_metadata
 
 
@@ -40,7 +41,6 @@ def row(**overrides):
         "is_generated": False,
         "length_bytes": 128,
         "extension": "py",
-        "filename": "example.py",
     }
     value.update(overrides)
     return value
@@ -85,7 +85,7 @@ class StreamMetadataTests(unittest.TestCase):
             return iter(rows)
 
         count = stream_metadata(
-            request_value or request(), load_dataset_fn=loader,
+            request_value or request(), read_rows_fn=loader,
             environment=environment, output=output,
             install_backend_fn=installer or RecordingInstaller(),
         )
@@ -103,24 +103,23 @@ class StreamMetadataTests(unittest.TestCase):
         self.assertEqual(caught.exception.code, code)
         self.assertEqual(str(caught.exception), code)
 
-    def test_calls_only_revision_pinned_streaming_dataset_for_allowed_configurations(self):
+    def test_reads_rows_for_allowed_configurations_with_the_request_budget_and_token(self):
         for configuration, path, extension in [
             ("Python", "/x.py", "py"),
             ("TypeScript", "/x.ts", "ts"),
         ]:
             record = row(
                 language=configuration, path=path, extension=extension,
-                filename=path[1:], gha_language=configuration,
+                gha_language=configuration,
             )
             count, calls, _text, _environment = self.run_stream(
                 [record], request(configuration=configuration)
             )
             self.assertEqual(count, 1)
-            self.assertEqual(calls[0][0], ("bigcode/the-stack-v2", configuration))
-            self.assertEqual(calls[0][1], {
-                "split": "train", "streaming": True, "revision": REVISION,
-                "token": "external-token",
-            })
+            args, kwargs, _environment_seen = calls[0]
+            self.assertEqual(kwargs, {})
+            self.assertEqual((args[0], args[1], args[3]), (configuration, "external-token", 1))
+            self.assertIsInstance(args[2], NetworkBudget)
 
     def test_projects_only_documented_fields_in_input_order_and_stops_at_limit(self):
         pulled = []
@@ -130,7 +129,7 @@ class StreamMetadataTests(unittest.TestCase):
                 pulled.append(index)
                 name = f"example{index}.py"
                 yield row(
-                    blob_id=str(index + 1) * 40, path=f"/src/{name}", filename=name
+                    blob_id=str(index + 1) * 40, path=f"/src/{name}"
                 )
 
         count, _calls, text, _environment = self.run_stream(rows(), request(rowLimit=2))
@@ -178,7 +177,7 @@ class StreamMetadataTests(unittest.TestCase):
             calls = []
             installer = RecordingInstaller()
             self.assert_code(code, lambda rv=request_value, tk=token: stream_metadata(
-                rv, load_dataset_fn=lambda *_args, **_kwargs: calls.append(True),
+                rv, read_rows_fn=lambda *_args, **_kwargs: calls.append(True),
                 environment={"HF_TOKEN": tk}, output=io.StringIO(), install_backend_fn=installer,
             ))
             self.assertEqual(calls, [])
@@ -193,29 +192,52 @@ class StreamMetadataTests(unittest.TestCase):
             ("REPOSITORY_REJECTED", row(repo_name="not-a-repository")),
             ("PATH_REJECTED", row(path="/../secret.py")),
             ("PATH_REJECTED", row(path="src/example.py")),
-            ("PATH_REJECTED", row(path="/src/example.ts")),
-            ("LICENSE_REJECTED", row(detected_licenses=[])),
+            ("LICENSE_REJECTED", row(detected_licenses="MIT")),
+            ("LICENSE_REJECTED", row(detected_licenses=[" MIT"])),
             ("LANGUAGE_REJECTED", row(language="TypeScript")),
-            ("GENERATED_REJECTED", row(is_generated=True)),
-            ("VENDOR_REJECTED", row(is_vendor=True)),
-            ("ENCODING_REJECTED", row(src_encoding="utf-8")),
+            ("ROW_VALUE_REJECTED", row(is_generated="no")),
+            ("ROW_VALUE_REJECTED", row(is_vendor=None)),
+            ("ROW_VALUE_REJECTED", row(src_encoding=8)),
             ("LENGTH_REJECTED", row(length_bytes="128")),
-            ("LENGTH_REJECTED", row(length_bytes=262_145)),
+            ("LENGTH_REJECTED", row(length_bytes=-1)),
             ("DATE_REJECTED", row(visit_date="not-a-date")),
         ]
         for code, bad_row in failures:
             self.assert_code(code, lambda value=bad_row: self.run_stream([value]))
+
+    def test_screens_out_ineligible_rows_without_failing_and_counts_every_inspected_row(self):
+        screened_out = [
+            row(blob_id="1" * 40, detected_licenses=[]),
+            row(blob_id="2" * 40, detected_licenses=["MIT", "MIT"]),
+            row(blob_id="3" * 40, is_generated=True),
+            row(blob_id="4" * 40, is_vendor=True),
+            row(blob_id="5" * 40, src_encoding="ISO-8859-1"),
+            row(blob_id="6" * 40, length_bytes=262_145),
+            row(blob_id="7" * 40, length_bytes=0),
+            row(blob_id="8" * 40, path="/src/example.ts", extension="ts"),
+        ]
+        eligible = row(blob_id="9" * 40, github_id=None)
+        rows = [*screened_out[:4], eligible, *screened_out[4:]]
+
+        count, _calls, text, _environment = self.run_stream(rows, request(rowLimit=len(rows)))
+
+        emitted = self.rows_of(text)
+        self.assertEqual(count, 1)
+        self.assertEqual([entry["swhBlobId"] for entry in emitted], ["9" * 40])
+        self.assertEqual(json.loads(self.trailer_of(text))["counters"]["rowsInspected"], len(rows))
 
     def test_rejects_changed_documented_column_types_and_relationships(self):
         failures = [
             ("ROW_VALUE_REJECTED", row(license_type="unknown")),
             ("ROW_VALUE_REJECTED", row(branch_name="main")),
             ("ROW_VALUE_REJECTED", row(github_id=True)),
+            ("ROW_VALUE_REJECTED", row(github_id="123")),
+            ("ROW_VALUE_REJECTED", row(star_events_count=None)),
             ("ROW_VALUE_REJECTED", row(star_events_count=-1)),
             ("ROW_VALUE_REJECTED", row(gha_license_id=7)),
             ("DATE_REJECTED", row(gha_created_at="not-a-date")),
             ("ROW_VALUE_REJECTED", row(extension="txt")),
-            ("ROW_VALUE_REJECTED", row(filename="other.py")),
+            ("ROW_VALUE_REJECTED", row(extension="txt")),
         ]
         for code, bad_row in failures:
             self.assert_code(code, lambda value=bad_row: self.run_stream([value]))
@@ -227,7 +249,7 @@ class StreamMetadataTests(unittest.TestCase):
             raise RuntimeError("Bearer private-token")
 
         self.assert_code("DATASET_LOAD_FAILED", lambda: stream_metadata(
-            request(), load_dataset_fn=load_failure,
+            request(), read_rows_fn=load_failure,
             environment={"HF_TOKEN": "external-token"}, output=io.StringIO(),
             install_backend_fn=RecordingInstaller(),
         ))
@@ -252,7 +274,7 @@ class StreamMetadataTests(unittest.TestCase):
                 return iter(rows)
 
             callback = lambda: stream_metadata(
-                request(), load_dataset_fn=loader, environment=environment,
+                request(), read_rows_fn=loader, environment=environment,
                 output=io.StringIO(), install_backend_fn=RecordingInstaller(),
             )
             if rows:
@@ -275,7 +297,7 @@ class StreamMetadataTests(unittest.TestCase):
             return iter([row()])
 
         stream_metadata(
-            request(requestLimit=7, networkByteLimit=4096), load_dataset_fn=loader,
+            request(requestLimit=7, networkByteLimit=4096), read_rows_fn=loader,
             environment={"HF_TOKEN": "external-token"}, output=io.StringIO(),
             install_backend_fn=recording_installer,
         )
@@ -302,8 +324,9 @@ class StreamMetadataTests(unittest.TestCase):
         trailer = json.loads(lines[-1])
         self.assertEqual(set(trailer), {"counters"})
         self.assertEqual(list(trailer["counters"]), [
-            "networkBytes", "peakTemporaryDiskBytes", "redirectsFollowed", "requests",
+            "networkBytes", "peakTemporaryDiskBytes", "redirectsFollowed", "requests", "rowsInspected",
         ])
+        self.assertEqual(trailer["counters"]["rowsInspected"], 1)
         self.assertEqual(trailer["counters"]["networkBytes"], 1000)
         self.assertEqual(trailer["counters"]["requests"], 2)
         self.assertEqual(trailer["counters"]["redirectsFollowed"], 0)
@@ -323,7 +346,7 @@ class StreamMetadataTests(unittest.TestCase):
 
         environment = {"HF_TOKEN": "external-token"}
         self.assert_code("TEMPORARY_DISK", lambda: stream_metadata(
-            request(temporaryDiskBytes=1024 * 1024), load_dataset_fn=loader,
+            request(temporaryDiskBytes=1024 * 1024), read_rows_fn=loader,
             environment=environment, output=io.StringIO(), install_backend_fn=RecordingInstaller(),
         ))
         self.assertFalse(os.path.exists(observed[0]))
@@ -336,11 +359,11 @@ class StreamMetadataTests(unittest.TestCase):
                         with open(os.path.join(environment["HF_HOME"], "late.bin"), "wb") as handle:
                             handle.write(b"\0" * (2 * 1024 * 1024))
                     name = f"example{index}.py"
-                    yield row(blob_id=str(index + 1) * 40, path=f"/src/{name}", filename=name)
+                    yield row(blob_id=str(index + 1) * 40, path=f"/src/{name}")
             return rows()
 
         self.assert_code("TEMPORARY_DISK", lambda: stream_metadata(
-            request(rowLimit=3, temporaryDiskBytes=1024 * 1024), load_dataset_fn=slow_growth,
+            request(rowLimit=3, temporaryDiskBytes=1024 * 1024), read_rows_fn=slow_growth,
             environment=environment, output=io.StringIO(), install_backend_fn=RecordingInstaller(),
         ))
 
@@ -353,7 +376,7 @@ class StreamMetadataTests(unittest.TestCase):
             return iter([row()])
 
         stream_metadata(
-            request(), load_dataset_fn=loader, environment=environment,
+            request(), read_rows_fn=loader, environment=environment,
             output=io.StringIO(), install_backend_fn=RecordingInstaller(),
         )
         for key in ("HF_HUB_DISABLE_XET", "HF_HUB_DISABLE_TELEMETRY", "HF_HUB_DISABLE_IMPLICIT_TOKEN",

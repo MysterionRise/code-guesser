@@ -167,7 +167,7 @@ const githubLane = (
   }),
 });
 
-const CAPTURED_METADATA_COUNTERS = { counters: { networkBytes: 2048, peakTemporaryDiskBytes: 512, redirectsFollowed: 0, requests: 2 } };
+const CAPTURED_METADATA_COUNTERS = { counters: { networkBytes: 2048, peakTemporaryDiskBytes: 512, redirectsFollowed: 0, requests: 2, rowsInspected: 1 } };
 const metadataOutput = (row: StackMetadataRow): Uint8Array =>
   Buffer.from(`${JSON.stringify(row)}\n${JSON.stringify(CAPTURED_METADATA_COUNTERS)}\n`);
 const stackLane = (
