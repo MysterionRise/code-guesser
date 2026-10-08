@@ -1,14 +1,14 @@
 ---
 heist: codeguessr-poc-readiness
 date: 2026-10-08
-status: draft
-contract: docs/gangsta/codeguessr-poc-readiness/specs/2026-10-08-contract-revision-12-draft.md
+status: approved
+contract: docs/gangsta/codeguessr-poc-readiness/specs/2026-10-08-contract-revision-12-signed.md
 ---
 
 # Execution Plan: Revision 12 Guessing Decks
 
-Every work package follows red-green-refactor with a failing test first. No
-work package starts before the Don signs revision 12.
+Every work package follows red-green-refactor with a failing test first. The Don
+signed revision 12 at 2026-10-08T20:33:38Z.
 
 | WP | Title | Main files | Done when |
 | --- | --- | --- | --- |

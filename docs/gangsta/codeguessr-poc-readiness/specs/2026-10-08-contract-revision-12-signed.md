@@ -1,11 +1,12 @@
 ---
 heist: codeguessr-poc-readiness
 date: 2026-10-08
-status: draft
+status: signed
 revision: 12
 approach: "Three Guessing Decks: Which Project, Which Language, Is This AI-Generated"
 signatories: [Don]
-review-status: awaiting-signature
+review-status: approved
+revision-12-approved-at: 2026-10-08T20:33:38Z
 revision-11-baseline: docs/gangsta/codeguessr-poc-readiness/specs/2026-08-15-contract-revision-11-signed.md
 revision-11-baseline-sha256: 3acc586d8fb479e6edfd2dd43e9f38ed5d8d6268ee5b025b449d3a564b32fe41
 drafted-at: 2026-10-08T19:40:00Z
@@ -231,4 +232,4 @@ five-round artifact. It authorizes no merge, deployment, or public players.
 
 | Role | Decision | Timestamp |
 | --- | --- | --- |
-| Don | pending | |
+| Don | signed as drafted | 2026-10-08T20:33:38Z |
