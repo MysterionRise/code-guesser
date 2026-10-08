@@ -3,8 +3,10 @@
 ## Mission
 
 Continue the existing local-only proof of concept until one preparation run
-produces exactly five real rounds: three GitHub provenance rounds and two Stack
-language rounds. The goal is demo testing on one machine, not public play.
+produces three real code-guessing decks of five rounds each (Contract revision
+12, FR-002): "Which project?" and "Is this AI-generated?" from GitHub commit
+search, and "Which language?" from The Stack v2. The goal is demo testing on
+one machine, not public play.
 
 ## Read first
 
@@ -40,31 +42,35 @@ Expected SHA-256:
 - Branch: `claude/demoable-poc` (continues the merged
   `claude/clever-curie-d7rv1m` work on `main`).
 - Baseline before this work: `488aca571e7a05e7dc3aa6ae98c690b7ea69779b`.
-- The real five-round artifact exists at
-  `apps/game/src/demo/generated/local-real-rounds.json` (canonical SHA-256
-  `0eab7f489f311125b9a1ae8574fd2a3b072c3c954e48c8284aac39559a607498`, crawl
-  snapshot `9249eb590064490285f5f799acabb3fe56edf436fdc1d5b712262c99ca083713`),
-  produced by the fourteenth authorized live run on 2026-10-08 with the
-  accepted `GITHUB_SEARCH_INCOMPLETE` warning, and verified independently. See
-  `docs/gangsta/codeguessr-poc-readiness/evidence/2026-10-08-combined-live-run.md`.
-- The root route mounts that artifact through the server-only loader and the
-  operator-pinned hash in `apps/game/src/demo/local-real-experiment.pin.server.ts`;
-  there is no synthetic fallback. The synthetic catalogue stays in the codebase
-  and its own tests.
-- The README embeds three captioned GIFs and an MP4 recorded from the real
-  rounds by `pnpm demo:record`.
+- Revision 12/13 implementation (WP-036 to WP-043) is committed: profile
+  `ops/poc/profiles/local-real-rounds.v2.json`, the three deck generators,
+  artifact schema `local-experiment-artifact.v2`, run report
+  `local-experiment-run.v2`, the v2 game authority, and the root-route deck
+  chooser (`/?deck=project|language|ai`). Offline suites, the game build,
+  and containment pass.
+- The committed artifact at `apps/game/src/demo/generated/local-real-rounds.json`
+  is still the revision 11 five-round artifact (canonical SHA-256
+  `0eab7f489f311125b9a1ae8574fd2a3b072c3c954e48c8284aac39559a607498`). The v2
+  authority rejects it, so the root route shows its "nothing to play" notice
+  until the revision 12 live run publishes a v2 artifact and its hash is
+  pinned in `apps/game/src/demo/local-real-experiment.pin.server.ts`.
+- WP-044 (the one live run revision 12 authorizes) has not run yet. The
+  committed-artifact loader test and the browser specs need its output.
+- The README media still show the revision 11 rounds; `pnpm demo:record` now
+  records one scene per deck plus a full run (WP-045).
 - The run report lives at the ignored path `ops/poc/stack/tmp/local-experiment-run.json`.
 - Software Heritage blobs are read anonymously; no AWS credential is needed.
 - Every failure logs its stage, a safe code, the failing function and file,
   and (for selection failures) pool counts and rejection aggregates.
 
-This is a demoable local real-data PoC, not production-ready and not
-authorized for public players.
+This is a local real-data PoC in transition to three decks, not
+production-ready and not authorized for public players.
 
 ## Non-negotiable boundaries
 
 - Localhost only; no deployment or public players.
-- Exactly five automatically prepared rounds with a three/two source split.
+- Exactly three automatically prepared decks of five rounds with the FR-002
+  lineage (revision 12; it replaced revision 11's three/two split).
 - No human content-review workflow for this PoC.
 - Public open-source repositories only, with licence and recorded-author data.
 - The Stack v2 release remains `v2.2.0` at immutable revision
@@ -81,11 +87,8 @@ authorized for public players.
 
 ## Immediate next steps
 
-1. The Don confirms or reverts two semantics refinements made during the live
-   attempts (see the 2026-10-08 checkpoint): trailer-aware marker matching and
-   the additive observed Copilot trailer names in the profile.
-2. Merge is a separate decision; this handoff authorizes none.
-3. To regenerate the artifact, rerun with the operator's credentials:
+1. Run the one live preparation that revision 12 authorizes (WP-044), with
+   the operator's credentials from the standard stores:
 
    ```bash
    HF_TOKEN="$(cat ~/.cache/huggingface/token)" \
@@ -94,16 +97,28 @@ authorized for public players.
    pnpm prepare:poc
    ```
 
-   then verify the new artifact independently, update the pinned hash, rerun
-   the full verification matrix, re-record the media, and update the evidence.
+   A failed run leaves the previous artifact in place. Revision 12 authorizes
+   one run, so report a failure instead of rerunning.
+2. Verify the new artifact independently: it parses under the v2 model, the
+   preparer and game canonical hashes equal the report's `artifactHash`,
+   decks are project/language/ai of five, languages are distinct, the AI deck
+   has at least two of each outcome, counts are within the v2 ceilings, every
+   query is complete, and neither file contains token-like strings.
+3. Pin the verified hash, run the full verification matrix, re-record the
+   media with `pnpm demo:record` (remove the revision 11 GIFs), and update the
+   README, this handoff, a dated evidence file, and a new checkpoint.
+4. Merge is a separate decision; this handoff authorizes none.
 
 Read the `PREPARATION_STAGE_FAILED` line first on any failure:
 `RETRY_SIGNAL_MISSING 4xx` means a 403/429 without a usable instruction,
 `WAIT_LIMIT` means the instruction exceeded the signed fifteen-second wait,
-`REQUEST_COUNT` or `REQUEST_LIMIT` in the rejections means the 200-request
+`REQUEST_COUNT` or `REQUEST_LIMIT` in the rejections means the 600-request
 ceiling was spent, `WORKER_EXIT` means a Python worker exited non-zero
 (reproduce it directly to read its code), and a `PUBLIC_CONTAINMENT_*` code
-names the protected key and public field that collided.
+names the protected key and public field that collided. Selection
+diagnostics `REPOSITORY_REPEATED`, `PROJECT_NAME_IN_EXCERPT`,
+`PROJECT_REPOSITORY_SKIPPED`, `AI_CREDIT_ABSENT`, and
+`SOURCE_IDENTITY_UNREPORTABLE` are expected screening outcomes, not faults.
 
 ## Commands
 
@@ -143,8 +158,8 @@ Do not call the real-data PoC runnable until all of the following are true:
 1. Preparation exits successfully and emits its completion marker.
 2. Both Python workers enforce and test the signed network and disk boundaries.
 3. Report/artifact publication cannot leave an orphan success report.
-4. The generated artifact contains exactly three provenance and two language
-   fixtures and passes server-side validation.
+4. The generated artifact contains exactly three decks of five fixtures with
+   the FR-002 lineage and passes server-side validation.
 5. Artifact and run-report hashes, source split, warning/completeness state,
    and capacity counts are independently verified without leaking content.
 6. The root route consumes the validated server-only authority.
