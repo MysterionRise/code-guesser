@@ -28,31 +28,32 @@ Expected SHA-256:
 
 ## Current state
 
-- Branch: `claude/clever-curie-d7rv1m` (continues the merged
-  `codex/heist/codeguessr-poc-readiness` work on `main`).
-- Baseline before this work: `fd6f34cd0d8b4a344fb537e87256bc8f8e69837a`.
+- Branch: `claude/demoable-poc` (continues the merged
+  `claude/clever-curie-d7rv1m` work on `main`).
+- Baseline before this work: `488aca571e7a05e7dc3aa6ae98c690b7ea69779b`.
 - The crawler, Stack workers, five-round artifact schema, server-only game
-  authority, tests, operator command, MIT licence, and CI workflow exist.
-- The root route still uses the synthetic rehearsal catalogue.
+  authority, a server-only artifact loader with an operator-pinned trusted hash,
+  a scripted demo recorder (`pnpm demo:record`, README GIFs and MP4), tests,
+  operator command, MIT licence, and CI workflow exist.
+- The root route still uses the synthetic rehearsal catalogue; the loader is
+  tested but not yet wired because no artifact exists.
 - The generated real-round artifact and live run report are intentionally
   absent.
-- Report/artifact publication is transactional (staged report, commit inside
-  the artifact publisher, rollback on failure).
-- Both Python Stack workers enforce the signed endpoint, redirect, network-byte,
-  request, credential-forwarding, and temporary-disk ceilings in-process and
-  report counters the preparer meters. The Hugging Face redirect allowlist is
-  intentionally empty because no target host has been observed under
-  authorization; a live metadata stage fails closed with `REDIRECT_REJECTED`
-  until that host is recorded and added as a literal in
-  `ops/poc/stack/bounded_http.py` and `ops/poc/prepare/request-policy.ts`.
-- The bounded transport translates a GitHub 403/429 `retry-after` or exhausted
-  rate-limit budget into the controller's single bounded retry; everything else
-  still fails closed. A failed run logs
-  `PREPARATION_STAGE_FAILED <stage> <code> <statusClass>` before
-  `PREPARATION_FAILED`.
-- The 2026-10-05 authorized headers-only GitHub probe observed HTTP 200 with
-  authentication supplied, no exhausted rate limit, and no retry delay, using
-  the session's proxy-injected token rather than the operator's.
+- On 2026-10-08 eight authorized live runs moved the failing stage from
+  GitHub admission through Stack metadata to selected-blob retrieval. GitHub
+  discovery, lineage, admission (three candidates, both marker outcomes), and
+  both Stack metadata configurations (10,000 rows each) now pass against the
+  live providers within every ceiling. See
+  `docs/gangsta/codeguessr-poc-readiness/evidence/2026-10-08-live-preparation-attempts.md`.
+- The Hugging Face redirect host `us.aws.cdn.hf.co` is recorded and
+  allowlisted on both sides. The metadata worker reads one parquet row group
+  per exact range request instead of streaming through `datasets`.
+- A failed run logs `PREPARATION_STAGE_FAILED <stage> <code> <statusClass>`
+  for every failure, plus `PREPARATION_COUNTS` and `PREPARATION_REJECTIONS`
+  aggregates when selection fails.
+- The remaining blocker is the operator's AWS credential: the default profile
+  key is rejected by AWS itself (`InvalidClientTokenId`), so every Software
+  Heritage blob fetch exits with `WORKER_EXIT`.
 
 This is a resumable engineering handoff, not a completed or production-ready
 real-data demo.
@@ -77,27 +78,41 @@ real-data demo.
 
 ## Immediate next steps
 
-The next external action requires explicit operator authorization. Perform one
-authenticated request to the pinned Hugging Face `resolve` endpoint for one
-parquet shard of the Stack dataset, with redirects disabled, no retry, and no
-response-body read, reporting only:
+1. The operator replaces the AWS default-profile credentials (or exports
+   `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`) with a key AWS accepts and that
+   may read the `softwareheritage` bucket. Verify with a single
+   `sts get-caller-identity` before any run; never record the values.
+2. Rerun the live preparation:
 
-- Numeric HTTP status.
-- The redirect target host, if a `Location` header is present (host only; no
-  path, query, or signature).
+   ```bash
+   HF_TOKEN="$(cat ~/.cache/huggingface/token)" \
+   GITHUB_TOKEN="$(gh auth token)" \
+   STACK_V2_ACKNOWLEDGED_USABLE_REVISION=e565caa3a78c2423bd374333a472b049eb090e47 \
+   pnpm prepare:poc
+   ```
 
-Then add that host as a literal to `REDIRECT_HOSTS` in
-`ops/poc/stack/bounded_http.py` and to the redirect policy in
-`ops/poc/prepare/request-policy.ts`, test-first, before any full live run.
+   If blob retrieval still fails with `WORKER_EXIT`, reproduce one fetch with the
+   worker directly and check for a requester-pays requirement before changing
+   code.
+3. On `PREPARATION_COMPLETE`, verify the artifact independently (canonical hash
+   equals the report's `artifactHash`, three provenance then two language
+   fixtures, counts within ceilings), record the hash in
+   `apps/game/src/demo/local-real-experiment.pin.server.ts`, and commit the
+   artifact.
+4. Wire `apps/game/src/app/page.tsx` and `actions.ts` to
+   `local-real-experiment-loader.server.ts`, replace only the route-source
+   assertions (FR-015) in `rehearsal-catalogue.test.ts`, `demo-game.test.ts`,
+   and the containment test, and rewrite `tests/e2e/arcade-shell.spec.ts` to
+   derive answers from the artifact.
+5. Re-record the README media with `pnpm demo:record`, then update README,
+   checkpoint, and this file with fresh evidence.
 
-If a later operator run fails at GitHub Search, read the
-`PREPARATION_STAGE_FAILED` line: `RETRY_SIGNAL_MISSING 4xx` means a 403/429
-without a usable instruction (likely secondary throttling or missing token),
-`WAIT_LIMIT` means the instruction exceeded the signed fifteen-second wait, and
-`UNSUPPORTED_STATUS` with another class means a non-rate-limit status.
-
-Do not rerun the complete preparation command until the redirect host is
-recorded and the signed Contract permits the response.
+Read the `PREPARATION_STAGE_FAILED` line first on any failure:
+`RETRY_SIGNAL_MISSING 4xx` means a 403/429 without a usable instruction,
+`WAIT_LIMIT` means the instruction exceeded the signed fifteen-second wait,
+`REQUEST_COUNT` or `REQUEST_LIMIT` in the rejections means the 200-request
+ceiling was spent, and `WORKER_EXIT` means a Python worker exited non-zero
+(reproduce it directly to read its code).
 
 ## Commands
 

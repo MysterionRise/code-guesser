@@ -22,11 +22,9 @@ This branch contains two distinct local experiences:
 
 - The synthetic five-round demo is runnable now.
 - The real-round experiment pipeline is implemented and tested offline, but its
-  live five-round artifact has not been generated. The last authorized live
-  attempt (2026-08-29) stopped at GitHub Search with an unsupported HTTP
-  status; a headers-only probe on 2026-10-05 found the same query answering
-  HTTP 200, so that failure was environment-specific rather than a dead
-  endpoint.
+  live five-round artifact has not been generated. On 2026-10-08 the live run
+  cleared GitHub discovery, lineage, admission, and Stack metadata, and stops
+  at selected-blob retrieval because the operator's AWS key is rejected by AWS.
 
 The real experiment is therefore a work in progress, not a runnable real-data
 demo yet. It remains localhost-only, automatically prepared, unreviewed, and
@@ -79,31 +77,26 @@ requests during rounds.
 The signed design requires bounded selected-blob access and forbids complete
 Stack datasets, language shards, and repository archives. The TypeScript and
 GitHub path enforces its declared request and response ceilings. Both Python
-Stack workers now enforce the same boundaries in-process and report their
-counts back to the preparer:
+Stack workers enforce the same boundaries in-process and report their counts
+back to the preparer:
 
-- The metadata worker installs a bounded HTTP transport as the Hugging Face
-  client factory. Only HTTPS GET/HEAD to exact `huggingface.co` dataset
-  endpoints at the pinned revision pass; requests and received bytes are
-  charged against the budget the preparer hands over; no retryable status or
-  transport exception ever reaches the Hub client's own backoff loop; the
-  temporary cache is metered against the 32 MiB ceiling; and the worker
-  disables xet, telemetry, implicit tokens, and the dataset-viewer shortcut.
+- The metadata worker lists the first shard of each configuration, reads the
+  parquet footer by one suffix range, and fetches exactly one row group per
+  exact byte range through a bounded HTTP transport. Only HTTPS GET/HEAD to
+  exact `huggingface.co` dataset endpoints at the pinned revision pass, and one
+  redirect to the observed host `us.aws.cdn.hf.co` is followed with origin
+  credentials stripped. Rows that fail FR-029 screening are inspected and
+  counted but not emitted; schema or type drift fails closed. Inspecting
+  10,000 rows per language costs about 18 MiB and seven requests.
 - The selected-blob worker pins the Software Heritage bucket endpoint, region,
   signature version, timeouts, and a single attempt. A before-send guard allows
   exactly one GET per object to the exact bucket host and key path with no
   query string, and compressed bytes are metered against the network budget.
 - Each worker ends its output with a canonical counters line. The preparer
   charges the reported requests to the shared request ceiling, the reported
-  bytes to the metadata or blob ceilings, and the reported peak temporary disk
-  to the signed 32 MiB reservation, and rejects the run on any overrun.
-
-One boundary is deliberately closed rather than open: the Contract requires
-exact redirect target hosts, and the host that Hugging Face parquet reads
-redirect to has never been observed under authorization. The metadata worker's
-redirect allowlist is therefore empty, and a live metadata stage will fail
-closed with `REDIRECT_REJECTED` until one authorized observation records that
-host and it is added as a literal on both the Python and TypeScript sides.
+  bytes to the metadata or blob ceilings, the reported inspected rows to the
+  row ceiling, and the reported peak temporary disk to the signed 32 MiB
+  reservation, and rejects the run on any overrun.
 
 ### Access prerequisites
 
@@ -137,37 +130,32 @@ substitute either output. The real experiment must not be mounted as the active
 route until preparation succeeds and the artifact passes the existing
 server-side validation and browser/containment sweep.
 
-## Current blockers
+## Current state and blocker
 
-The two implementation blockers from the 2026-09-04 handoff audit are closed:
-report/artifact publication is transactional, and both Python workers enforce
-and test the signed network and temporary-disk ceilings. Two further defects
-found on 2026-10-05 are also closed: the preparer could never retry on a
-provider instruction because nothing in production produced the retry signal,
-and it logged only a bare failure line. A GitHub 403 or 429 with an integer
-`retry-after`, or an exhausted rate-limit budget with a future reset, now
-yields exactly the one bounded retry the Contract permits, and a failed run
-logs one line of the form
-`PREPARATION_STAGE_FAILED <stage> <reason-code> <status-class>` before
-`PREPARATION_FAILED`, never a body, URL, or credential.
+Eight authorized live runs on 2026-10-08 moved the failing stage forward from
+GitHub admission to selected-blob retrieval, fixing each provider mismatch
+test-first (see
+[the live attempts evidence](docs/gangsta/codeguessr-poc-readiness/evidence/2026-10-08-live-preparation-attempts.md)).
+GitHub discovery, lineage, admission, and both Stack metadata configurations
+now complete against the live providers within every ceiling.
 
-What still prevents a live run:
+What still prevents a live artifact:
 
-- Provider access requires the operator's explicit authorization and the
-  operator's own Hugging Face, Software Heritage, and optional GitHub
-  credentials.
-- The Hugging Face parquet redirect target host is unobserved, so the metadata
-  stage fails closed with `REDIRECT_REJECTED` by design. The next external
-  action is one authorized request to the pinned `resolve` endpoint, without
-  following the redirect or reading a body, recording only the redirect target
-  host so it can be allowlisted on both sides.
+- The AWS credential in the operator's default profile is rejected by AWS
+  itself (`InvalidClientTokenId`), so every Software Heritage blob fetch fails
+  and the run stops at `BLOB_RETRIEVAL BLOB_ATTEMPTS`. Supplying a key that AWS
+  accepts and that may read the `softwareheritage` bucket is the next external
+  action.
 
-The 2026-10-05 GitHub probe sent one authenticated GET for the first profile
-query with no retry and discarded the body unread. It observed HTTP 200, no
-exhausted rate limit, and no retry delay. The probe's token and proxy were the
-session's, not the operator's, so it does not reproduce the operator's exact
-conditions; the new stage log line makes the next operator failure
-self-describing.
+A failed run now logs one line of the form
+`PREPARATION_STAGE_FAILED <stage> <reason-code> <status-class>` for every
+failure, and selection failures add `PREPARATION_COUNTS` and
+`PREPARATION_REJECTIONS` aggregates, never a body, URL, identity, or credential.
+
+Two semantics refinements made today are recorded for confirmation: a
+configured marker also matches a Git trailer line that ends in exactly one
+angle-bracket address, and the profile lists the observed Copilot trailer names
+in addition to its original literals.
 
 ## Verification
 
@@ -191,11 +179,11 @@ pnpm exec node --test tests/containment/acquisition-boundary.test.mjs
 pnpm --filter @codeguessr/game build
 ```
 
-Fresh verification on 2026-10-05 produced:
+Fresh verification on 2026-10-08 produced:
 
-- 2,307/2,307 workspace tests across 87 files, plus 4/4 workspace checks;
+- 2,330/2,330 workspace tests across 89 files, plus 4/4 workspace checks;
 - all workspace and operator TypeScript checks passing;
-- 34/34 locked Python worker tests;
+- 42/42 locked Python worker tests;
 - 37/37 accessibility checks and 6/6 performance checks;
 - 3/3 acquisition-containment checks;
 - a successful production build; and
