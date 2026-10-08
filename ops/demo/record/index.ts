@@ -1,6 +1,7 @@
 /**
- * Records the local CodeGuessr game at a phone viewport and encodes short
- * captioned GIFs plus one MP4 into docs/media. Run with `pnpm demo:record`.
+ * Records the local CodeGuessr game at a phone viewport and encodes one short
+ * captioned GIF per deck, a full-run GIF, and one MP4 into docs/media.
+ * Run with `pnpm demo:record` after a verified preparation run.
  *
  * Set DEMO_BASE_URL to record an already running server; otherwise a Next dev
  * server is started on 127.0.0.1:3100 for the duration of the run.
@@ -74,13 +75,17 @@ const smoothScroll = async (page: Page, selector: string): Promise<void> => {
 const performStep = async (page: Page, baseUrl: string, step: Step): Promise<void> => {
   switch (step.kind) {
     case "goto":
-      await page.goto(`${baseUrl}/`, { waitUntil: "networkidle" });
+      await page.goto(`${baseUrl}${step.path}`, { waitUntil: "networkidle" });
       return;
     case "caption":
       await setCaption(page, step.text);
       return;
     case "click":
       await page.getByRole("button", { name: step.name, exact: true }).click({ timeout: STEP_TIMEOUT_MILLISECONDS });
+      return;
+    case "link":
+      await page.getByRole("link", { name: step.name }).first().click({ timeout: STEP_TIMEOUT_MILLISECONDS });
+      await page.waitForLoadState("networkidle");
       return;
     case "choose":
       await page.getByRole("group", { name: "Choose one answer" }).getByRole("radio").nth(step.index)

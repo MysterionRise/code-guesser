@@ -2,9 +2,10 @@ import type { GifOptions } from "./encode";
 
 /** One scripted interaction with the running game. */
 export type Step =
-  | Readonly<{ kind: "goto" }>
+  | Readonly<{ kind: "goto"; path: string }>
   | Readonly<{ kind: "caption"; text: string }>
   | Readonly<{ kind: "click"; name: string }>
+  | Readonly<{ kind: "link"; name: string }>
   | Readonly<{ kind: "choose"; index: number }>
   | Readonly<{ kind: "expectText"; pattern: string }>
   | Readonly<{ kind: "expectHeading"; pattern: string }>
@@ -22,6 +23,8 @@ export interface Scene {
 
 const caption = (text: string): Step => ({ kind: "caption", text });
 const click = (name: string): Step => ({ kind: "click", name });
+const link = (name: string): Step => ({ kind: "link", name });
+const goto = (path: string): Step => ({ kind: "goto", path });
 const choose = (index: number): Step => ({ kind: "choose", index });
 const wait = (milliseconds: number): Step => ({ kind: "wait", milliseconds });
 const verdict: Step = { kind: "expectHeading", pattern: "^(?:Nice read\\.|Not this time\\.)$" };
@@ -56,57 +59,69 @@ const playRound = (round: number, hints: number): Step[] => [
   wait(1400),
 ];
 
+/** One deck's teaser: open it through the deck parameter, take a hint, and lock in an answer. */
+const deckScene = (
+  deck: "project" | "language" | "ai",
+  captions: Readonly<{ opening: string; hint: string; answer: string }>,
+  answerIndex: number,
+  gif: Partial<GifOptions> = {},
+): Scene => ({
+  id: `deck-${deck}`,
+  gif,
+  steps: [
+    goto(`/?deck=${deck}`),
+    { kind: "expectText", pattern: "Round 1 of 5" },
+    wait(500),
+    caption(captions.opening),
+    wait(2200),
+    caption(captions.hint),
+    wait(500),
+    click("Reveal hint 1"),
+    wait(1500),
+    caption(captions.answer),
+    { kind: "scrollTo", selector: "fieldset" },
+    wait(800),
+    choose(answerIndex),
+    wait(800),
+    click("Lock in answer"),
+    verdict,
+    { kind: "scrollTo", selector: ".reveal h2" },
+    wait(2600),
+    caption(""),
+    wait(300),
+  ],
+});
+
 export const SCENES: readonly Scene[] = Object.freeze([
+  deckScene("project", {
+    opening: "Which project is this from?",
+    hint: "Hints cost points.",
+    answer: "Four real repos. Pick one.",
+  }, ANSWER_CHOREOGRAPHY[0] ?? 0),
+  deckScene("language", {
+    opening: "Name the language.",
+    hint: "Stuck? Take a hint.",
+    answer: "Lock in your call.",
+  }, ANSWER_CHOREOGRAPHY[1] ?? 0, { width: 360, maximumColors: 96 }),
+  deckScene("ai", {
+    opening: "Is this AI-generated?",
+    hint: "Answers come from AI credits in the commit.",
+    answer: "Credited, or not?",
+  }, Math.min(ANSWER_CHOREOGRAPHY[3] ?? 1, 1), { width: 360, maximumColors: 96 }),
   {
-    id: "01-read-the-code",
-    gif: {},
-    steps: [
-      { kind: "goto" },
-      { kind: "expectText", pattern: "Round 1 of 5" },
-      wait(600),
-      caption("Read the code."),
-      wait(2200),
-      caption("Reveal a hint. It costs points."),
-      wait(600),
-      click("Reveal hint 1"),
-      wait(1400),
-      click("Reveal hint 2"),
-      wait(2000),
-      caption(""),
-      wait(300),
-    ],
-  },
-  {
-    id: "02-lock-in",
-    gif: { width: 360, maximumColors: 96 },
-    steps: [
-      { kind: "goto" },
-      { kind: "expectText", pattern: "Round 1 of 5" },
-      wait(400),
-      caption("Lock in your call."),
-      { kind: "scrollTo", selector: "fieldset" },
-      wait(900),
-      choose(ANSWER_CHOREOGRAPHY[0] ?? 0),
-      wait(900),
-      click("Lock in answer"),
-      verdict,
-      caption("Fewer hints, more points."),
-      { kind: "scrollTo", selector: ".reveal h2" },
-      wait(2600),
-      caption(""),
-      wait(300),
-    ],
-  },
-  {
-    id: "03-full-run",
+    id: "full-run",
     gif: { speed: 2, framesPerSecond: 12, width: 360, maximumColors: 80 },
     mp4: "codeguessr-demo",
     steps: [
-      { kind: "goto" },
-      { kind: "expectText", pattern: "Round 1 of 5" },
+      goto("/"),
+      { kind: "expectHeading", pattern: "^Pick a deck$" },
       wait(500),
-      caption("Five rounds. Read, guess, score."),
-      wait(1200),
+      caption("Three decks. Five real rounds each."),
+      wait(1800),
+      link("Which project?"),
+      { kind: "expectText", pattern: "Round 1 of 5" },
+      caption("Read, guess, score."),
+      wait(1000),
       ...playRound(1, 1),
       click("Next round"),
       ...playRound(2, 0),
@@ -119,11 +134,14 @@ export const SCENES: readonly Scene[] = Object.freeze([
       { kind: "expectText", pattern: "Run complete" },
       caption("Share your score."),
       { kind: "scrollTo", selector: ".reveal p:last-of-type" },
-      wait(2600),
-      click("Play again"),
-      { kind: "expectText", pattern: "Round 1 of 5" },
-      caption(""),
+      wait(2400),
+      caption("Then try another deck."),
       wait(900),
+      link("Choose another deck"),
+      { kind: "expectHeading", pattern: "^Pick a deck$" },
+      wait(1200),
+      caption(""),
+      wait(600),
     ],
   },
 ]);
