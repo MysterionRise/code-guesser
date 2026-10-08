@@ -63,3 +63,24 @@ ceiling.
 
 No token, commit, repository name, message text, response body, or dataset row
 is preserved.
+
+## Overlap and replacement windows (added the same day)
+
+Count-only probes for commits matching both an AI-credit window and an
+ordinary window:
+
+| Query | Results |
+| --- | --- |
+| `refactor "Co-authored-by: Copilot" org:github committer-date:2026-09-01 merge:false is:public` | 2 |
+| `refactor "Co-Authored-By: Claude" org:github committer-date:2026-09-01..2026-09-07 merge:false is:public` | 0 |
+| `refactor "Co-Authored-By: Claude" org:vercel committer-date:2026-09-01..2026-09-30 merge:false is:public` | 4 |
+| `refactor "Co-authored-by: Copilot" org:microsoft committer-date:2026-09-06 merge:false is:public` | 1 |
+| `"Co-authored-by: Copilot" "Co-Authored-By: Claude" org:github committer-date:2026-09-01 merge:false is:public` | 0 |
+
+Date-disjoint replacement windows, all complete:
+
+| Query | Results |
+| --- | --- |
+| `"Co-Authored-By: Claude" org:github committer-date:2026-09-02..2026-09-30 merge:false is:public` | 35 |
+| `refactor org:vercel committer-date:2026-08-01..2026-08-31 merge:false is:public` | 65 |
+| `refactor org:github committer-date:2026-08-01..2026-08-31 merge:false is:public` | 119 |
