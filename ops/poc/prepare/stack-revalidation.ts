@@ -2,7 +2,8 @@ import { createHash } from "node:crypto";
 
 import { screenBlob, screenLicenseEvidence } from "@codeguessr/content/local-poc-support";
 import { canonicalHash } from "./canonical";
-import type { CrawlProfile } from "./profile";
+import type { CrawlProfile, StackLanguage } from "./profile";
+import { languageExcerpt, looksGenerated } from "./excerpt-window";
 import type { RetryController } from "./retry";
 import type { StackMetadataRow } from "./stack-metadata";
 import type { BoundedTransport } from "./transport";
@@ -37,7 +38,7 @@ export interface RevalidatedStackCandidate extends Readonly<Record<string, unkno
   readonly path: string;
   readonly commit: string;
   readonly excerpt: string;
-  readonly detectedLanguage: "Python" | "TypeScript";
+  readonly detectedLanguage: StackLanguage;
 }
 const fail = (): never => { throw new StackRevalidationError(); };
 const record = (value: unknown): UnknownRecord =>
@@ -80,7 +81,10 @@ const validDate = (value: unknown): boolean => {
   return !Number.isNaN(instant.valueOf()) && expected.every((part, index) => part === observed[index]);
 };
 const decode = (value: unknown, size: unknown, whitespace = true): Uint8Array => {
-  const source = text(value);
+  // GitHub wraps base64 content at 60 columns with a trailing newline; the worker's own base64 is exact.
+  const source = whitespace
+    ? (typeof value === "string" && value.trim().length > 0 ? value : fail())
+    : text(value);
   const encoded = whitespace ? source.replace(/\s/gu, "") : source;
   if (!Number.isSafeInteger(size) || !/^[A-Za-z0-9+/]*={0,2}$/u.test(encoded)) fail();
   const bytes = Buffer.from(encoded, "base64");
@@ -232,17 +236,6 @@ const licenseState = async (
     || screened.repositoryPolicyHash !== options.profileHash) fail();
   return response.html_url as string;
 };
-const excerpt = (textValue: string, maximum: number, minimum: number): string => {
-  const bytes = new TextEncoder().encode(textValue);
-  let end = Math.min(bytes.byteLength, maximum);
-  let value: string | undefined;
-  while (end > 0 && value === undefined) {
-    try { value = new TextDecoder("utf-8", { fatal: true }).decode(bytes.slice(0, end)); } catch { end -= 1; }
-  }
-  const excerptValue = value ?? fail();
-  if (new TextEncoder().encode(excerptValue).byteLength < minimum) fail();
-  return excerptValue;
-};
 
 export const revalidateStackCandidate = async (
   options: StackRevalidationOptions,
@@ -265,8 +258,13 @@ export const revalidateStackCandidate = async (
     || githubBytes.some((value, index) => value !== selected[index])) fail();
   const licenseUrl = await licenseState(options, api, web, commit, repo, metadata.detectedLicenses);
   const screened = screenBlob({ path, bytes: githubBytes }, options.seenNormalizedHashes ?? new Set());
-  const excerptText = excerpt(screened.text, options.profile.screening.excerptBytes,
-    options.profile.screening.minimumExcerptBytes);
+  // FR-023 as amended: stricter experiment-local generated-file screen; FR-025: header-skipping window.
+  if (looksGenerated(screened.text, options.profile.screening.generatedScanLines)) fail();
+  const excerptText = languageExcerpt(screened.text, metadata.detectedLanguage as StackLanguage, {
+    maxLines: options.profile.screening.languageExcerptLines,
+    maxBytes: options.profile.screening.excerptBytes,
+    minBytes: options.profile.screening.minimumExcerptBytes,
+  }) ?? fail();
   return Object.freeze({
     discoverySource: "STACK_V2", repository, repositoryUrl: web,
     authorName: commitRecord.name, authorLogin: commitRecord.login, authorBasis: "SELECTED_COMMIT",

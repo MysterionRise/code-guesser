@@ -42,7 +42,7 @@ const treeIdentity = (entries: readonly { path: string; mode: string; type: stri
 const rootEntries = [{ path, mode: "100644", type: "blob", sha: blob }];
 const rootTree = treeIdentity(rootEntries);
 const profile = async () => parseCrawlProfile(JSON.parse(await readFile(
-  new URL("../profiles/local-real-rounds.v1.json", import.meta.url), "utf8",
+  new URL("../profiles/local-real-rounds.v2.json", import.meta.url), "utf8",
 )));
 
 const row = (overrides: Record<string, unknown> = {}) => {
@@ -177,6 +177,21 @@ const invoke = async (
 };
 
 describe("Stack candidate GitHub revalidation", () => {
+
+  it("decodes the provider's line-wrapped base64 for GitHub blobs and licence files", async () => {
+    const wrap = (value: string) => value.replace(/(.{60})/gu, "$1\n") + "\n";
+    const values = responses();
+    values.get(`${api}/git/blobs/${blob}`).content = wrap(values.get(`${api}/git/blobs/${blob}`).content);
+    values.get(`${api}/license?ref=${commit}`).content = wrap(values.get(`${api}/license?ref=${commit}`).content);
+    const result = await invoke(values);
+    expect(result.discoverySource).toBe("STACK_V2");
+    for (const broken of ["", " \n", 7]) {
+      const bad = responses();
+      bad.get(`${api}/git/blobs/${blob}`).content = broken;
+      await expect(invoke(bad)).rejects.toThrow("STACK_REVALIDATION_REJECTED");
+    }
+  });
+
   it("binds exact Stack bytes to a public pinned GitHub source and retains only a screened excerpt", async () => {
     const requests: string[] = [];
     const output = await invoke(responses(), row(), selected(), requests);
@@ -198,7 +213,7 @@ describe("Stack candidate GitHub revalidation", () => {
       licenseSpdx: "MIT",
       licenseFileUrl: `${web}/blob/${commit}/LICENSE`,
       rawContentHash: sha256(content),
-      excerpt: content.toString("utf8"),
+      excerpt: content.toString("utf8").replace(/\n+$/u, ""),
       stackRelease: "v2.2.0",
       stackRevision: "e565caa3a78c2423bd374333a472b049eb090e47",
       configuration: "Python",
@@ -233,9 +248,9 @@ describe("Stack candidate GitHub revalidation", () => {
       },
     })));
     expect(output).toMatchObject({
-      profileVersion: "local-real-rounds.v1",
+      profileVersion: "local-real-rounds.v2",
       crawlSnapshotId: "f".repeat(64),
-      excerptHash: sha256(content.toString("utf8")),
+      excerptHash: sha256(content.toString("utf8").replace(/\n+$/u, "")),
       stableRowId: row().stableRowId,
       swhDirectoryId: "d".repeat(40),
       swhSnapshotId: "e".repeat(40),
@@ -327,6 +342,7 @@ describe("Stack candidate GitHub revalidation", () => {
     const long = alternateScenario(longBytes, path, "Python");
     const output = await invoke(long.values, long.metadata, long.selectedBlob);
     expect(Buffer.byteLength(output.excerpt)).toBeLessThanOrEqual(4096);
+    expect(output.excerpt.split("\n").length).toBeLessThanOrEqual(20);
     expect(output.excerpt).not.toContain("tail_only_marker");
 
     const shortBytes = Buffer.from("def x():\n    return 1\n");

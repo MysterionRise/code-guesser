@@ -26,7 +26,7 @@ const licenseBytes = new TextEncoder().encode("MIT License\n\nPermission is here
 const licenseBlob = gitBlob(licenseBytes);
 
 const profile = async () => parseCrawlProfile(JSON.parse(
-  await readFile(new URL("../profiles/local-real-rounds.v1.json", import.meta.url), "utf8"),
+  await readFile(new URL("../profiles/local-real-rounds.v2.json", import.meta.url), "utf8"),
 ));
 
 const lineage = Object.freeze({
@@ -141,6 +141,21 @@ const invoke = async (
 };
 
 describe("GitHub public repository admission", () => {
+
+  it("decodes the provider's line-wrapped base64 licence content and rejects empty or non-string content", async () => {
+    const wrapped = Buffer.from(licenseBytes).toString("base64").replace(/(.{60})/gu, "$1\n") + "\n";
+    const providerResponses = mutableResponses();
+    providerResponses.get(`${api}/license?ref=${childCommit}`).content = wrapped;
+    const [admitted] = await invoke(providerResponses);
+    expect(admitted.source.licenseSpdx).toBe("MIT");
+
+    for (const content of ["", "   ", 42, null]) {
+      const broken = mutableResponses();
+      broken.get(`${api}/license?ref=${childCommit}`).content = content;
+      await expect(invoke(broken)).rejects.toBeInstanceOf(admissionModule.GitHubAdmissionError);
+    }
+  });
+
   it("binds public metadata, pinned licence evidence, and selected-commit author", async () => {
     const requests: Array<{ url: string; headers: Readonly<Record<string, string>> }> = [];
     const output = await invoke(responses(), requests);
@@ -161,7 +176,7 @@ describe("GitHub public repository admission", () => {
         licenseFileUrl: `${web}/blob/${childCommit}/LICENSE`,
         commit: childCommit,
         blobUrl: `${web}/blob/${childCommit}/${path}`,
-        profileVersion: "local-real-rounds.v1",
+        profileVersion: "local-real-rounds.v2",
         crawlSnapshotId: hash("f"),
       },
     });

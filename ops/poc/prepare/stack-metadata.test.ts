@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 
 import { createCapacityMeter } from "./capacity";
-import { parseCrawlProfile } from "./profile";
+import { parseCrawlProfile, STACK_LANGUAGES } from "./profile";
 
 const testModuleName: string = "vitest";
 const { describe, expect, it } = await import(testModuleName) as any;
@@ -12,7 +12,7 @@ const collectStackMetadata = typeof metadataModule.collectStackMetadata === "fun
   ? metadataModule.collectStackMetadata as (...args: any[]) => Promise<any>
   : async (): Promise<never> => { throw new Error("STACK_METADATA_NOT_IMPLEMENTED"); };
 
-const profilePath = new URL("../profiles/local-real-rounds.v1.json", import.meta.url);
+const profilePath = new URL("../profiles/local-real-rounds.v2.json", import.meta.url);
 const runtimeDirectory = new URL("../stack/", import.meta.url);
 const lockPath = new URL("uv.lock", runtimeDirectory);
 const pythonPath = new URL(".python-version", runtimeDirectory);
@@ -50,7 +50,7 @@ const metadataRow = (overrides: Record<string, unknown> = {}) => {
 };
 
 const counters = (overrides: Record<string, unknown> = {}) => ({
-  counters: { networkBytes: 4096, peakTemporaryDiskBytes: 1024, redirectsFollowed: 0, requests: 3, ...overrides },
+  counters: { networkBytes: 4096, peakTemporaryDiskBytes: 1024, redirectsFollowed: 0, requests: 3, rowsInspected: 1, ...overrides },
 });
 const lines = (...objects: Record<string, unknown>[]): Uint8Array =>
   Buffer.from(objects.map((object) => JSON.stringify(object)).join("\n") + "\n");
@@ -61,7 +61,7 @@ const setup = async (overrides: Record<string, unknown> = {}) => {
   const capacity = createCapacityMeter({
     limits: profile.capacity,
     githubQueryIds: profile.github.queries.map(({ id }) => id),
-    stackLanguages: ["Python", "TypeScript"],
+    stackLanguages: STACK_LANGUAGES,
   });
   return {
     profile,
@@ -158,11 +158,11 @@ describe("Stack metadata worker bridge", () => {
         revision: "e565caa3a78c2423bd374333a472b049eb090e47",
         rowLimit: 1,
         perBlobByteLimit: 262_144,
-        requestLimit: 200,
-        networkByteLimit: 67_108_864,
+        requestLimit: 600,
+        networkByteLimit: 100_663_296,
         temporaryDiskBytes: 33_554_432,
       }) + "\n",
-      stdoutByteLimit: 67_108_864,
+      stdoutByteLimit: 100_663_296,
       stderrByteLimit: 4096,
     });
     expect(rows).toEqual([metadataRow()]);
@@ -187,15 +187,15 @@ describe("Stack metadata worker bridge", () => {
     release();
 
     expect(JSON.parse(calls[0].stdin)).toMatchObject({
-      requestLimit: 195,
-      networkByteLimit: 67_107_864,
+      requestLimit: 595,
+      networkByteLimit: 100_662_296,
       temporaryDiskBytes: 33_553_408,
     });
-    expect(calls[0].stdoutByteLimit).toBe(67_107_864);
+    expect(calls[0].stdoutByteLimit).toBe(100_662_296);
 
     let spawns = 0;
     const exhausted = await setup({ runWorker: async () => { spawns += 1; return { exitCode: 0, stdout: ndjson(metadataRow()), stderr: new Uint8Array() }; } });
-    for (let index = 0; index < 200; index += 1) exhausted.capacity.beginRequest().release();
+    for (let index = 0; index < 600; index += 1) exhausted.capacity.beginRequest().release();
     await expect(collectStackMetadata(exhausted)).rejects.toMatchObject({ code: "LIMIT_REJECTED" });
     expect(spawns).toBe(0);
   });
@@ -224,13 +224,34 @@ describe("Stack metadata worker bridge", () => {
       ["COUNTERS_REJECTED", lines(row, counters({ requests: 1.5 }))],
       ["COUNTERS_REJECTED", lines(row, counters({ redirectsFollowed: 4 }))],
       ["COUNTERS_REJECTED", lines(row, { trailer: counters().counters })],
-      ["METADATA_CAPACITY", lines(row, counters({ requests: 201 }))],
-      ["METADATA_BYTES", lines(row, counters({ networkBytes: 67_108_865 }))],
+      ["METADATA_CAPACITY", lines(row, counters({ requests: 601 }))],
+      ["METADATA_BYTES", lines(row, counters({ networkBytes: 100_663_297 }))],
       ["TEMPORARY_DISK", lines(row, counters({ peakTemporaryDiskBytes: 33_554_433 }))],
     ] as const;
     for (const [code, stdout] of cases) {
       await expectBeforeBlob(code, { runWorker: async () => ({ exitCode: 0, stdout, stderr: new Uint8Array() }) });
     }
+  });
+
+  it("charges every inspected row, accepts fewer emitted rows, and rejects inspected counts off the ceiling", async () => {
+    const options = await setup({
+      rowLimit: 3,
+      runWorker: async () => ({ exitCode: 0, stdout: lines(metadataRow(), counters({ rowsInspected: 3 })), stderr: new Uint8Array() }),
+    });
+
+    const rows = await collectStackMetadata(options);
+
+    expect(rows).toHaveLength(1);
+    expect(options.capacity.snapshot().stackRows.Python).toBe(3);
+    for (const [code, inspected] of [["OUTPUT_MALFORMED", 2], ["ROW_OVERRUN", 4], ["ROW_OVERRUN", 0]] as const) {
+      await expectBeforeBlob(code, {
+        rowLimit: 3,
+        runWorker: async () => ({ exitCode: 0, stdout: lines(metadataRow(), counters({ rowsInspected: inspected })), stderr: new Uint8Array() }),
+      });
+    }
+    await expectBeforeBlob("COUNTERS_REJECTED", {
+      runWorker: async () => ({ exitCode: 0, stdout: lines(metadataRow(), { counters: { networkBytes: 1, peakTemporaryDiskBytes: 0, redirectsFollowed: 0, requests: 1 } }), stderr: new Uint8Array() }),
+    });
   });
 
   it("records exact rows and metadata bytes with the accepted capacity meter before blobs", async () => {
@@ -341,7 +362,7 @@ describe("Stack metadata worker bridge", () => {
     await expectBeforeBlob("METADATA_BYTES", {
       runWorker: async () => ({
         exitCode: 0,
-        stdout: new Uint8Array(67_108_865),
+        stdout: new Uint8Array(100_663_297),
         stderr: new Uint8Array(),
       }),
     });
@@ -388,7 +409,7 @@ describe("Stack metadata worker bridge", () => {
     const rows = await collectStackMetadata(await setup({
       configuration: "TypeScript",
       rowLimit: 2,
-      runWorker: async () => ({ exitCode: 0, stdout: ndjson(first, second), stderr: new Uint8Array() }),
+      runWorker: async () => ({ exitCode: 0, stdout: lines(first, second, counters({ rowsInspected: 2 })), stderr: new Uint8Array() }),
     }));
     expect(rows.map(({ swhBlobId }: { swhBlobId: string }) => swhBlobId))
       .toEqual(["1".repeat(40), "2".repeat(40)]);
@@ -416,7 +437,7 @@ describe("Stack metadata worker bridge", () => {
       { exitCode: 1, stdout: new Uint8Array(), stderr: new Uint8Array() },
       { exitCode: 0, stdout: ndjson(metadataRow()), stderr: Buffer.from("warning") },
       { exitCode: 0, stdout: Buffer.from("not-json\n"), stderr: new Uint8Array() },
-      { exitCode: 0, stdout: new Uint8Array(67_108_865), stderr: new Uint8Array() },
+      { exitCode: 0, stdout: new Uint8Array(100_663_297), stderr: new Uint8Array() },
     ]) {
       let cleanups = 0;
       await expect(collectStackMetadata(await setup({

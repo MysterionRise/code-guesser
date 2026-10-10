@@ -158,9 +158,11 @@ export function formatCompletionResult(result: EntertainmentResultProjection): s
 interface ArcadeShellProps {
   mode: PublicModeContract;
   authorizeRevealAction: (request: RevealRequest) => Promise<AuthorizedReveal>;
+  /** When set, completion also links back to the deck chooser. */
+  chooseAnotherDeckHref?: string;
 }
 
-export function ArcadeShell({ mode, authorizeRevealAction }: ArcadeShellProps) {
+export function ArcadeShell({ mode, authorizeRevealAction, chooseAnotherDeckHref }: ArcadeShellProps) {
   const [session, setSession] = React.useState(() => createArcadeSession(mode));
   const [selection, setSelection] = React.useState("");
   const [busy, setBusy] = React.useState(false);
@@ -272,6 +274,7 @@ export function ArcadeShell({ mode, authorizeRevealAction }: ArcadeShellProps) {
                 : <>
                     <p>{formatCompletionResult(session.result!)}</p>
                     <button type="button" onClick={restart}>Play again</button>
+                    {chooseAnotherDeckHref && <a className="deck-link" href={chooseAnotherDeckHref}>Choose another deck</a>}
                   </>}
             </>
           )}

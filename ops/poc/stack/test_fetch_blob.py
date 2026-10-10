@@ -37,7 +37,7 @@ def limits(**overrides):
         "perBlobBytes": MAXIMUM_BLOB_BYTES,
         "totalBlobBytes": 16 * 1024 * 1024,
         "temporaryDiskBytes": 32 * 1024 * 1024,
-        "requestLimit": 200,
+        "requestLimit": 600,
         "networkByteLimit": MAXIMUM_BLOB_BYTES,
     }
     value.update(overrides)
@@ -198,7 +198,9 @@ class FetchSelectedBlobTests(unittest.TestCase):
         config = kwargs["config"]
         self.assertEqual(config.retries, {"total_max_attempts": 1, "mode": "standard"})
         self.assertEqual((config.connect_timeout, config.read_timeout, config.max_pool_connections), (15, 15, 1))
-        self.assertEqual(config.signature_version, "s3v4")
+        # The content bucket serves objects anonymously; no AWS signing material is ever attached.
+        from botocore import UNSIGNED
+        self.assertIs(config.signature_version, UNSIGNED)
         self.assertEqual(config.s3, {"addressing_style": "virtual"})
         self.assertEqual(
             [name for name, _handler in client.meta.events.registrations], ["before-send.s3.GetObject"],
@@ -225,7 +227,7 @@ class FetchSelectedBlobTests(unittest.TestCase):
             ("DECLARED_SIZE_REJECTED", limits(perBlobBytes=3)),
             ("TOTAL_BLOB_BYTES", limits(totalBlobBytes=7)),
             ("LIMIT_RAISED", limits(blobAttempts=51)),
-            ("LIMIT_RAISED", limits(requestLimit=201)),
+            ("LIMIT_RAISED", limits(requestLimit=601)),
             ("LIMIT_RAISED", limits(networkByteLimit=MAXIMUM_BLOB_BYTES + 1)),
             ("LIMIT_VALUE", limits(temporaryDiskBytes=0)),
             ("LIMIT_VALUE", limits(requestLimit=0)),

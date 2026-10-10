@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { reconstructChangedLines, screenBlob } from "@codeguessr/content/local-poc-support";
+import { isScreenablePath, patchFitsExcerptWindow, reconstructChangedLines, screenBlob } from "@codeguessr/content/local-poc-support";
+import { looksGenerated } from "./excerpt-window";
 import type { GitHubSearchCandidate } from "./github-search";
 import type { CrawlProfile } from "./profile";
 import type { RetryController } from "./retry";
@@ -38,6 +39,10 @@ export interface GitHubLineageCandidate extends GitHubSearchCandidate {
   readonly changedLineHash: string;
   readonly excerpt: string;
   readonly excerptHash: string;
+  /** Revision 12 AI-deck hints: the commit's changed-file count and line totals from its own record. */
+  readonly changedFileCount: number;
+  readonly commitAdditions: number;
+  readonly commitDeletions: number;
 }
 interface CommitRecord {
   readonly sha: string;
@@ -45,6 +50,7 @@ interface CommitRecord {
   readonly message: string;
   readonly parents: readonly string[];
   readonly files: readonly UnknownRecord[];
+  readonly stats: unknown;
 }
 interface TreeEntry {
   readonly path: string;
@@ -111,23 +117,45 @@ const parseCommit = (
     message: text(commit.message),
     parents: Object.freeze(parents),
     files: Object.freeze(Array.isArray(response.files) ? response.files.map(record) : fail()),
+    stats: response.stats,
   });
 };
 
+/**
+ * FR-024 requires a single-parent commit; the commit itself may touch several files.
+ * Exactly one same-path modification is bound: the first screenable one in path order,
+ * so the choice is deterministic for the pinned commit and recorded in the fixture.
+ */
 const parseChangedPath = (
   commit: CommitRecord,
   api: string,
   web: string,
 ): Readonly<{ path: string; blob: string }> => {
-  if (commit.parents.length !== 1 || commit.files.length !== 1) fail();
-  const file = commit.files[0]!;
+  if (commit.parents.length !== 1 || commit.files.length === 0) fail();
+  // A recorded patch that cannot fit the excerpt window disqualifies its file up front; an
+  // absent patch leaves the decision to the authoritative reconstruction from pinned blobs.
+  const modifications = commit.files.filter((entry) => entry.status === "modified"
+    && entry.previous_filename === undefined && typeof entry.filename === "string"
+    && isScreenablePath(entry.filename)
+    && (typeof entry.patch !== "string" || patchFitsExcerptWindow(entry.patch)));
+  const names = modifications.map((entry) => text(entry.filename));
+  if (names.length === 0 || new Set(names).size !== names.length) fail();
+  const file = [...modifications].sort((left, right) => compareText(text(left.filename), text(right.filename)))[0]!;
   const path = text(file.filename);
   const blob = gitId(file.sha);
+  // GitHub percent-encodes the whole path (slashes included) inside these per-file URLs.
+  const encoded = encodeURIComponent(path);
   if (file.status !== "modified" || file.previous_filename !== undefined
-    || file.blob_url !== `${web}/blob/${commit.sha}/${path}`
-    || file.raw_url !== `${web}/raw/${commit.sha}/${path}`
-    || file.contents_url !== `${api}/contents/${path}?ref=${commit.sha}`) fail();
+    || file.blob_url !== `${web}/blob/${commit.sha}/${encoded}`
+    || file.raw_url !== `${web}/raw/${commit.sha}/${encoded}`
+    || file.contents_url !== `${api}/contents/${encoded}?ref=${commit.sha}`) fail();
   return Object.freeze({ path, blob });
+};
+
+const commitStats = (commit: CommitRecord): Readonly<{ additions: number; deletions: number }> => {
+  const stats = record(commit.stats);
+  const count = (value: unknown): number => Number.isSafeInteger(value) && (value as number) >= 0 ? value as number : fail();
+  return Object.freeze({ additions: count(stats.additions), deletions: count(stats.deletions) });
 };
 
 const treeHash = (entries: readonly TreeEntry[]): string => {
@@ -246,17 +274,20 @@ const bindCandidate = async (
   const child = parseCommit(await requestJson(options, `${api}/commits/${candidate.commit}`),
     candidate.commit, api, web);
   const changed = parseChangedPath(child, api, web);
+  // Child side first: its tree binding and blob screening reject most candidates, and every
+  // request they save is a request the signed ceiling keeps for the next candidate.
+  const childPath = await resolvePath(options, api, child.tree, changed.path);
+  if (childPath.blob !== changed.blob) fail();
+  const childBytes = await loadBlob(options, api, childPath.blob);
+  const childScreen = screenBlob({ path: changed.path, bytes: childBytes }, options.seenNormalizedHashes ?? new Set<string>());
+  // FR-023 as amended: the experiment's stricter generated-file screen applies to every fixture.
+  if (looksGenerated(childScreen.text, options.profile.screening.generatedScanLines)) fail();
+  const stats = commitStats(child);
   const parentSha = child.parents[0]!;
   const parent = parseCommit(await requestJson(options, `${api}/commits/${parentSha}`), parentSha, api, web);
-  const [childPath, parentPath] = await Promise.all([
-    resolvePath(options, api, child.tree, changed.path),
-    resolvePath(options, api, parent.tree, changed.path),
-  ]);
-  if (childPath.blob !== changed.blob || childPath.blob === parentPath.blob) fail();
-  const [childBytes, parentBytes] = await Promise.all([
-    loadBlob(options, api, childPath.blob),
-    loadBlob(options, api, parentPath.blob),
-  ]);
+  const parentPath = await resolvePath(options, api, parent.tree, changed.path);
+  if (childPath.blob === parentPath.blob) fail();
+  const parentBytes = await loadBlob(options, api, parentPath.blob);
   const { parentHash, childHash, diff } = screenChange(options, changed.path, child.parents,
     { blob: parentPath.blob, bytes: parentBytes }, { blob: childPath.blob, bytes: childBytes });
   return Object.freeze({
@@ -279,6 +310,9 @@ const bindCandidate = async (
     changedLineHash: sha256(JSON.stringify(diff.changedLines)),
     excerpt: diff.excerpt,
     excerptHash: diff.excerptSha256,
+    changedFileCount: child.files.length,
+    commitAdditions: stats.additions,
+    commitDeletions: stats.deletions,
   });
 };
 

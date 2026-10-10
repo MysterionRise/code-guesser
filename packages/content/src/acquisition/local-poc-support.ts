@@ -1,10 +1,12 @@
 export {
   BlobScreenError,
+  isScreenablePath,
   screenBlob,
   type ScreenedBlob,
 } from "./github/blob-screen";
 export {
   ChangedLinesError,
+  patchFitsExcerptWindow,
   reconstructChangedLines,
   type ChangedLinesInput,
   type ChangedLinesResult,

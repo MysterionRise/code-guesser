@@ -4,7 +4,7 @@ test.use({ viewport: { width: 320, height: 568 } });
 
 test("records local Chromium provenance observations without promoting them to support evidence", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
-  await page.goto("/");
+  await page.goto("/?deck=ai");
   await expect(page.getByRole("main")).toBeVisible();
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);

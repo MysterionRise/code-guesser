@@ -35,6 +35,10 @@ const CALLER_HEADERS = new Set(["accept", "user-agent", "x-github-api-version"])
 const CREDENTIAL_LIKE_VALUE = /(?:\bbearer\b|\bbasic\b|\btoken\s*[:=]|\bsecret\s*[:=]|\bpassword\s*[:=]|\bcredential\s*[:=]|\baws4-hmac-sha256\b)/iu;
 const SENSITIVE_QUERY = /^(?:access_token|token|authorization|signature|x-amz-.+|awsaccesskeyid)$/iu;
 const STACK_CARD_PATH = "/datasets/bigcode/the-stack-v2/raw/main/README.md";
+// Exact hosts a Hugging Face resolve redirect may target. The one entry was observed under
+// authorization on 2026-10-08 (HEAD on the pinned resolve endpoint answered 302 to this host);
+// see docs/gangsta/codeguessr-poc-readiness/evidence/2026-10-08-hugging-face-redirect-observation.md.
+const HUGGING_FACE_REDIRECT_HOSTS: ReadonlySet<string> = new Set(["us.aws.cdn.hf.co"]);
 
 const pathAllowed = (provider: Provider, url: URL): boolean => {
   if (provider === "github") {
@@ -107,6 +111,26 @@ export const authorizeRequest = (
   });
 };
 
+/**
+ * A resolve redirect to the observed CDN host carries the target host's own signed query and
+ * receives no credential: the origin token, cookies, and signing state never cross hosts.
+ */
+const authorizeHuggingFaceRedirectTarget = (
+  origin: RequestInput,
+  location: string,
+): AuthorizedRequest | undefined => {
+  if (origin.provider !== "huggingFace" || /\/\.\.(?:\/|$)/u.test(location)) return undefined;
+  let url: URL;
+  try {
+    url = new URL(location);
+  } catch {
+    return undefined;
+  }
+  if (!HUGGING_FACE_REDIRECT_HOSTS.has(url.hostname)) return undefined;
+  if (url.protocol !== "https:" || url.username || url.password || url.port !== "" || url.hash !== "") fail();
+  return Object.freeze({ provider: "huggingFace", method: origin.method, url, headers: Object.freeze({}) });
+};
+
 export const authorizeRedirect = (
   origin: RequestInput,
   location: string,
@@ -114,6 +138,10 @@ export const authorizeRedirect = (
   credentials: CredentialPolicy = {},
 ): AuthorizedRequest => {
   parseRequest(origin, true);
+  if (targetProvider === "huggingFace") {
+    const target = authorizeHuggingFaceRedirectTarget(origin, location);
+    if (target) return target;
+  }
   return authorizeRequest({
     provider: targetProvider,
     method: origin.method,

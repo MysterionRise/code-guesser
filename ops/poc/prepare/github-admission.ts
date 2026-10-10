@@ -127,7 +127,12 @@ const selectedAuthor = (
 
 const decodeLicense = (response: UnknownRecord): Uint8Array => {
   if (response.encoding !== "base64" || !Number.isSafeInteger(response.size)) fail();
-  const encoded = text(response.content).replace(/\s/gu, "");
+  // The provider wraps base64 content at 60 columns with a trailing newline; only the
+  // whitespace-free payload is validated and decoded.
+  const content = typeof response.content === "string" && response.content.trim().length > 0
+    ? response.content
+    : fail();
+  const encoded = content.replace(/\s/gu, "");
   if (!/^[A-Za-z0-9+/]*={0,2}$/u.test(encoded)) fail();
   const bytes = Buffer.from(encoded, "base64");
   if (bytes.byteLength !== response.size || bytes.toString("base64") !== encoded) fail();

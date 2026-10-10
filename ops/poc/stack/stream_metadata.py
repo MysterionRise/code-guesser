@@ -7,12 +7,11 @@ import sys
 import tempfile
 
 
-DATASET_NAME = "bigcode/the-stack-v2"
 PINNED_REVISION = "e565caa3a78c2423bd374333a472b049eb090e47"
 MAXIMUM_ROWS = 10_000
 MAXIMUM_BLOB_BYTES = 256 * 1024
-MAXIMUM_REQUESTS = 200
-MAXIMUM_NETWORK_BYTES = 64 * 1024 * 1024
+MAXIMUM_REQUESTS = 600
+MAXIMUM_NETWORK_BYTES = 96 * 1024 * 1024
 MAXIMUM_TEMPORARY_BYTES = 32 * 1024 * 1024
 DISK_CHECK_INTERVAL = 256
 REQUEST_KEYS = {
@@ -26,7 +25,6 @@ PROVIDER_KEYS = {
     "star_events_count", "fork_events_count", "gha_license_id",
     "gha_event_created_at", "gha_created_at", "gha_language", "src_encoding",
     "language", "is_vendor", "is_generated", "length_bytes", "extension",
-    "filename",
 }
 CACHE_KEYS = ("HF_HOME", "HF_DATASETS_CACHE", "HUGGINGFACE_HUB_CACHE", "HF_TOKEN_PATH", "TMPDIR")
 HUB_HARDENING = {
@@ -36,6 +34,14 @@ HUB_HARDENING = {
     "HF_HUB_DISABLE_PROGRESS_BARS": "1",
     "HF_HUB_ETAG_TIMEOUT": "15",
     "HF_HUB_DOWNLOAD_TIMEOUT": "15",
+}
+# Revision 12 FR-025/FR-028: the five configured language subsets and their exact extensions.
+EXTENSIONS = {
+    "Python": (".py",),
+    "TypeScript": (".ts", ".tsx"),
+    "Go": (".go",),
+    "Rust": (".rs",),
+    "Ruby": (".rb",),
 }
 HEX_40 = re.compile(r"^[0-9a-f]{40}$")
 REPOSITORY = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
@@ -55,7 +61,7 @@ def _parse_request(value, environment):
     if not isinstance(value, dict) or set(value) != REQUEST_KEYS:
         _fail("REQUEST_MALFORMED")
     configuration = value["configuration"]
-    if configuration not in ("Python", "TypeScript"):
+    if configuration not in EXTENSIONS:
         _fail("CONFIGURATION_REJECTED")
     if value["revision"] != PINNED_REVISION:
         _fail("REVISION_REJECTED")
@@ -114,34 +120,37 @@ def _date(value, *, optional=False):
     return moment.isoformat(timespec=timespec).replace("+00:00", "Z")
 
 
-def _path(value, configuration):
+def _path(value):
+    """Structural path validation; the configured extension is a screening criterion, not a schema rule."""
     parsed = _text(value, "PATH_REJECTED")
     relative = parsed[1:] if parsed.startswith("/") else parsed
-    extensions = (".py",) if configuration == "Python" else (".ts", ".tsx")
     if not parsed.startswith("/") or "\\" in parsed:
         _fail("PATH_REJECTED")
     if any(part in ("", ".", "..") for part in relative.split("/")):
         _fail("PATH_REJECTED")
-    if not relative.endswith(extensions):
-        _fail("PATH_REJECTED")
     return relative
 
 
+def _extensions(configuration):
+    return EXTENSIONS[configuration]
+
+
 def _licenses(value):
-    if not isinstance(value, list) or not value:
+    """Structural licence validation; an empty or repeated list screens the row out later."""
+    if not isinstance(value, list):
         _fail("LICENSE_REJECTED")
-    parsed = [_text(item, "LICENSE_REJECTED") for item in value]
-    if len(set(parsed)) != len(parsed):
-        _fail("LICENSE_REJECTED")
-    return parsed
+    return [_text(item, "LICENSE_REJECTED") for item in value]
 
 
 def _validate_documented_columns(value, path):
     if value["license_type"] not in ("permissive", "no_license"):
         _fail("ROW_VALUE_REJECTED")
-    if not _text(value["branch_name"], "ROW_VALUE_REJECTED").startswith("refs/"):
-        _fail("ROW_VALUE_REJECTED")
+    # The card documents branch_name only as a name; values such as HEAD are data, not drift.
+    _text(value["branch_name"], "ROW_VALUE_REJECTED")
+    # github_id is null when the GitHub Archive linkage is absent; event counts are always present.
     for name in ("github_id", "star_events_count", "fork_events_count"):
+        if value[name] is None and name == "github_id":
+            continue
         if isinstance(value[name], bool) or not isinstance(value[name], int) or value[name] < 0:
             _fail("ROW_VALUE_REJECTED")
     for name in ("gha_license_id", "gha_language"):
@@ -149,29 +158,40 @@ def _validate_documented_columns(value, path):
             _text(value[name], "ROW_VALUE_REJECTED")
     _date(value["gha_event_created_at"], optional=True)
     _date(value["gha_created_at"], optional=True)
-    extension = _text(value["extension"], "ROW_VALUE_REJECTED")
-    filename = _text(value["filename"], "ROW_VALUE_REJECTED")
-    if extension != path.rsplit(".", 1)[-1] or filename != path.rsplit("/", 1)[-1]:
+    # The extension column is typed here (it is empty for extensionless files); whether it
+    # agrees with the path is a screening question.
+    if not isinstance(value["extension"], str):
         _fail("ROW_VALUE_REJECTED")
 
 
 def _validate_row(value, configuration, byte_limit):
+    """Fails closed on schema or metadata drift (FR-028); returns None for a row that
+    merely fails the FR-029 screening and therefore may not proceed to blob retrieval."""
     if not isinstance(value, dict) or set(value) != PROVIDER_KEYS:
         _fail("ROW_SCHEMA_REJECTED")
     if value["language"] != configuration:
         _fail("LANGUAGE_REJECTED")
-    if value["is_generated"] is not False:
-        _fail("GENERATED_REJECTED")
-    if value["is_vendor"] is not False:
-        _fail("VENDOR_REJECTED")
-    if value["src_encoding"] != "UTF-8":
-        _fail("ENCODING_REJECTED")
-    length = _bounded_integer(value["length_bytes"], byte_limit, "LENGTH_REJECTED")
+    for name in ("is_generated", "is_vendor"):
+        if not isinstance(value[name], bool):
+            _fail("ROW_VALUE_REJECTED")
+    encoding = _text(value["src_encoding"], "ROW_VALUE_REJECTED")
+    length = value["length_bytes"]
+    if isinstance(length, bool) or not isinstance(length, int) or length < 0:
+        _fail("LENGTH_REJECTED")
     repository = _text(value["repo_name"], "REPOSITORY_REJECTED")
     if not REPOSITORY.fullmatch(repository):
         _fail("REPOSITORY_REJECTED")
-    path = _path(value["path"], configuration)
+    path = _path(value["path"])
+    licenses = _licenses(value["detected_licenses"])
     _validate_documented_columns(value, path)
+    screened_out = (
+        value["is_generated"] or value["is_vendor"] or encoding != "UTF-8"
+        or not 1 <= length <= byte_limit or not licenses or len(set(licenses)) != len(licenses)
+        or not path.endswith(_extensions(configuration))
+        or value["extension"] != path.rsplit(".", 1)[-1]
+    )
+    if screened_out:
+        return None
     return _project(value, configuration, repository, path, length)
 
 
@@ -218,12 +238,11 @@ def _restore_environment(environment, previous):
             environment[key] = value
 
 
-def _default_loader(*args, **kwargs):
-    import datasets.config
-    from datasets import load_dataset
-    # The dataset-viewer shortcut would contact a second host; the signed allowlist has one.
-    datasets.config.USE_PARQUET_EXPORT = False
-    return load_dataset(*args, **kwargs)
+def _default_reader(configuration, token, budget, row_limit):
+    from bounded_http import create_client
+    from bounded_parquet import read_rows
+    with create_client(budget) as client:
+        yield from read_rows(client, configuration, token, row_limit)
 
 
 def _default_installer(budget):
@@ -243,14 +262,19 @@ def _check_temporary_disk(budget, measure, cache_root, disk_limit):
         _fail("TEMPORARY_DISK")
 
 
-def stream_metadata(request, *, load_dataset_fn=None, environment=None, output=None,
+def _stable_code(error, fallback):
+    code = getattr(error, "code", None)
+    return code if isinstance(code, str) and code.isupper() else fallback
+
+
+def stream_metadata(request, *, read_rows_fn=None, environment=None, output=None,
                     install_backend_fn=None, measure_disk_fn=None):
     from bounded_http import NetworkBudget
     active_environment = os.environ if environment is None else environment
     active_output = sys.stdout if output is None else output
     (configuration, row_limit, byte_limit, token,
      request_limit, network_limit, disk_limit) = _parse_request(request, active_environment)
-    loader = _default_loader if load_dataset_fn is None else load_dataset_fn
+    reader = _default_reader if read_rows_fn is None else read_rows_fn
     installer = _default_installer if install_backend_fn is None else install_backend_fn
     measure = _default_measure if measure_disk_fn is None else measure_disk_fn
     budget = NetworkBudget(request_limit, network_limit)
@@ -259,30 +283,31 @@ def stream_metadata(request, *, load_dataset_fn=None, environment=None, output=N
         try:
             installer(budget)
             try:
-                dataset = loader(
-                    DATASET_NAME, configuration, split="train", streaming=True,
-                    revision=PINNED_REVISION, token=token,
-                )
-            except Exception:
-                _fail("DATASET_LOAD_FAILED")
+                iterator = iter(reader(configuration, token, budget, row_limit))
+            except Exception as error:  # noqa: BLE001 - only a stable code leaves the worker
+                _fail(_stable_code(error, "DATASET_LOAD_FAILED"))
             _check_temporary_disk(budget, measure, cache_root, disk_limit)
-            iterator = iter(dataset)
+            emitted = 0
             for index in range(row_limit):
                 try:
                     source_row = next(iterator)
                 except StopIteration:
                     _fail("EARLY_STOP")
-                except Exception:
-                    _fail("STREAM_FAILED")
+                except Exception as error:  # noqa: BLE001 - only a stable code leaves the worker
+                    _fail(_stable_code(error, "STREAM_FAILED"))
                 projected = _validate_row(source_row, configuration, byte_limit)
-                active_output.write(json.dumps(projected, ensure_ascii=False, separators=(",", ":")) + "\n")
+                if projected is not None:
+                    active_output.write(json.dumps(projected, ensure_ascii=False, separators=(",", ":")) + "\n")
+                    emitted += 1
                 if (index + 1) % DISK_CHECK_INTERVAL == 0:
                     _check_temporary_disk(budget, measure, cache_root, disk_limit)
             _check_temporary_disk(budget, measure, cache_root, disk_limit)
+            # Every inspected row counts against the signed row ceiling, whether or not it was emitted.
             active_output.write(json.dumps(
-                {"counters": budget.counters()}, separators=(",", ":"), sort_keys=True,
+                {"counters": {**budget.counters(), "rowsInspected": row_limit}},
+                separators=(",", ":"), sort_keys=True,
             ) + "\n")
-            return row_limit
+            return emitted
         finally:
             _restore_environment(active_environment, previous)
 

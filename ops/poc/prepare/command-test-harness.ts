@@ -1,12 +1,13 @@
+import { createRunReport } from "./run-report";
 import { readFile } from "node:fs/promises";
 
 import { canonicalBytes, canonicalHash } from "./canonical";
 import { createCapacityMeter, type CapacityMeter } from "./capacity";
 import type { GitHubQueryClassification } from "./github-search";
-import { parseCrawlProfile, type CrawlProfile } from "./profile";
+import { parseCrawlProfile, STACK_LANGUAGES, type CrawlProfile, type StackLanguage } from "./profile";
 import type { PreparationDependencies } from "./index";
 
-const profilePath = new URL("../profiles/local-real-rounds.v1.json", import.meta.url);
+const profilePath = new URL("../profiles/local-real-rounds.v2.json", import.meta.url);
 
 export const hash = (digit: string): string => digit.repeat(64);
 export const accepted = <Value>(value: Value, digit = "a") => ({
@@ -39,9 +40,21 @@ interface HarnessState {
   readonly leases: CommandHarness["leases"];
   readonly published: unknown[];
   readonly reports: unknown[];
-  readonly candidates: readonly { id: number }[];
-  readonly rows: Readonly<Record<"Python" | "TypeScript", readonly { id: string; detectedLanguage: string }[]>>;
+  readonly candidates: readonly HarnessCandidate[];
+  readonly rows: Readonly<Record<StackLanguage, readonly { id: string; detectedLanguage: string }[]>>;
 }
+
+export interface HarnessCandidate { readonly id: number; readonly queryId: string; readonly repository: string }
+/** Ordinary candidates 0-7 feed the project deck and uncredited AI rounds; 20-22 carry an AI credit. */
+export const HARNESS_CANDIDATES: readonly HarnessCandidate[] = Object.freeze([
+  ...[0, 1, 2, 3, 4, 5, 6, 7].map((id) => ({ id, queryId: "ordinary-facebook", repository: `org${id}/repo-${id}` })),
+  ...[20, 21, 22].map((id) => ({ id, queryId: "ai-copilot-github", repository: `org${id}/repo-${id}` })),
+]);
+export const HARNESS_CREDIT = "Co-authored-by: Copilot <1+Copilot@users.noreply.github.com>";
+const harnessRows = (): HarnessState["rows"] => Object.fromEntries(STACK_LANGUAGES.map((language) => [language,
+  language === "Python"
+    ? [{ id: "py-reject", detectedLanguage: "Python" }, { id: "py", detectedLanguage: "Python" }]
+    : [{ id: language.toLowerCase(), detectedLanguage: language }]])) as unknown as HarnessState["rows"];
 
 const makeState = (profile: CrawlProfile): HarnessState => ({
   profile,
@@ -50,11 +63,8 @@ const makeState = (profile: CrawlProfile): HarnessState => ({
   leases: [],
   published: [],
   reports: [],
-  candidates: [0, 1, 2, 3, 4].map((id) => ({ id })),
-  rows: {
-    Python: [{ id: "py-reject", detectedLanguage: "Python" }, { id: "py", detectedLanguage: "Python" }],
-    TypeScript: [{ id: "ts", detectedLanguage: "TypeScript" }],
-  },
+  candidates: HARNESS_CANDIDATES,
+  rows: harnessRows(),
 });
 
 const makeFoundationDependencies = (
@@ -102,13 +112,18 @@ const makeGitHubDependencies = (
   bindGitHubLineage: async ({ candidate, capacity }) => {
     state.calls.push(`lineage:${(candidate as any).id}`);
     state.dependencyMeters.push(capacity);
-    return accepted({ ...(candidate as object), commitMessage: (candidate as any).id === 0
-      ? state.profile.markers[0] : "ordinary refactor" }, "3");
+    const id = (candidate as any).id as number;
+    return accepted({ ...(candidate as object), excerpt: `value_${id} = compute(${id}) + 1000`,
+      commitMessage: id >= 20 ? `Fix spacing\n\n${HARNESS_CREDIT}` : "ordinary refactor" }, "3");
   },
   admitGitHubCandidate: async ({ candidate, capacity }) => {
     state.calls.push(`admit:${(candidate as any).id}`);
     state.dependencyMeters.push(capacity);
-    return accepted({ admissionDecision: "AUTOMATED_POC_ADMISSION_ONLY", lineage: candidate }, "4");
+    const lineage = candidate as any;
+    return accepted({ admissionDecision: "AUTOMATED_POC_ADMISSION_ONLY", lineage, source: {
+      repository: lineage.repository, commit: String(lineage.id).padStart(40, "c"), path: `src/file-${lineage.id}.ts`,
+      blob: String(lineage.id).padStart(40, "b"), rawContentHash: String(lineage.id).padStart(64, "r"),
+      excerptHash: String(lineage.id).padStart(64, "e"), queryId: lineage.queryId } }, "4");
   },
 });
 
@@ -119,7 +134,7 @@ const makeStackDependencies = (
     state.calls.push(`metadata:${configuration}`);
     state.dependencyMeters.push(capacity);
     capacity.recordStackRows(configuration, state.rows[configuration].length, 100);
-    return accepted(state.rows[configuration], configuration === "Python" ? "5" : "6");
+    return accepted(state.rows[configuration], String(5 + STACK_LANGUAGES.indexOf(configuration)));
   },
   fetchStackBlob: async ({ row, limits, capacity }) => {
     state.calls.push(`fetch:${(row as any).id}:${limits.blobAttempts}:${limits.totalBlobBytes}`);
@@ -140,23 +155,30 @@ const makeStackDependencies = (
 
 const makeArtifactDependencies = (
   state: HarnessState,
-): Pick<PreparationDependencies, "generateProvenance" | "generateLanguage" | "compose"> => ({
-  generateProvenance: ({ candidates: selected }) => {
-    state.calls.push(`provenance:${selected.length}`);
-    return { fixtures: [{ kind: "PROVENANCE" }, { kind: "PROVENANCE" }, { kind: "PROVENANCE" }] } as any;
+): Pick<PreparationDependencies, "generateProject" | "generateLanguage" | "generateAi" | "compose"> => ({
+  generateProject: ({ candidates: selected, distractorPool }) => {
+    state.calls.push(`project:${selected.length}:${distractorPool.length}`);
+    return { fixtures: Array.from({ length: 5 }, () => ({ kind: "PROJECT" })) } as any;
   },
   generateLanguage: ({ candidates: selected }) => {
     state.calls.push(`language:${selected.length}`);
-    return { fixtures: [{ kind: "LANGUAGE" }, { kind: "LANGUAGE" }] } as any;
+    return { fixtures: Array.from({ length: 5 }, () => ({ kind: "LANGUAGE" })) } as any;
+  },
+  generateAi: ({ candidates: selected }) => {
+    state.calls.push(`ai:${selected.length}`);
+    return { fixtures: Array.from({ length: 5 }, () => ({ kind: "AI_CREDIT" })) } as any;
   },
   compose: (options) => {
-    state.calls.push(`compose:${options.provenance.fixtures.length}/${options.language.fixtures.length}`);
+    state.calls.push(`compose:${options.project.fixtures.length}/${options.language.fixtures.length}/${options.ai.fixtures.length}`);
     const crawlSnapshotId = canonicalHash({ profileHash: canonicalHash(options.profile),
       acceptedResponseHashes: options.acceptedResponseHashes });
-    const fixtures = [...options.provenance.fixtures, ...options.language.fixtures].map((fixture, index) => ({
-      ...fixture, source: { repository: `owner/repo-${index}`, commit: String(index + 1).repeat(40), path: `src/file-${index}.ts` },
-    }));
-    return { artifact: { crawlSnapshot: { id: crawlSnapshotId }, fixtures },
+    let index = 0;
+    const deck = (id: string, generated: { fixtures: readonly unknown[] }) => ({ id, fixtures: generated.fixtures.map((fixture) => {
+      index += 1;
+      return { ...(fixture as object), source: { repository: `owner/repo-${index}`, commit: String(index % 10).repeat(40), path: `src/file-${index}.ts` } };
+    }) });
+    return { artifact: { crawlSnapshot: { id: crawlSnapshotId },
+      decks: [deck("project", options.project), deck("language", options.language), deck("ai", options.ai)] },
       artifactHash: hash("9"), artifactBytes: new Uint8Array([1]), roundRecordSet: {} } as any;
   },
 });
@@ -164,7 +186,7 @@ const makeArtifactDependencies = (
 const makeOutputDependencies = (
   state: HarnessState,
 ): Pick<PreparationDependencies, "createReport" | "stageReport" | "publishArtifact" | "now" | "uuid" | "log"> => ({
-  createReport: (input) => { state.calls.push("report:create"); return input as any; },
+  createReport: (input) => { state.calls.push("report:create"); return createRunReport(input); },
   stageReport: async (report) => {
     state.calls.push("report:stage");
     return {

@@ -1,6 +1,8 @@
 import {
   SIGNED_CAPACITY_CEILINGS,
+  STACK_LANGUAGES,
   type CapacityLimits,
+  type StackLanguage,
 } from "./profile";
 
 export class CapacityError extends Error {
@@ -10,7 +12,6 @@ export class CapacityError extends Error {
   }
 }
 
-type StackLanguage = "Python" | "TypeScript";
 type Usage = { pages: number; results: number };
 
 export interface CapacityOptions {
@@ -103,14 +104,12 @@ const validateDimensions = (options: CapacityOptions): void => {
     || queries.some((id) => typeof id !== "string" || id.trim() !== id || id.length === 0)) {
     fail("QUERY_DIMENSIONS");
   }
-  if (options.stackLanguages.length !== 2
-    || options.stackLanguages[0] !== "Python"
-    || options.stackLanguages[1] !== "TypeScript") fail("STACK_DIMENSIONS");
+  if (options.stackLanguages.join("|") !== STACK_LANGUAGES.join("|")) fail("STACK_DIMENSIONS");
 };
 
 const initialState = (queryIds: readonly string[]): CapacityState => ({
   github: Object.fromEntries(queryIds.map((id) => [id, { pages: 0, results: 0 }])),
-  stackRows: { Python: 0, TypeScript: 0 },
+  stackRows: Object.fromEntries(STACK_LANGUAGES.map((language) => [language, 0])) as Record<StackLanguage, number>,
   stackMetadataBytes: 0,
   blobAttempts: 0,
   successfulBlobs: 0,

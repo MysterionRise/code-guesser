@@ -1,7 +1,8 @@
 import { readFile } from "node:fs/promises";
 
 import { canonicalHash } from "./canonical";
-import { parseCrawlProfile } from "./profile";
+import { readFileSync } from "node:fs";
+import { parseCrawlProfile, type CrawlProfile } from "./profile";
 import { createRetryController } from "./retry";
 import { createBoundedTransport } from "./transport";
 
@@ -13,7 +14,7 @@ const crawlGitHubCommitSearch = typeof searchModule.crawlGitHubCommitSearch === 
   ? searchModule.crawlGitHubCommitSearch as (...args: any[]) => Promise<any>
   : async (): Promise<never> => { throw new Error("GITHUB_SEARCH_NOT_IMPLEMENTED"); };
 
-const profilePath = new URL("../profiles/local-real-rounds.v1.json", import.meta.url);
+const profilePath = new URL("../profiles/local-real-rounds.v2.json", import.meta.url);
 const shaFor = (value: number): string => value.toString(16).padStart(40, "0");
 const searchItem = (
   commit: string,
@@ -31,12 +32,25 @@ const searchItem = (
   },
 });
 
+/** Every rejection keeps the stable stage message and names the failing check in its code. */
+const searchRejection = (code: string): Record<string, unknown> => ({
+  name: "GitHubSearchError", message: "GITHUB_SEARCH_REJECTED", code,
+});
+
+/** Test-only: overlays mutated query and capacity fields on the signed profile, which the exact parser would reject. */
+const signedProfile = parseCrawlProfile(JSON.parse(readFileSync(profilePath, "utf8")));
+const profileFrom = (raw: Record<string, any>): CrawlProfile => ({
+  ...signedProfile,
+  github: { ...signedProfile.github, queries: raw.github.queries },
+  capacity: { ...signedProfile.capacity, ...raw.capacity },
+}) as CrawlProfile;
+
 describe("GitHub commit search adapter", () => {
   it("binds the exact profile request and returns an immutable candidate", async () => {
     const raw = JSON.parse(await readFile(profilePath, "utf8")) as Record<string, any>;
     raw.github.queries = [raw.github.queries[0]];
     Object.assign(raw.capacity, { githubPages: 1, githubResults: 1 });
-    const profile = parseCrawlProfile(raw);
+    const profile = profileFrom(raw);
     const sha = "a".repeat(40);
     const requests: any[] = [];
     const response = {
@@ -88,7 +102,7 @@ describe("GitHub commit search adapter", () => {
     raw.github.queries = [raw.github.queries[0]];
     raw.capacity.githubPages = 1;
     raw.capacity.githubResults = 1;
-    const profile = parseCrawlProfile(raw);
+    const profile = profileFrom(raw);
     const sha = shaFor(1);
     const response = {
       total_count: 1,
@@ -135,7 +149,7 @@ describe("GitHub commit search adapter", () => {
     const raw = JSON.parse(await readFile(profilePath, "utf8")) as Record<string, any>;
     raw.capacity.githubPages = 1;
     raw.capacity.githubResults = 1;
-    const profile = parseCrawlProfile(raw);
+    const profile = profileFrom(raw);
     const requests: URL[] = [];
 
     const pool = await crawlGitHubCommitSearch({
@@ -154,7 +168,7 @@ describe("GitHub commit search adapter", () => {
               sha,
               url: `https://api.github.com/repos/example/project-${queryIndex}/commits/${sha}`,
               html_url: `https://github.com/example/project-${queryIndex}/commit/${sha}`,
-              commit: { committer: { date: `2026-07-${28 + queryIndex}T10:00:00Z` } },
+              commit: { committer: { date: `2026-07-${10 + queryIndex}T10:00:00Z` } },
               repository: {
                 full_name: `example/project-${queryIndex}`,
                 url: `https://api.github.com/repos/example/project-${queryIndex}`,
@@ -170,7 +184,7 @@ describe("GitHub commit search adapter", () => {
     expect(requests.map((url) => url.searchParams.get("q"))).toEqual(
       profile.github.queries.map(({ query }) => query),
     );
-    expect(pool.candidates.map(({ queryIndex }: { queryIndex: number }) => queryIndex)).toEqual([0, 1, 2]);
+    expect(pool.candidates.map(({ queryIndex }: { queryIndex: number }) => queryIndex)).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
   });
 
   it("reads every finite page with the GitHub page size and binds canonical response hashes", async () => {
@@ -178,7 +192,7 @@ describe("GitHub commit search adapter", () => {
     raw.github.queries = [raw.github.queries[0]];
     raw.capacity.githubPages = 2;
     raw.capacity.githubResults = 101;
-    const profile = parseCrawlProfile(raw);
+    const profile = profileFrom(raw);
     const requests: Array<{ request: any; page: number }> = [];
     const responses = [
       {
@@ -225,7 +239,7 @@ describe("GitHub commit search adapter", () => {
     raw.github.queries = [raw.github.queries[0]];
     raw.capacity.githubPages = 1;
     raw.capacity.githubResults = 3;
-    const profile = parseCrawlProfile(raw);
+    const profile = profileFrom(raw);
     const older = searchItem(shaFor(3), "example/zeta", "2026-07-29T10:00:00Z");
     const beta = searchItem(shaFor(2), "example/beta", "2026-07-30T10:00:00.001Z");
     const alpha = searchItem(shaFor(1), "example/alpha", "2026-07-30T10:00:00Z");
@@ -276,18 +290,19 @@ describe("GitHub commit search adapter", () => {
     base.github.queries = [base.github.queries[0]];
     const valid = searchItem(shaFor(1));
     const cases = [
-      { name: "incomplete outside authorized profile", results: 1, pages: 1,
+      { name: "incomplete outside authorized profile", code: "GITHUB_SEARCH_INCOMPLETE", results: 1, pages: 1,
         response: { total_count: 1, incomplete_results: true, items: [valid] } },
-      { name: "over result ceiling", results: 1, pages: 1,
+      { name: "over result ceiling", code: "GITHUB_SEARCH_RESULT_CEILING", results: 1, pages: 1,
         response: { total_count: 2, incomplete_results: false, items: [valid] } },
-      { name: "missing indexed item", results: 1, pages: 1,
+      { name: "missing indexed item", code: "GITHUB_SEARCH_ITEM_COUNT", results: 1, pages: 1,
         response: { total_count: 1, incomplete_results: false, items: [] } },
-      { name: "unexpected indexed item", results: 1, pages: 1,
+      { name: "unexpected indexed item", code: "GITHUB_SEARCH_ITEM_COUNT", results: 1, pages: 1,
         response: { total_count: 0, incomplete_results: false, items: [valid] } },
-      { name: "duplicate commit", results: 2, pages: 1,
+      { name: "duplicate commit", code: "GITHUB_SEARCH_DUPLICATE", results: 2, pages: 1,
         response: { total_count: 2, incomplete_results: false, items: [valid, valid] } },
       {
         name: "over page ceiling",
+        code: "GITHUB_SEARCH_PAGE_CEILING",
         results: 101,
         pages: 1,
         response: {
@@ -303,12 +318,12 @@ describe("GitHub commit search adapter", () => {
       const raw = structuredClone(base);
       raw.capacity.githubResults = scenario.results;
       raw.capacity.githubPages = scenario.pages;
-      const profile = parseCrawlProfile(raw);
+      const profile = profileFrom(raw);
       await expect(crawlGitHubCommitSearch({
         profile,
         transport: { requestJson: async () => scenario.response },
         retry: { execute: async (operation: () => Promise<unknown>) => operation() },
-      }), scenario.name).rejects.toBeInstanceOf(searchModule.GitHubSearchError);
+      }), scenario.name).rejects.toMatchObject(searchRejection(scenario.code));
     }
   });
 
@@ -317,20 +332,20 @@ describe("GitHub commit search adapter", () => {
     raw.github.queries = [raw.github.queries[0]];
     raw.capacity.githubPages = 1;
     raw.capacity.githubResults = 1;
-    const profile = parseCrawlProfile(raw);
-    const mutations: Array<{ name: string; apply(value: any): void }> = [
-      { name: "uppercase sha", apply: (value) => { value.items[0].sha = "A".repeat(40); } },
-      { name: "mutable sha", apply: (value) => { value.items[0].sha = "main"; } },
-      { name: "invalid repository", apply: (value) => { value.items[0].repository.full_name = "../project"; } },
-      { name: "invalid date", apply: (value) => { value.items[0].commit.committer.date = "yesterday"; } },
-      { name: "impossible date", apply: (value) => { value.items[0].commit.committer.date = "2026-99-99T10:00:00Z"; } },
-      { name: "one fractional digit", apply: (value) => { value.items[0].commit.committer.date = "2026-07-30T10:00:00.0Z"; } },
-      { name: "two fractional digits", apply: (value) => { value.items[0].commit.committer.date = "2026-07-30T10:00:00.00Z"; } },
-      { name: "four fractional digits", apply: (value) => { value.items[0].commit.committer.date = "2026-07-30T10:00:00.0000Z"; } },
-      { name: "off-host api commit", apply: (value) => { value.items[0].url = `https://evil.test/commit/${shaFor(1)}`; } },
-      { name: "mutable web commit", apply: (value) => { value.items[0].html_url = "https://github.com/example/project/commit/main"; } },
-      { name: "off-host api repository", apply: (value) => { value.items[0].repository.url = "https://evil.test/repos/example/project"; } },
-      { name: "off-host web repository", apply: (value) => { value.items[0].repository.html_url = "https://evil.test/example/project"; } },
+    const profile = profileFrom(raw);
+    const mutations: Array<{ name: string; code: string; apply(value: any): void }> = [
+      { name: "uppercase sha", code: "GITHUB_SEARCH_IDENTITY", apply: (value) => { value.items[0].sha = "A".repeat(40); } },
+      { name: "mutable sha", code: "GITHUB_SEARCH_IDENTITY", apply: (value) => { value.items[0].sha = "main"; } },
+      { name: "invalid repository", code: "GITHUB_SEARCH_IDENTITY", apply: (value) => { value.items[0].repository.full_name = "../project"; } },
+      { name: "invalid date", code: "GITHUB_SEARCH_DATE", apply: (value) => { value.items[0].commit.committer.date = "yesterday"; } },
+      { name: "impossible date", code: "GITHUB_SEARCH_DATE", apply: (value) => { value.items[0].commit.committer.date = "2026-99-99T10:00:00Z"; } },
+      { name: "one fractional digit", code: "GITHUB_SEARCH_DATE", apply: (value) => { value.items[0].commit.committer.date = "2026-07-30T10:00:00.0Z"; } },
+      { name: "two fractional digits", code: "GITHUB_SEARCH_DATE", apply: (value) => { value.items[0].commit.committer.date = "2026-07-30T10:00:00.00Z"; } },
+      { name: "four fractional digits", code: "GITHUB_SEARCH_DATE", apply: (value) => { value.items[0].commit.committer.date = "2026-07-30T10:00:00.0000Z"; } },
+      { name: "off-host api commit", code: "GITHUB_SEARCH_IDENTITY", apply: (value) => { value.items[0].url = `https://evil.test/commit/${shaFor(1)}`; } },
+      { name: "mutable web commit", code: "GITHUB_SEARCH_IDENTITY", apply: (value) => { value.items[0].html_url = "https://github.com/example/project/commit/main"; } },
+      { name: "off-host api repository", code: "GITHUB_SEARCH_IDENTITY", apply: (value) => { value.items[0].repository.url = "https://evil.test/repos/example/project"; } },
+      { name: "off-host web repository", code: "GITHUB_SEARCH_IDENTITY", apply: (value) => { value.items[0].repository.html_url = "https://evil.test/example/project"; } },
     ];
 
     for (const mutation of mutations) {
@@ -344,7 +359,7 @@ describe("GitHub commit search adapter", () => {
         profile,
         transport: { requestJson: async () => response },
         retry: { execute: async (operation: () => Promise<unknown>) => operation() },
-      }), mutation.name).rejects.toBeInstanceOf(searchModule.GitHubSearchError);
+      }), mutation.name).rejects.toMatchObject(searchRejection(mutation.code));
     }
   });
 
@@ -352,7 +367,7 @@ describe("GitHub commit search adapter", () => {
     const raw = JSON.parse(await readFile(profilePath, "utf8")) as Record<string, any>;
     raw.capacity.githubPages = 1;
     raw.capacity.githubResults = 1;
-    const profile = parseCrawlProfile(raw);
+    const profile = profileFrom(raw);
     const response = { total_count: 0, incomplete_results: false, items: [] };
     let retryExecutions = 0;
 
@@ -378,21 +393,21 @@ describe("GitHub commit search adapter", () => {
     raw.github.queries = [raw.github.queries[0]];
     raw.capacity.githubPages = 1;
     raw.capacity.githubResults = 1;
-    const profile = parseCrawlProfile(raw);
-    const mutations: Array<{ name: string; apply(value: any): void }> = [
-      { name: "missing response key", apply: (value) => { delete value.total_count; } },
-      { name: "missing item key", apply: (value) => { delete value.items[0].sha; } },
-      { name: "missing repository key", apply: (value) => { delete value.items[0].repository.url; } },
-      { name: "missing commit key", apply: (value) => { delete value.items[0].commit.committer; } },
-      { name: "missing committer key", apply: (value) => { delete value.items[0].commit.committer.date; } },
-      { name: "non-array items", apply: (value) => { value.items = {}; } },
-      { name: "negative count", apply: (value) => { value.total_count = -1; } },
-      { name: "fractional count", apply: (value) => { value.total_count = 0.5; } },
-      { name: "non-string sha", apply: (value) => { value.items[0].sha = 1; } },
-      { name: "non-string item url", apply: (value) => { value.items[0].url = 1; } },
-      { name: "non-string repository", apply: (value) => { value.items[0].repository.full_name = 1; } },
-      { name: "non-string repository url", apply: (value) => { value.items[0].repository.url = 1; } },
-      { name: "non-string date", apply: (value) => { value.items[0].commit.committer.date = 1; } },
+    const profile = profileFrom(raw);
+    const mutations: Array<{ name: string; code: string; apply(value: any): void }> = [
+      { name: "missing response key", code: "GITHUB_SEARCH_SHAPE", apply: (value) => { delete value.total_count; } },
+      { name: "missing item key", code: "GITHUB_SEARCH_SHAPE", apply: (value) => { delete value.items[0].sha; } },
+      { name: "missing repository key", code: "GITHUB_SEARCH_SHAPE", apply: (value) => { delete value.items[0].repository.url; } },
+      { name: "missing commit key", code: "GITHUB_SEARCH_SHAPE", apply: (value) => { delete value.items[0].commit.committer; } },
+      { name: "missing committer key", code: "GITHUB_SEARCH_SHAPE", apply: (value) => { delete value.items[0].commit.committer.date; } },
+      { name: "non-array items", code: "GITHUB_SEARCH_SHAPE", apply: (value) => { value.items = {}; } },
+      { name: "negative count", code: "GITHUB_SEARCH_SHAPE", apply: (value) => { value.total_count = -1; } },
+      { name: "fractional count", code: "GITHUB_SEARCH_SHAPE", apply: (value) => { value.total_count = 0.5; } },
+      { name: "non-string sha", code: "GITHUB_SEARCH_IDENTITY", apply: (value) => { value.items[0].sha = 1; } },
+      { name: "non-string item url", code: "GITHUB_SEARCH_IDENTITY", apply: (value) => { value.items[0].url = 1; } },
+      { name: "non-string repository", code: "GITHUB_SEARCH_IDENTITY", apply: (value) => { value.items[0].repository.full_name = 1; } },
+      { name: "non-string repository url", code: "GITHUB_SEARCH_IDENTITY", apply: (value) => { value.items[0].repository.url = 1; } },
+      { name: "non-string date", code: "GITHUB_SEARCH_DATE", apply: (value) => { value.items[0].commit.committer.date = 1; } },
     ];
 
     for (const mutation of mutations) {
@@ -406,7 +421,7 @@ describe("GitHub commit search adapter", () => {
         profile,
         transport: { requestJson: async () => response },
         retry: { execute: async (operation: () => Promise<unknown>) => operation() },
-      }), mutation.name).rejects.toBeInstanceOf(searchModule.GitHubSearchError);
+      }), mutation.name).rejects.toMatchObject(searchRejection(mutation.code));
     }
   });
 
@@ -415,7 +430,7 @@ describe("GitHub commit search adapter", () => {
     raw.github.queries = [raw.github.queries[0]];
     raw.capacity.githubPages = 2;
     raw.capacity.githubResults = 101;
-    const profile = parseCrawlProfile(raw);
+    const profile = profileFrom(raw);
     const firstPage = Array.from({ length: 100 }, (_, index) =>
       searchItem(shaFor(index + 1), `example/page-${index}`));
     const inconsistent = crawlGitHubCommitSearch({
@@ -427,7 +442,7 @@ describe("GitHub commit search adapter", () => {
       },
       retry: { execute: async (operation: () => Promise<unknown>) => operation() },
     });
-    await expect(inconsistent).rejects.toBeInstanceOf(searchModule.GitHubSearchError);
+    await expect(inconsistent).rejects.toMatchObject(searchRejection("GITHUB_SEARCH_TOTAL_CHANGED"));
 
     const repeatedAcrossPages = crawlGitHubCommitSearch({
       profile,
@@ -440,13 +455,13 @@ describe("GitHub commit search adapter", () => {
       },
       retry: { execute: async (operation: () => Promise<unknown>) => operation() },
     });
-    await expect(repeatedAcrossPages).rejects.toBeInstanceOf(searchModule.GitHubSearchError);
+    await expect(repeatedAcrossPages).rejects.toMatchObject(searchRejection("GITHUB_SEARCH_DUPLICATE"));
 
     const allQueries = JSON.parse(await readFile(profilePath, "utf8")) as Record<string, any>;
     allQueries.capacity.githubPages = 1;
     allQueries.capacity.githubResults = 1;
     const repeatedAcrossQueries = crawlGitHubCommitSearch({
-      profile: parseCrawlProfile(allQueries),
+      profile: profileFrom(allQueries),
       transport: {
         requestJson: async () => ({
           total_count: 1,
@@ -456,7 +471,7 @@ describe("GitHub commit search adapter", () => {
       },
       retry: { execute: async (operation: () => Promise<unknown>) => operation() },
     });
-    await expect(repeatedAcrossQueries).rejects.toBeInstanceOf(searchModule.GitHubSearchError);
+    await expect(repeatedAcrossQueries).rejects.toMatchObject(searchRejection("GITHUB_SEARCH_DUPLICATE"));
   });
 
   describe("live retry instructions through the bounded transport", () => {
@@ -464,7 +479,7 @@ describe("GitHub commit search adapter", () => {
       const raw = JSON.parse(await readFile(profilePath, "utf8")) as Record<string, any>;
       raw.github.queries = [raw.github.queries[0]];
       Object.assign(raw.capacity, { githubPages: 1, githubResults: 1 });
-      return parseCrawlProfile(raw);
+      return profileFrom(raw);
     };
     const okResponse = () => new Response(JSON.stringify({
       total_count: 1, incomplete_results: false,

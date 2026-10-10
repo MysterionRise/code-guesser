@@ -56,6 +56,7 @@ const commitResponse = (
     url: `${api}/commits/${sha}`,
     html_url: `${web}/commit/${sha}`,
   })),
+  stats: { total: 3, additions: 2, deletions: 1 },
   files,
 });
 
@@ -78,7 +79,7 @@ const blobResponse = (sha: string, bytes: Uint8Array): Record<string, unknown> =
 });
 
 const profile = async () => parseCrawlProfile(JSON.parse(
-  await readFile(new URL("../profiles/local-real-rounds.v1.json", import.meta.url), "utf8"),
+  await readFile(new URL("../profiles/local-real-rounds.v2.json", import.meta.url), "utf8"),
 ));
 
 const validResponses = (): ReadonlyMap<string, unknown> => new Map([
@@ -87,9 +88,9 @@ const validResponses = (): ReadonlyMap<string, unknown> => new Map([
       sha: childBlob,
       filename: "src/value.ts",
       status: "modified",
-      blob_url: `${web}/blob/${ids.childCommit}/src/value.ts`,
-      raw_url: `${web}/raw/${ids.childCommit}/src/value.ts`,
-      contents_url: `${api}/contents/src/value.ts?ref=${ids.childCommit}`,
+      blob_url: `${web}/blob/${ids.childCommit}/src%2Fvalue.ts`,
+      raw_url: `${web}/raw/${ids.childCommit}/src%2Fvalue.ts`,
+      contents_url: `${api}/contents/src%2Fvalue.ts?ref=${ids.childCommit}`,
     }])],
   [`${api}/commits/${ids.parentCommit}`, commitResponse(ids.parentCommit, parentTree, [], [])],
   [`${api}/git/trees/${childTree}`, treeResponse(childTree,
@@ -137,9 +138,9 @@ const responsesForBytes = (parent: Uint8Array, child: Uint8Array): Map<string, a
     [`${api}/commits/${ids.childCommit}`, commitResponse(ids.childCommit, childRoot,
       [ids.parentCommit], [{
         sha: childObject, filename: "src/value.ts", status: "modified",
-        blob_url: `${web}/blob/${ids.childCommit}/src/value.ts`,
-        raw_url: `${web}/raw/${ids.childCommit}/src/value.ts`,
-        contents_url: `${api}/contents/src/value.ts?ref=${ids.childCommit}`,
+        blob_url: `${web}/blob/${ids.childCommit}/src%2Fvalue.ts`,
+        raw_url: `${web}/raw/${ids.childCommit}/src%2Fvalue.ts`,
+        contents_url: `${api}/contents/src%2Fvalue.ts?ref=${ids.childCommit}`,
       }])],
     [`${api}/commits/${ids.parentCommit}`, commitResponse(ids.parentCommit, parentRoot, [], [])],
     [`${api}/git/trees/${childRoot}`, treeResponse(childRoot,
@@ -273,6 +274,98 @@ describe("GitHub immutable lineage adapter", () => {
       await expect(invoke(responses)).rejects.toBeInstanceOf(lineageModule.GitHubLineageError);
     },
   );
+
+  it("binds the first screenable same-path modification by path order from a multi-file commit", async () => {
+    const responses = mutableResponses();
+    const commit = responses.get(`${api}/commits/${ids.childCommit}`);
+    const original = commit.files[0];
+    const file = (filename: string, overrides: Record<string, unknown> = {}) => ({
+      ...structuredClone(original),
+      filename,
+      blob_url: `${web}/blob/${ids.childCommit}/${encodeURIComponent(filename)}`,
+      raw_url: `${web}/raw/${ids.childCommit}/${encodeURIComponent(filename)}`,
+      contents_url: `${api}/contents/${encodeURIComponent(filename)}?ref=${ids.childCommit}`,
+      ...overrides,
+    });
+    commit.files = [
+      file("src/zeta.ts"),
+      file("docs/guide.ts"),
+      file("src/a.ts", { status: "added" }),
+      file("src/b.ts", { previous_filename: "src/old.ts" }),
+      file("src/notes.md"),
+      original,
+    ];
+
+    const [bound] = await invoke(responses);
+
+    expect(bound.path).toBe("src/value.ts");
+    expect(bound.childBlob).toBe(childBlob);
+
+    const unsupportedOnly = mutableResponses();
+    unsupportedOnly.get(`${api}/commits/${ids.childCommit}`).files = [file("src/notes.md"), file("docs/guide.ts")];
+    await expect(invoke(unsupportedOnly)).rejects.toBeInstanceOf(lineageModule.GitHubLineageError);
+  });
+
+  it("requires the provider's percent-encoded file URLs and rejects literal-slash variants", async () => {
+    for (const key of ["blob_url", "raw_url", "contents_url"]) {
+      const responses = mutableResponses();
+      const file = responses.get(`${api}/commits/${ids.childCommit}`).files[0];
+      file[key] = String(file[key]).replace("src%2Fvalue.ts", "src/value.ts");
+      await expect(invoke(responses)).rejects.toBeInstanceOf(lineageModule.GitHubLineageError);
+    }
+  });
+
+  it("skips modifications whose recorded patch cannot fit the excerpt window and rejects cheaply when none can", async () => {
+    const responses = mutableResponses();
+    const commit = responses.get(`${api}/commits/${ids.childCommit}`);
+    const original = commit.files[0];
+    const file = (filename: string, patch: string) => ({
+      ...structuredClone(original),
+      filename,
+      patch,
+      blob_url: `${web}/blob/${ids.childCommit}/${encodeURIComponent(filename)}`,
+      raw_url: `${web}/raw/${ids.childCommit}/${encodeURIComponent(filename)}`,
+      contents_url: `${api}/contents/${encodeURIComponent(filename)}?ref=${ids.childCommit}`,
+    });
+    const farHunks = "@@ -8,3 +8,3 @@\n a\n-b\n+c = 1\n d\n@@ -398,3 +398,3 @@\n e\n-f\n+g = 2\n h";
+    commit.files = [
+      file("src/alpha.ts", farHunks),
+      { ...original, patch: "@@ -1,3 +1,3 @@\n export function value() {\n-  return 1;\n+  return 2;\n }" },
+    ];
+    const [bound] = await invoke(responses);
+    expect(bound.path).toBe("src/value.ts");
+
+    const onlyCommit = new Map([[`${api}/commits/${ids.childCommit}`, structuredClone(commit)]]);
+    onlyCommit.get(`${api}/commits/${ids.childCommit}`)!.files = [file("src/alpha.ts", farHunks), file("src/beta.ts", "@@ -1,2 +1,3 @@\n a\n+// note\n b")];
+    await expect(invoke(onlyCommit)).rejects.toBeInstanceOf(lineageModule.GitHubLineageError);
+  });
+
+  it("screens the child blob before requesting anything about the parent", async () => {
+    const binaryChild = encoder.encode("export function value() {\n  return 2;\u0000\n}\n");
+    const responses = responsesForBytes(parentBytes, binaryChild);
+    responses.delete(`${api}/commits/${ids.parentCommit}`);
+    await expect(invoke(responses)).rejects.toThrow("BINARY_CONTENT");
+  });
+
+  it("records the commit's changed-file count and line totals for the AI deck's hints", async () => {
+    const [bound] = await invoke();
+    expect(bound.changedFileCount).toBe(1);
+    expect(bound.commitAdditions).toBe(2);
+    expect(bound.commitDeletions).toBe(1);
+
+    for (const stats of [undefined, { additions: -1, deletions: 0 }, { additions: 1.5, deletions: 0 }, { additions: 1 }]) {
+      const responses = mutableResponses();
+      responses.get(`${api}/commits/${ids.childCommit}`).stats = stats;
+      await expect(invoke(responses)).rejects.toBeInstanceOf(lineageModule.GitHubLineageError);
+    }
+  });
+
+  it("rejects a generated child file before requesting anything about the parent", async () => {
+    const generated = encoder.encode("// This file was automatically generated and should not be edited.\nexport function value() {\n  return 2;\n}\n");
+    const responses = responsesForBytes(parentBytes, generated);
+    responses.delete(`${api}/commits/${ids.parentCommit}`);
+    await expect(invoke(responses)).rejects.toBeInstanceOf(lineageModule.GitHubLineageError);
+  });
 
   it("rejects ambiguous changed-file populations and previous-path metadata", async () => {
     const multiple = mutableResponses();

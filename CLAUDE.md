@@ -3,8 +3,10 @@
 ## Mission
 
 Continue the existing local-only proof of concept until one preparation run
-produces exactly five real rounds: three GitHub provenance rounds and two Stack
-language rounds. The goal is demo testing on one machine, not public play.
+produces three real code-guessing decks of five rounds each (Contract revision
+12, FR-002): "Which project?" and "Is this AI-generated?" from GitHub commit
+search, and "Which language?" from The Stack v2. The goal is demo testing on
+one machine, not public play.
 
 ## Read first
 
@@ -13,54 +15,65 @@ Treat these as the durable source of truth, in this order:
 1. `docs/gangsta/codeguessr-poc-readiness/checkpoints/2026-10-05-checkpoint-the-hit-boundaries.md`
 2. `docs/gangsta/codeguessr-poc-readiness/checkpoints/2026-09-04-checkpoint-handoff.md`
 3. `docs/gangsta/codeguessr-poc-readiness/reviews/2026-09-04-handoff-audit.md`
-4. `docs/gangsta/codeguessr-poc-readiness/specs/2026-08-15-contract-revision-11-signed.md`
+4. `docs/gangsta/codeguessr-poc-readiness/specs/2026-10-08-contract-revision-12-signed.md`
+   and its correction
+   `docs/gangsta/codeguessr-poc-readiness/specs/2026-10-08-contract-revision-13-signed.md`
+   (both amend revision 11, which stays binding where not amended:
+   `docs/gangsta/codeguessr-poc-readiness/specs/2026-08-15-contract-revision-11-signed.md`)
 5. `docs/gangsta/codeguessr-poc-readiness/plans/2026-07-31-execution-plan.md`
 6. `README.md`
 
-Verify the signed Contract before relying on it:
+Verify both signed Contract files before relying on them:
 
 ```bash
-shasum -a 256 docs/gangsta/codeguessr-poc-readiness/specs/2026-08-15-contract-revision-11-signed.md
+shasum -a 256 docs/gangsta/codeguessr-poc-readiness/specs/2026-08-15-contract-revision-11-signed.md \
+  docs/gangsta/codeguessr-poc-readiness/specs/2026-10-08-contract-revision-12-signed.md \
+  docs/gangsta/codeguessr-poc-readiness/specs/2026-10-08-contract-revision-13-signed.md
 ```
 
 Expected SHA-256:
-`3acc586d8fb479e6edfd2dd43e9f38ed5d8d6268ee5b025b449d3a564b32fe41`.
+
+- Revision 11: `3acc586d8fb479e6edfd2dd43e9f38ed5d8d6268ee5b025b449d3a564b32fe41`
+- Revision 12 amendment: `045ff6a7801f07096f0eb178fa358458e9661ed11d2de7830747538c7ce30e78`
+- Revision 13 correction: `2af256ad391f3e91de8e5be3ce58a35a468d32a7f9c363a26f22481b81dfcc43`
 
 ## Current state
 
-- Branch: `claude/clever-curie-d7rv1m` (continues the merged
-  `codex/heist/codeguessr-poc-readiness` work on `main`).
-- Baseline before this work: `fd6f34cd0d8b4a344fb537e87256bc8f8e69837a`.
-- The crawler, Stack workers, five-round artifact schema, server-only game
-  authority, tests, operator command, MIT licence, and CI workflow exist.
-- The root route still uses the synthetic rehearsal catalogue.
-- The generated real-round artifact and live run report are intentionally
-  absent.
-- Report/artifact publication is transactional (staged report, commit inside
-  the artifact publisher, rollback on failure).
-- Both Python Stack workers enforce the signed endpoint, redirect, network-byte,
-  request, credential-forwarding, and temporary-disk ceilings in-process and
-  report counters the preparer meters. The Hugging Face redirect allowlist is
-  intentionally empty because no target host has been observed under
-  authorization; a live metadata stage fails closed with `REDIRECT_REJECTED`
-  until that host is recorded and added as a literal in
-  `ops/poc/stack/bounded_http.py` and `ops/poc/prepare/request-policy.ts`.
-- The bounded transport translates a GitHub 403/429 `retry-after` or exhausted
-  rate-limit budget into the controller's single bounded retry; everything else
-  still fails closed. A failed run logs
-  `PREPARATION_STAGE_FAILED <stage> <code> <statusClass>` before
-  `PREPARATION_FAILED`.
-- The 2026-10-05 authorized headers-only GitHub probe observed HTTP 200 with
-  authentication supplied, no exhausted rate limit, and no retry delay, using
-  the session's proxy-injected token rather than the operator's.
+- Branch: `claude/demoable-poc` (continues the merged
+  `claude/clever-curie-d7rv1m` work on `main`).
+- Baseline before this work: `488aca571e7a05e7dc3aa6ae98c690b7ea69779b`.
+- Revision 12/13 implementation (WP-036 to WP-043) is committed: profile
+  `ops/poc/profiles/local-real-rounds.v2.json`, the three deck generators,
+  artifact schema `local-experiment-artifact.v2`, run report
+  `local-experiment-run.v2`, the v2 game authority, and the root-route deck
+  chooser (`/?deck=project|language|ai`). Offline suites, the game build,
+  and containment pass.
+- The committed artifact at `apps/game/src/demo/generated/local-real-rounds.json`
+  is still the revision 11 five-round artifact (canonical SHA-256
+  `0eab7f489f311125b9a1ae8574fd2a3b072c3c954e48c8284aac39559a607498`). The v2
+  authority rejects it, so the root route shows its "nothing to play" notice
+  until the revision 12 live run publishes a v2 artifact and its hash is
+  pinned in `apps/game/src/demo/local-real-experiment.pin.server.ts`.
+- WP-044 (the revision 12 live run) has failed closed twice on 2026-10-10,
+  publishing nothing: first on stale Python worker maxima (fixed), then on
+  one inconsistent GitHub search response. See
+  `docs/gangsta/codeguessr-poc-readiness/evidence/2026-10-10-revision-12-live-run-attempts.md`.
+  The committed-artifact loader test and the browser specs need its output.
+- The README media still show the revision 11 rounds; `pnpm demo:record` now
+  records one scene per deck plus a full run (WP-045).
+- The run report lives at the ignored path `ops/poc/stack/tmp/local-experiment-run.json`.
+- Software Heritage blobs are read anonymously; no AWS credential is needed.
+- Every failure logs its stage, a safe code, the failing function and file,
+  and (for selection failures) pool counts and rejection aggregates.
 
-This is a resumable engineering handoff, not a completed or production-ready
-real-data demo.
+This is a local real-data PoC in transition to three decks, not
+production-ready and not authorized for public players.
 
 ## Non-negotiable boundaries
 
 - Localhost only; no deployment or public players.
-- Exactly five automatically prepared rounds with a three/two source split.
+- Exactly three automatically prepared decks of five rounds with the FR-002
+  lineage (revision 12; it replaced revision 11's three/two split).
 - No human content-review workflow for this PoC.
 - Public open-source repositories only, with licence and recorded-author data.
 - The Stack v2 release remains `v2.2.0` at immutable revision
@@ -77,27 +90,42 @@ real-data demo.
 
 ## Immediate next steps
 
-The next external action requires explicit operator authorization. Perform one
-authenticated request to the pinned Hugging Face `resolve` endpoint for one
-parquet shard of the Stack dataset, with redirects disabled, no retry, and no
-response-body read, reporting only:
+1. Run the one live preparation that revision 12 authorizes (WP-044), with
+   the operator's credentials from the standard stores:
 
-- Numeric HTTP status.
-- The redirect target host, if a `Location` header is present (host only; no
-  path, query, or signature).
+   ```bash
+   HF_TOKEN="$(cat ~/.cache/huggingface/token)" \
+   GITHUB_TOKEN="$(gh auth token)" \
+   STACK_V2_ACKNOWLEDGED_USABLE_REVISION=e565caa3a78c2423bd374333a472b049eb090e47 \
+   pnpm prepare:poc
+   ```
 
-Then add that host as a literal to `REDIRECT_HOSTS` in
-`ops/poc/stack/bounded_http.py` and to the redirect policy in
-`ops/poc/prepare/request-policy.ts`, test-first, before any full live run.
+   A failed run leaves the previous artifact in place. Revision 12 authorizes
+   one run, so report a failure instead of rerunning.
+2. Verify the new artifact independently: it parses under the v2 model, the
+   preparer and game canonical hashes equal the report's `artifactHash`,
+   decks are project/language/ai of five, languages are distinct, the AI deck
+   has at least two of each outcome, counts are within the v2 ceilings, every
+   query is complete, and neither file contains token-like strings.
+3. Pin the verified hash, run the full verification matrix, re-record the
+   media with `pnpm demo:record` (remove the revision 11 GIFs), and update the
+   README, this handoff, a dated evidence file, and a new checkpoint.
+4. Merge is a separate decision; this handoff authorizes none.
 
-If a later operator run fails at GitHub Search, read the
-`PREPARATION_STAGE_FAILED` line: `RETRY_SIGNAL_MISSING 4xx` means a 403/429
-without a usable instruction (likely secondary throttling or missing token),
-`WAIT_LIMIT` means the instruction exceeded the signed fifteen-second wait, and
-`UNSUPPORTED_STATUS` with another class means a non-rate-limit status.
-
-Do not rerun the complete preparation command until the redirect host is
-recorded and the signed Contract permits the response.
+Read the `PREPARATION_STAGE_FAILED` line first on any failure:
+`RETRY_SIGNAL_MISSING 4xx` means a 403/429 without a usable instruction,
+`WAIT_LIMIT` means the instruction exceeded the signed fifteen-second wait,
+`REQUEST_COUNT` or `REQUEST_LIMIT` in the rejections means the 600-request
+ceiling was spent, `WORKER_EXIT` means a Python worker exited non-zero
+(reproduce it directly to read its code), and a `PUBLIC_CONTAINMENT_*` code
+names the protected key and public field that collided, and a
+`GITHUB_SEARCH_*` code names the discovery check that rejected a search
+response (`INCOMPLETE`, `TOTAL_CHANGED`, `ITEM_COUNT`, and `DUPLICATE` are
+provider inconsistencies; `SHAPE`, `IDENTITY`, and `DATE` are record drift).
+Selection
+diagnostics `REPOSITORY_REPEATED`, `PROJECT_NAME_IN_EXCERPT`,
+`PROJECT_REPOSITORY_SKIPPED`, `AI_CREDIT_ABSENT`, and
+`SOURCE_IDENTITY_UNREPORTABLE` are expected screening outcomes, not faults.
 
 ## Commands
 
@@ -137,8 +165,8 @@ Do not call the real-data PoC runnable until all of the following are true:
 1. Preparation exits successfully and emits its completion marker.
 2. Both Python workers enforce and test the signed network and disk boundaries.
 3. Report/artifact publication cannot leave an orphan success report.
-4. The generated artifact contains exactly three provenance and two language
-   fixtures and passes server-side validation.
+4. The generated artifact contains exactly three decks of five fixtures with
+   the FR-002 lineage and passes server-side validation.
 5. Artifact and run-report hashes, source split, warning/completeness state,
    and capacity counts are independently verified without leaking content.
 6. The root route consumes the validated server-only authority.

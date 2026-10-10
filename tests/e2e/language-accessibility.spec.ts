@@ -4,7 +4,7 @@ test.use({ viewport: { width: 320, height: 568 } });
 
 test("records local Chromium language observations without promoting them to support evidence", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
-  await page.goto("/");
+  await page.goto("/?deck=language");
   const main = page.getByRole("main");
   await expect(main).toBeVisible();
   expect(await page.evaluate(() => matchMedia("(prefers-reduced-motion: reduce)").matches)).toBe(true);

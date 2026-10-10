@@ -9,15 +9,19 @@ import {
   type PublicModeContract,
   type PublicRoundInput,
 } from "../components/arcade/mode-contract";
-import { parseArtifact } from "./local-real-experiment-artifact.server";
+import { ARTIFACT_KEYS, parseArtifact } from "./local-real-experiment-artifact.server";
 import {
   CORRECT_ROUND_SCORES,
   LocalRealExperimentError,
   MAXIMUM_SCORE,
+  MODE_KINDS,
   ROUND_COUNT,
   ROUND_SCORES,
+  RULE_SEMANTICS,
   fail,
+  type DeckId,
   type JsonRecord,
+  type ParsedDeck,
   type ParsedFixture,
   type PrivateReveal,
 } from "./local-real-experiment-domain.server";
@@ -30,10 +34,19 @@ import {
 
 export { LocalRealExperimentError };
 
+/** One playable deck: public text and the public mode contract only. */
+export interface LocalRealDeck {
+  readonly id: DeckId;
+  readonly title: string;
+  readonly description: string;
+  readonly notice: string | null;
+  readonly mode: PublicModeContract;
+}
+
 export interface LocalRealExperiment {
   readonly kind: "LOCAL_UNREVIEWED_EXPERIMENT";
   readonly artifactHash: string;
-  readonly mode: PublicModeContract;
+  readonly decks: readonly LocalRealDeck[];
   readonly privateReveals: Readonly<Record<string, PrivateReveal>>;
   readonly createReveal: (request: RevealRequest) => AuthorizedReveal;
 }
@@ -62,7 +75,7 @@ const derivePublicRound = (
     roundVersionId: fixture.roundVersion,
     excerpt: { versionId: fixture.source.excerptHash, text: fixture.excerpt },
     mode: {
-      kind: fixture.kind === "PROVENANCE" ? "provenance" : "language",
+      kind: MODE_KINDS[fixture.kind],
       contractVersionId: canonicalHash({ candidates, prompt: fixture.prompt }),
       calibrationVersionId: canonicalHash({
         profileHash: artifact.profileHash,
@@ -117,9 +130,7 @@ const deriveRound = (
     rules: canonicalHash({
       kind: fixture.kind,
       prompt: fixture.prompt,
-      semantics: fixture.kind === "PROVENANCE"
-        ? "literal-configured-marker-record.v1"
-        : "pinned-extension-language.v1",
+      semantics: RULE_SEMANTICS[fixture.kind],
     }),
   };
   return {
@@ -128,28 +139,38 @@ const deriveRound = (
   };
 };
 
-const deriveRecords = (
-  fixtures: readonly ParsedFixture[],
+const deriveDecks = (
+  parsedDecks: readonly ParsedDeck[],
   artifact: JsonRecord,
 ): Readonly<{
-  mode: PublicModeContract;
+  decks: readonly LocalRealDeck[];
   privateReveals: Readonly<Record<string, PrivateReveal>>;
 }> => {
   const scoring = canonicalHash({ scheme: "local-experiment-zero-one-two-clues.v1" });
-  const records = fixtures.map((fixture) => deriveRound(fixture, artifact, scoring));
-  const mode = createPublicModeContract({
-    sessionContractVersionId: canonicalHash({
-      schemaVersion: artifact.schemaVersion,
-      profileHash: artifact.profileHash,
-      crawlSnapshotId: (artifact.crawlSnapshot as JsonRecord).id,
-    }),
-    rounds: records.map(({ publicRound }) => publicRound),
+  const reveals: PrivateReveal[] = [];
+  const decks = parsedDecks.map((deck) => {
+    const records = deck.fixtures.map((fixture) => deriveRound(fixture, artifact, scoring));
+    const mode = createPublicModeContract({
+      sessionContractVersionId: canonicalHash({
+        schemaVersion: artifact.schemaVersion,
+        profileHash: artifact.profileHash,
+        crawlSnapshotId: (artifact.crawlSnapshot as JsonRecord).id,
+        deck: deck.id,
+      }),
+      rounds: records.map(({ publicRound }) => publicRound),
+    });
+    const deckReveals = records.map(({ privateReveal }) => privateReveal);
+    // Within each deck the five public identities equal the five private reveal identities.
+    if (mode.rounds.map(({ roundId }) => roundId).sort().join("|")
+      !== deckReveals.map(({ roundId }) => roundId).sort().join("|")) fail();
+    reveals.push(...deckReveals);
+    return Object.freeze({
+      id: deck.id, title: deck.title, description: deck.description, notice: deck.notice, mode,
+    });
   });
-  const privateReveals = deepFreeze(Object.fromEntries(records.map(({ privateReveal }) =>
-    [privateReveal.roundId, privateReveal])));
-  const publicIds = mode.rounds.map(({ roundId }) => roundId).sort();
-  if (publicIds.join("|") !== Object.keys(privateReveals).sort().join("|")) fail();
-  return Object.freeze({ mode, privateReveals });
+  const privateReveals = deepFreeze(Object.fromEntries(reveals.map((reveal) => [reveal.roundId, reveal])));
+  if (Object.keys(privateReveals).length !== reveals.length) fail();
+  return Object.freeze({ decks: Object.freeze(decks), privateReveals });
 };
 
 const scoreIsReachable = (score: number, completedRounds: number): boolean => {
@@ -162,7 +183,7 @@ const scoreIsReachable = (score: number, completedRounds: number): boolean => {
 };
 
 const revealFor = (
-  mode: PublicModeContract,
+  decks: readonly LocalRealDeck[],
   privateReveals: Readonly<Record<string, PrivateReveal>>,
   artifactHash: string,
   value: RevealRequest,
@@ -173,7 +194,9 @@ const revealFor = (
   if (!Number.isInteger(request.completedRounds) || (request.completedRounds as number) < 0
     || (request.completedRounds as number) >= ROUND_COUNT) fail();
   const completed = request.completedRounds as number;
-  const round = mode.rounds[completed] ?? fail();
+  // The deck is derived from the round identity; order, score, and clue checks apply within it.
+  const deck = decks.find(({ mode }) => mode.rounds.some(({ roundId }) => roundId === request.roundId)) ?? fail();
+  const round = deck.mode.rounds[completed] ?? fail();
   if (request.roundId !== round.roundId || request.roundVersionId !== round.roundVersionId
     || !round.mode.candidates.some(({ candidateId }) => candidateId === request.candidateId)
     || !Number.isInteger(request.cluesUsed) || (request.cluesUsed as number) < 0
@@ -213,18 +236,15 @@ export const createLocalRealExperiment = (
   try {
     const expectedArtifactHash = sha256(trustedArtifactHash);
     if (canonicalHash(artifactInput) !== expectedArtifactHash) fail();
-    const artifact = record(artifactInput, [
-      "schemaVersion", "contentClass", "profileHash", "crawlSnapshot", "fixtures",
-    ]);
-    const fixtures = parseArtifact(artifact);
-    const { mode, privateReveals } = deriveRecords(fixtures, artifact);
+    const artifact = record(artifactInput, ARTIFACT_KEYS);
+    const { decks, privateReveals } = deriveDecks(parseArtifact(artifact), artifact);
     return Object.freeze({
       kind: "LOCAL_UNREVIEWED_EXPERIMENT",
       artifactHash: expectedArtifactHash,
-      mode,
+      decks,
       privateReveals,
       createReveal: (request: RevealRequest) =>
-        revealFor(mode, privateReveals, expectedArtifactHash, request),
+        revealFor(decks, privateReveals, expectedArtifactHash, request),
     });
   } catch {
     return fail();

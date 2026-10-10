@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { CapacityMeter } from "./capacity";
-import type { CrawlProfile } from "./profile";
+import { STACK_LANGUAGES, type CrawlProfile, type StackLanguage } from "./profile";
 
 const RUNTIME_DIRECTORY = fileURLToPath(new URL("../stack/", import.meta.url)).replace(/\/$/u, "");
 const WORKER_PATH = join(RUNTIME_DIRECTORY, "stream_metadata.py");
@@ -21,6 +21,8 @@ const ROW_KEYS = [
   "committerDate",
 ] as const;
 const COUNTER_KEYS = ["networkBytes", "peakTemporaryDiskBytes", "redirectsFollowed", "requests"] as const;
+/** The metadata worker additionally reports every row it inspected, emitted or screened out. */
+const METADATA_COUNTER_KEYS = [...COUNTER_KEYS, "rowsInspected"] as const;
 const HEX_40 = /^[0-9a-f]{40}$/u;
 const HEX_64 = /^[0-9a-f]{64}$/u;
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u;
@@ -43,7 +45,7 @@ export interface StackMetadataRow extends Readonly<Record<string, unknown>> {
   readonly repository: string;
   readonly path: string;
   readonly detectedLicenses: readonly string[];
-  readonly detectedLanguage: "Python" | "TypeScript";
+  readonly detectedLanguage: StackLanguage;
   readonly generated: false;
   readonly vendor: false;
   readonly sourceEncoding: "UTF-8";
@@ -71,6 +73,11 @@ export interface WorkerCounters {
   readonly requests: number;
 }
 
+export interface MetadataCounters extends WorkerCounters {
+  /** Rows inspected against the row ceiling; rows that failed FR-029 screening are counted but not emitted. */
+  readonly rowsInspected: number;
+}
+
 export interface WorkerResult {
   readonly exitCode: number;
   readonly stdout: Uint8Array;
@@ -81,7 +88,7 @@ export interface WorkerResult {
 export interface StackMetadataOptions {
   readonly profile: CrawlProfile;
   readonly capacity: Pick<CapacityMeter, "recordStackRows" | "recordWorkerRequests" | "reserveTemporaryDisk" | "snapshot">;
-  readonly configuration: "Python" | "TypeScript";
+  readonly configuration: StackLanguage;
   readonly rowLimit: number;
   readonly environment: Readonly<Record<string, string | undefined>>;
   readonly runWorker?: (request: WorkerRequest) => Promise<WorkerResult>;
@@ -142,7 +149,7 @@ const validateRuntime = async (
 };
 
 const workerRequest = (options: StackMetadataOptions): WorkerRequest => {
-  if (options.configuration !== "Python" && options.configuration !== "TypeScript") {
+  if (!(STACK_LANGUAGES as readonly string[]).includes(options.configuration)) {
     fail("CONFIGURATION_REJECTED");
   }
   const path = options.environment.PATH ?? fail("ENVIRONMENT_REJECTED");
@@ -180,8 +187,7 @@ const workerRequest = (options: StackMetadataOptions): WorkerRequest => {
 
 const nonNegativeInteger = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0;
 
-/** Parses the canonical trailer line `{"counters":{...}}`; any shape, order, sign, or consistency drift rejects. */
-export const parseWorkerCounters = (line: string): WorkerCounters => {
+const parseCounters = (line: string, keys: readonly string[]): Record<string, number> => {
   let parsed: unknown;
   try {
     parsed = JSON.parse(line);
@@ -194,18 +200,20 @@ export const parseWorkerCounters = (line: string): WorkerCounters => {
   const counters = outer.counters;
   if (typeof counters !== "object" || counters === null || Array.isArray(counters)) return fail("COUNTERS_REJECTED");
   const record = counters as Record<string, unknown>;
-  if (Object.keys(record).join("|") !== COUNTER_KEYS.join("|")) fail("COUNTERS_REJECTED");
-  if (COUNTER_KEYS.some((key) => !nonNegativeInteger(record[key]))) fail("COUNTERS_REJECTED");
-  const result = Object.freeze({
-    networkBytes: record.networkBytes as number,
-    peakTemporaryDiskBytes: record.peakTemporaryDiskBytes as number,
-    redirectsFollowed: record.redirectsFollowed as number,
-    requests: record.requests as number,
-  });
-  if (result.redirectsFollowed > result.requests) fail("COUNTERS_REJECTED");
+  if (Object.keys(record).join("|") !== keys.join("|")) fail("COUNTERS_REJECTED");
+  if (keys.some((key) => !nonNegativeInteger(record[key]))) fail("COUNTERS_REJECTED");
+  const result = Object.freeze(Object.fromEntries(keys.map((key) => [key, record[key] as number])));
+  if (result.redirectsFollowed! > result.requests!) fail("COUNTERS_REJECTED");
   if (line !== JSON.stringify({ counters: result })) fail("COUNTERS_REJECTED");
   return result;
 };
+
+/** Parses the canonical trailer line `{"counters":{...}}`; any shape, order, sign, or consistency drift rejects. */
+export const parseWorkerCounters = (line: string): WorkerCounters =>
+  parseCounters(line, COUNTER_KEYS) as unknown as WorkerCounters;
+
+export const parseMetadataCounters = (line: string): MetadataCounters =>
+  parseCounters(line, METADATA_COUNTER_KEYS) as unknown as MetadataCounters;
 
 /** Splits decoded worker stdout into its payload lines and the mandatory counters trailer. */
 export const splitWorkerOutput = (bytes: Uint8Array): Readonly<{ lines: readonly string[]; trailer: string }> => {
@@ -234,10 +242,14 @@ const exactRecord = (value: unknown): Record<string, unknown> => {
 const validText = (value: unknown): value is string =>
   typeof value === "string" && value.length > 0 && value.trim() === value;
 
-const validPath = (value: unknown, language: "Python" | "TypeScript"): boolean => {
+const EXTENSIONS: Readonly<Record<StackLanguage, readonly string[]>> = Object.freeze({
+  Python: [".py"], TypeScript: [".ts", ".tsx"], Go: [".go"], Rust: [".rs"], Ruby: [".rb"],
+});
+
+const validPath = (value: unknown, language: StackLanguage): boolean => {
   if (!validText(value) || value.startsWith("/") || value.includes("\\")) return false;
   if (value.split("/").some((part) => part === "" || part === "." || part === "..")) return false;
-  return language === "Python" ? value.endsWith(".py") : /\.tsx?$/u.test(value);
+  return EXTENSIONS[language].some((extension) => value.endsWith(extension));
 };
 
 const validUtcDate = (value: unknown): value is string => {
@@ -253,7 +265,7 @@ const validUtcDate = (value: unknown): value is string => {
 
 const validateIdentity = (
   row: Record<string, unknown>,
-  language: "Python" | "TypeScript",
+  language: StackLanguage,
 ): void => {
   const identities = [
     row.swhBlobId, row.swhContentId, row.swhDirectoryId, row.swhSnapshotId, row.swhRevisionId,
@@ -276,7 +288,7 @@ const validateDates = (row: Record<string, unknown>): void => {
 
 const validateRow = (
   value: unknown,
-  language: "Python" | "TypeScript",
+  language: StackLanguage,
   byteLimit: number,
 ): StackMetadataRow => {
   const row = exactRecord(value);
@@ -298,14 +310,13 @@ const validateRow = (
 
 interface ParsedMetadataOutput {
   readonly rows: readonly StackMetadataRow[];
-  readonly counters: WorkerCounters;
+  readonly counters: MetadataCounters;
 }
 
 const parseOutput = (bytes: Uint8Array, options: StackMetadataOptions): ParsedMetadataOutput => {
   if (bytes.byteLength > options.profile.capacity.stackMetadataBytes) fail("METADATA_BYTES");
   const { lines, trailer } = splitWorkerOutput(bytes);
   if (lines.length > options.rowLimit) fail("ROW_OVERRUN");
-  if (lines.length !== options.rowLimit) fail("OUTPUT_MALFORMED");
   const rows = lines.map((line) => {
     try {
       const row = validateRow(JSON.parse(line), options.configuration, options.profile.capacity.perBlobBytes);
@@ -318,7 +329,11 @@ const parseOutput = (bytes: Uint8Array, options: StackMetadataOptions): ParsedMe
   });
   const ids = rows.map(({ stableRowId }) => stableRowId);
   if (new Set(ids).size !== ids.length) fail("ROW_DUPLICATE");
-  return Object.freeze({ rows: Object.freeze(rows), counters: parseWorkerCounters(trailer) });
+  const counters = parseMetadataCounters(trailer);
+  // The worker inspects exactly the row ceiling it was handed; screened-out rows are inspected but not emitted.
+  if (counters.rowsInspected > options.rowLimit || rows.length > counters.rowsInspected) fail("ROW_OVERRUN");
+  if (counters.rowsInspected !== options.rowLimit) fail("OUTPUT_MALFORMED");
+  return Object.freeze({ rows: Object.freeze(rows), counters });
 };
 
 const meterWorkerCounters = (
@@ -333,7 +348,7 @@ const meterWorkerCounters = (
   if (counters.peakTemporaryDiskBytes > budget.temporaryDiskBytes!) fail("TEMPORARY_DISK");
   try {
     options.capacity.recordWorkerRequests(counters.requests);
-    options.capacity.recordStackRows(options.configuration, parsed.rows.length, counters.networkBytes);
+    options.capacity.recordStackRows(options.configuration, counters.rowsInspected, counters.networkBytes);
   } catch {
     return fail("METADATA_CAPACITY");
   }
