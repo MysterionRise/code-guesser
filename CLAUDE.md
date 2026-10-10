@@ -54,8 +54,11 @@ Expected SHA-256:
   authority rejects it, so the root route shows its "nothing to play" notice
   until the revision 12 live run publishes a v2 artifact and its hash is
   pinned in `apps/game/src/demo/local-real-experiment.pin.server.ts`.
-- WP-044 (the one live run revision 12 authorizes) has not run yet. The
-  committed-artifact loader test and the browser specs need its output.
+- WP-044 (the revision 12 live run) has failed closed twice on 2026-10-10,
+  publishing nothing: first on stale Python worker maxima (fixed), then on
+  one inconsistent GitHub search response. See
+  `docs/gangsta/codeguessr-poc-readiness/evidence/2026-10-10-revision-12-live-run-attempts.md`.
+  The committed-artifact loader test and the browser specs need its output.
 - The README media still show the revision 11 rounds; `pnpm demo:record` now
   records one scene per deck plus a full run (WP-045).
 - The run report lives at the ignored path `ops/poc/stack/tmp/local-experiment-run.json`.
@@ -115,7 +118,11 @@ Read the `PREPARATION_STAGE_FAILED` line first on any failure:
 `REQUEST_COUNT` or `REQUEST_LIMIT` in the rejections means the 600-request
 ceiling was spent, `WORKER_EXIT` means a Python worker exited non-zero
 (reproduce it directly to read its code), and a `PUBLIC_CONTAINMENT_*` code
-names the protected key and public field that collided. Selection
+names the protected key and public field that collided, and a
+`GITHUB_SEARCH_*` code names the discovery check that rejected a search
+response (`INCOMPLETE`, `TOTAL_CHANGED`, `ITEM_COUNT`, and `DUPLICATE` are
+provider inconsistencies; `SHAPE`, `IDENTITY`, and `DATE` are record drift).
+Selection
 diagnostics `REPOSITORY_REPEATED`, `PROJECT_NAME_IN_EXCERPT`,
 `PROJECT_REPOSITORY_SKIPPED`, `AI_CREDIT_ABSENT`, and
 `SOURCE_IDENTITY_UNREPORTABLE` are expected screening outcomes, not faults.

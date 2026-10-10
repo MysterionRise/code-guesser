@@ -61,7 +61,53 @@ The first row group of each configured language's first shard is 17.3 MiB
 and footer overhead per language, so the expected total is about 87 MiB
 against the 96 MiB ceiling.
 
-### Authorization state
+## Attempt 2 (2026-10-10, operator-run, after commit `7eb7836`)
 
-Revision 12 authorized one live run, and this attempt used it. A further run
-needs the operator's explicit authorization.
+The operator ran the same command again about an hour later. It failed closed
+during discovery, before any lineage, admission, or Stack request, and
+published nothing.
+
+```text
+PREPARATION_STAGE_FAILED DISCOVERY GITHUB_SEARCH_REJECTED none
+PREPARATION_FAILURE_SITE crawlGitHubCommitSearch@github-search.ts
+PREPARATION_FAILED
+```
+
+Attempt 1 had passed the same discovery code with the same eight signed
+queries. Every search check (response shape, `incomplete_results`, result and
+page ceilings, a stable total across pages, exact item counts, identity and
+URL binding, committer dates, and duplicate identities) threw the same
+`GITHUB_SEARCH_REJECTED` code, so the log could not say which one fired.
+
+### Read-only probe after the attempt
+
+A diagnostic script replayed the eight signed queries with the same
+parameters and applied the same checks, printing counts only (11 requests),
+then counted committer-date ties around the page boundaries of the three
+two-page queries (6 requests). Every query passed every check:
+
+| Query | Total | Pages | Incomplete | Items per page |
+| --- | --- | --- | --- | --- |
+| `ai-copilot-github` | 62 | 1 | false | 62 |
+| `ai-copilot-microsoft` | 49 | 1 | false | 49 |
+| `ai-claude-github` | 35 | 1 | false | 35 |
+| `ai-claude-vercel` | 85 | 1 | false | 85 |
+| `ordinary-facebook` | 148 | 2 | false | 100, 48 |
+| `ordinary-google` | 121 | 2 | false | 100, 21 |
+| `ordinary-vercel` | 65 | 1 | false | 65 |
+| `ordinary-github` | 119 | 2 | false | 100, 19 |
+
+No page boundary falls inside a committer-date tie, so unstable ordering
+between pages is not the expected cause. Attempt 2 most likely met one
+transient inconsistent search response; the evidence cannot say which check
+it failed.
+
+### Diagnostics change
+
+Each search rejection now carries a specific code that the stage line logs in
+place of the generic message: `GITHUB_SEARCH_SHAPE`, `GITHUB_SEARCH_IDENTITY`,
+`GITHUB_SEARCH_DATE`, `GITHUB_SEARCH_INCOMPLETE`,
+`GITHUB_SEARCH_RESULT_CEILING`, `GITHUB_SEARCH_TOTAL_CHANGED`,
+`GITHUB_SEARCH_PAGE_CEILING`, `GITHUB_SEARCH_ITEM_COUNT`, or
+`GITHUB_SEARCH_DUPLICATE`. Every check and its fail-closed outcome are
+unchanged.

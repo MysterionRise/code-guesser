@@ -20,8 +20,20 @@ const FEBRUARY = 2;
 
 type UnknownRecord = Record<string, unknown>;
 
+/** The discovery check that rejected a response; the stage log names it instead of the generic message. */
+export type GitHubSearchRejection =
+  | "GITHUB_SEARCH_SHAPE"
+  | "GITHUB_SEARCH_IDENTITY"
+  | "GITHUB_SEARCH_DATE"
+  | "GITHUB_SEARCH_INCOMPLETE"
+  | "GITHUB_SEARCH_RESULT_CEILING"
+  | "GITHUB_SEARCH_TOTAL_CHANGED"
+  | "GITHUB_SEARCH_PAGE_CEILING"
+  | "GITHUB_SEARCH_ITEM_COUNT"
+  | "GITHUB_SEARCH_DUPLICATE";
+
 export class GitHubSearchError extends Error {
-  public constructor() {
+  public constructor(public readonly code: GitHubSearchRejection) {
     super("GITHUB_SEARCH_REJECTED");
     this.name = "GitHubSearchError";
   }
@@ -56,11 +68,11 @@ export interface GitHubQueryClassification {
   readonly completeness: GitHubQueryCompleteness;
 }
 
-const fail = (): never => { throw new GitHubSearchError(); };
+const fail = (code: GitHubSearchRejection): never => { throw new GitHubSearchError(code); };
 const requiredRecord = (value: unknown, keys: readonly string[]): UnknownRecord => {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return fail();
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return fail("GITHUB_SEARCH_SHAPE");
   const candidate = value as UnknownRecord;
-  if (keys.some((key) => !Object.hasOwn(candidate, key))) fail();
+  if (keys.some((key) => !Object.hasOwn(candidate, key))) fail("GITHUB_SEARCH_SHAPE");
   return candidate;
 };
 
@@ -71,9 +83,9 @@ const searchResponse = (value: unknown): Readonly<{
 }> => {
   const response = requiredRecord(value, ["total_count", "incomplete_results", "items"]);
   const items = response.items;
-  if (!Number.isSafeInteger(response.total_count) || (response.total_count as number) < 0) fail();
-  if (typeof response.incomplete_results !== "boolean") fail();
-  const parsedItems: unknown[] = Array.isArray(items) ? items : fail();
+  if (!Number.isSafeInteger(response.total_count) || (response.total_count as number) < 0) fail("GITHUB_SEARCH_SHAPE");
+  if (typeof response.incomplete_results !== "boolean") fail("GITHUB_SEARCH_SHAPE");
+  const parsedItems: unknown[] = Array.isArray(items) ? items : fail("GITHUB_SEARCH_SHAPE");
   return Object.freeze({
     totalCount: response.total_count as number,
     incompleteResults: response.incomplete_results as boolean,
@@ -91,18 +103,18 @@ const searchResponse = (value: unknown): Readonly<{
 const hasAuthorizedIncompleteProfile = (_profile: CrawlProfile): boolean => false;
 
 const repositoryName = (value: unknown): string => {
-  if (typeof value !== "string") return fail();
+  if (typeof value !== "string") return fail("GITHUB_SEARCH_IDENTITY");
   const segments = value.split("/");
   if (segments.length !== 2 || segments.some((segment) =>
     segment.length === 0
     || segment === "."
     || segment === ".."
-    || !/^[A-Za-z0-9_.-]+$/u.test(segment))) fail();
+    || !/^[A-Za-z0-9_.-]+$/u.test(segment))) fail("GITHUB_SEARCH_IDENTITY");
   return value;
 };
 
 const fullCommit = (value: unknown): string =>
-  typeof value === "string" && /^[0-9a-f]{40}$/u.test(value) ? value : fail();
+  typeof value === "string" && /^[0-9a-f]{40}$/u.test(value) ? value : fail("GITHUB_SEARCH_IDENTITY");
 
 const isLeapYear = (year: number): boolean =>
   year % LEAP_YEAR_INTERVAL === 0
@@ -116,7 +128,7 @@ const daysInMonth = (year: number, month: number): number => {
 
 const committerDate = (value: unknown): string => {
   const match = typeof value === "string" ? COMMITTER_DATE.exec(value) : null;
-  if (match === null) return fail();
+  if (match === null) return fail("GITHUB_SEARCH_DATE");
   const year = Number(match[1]!);
   const month = Number(match[2]!);
   const day = Number(match[3]!);
@@ -131,7 +143,7 @@ const committerDate = (value: unknown): string => {
     || second > MAXIMUM_MINUTE_OR_SECOND || offsetHour > MAXIMUM_OFFSET_HOUR
     || offsetMinute > MAXIMUM_MINUTE_OR_SECOND
     || (offsetHour === MAXIMUM_OFFSET_HOUR && offsetMinute !== 0)
-    || (match[8] === "-" && offsetHour === 0 && offsetMinute === 0)) return fail();
+    || (match[8] === "-" && offsetHour === 0 && offsetMinute === 0)) return fail("GITHUB_SEARCH_DATE");
   const local = new Date(0);
   local.setUTCFullYear(year, month - 1, day);
   local.setUTCHours(hour, minute, second, millisecond);
@@ -139,7 +151,7 @@ const committerDate = (value: unknown): string => {
   const offset = direction * ((offsetHour * MINUTES_PER_HOUR) + offsetMinute);
   const normalized = new Date(local.getTime() - (offset * MILLISECONDS_PER_MINUTE));
   if (!Number.isFinite(normalized.getTime())
-    || normalized.getUTCFullYear() < 0 || normalized.getUTCFullYear() > MAXIMUM_UTC_YEAR) return fail();
+    || normalized.getUTCFullYear() < 0 || normalized.getUTCFullYear() > MAXIMUM_UTC_YEAR) return fail("GITHUB_SEARCH_DATE");
   return normalized.toISOString();
 };
 
@@ -160,7 +172,7 @@ const parseCandidate = (
   if (repository.url !== apiRepositoryUrl
     || repository.html_url !== repositoryUrl
     || item.url !== apiCommitUrl
-    || item.html_url !== commitUrl) fail();
+    || item.html_url !== commitUrl) fail("GITHUB_SEARCH_IDENTITY");
   return Object.freeze({
     queryId,
     queryIndex,
@@ -218,15 +230,15 @@ export const crawlGitHubCommitSearch = async (
     for (let page = 1; page <= pages; page += 1) {
       const response = await loadSearchPage(options, query, page, perPage);
       const parsed = searchResponse(response);
-      if (parsed.incompleteResults && !hasAuthorizedIncompleteProfile(options.profile)) fail();
+      if (parsed.incompleteResults && !hasAuthorizedIncompleteProfile(options.profile)) fail("GITHUB_SEARCH_INCOMPLETE");
       providerReportedIncomplete ||= parsed.incompleteResults;
-      if (parsed.totalCount > options.profile.capacity.githubResults) fail();
-      if (expectedTotal !== undefined && parsed.totalCount !== expectedTotal) fail();
+      if (parsed.totalCount > options.profile.capacity.githubResults) fail("GITHUB_SEARCH_RESULT_CEILING");
+      if (expectedTotal !== undefined && parsed.totalCount !== expectedTotal) fail("GITHUB_SEARCH_TOTAL_CHANGED");
       expectedTotal = parsed.totalCount;
       pages = Math.max(1, Math.ceil(parsed.totalCount / perPage));
-      if (pages > options.profile.capacity.githubPages) fail();
+      if (pages > options.profile.capacity.githubPages) fail("GITHUB_SEARCH_PAGE_CEILING");
       const remaining = Math.max(0, parsed.totalCount - ((page - 1) * perPage));
-      if (parsed.items.length !== Math.min(perPage, remaining)) fail();
+      if (parsed.items.length !== Math.min(perPage, remaining)) fail("GITHUB_SEARCH_ITEM_COUNT");
       const responseHash = canonicalHash(response);
       if (!seenResponseHashes.has(responseHash)) {
         seenResponseHashes.add(responseHash);
@@ -235,7 +247,7 @@ export const crawlGitHubCommitSearch = async (
       candidates.push(...parsed.items.map((item) => {
         const candidate = parseCandidate(item, query.id, queryIndex);
         const identity = `${candidate.repository}\0${candidate.commit}`;
-        if (seenCandidates.has(identity)) fail();
+        if (seenCandidates.has(identity)) fail("GITHUB_SEARCH_DUPLICATE");
         seenCandidates.add(identity);
         return candidate;
       }));

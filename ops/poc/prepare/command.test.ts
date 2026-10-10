@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 
 import { canonicalHash } from "./canonical";
 import { createCapacityMeter } from "./capacity";
+import { GitHubSearchError } from "./github-search";
 import { HARNESS_CANDIDATES, HARNESS_CREDIT, accepted, classificationsFor, hash, loadProfile, makeHarness } from "./command-test-harness";
 import { STACK_LANGUAGES } from "./profile";
 import { RetryError } from "./retry";
@@ -547,6 +548,15 @@ const logLines = (calls: readonly string[]): string[] =>
     await expect(prepareLocalExperiment(search.dependencies)).rejects.toThrow("PREPARATION_FAILED");
     expect(logLines(search.calls)).toEqual([
       "log:PREPARATION_STAGE_FAILED DISCOVERY RETRY_SIGNAL_MISSING 4xx",
+      "log:PREPARATION_FAILED",
+    ]);
+
+    const inconsistent = await makeHarness({
+      searchGitHub: async () => { throw new GitHubSearchError("GITHUB_SEARCH_TOTAL_CHANGED"); },
+    });
+    await expect(prepareLocalExperiment(inconsistent.dependencies)).rejects.toThrow("PREPARATION_FAILED");
+    expect(logLines(inconsistent.calls)).toEqual([
+      "log:PREPARATION_STAGE_FAILED DISCOVERY GITHUB_SEARCH_TOTAL_CHANGED none",
       "log:PREPARATION_FAILED",
     ]);
 
