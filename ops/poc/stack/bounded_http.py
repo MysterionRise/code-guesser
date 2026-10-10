@@ -21,8 +21,8 @@ PINNED_REVISION = "e565caa3a78c2423bd374333a472b049eb090e47"
 # authorization on 2026-10-08 (HEAD on the pinned resolve endpoint answered 302
 # to this host); see evidence/2026-10-08-hugging-face-redirect-observation.md.
 REDIRECT_HOSTS = frozenset({"us.aws.cdn.hf.co"})
-MAXIMUM_REQUESTS = 200
-MAXIMUM_NETWORK_BYTES = 64 * 1024 * 1024
+MAXIMUM_REQUESTS = 600
+MAXIMUM_NETWORK_BYTES = 96 * 1024 * 1024
 TIMEOUT_SECONDS = 15.0
 READ_METHODS = ("GET", "HEAD")
 # Headers that belong to the origin request only; the rebuilt redirect request derives its own Host.

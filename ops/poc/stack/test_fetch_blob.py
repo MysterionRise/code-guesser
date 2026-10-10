@@ -37,7 +37,7 @@ def limits(**overrides):
         "perBlobBytes": MAXIMUM_BLOB_BYTES,
         "totalBlobBytes": 16 * 1024 * 1024,
         "temporaryDiskBytes": 32 * 1024 * 1024,
-        "requestLimit": 200,
+        "requestLimit": 600,
         "networkByteLimit": MAXIMUM_BLOB_BYTES,
     }
     value.update(overrides)
@@ -227,7 +227,7 @@ class FetchSelectedBlobTests(unittest.TestCase):
             ("DECLARED_SIZE_REJECTED", limits(perBlobBytes=3)),
             ("TOTAL_BLOB_BYTES", limits(totalBlobBytes=7)),
             ("LIMIT_RAISED", limits(blobAttempts=51)),
-            ("LIMIT_RAISED", limits(requestLimit=201)),
+            ("LIMIT_RAISED", limits(requestLimit=601)),
             ("LIMIT_RAISED", limits(networkByteLimit=MAXIMUM_BLOB_BYTES + 1)),
             ("LIMIT_VALUE", limits(temporaryDiskBytes=0)),
             ("LIMIT_VALUE", limits(requestLimit=0)),

@@ -52,8 +52,8 @@ def request(**overrides):
         "revision": REVISION,
         "rowLimit": 1,
         "perBlobByteLimit": 262_144,
-        "requestLimit": 200,
-        "networkByteLimit": 64 * 1024 * 1024,
+        "requestLimit": 600,
+        "networkByteLimit": 96 * 1024 * 1024,
         "temporaryDiskBytes": 32 * 1024 * 1024,
     }
     value.update(overrides)
@@ -185,8 +185,8 @@ class StreamMetadataTests(unittest.TestCase):
             ("REQUEST_MALFORMED", {key: value for key, value in request().items() if key != "requestLimit"},
              "external-token"),
             ("REQUEST_LIMIT_REJECTED", request(requestLimit=0), "external-token"),
-            ("REQUEST_LIMIT_REJECTED", request(requestLimit=201), "external-token"),
-            ("NETWORK_LIMIT_REJECTED", request(networkByteLimit=64 * 1024 * 1024 + 1), "external-token"),
+            ("REQUEST_LIMIT_REJECTED", request(requestLimit=601), "external-token"),
+            ("NETWORK_LIMIT_REJECTED", request(networkByteLimit=96 * 1024 * 1024 + 1), "external-token"),
             ("DISK_LIMIT_REJECTED", request(temporaryDiskBytes=32 * 1024 * 1024 + 1), "external-token"),
             ("TOKEN_MISSING", request(), ""),
         ]
