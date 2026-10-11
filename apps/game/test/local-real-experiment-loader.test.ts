@@ -27,8 +27,8 @@ describe("server-only local real experiment loader", () => {
     if (!loaded.ok) return;
     expect(loaded.experiment.kind).toBe("LOCAL_UNREVIEWED_EXPERIMENT");
     expect(loaded.experiment.artifactHash).toBe(hashValue(value));
-    expect(loaded.experiment.decks.map((deck: any) => deck.id)).toEqual(["project", "language", "ai"]);
-    expect(loaded.experiment.decks.every((deck: any) => deck.mode.rounds.length === 5)).toBe(true);
+    expect(loaded.experiment.decks.map((deck: any) => deck.id)).toEqual(["project", "language", "before-after"]);
+    expect(loaded.experiment.decks.every((deck: any) => loaded.experiment.dealSession(deck.id).rounds.length === 5)).toBe(true);
     expect(Object.isFrozen(loaded)).toBe(true);
   });
 
@@ -41,7 +41,7 @@ describe("server-only local real experiment loader", () => {
   it("rejects malformed, hash-mismatched, edited, and placeholder-pinned artifacts", () => {
     const value = artifact();
     const edited = artifact();
-    edited.decks[0].fixtures[0].excerpt = "edited";
+    edited.decks[0].fixtures[0].panes[0].text = "edited";
     const cases = [
       { artifactPath: written("{not json"), trustedArtifactHash: hashValue(value) },
       { artifactPath: written(value), trustedArtifactHash: "f".repeat(64) },
@@ -54,14 +54,18 @@ describe("server-only local real experiment loader", () => {
     }
   });
 
-  it("binds the committed artifact to the operator-pinned hash with three decks of five", async () => {
+  it("binds the committed artifact to the preparer-written pin and deals five-round sessions", async () => {
     const { TRUSTED_ARTIFACT_HASH } = await import("../src/demo/local-real-experiment.pin.server");
     const loaded = loadLocalRealExperiment({ artifactPath: fileURLToPath(new URL("../src/demo/generated/local-real-rounds.json", import.meta.url)) });
 
     expect(loaded.ok).toBe(true);
     if (!loaded.ok) return;
     expect(loaded.experiment.artifactHash).toBe(TRUSTED_ARTIFACT_HASH);
-    expect(loaded.experiment.decks.map((deck: any) => `${deck.id}:${deck.mode.rounds.length}`)).toEqual(["project:5", "language:5", "ai:5"]);
+    expect(loaded.experiment.decks.length).toBeGreaterThan(0);
+    for (const deck of loaded.experiment.decks) {
+      expect(deck.poolSize).toBeGreaterThanOrEqual(5);
+      expect(loaded.experiment.dealSession(deck.id).rounds).toHaveLength(5);
+    }
   });
 
   it("resolves the default artifact beside the game sources and memoizes the active authority", () => {

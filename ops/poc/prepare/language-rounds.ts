@@ -1,19 +1,12 @@
 import { canonicalHash } from "./canonical";
-import { type ExperimentFixture } from "./model";
 import { deepFreeze, validUtcTimestamp } from "./model-validation";
-import {
-  STACK_LANGUAGES,
-  mentionsExtension,
-  mentionsLabel,
-  type CrawlProfile,
-  type LanguageTemplate,
-  type StackLanguage,
-} from "./profile";
-import { attributionFor, fill, generatedDeck, sha256, shuffled, type GeneratedRounds } from "./round-projection";
+import { languageCandidateId, type ExperimentFixture } from "./model";
+import { STACK_LANGUAGES, mentionsExtension, mentionsLabel, type CrawlProfile, type StackLanguage } from "./profile";
+import { attributionFor, fill, orderedPool, roundIdFor, sha256, shuffled, sourceRecord, type GeneratedRounds } from "./round-helpers";
 import type { RevalidatedStackCandidate } from "./stack-revalidation";
 
 type Candidate = RevalidatedStackCandidate & Readonly<Record<string, unknown>>;
-type ClassifiedCandidate = Readonly<{ candidate: Candidate; language: StackLanguage; template: LanguageTemplate }>;
+type ClassifiedCandidate = Readonly<{ candidate: Candidate; language: StackLanguage }>;
 
 export class LanguageRoundsError extends Error {
   public constructor() {
@@ -27,9 +20,7 @@ export interface LanguageRoundsOptions {
   readonly candidates: readonly RevalidatedStackCandidate[];
 }
 
-export type GeneratedLanguageRounds = GeneratedRounds;
-
-const CANDIDATE_KEYS = [
+export const STACK_CANDIDATE_KEYS = [
   "discoverySource", "repository", "repositoryUrl", "authorName", "authorLogin",
   "authorBasis", "authorSourceUrl", "path", "blob", "rawContentHash", "excerptHash",
   "licenseName", "licenseSpdx", "licenseFileUrl", "commit", "commitUrl", "blobUrl",
@@ -37,7 +28,7 @@ const CANDIDATE_KEYS = [
   "configuration", "stableRowId", "swhBlobId", "swhContentId", "swhDirectoryId",
   "swhSnapshotId", "swhRevisionId", "stackRepository", "stackPath", "detectedLicenses",
   "detectedLanguage", "generated", "vendor", "sourceEncoding", "byteLength", "visitDate",
-  "revisionDate", "committerDate",
+  "revisionDate", "committerDate", "starEventsCount", "forkEventsCount",
 ] as const;
 const fail = (): never => { throw new LanguageRoundsError(); };
 const text = (value: unknown): string =>
@@ -48,16 +39,9 @@ const gitId = (value: unknown): string => /^[0-9a-f]{40}$/u.test(text(value)) ? 
 const sha256Id = (value: unknown): string => /^[0-9a-f]{64}$/u.test(text(value)) ? value as string : fail();
 const encodedPath = (value: string): string => value.split("/").map(encodeURIComponent).join("/");
 
-const SLUGS: Readonly<Record<string, string>> = Object.freeze({
-  Python: "python", TypeScript: "typescript", JavaScript: "javascript", Go: "go", Rust: "rust", Java: "java",
-  Ruby: "ruby", "C#": "csharp", Kotlin: "kotlin", Swift: "swift", PHP: "php", "C++": "cpp",
-});
-export const languageCandidateId = (label: string): string =>
-  `local-experiment.language.${SLUGS[label] ?? fail()}.v2`;
-
 const exactShape = (candidate: Candidate): void => {
   const actual = Object.keys(candidate).sort();
-  const expected = [...CANDIDATE_KEYS].sort();
+  const expected = [...STACK_CANDIDATE_KEYS].sort();
   if (actual.length !== expected.length || actual.some((key, index) => key !== expected[index])) fail();
 };
 
@@ -69,12 +53,11 @@ const languageFor = (profile: CrawlProfile, candidate: Candidate): StackLanguage
   const matching = profile.stack.configurations.flatMap(({ extensions }) =>
     extensions.filter((extension) => path.endsWith(extension)));
   if (matching.length !== 1 || !configured.extensions.includes(matching[0]!)) fail();
-  const stem = path.slice(0, -matching[0]!.length);
-  if (profile.stack.configurations.some(({ extensions }) => extensions.some((extension) => stem.endsWith(extension)))) fail();
   return language as StackLanguage;
 };
 
-const exactBindings = (profile: CrawlProfile, candidate: Candidate): void => {
+/** The revalidated candidate is exactly the shape revalidation produces, bound to this run's snapshot. */
+export const exactStackBindings = (profile: CrawlProfile, candidate: Candidate): void => {
   exactShape(candidate);
   if (candidate.discoverySource !== "STACK_V2" || candidate.authorBasis !== "SELECTED_COMMIT"
     || candidate.stackRelease !== profile.stack.release || candidate.stackRevision !== profile.stack.revision
@@ -98,7 +81,10 @@ const exactBindings = (profile: CrawlProfile, candidate: Candidate): void => {
   if (sha256Id(candidate.excerptHash) !== sha256(excerpt)
     || !Number.isSafeInteger(candidate.byteLength) || (candidate.byteLength as number) < excerptBytes
     || excerptBytes < profile.screening.minimumExcerptBytes || excerptBytes > profile.screening.excerptBytes
-    || excerpt.split("\n").length > profile.screening.languageExcerptLines) fail();
+    || excerpt.split("\n").length > profile.screening.excerptLines) fail();
+  for (const count of [candidate.starEventsCount, candidate.forkEventsCount]) {
+    if (!Number.isSafeInteger(count) || (count as number) < 0) fail();
+  }
   text(candidate.authorName);
   if (candidate.authorLogin !== null) text(candidate.authorLogin);
   const licenses = Array.isArray(candidate.detectedLicenses) ? candidate.detectedLicenses.map(text) : fail();
@@ -115,8 +101,8 @@ const containsWord = (haystack: string, needle: string): boolean => {
   return new RegExp(`(^|[^A-Za-z0-9_])${escaped}([^A-Za-z0-9_]|$)`, "iu").test(haystack);
 };
 
-/** FR-025 as replaced: no candidate label or the file's extension; FR-009/FR-023: no source identity. */
-const rejectSpoilers = (profile: CrawlProfile, candidate: Candidate, template: LanguageTemplate): void => {
+/** No option's name, no extension, and no source identity may appear in the code a language round shows. */
+export const rejectStackSpoilers = (profile: CrawlProfile, candidate: Candidate): void => {
   const excerpt = codeText(candidate.excerpt);
   const structuralValues = [
     candidate.repository, candidate.repositoryUrl, candidate.authorSourceUrl, candidate.path,
@@ -130,18 +116,16 @@ const rejectSpoilers = (profile: CrawlProfile, candidate: Candidate, template: L
   const protectedWords = [candidate.authorName, candidate.authorLogin, candidate.licenseName, candidate.licenseSpdx]
     .filter((value): value is string => typeof value === "string" && value.length > 0);
   if (protectedWords.some((value) => containsWord(excerpt, value))) fail();
-  if ([template.language, ...template.distractors].some((label) => mentionsLabel(excerpt, label))) fail();
-  const configured = profile.stack.configurations.find(({ language }) => language === template.language) ?? fail();
-  if (configured.extensions.some((extension) => mentionsExtension(excerpt, extension))) fail();
+  if (STACK_LANGUAGES.some((label) => mentionsLabel(excerpt, label))) fail();
+  if (profile.stack.configurations.some(({ extensions }) => extensions.some((extension) => mentionsExtension(excerpt, extension)))) fail();
 };
 
 const classify = (profile: CrawlProfile, candidate: RevalidatedStackCandidate): ClassifiedCandidate => {
   const value = candidate as Candidate;
-  exactBindings(profile, value);
+  exactStackBindings(profile, value);
   const language = languageFor(profile, value);
-  const template = profile.templates.language.languages.find((entry) => entry.language === language) ?? fail();
-  rejectSpoilers(profile, value, template);
-  return Object.freeze({ candidate: value, language, template });
+  rejectStackSpoilers(profile, value);
+  return Object.freeze({ candidate: value, language });
 };
 
 export const validateLanguageCandidate = (options: Readonly<{
@@ -149,47 +133,116 @@ export const validateLanguageCandidate = (options: Readonly<{
   candidate: RevalidatedStackCandidate;
 }>): RevalidatedStackCandidate => classify(options.profile, options.candidate).candidate;
 
-const fixtureFor = (classified: ClassifiedCandidate, profile: CrawlProfile): ExperimentFixture => {
-  const { candidate, language, template } = classified;
-  const languageTemplate = profile.templates.language;
-  const sourceValue = Object.fromEntries(Object.entries(candidate).filter(([key]) => key !== "excerpt"));
-  const source = deepFreeze(structuredClone(sourceValue));
-  const roundId = `local-language-${canonicalHash({
-    kind: "language", repository: candidate.repository, commit: candidate.commit,
-    path: candidate.path, blob: candidate.blob,
-  }).slice(0, 24)}`;
-  const candidates = shuffled(roundId, [language, ...template.distractors], (label) => label)
-    .map((label) => Object.freeze({ id: languageCandidateId(label), label }));
-  const clues = Object.freeze([...template.clues]);
-  const evidence = fill(languageTemplate.evidence, { language });
+/** Syntax typical of each language, most telling first; a hint names the first one the excerpt contains. */
+const SYNTAX: Readonly<Record<StackLanguage, readonly string[]>> = Object.freeze({
+  Python: ["elif", "self.", "lambda", "def ", "None", "await "],
+  TypeScript: ["interface ", "readonly ", ": string", ": number", "=> ", "export ", "const "],
+  Go: [":=", "err != nil", "func ", "chan ", "defer ", "struct {"],
+  Rust: ["let mut ", "&self", "fn ", "impl ", "Option<", "::", "match "],
+  Ruby: ["elsif", "do |", "attr_", "def ", "nil", "end"],
+});
+const UNTELLING_SYNTAX = "the way names are declared";
+
+const blockStyle = (excerpt: string): Readonly<{ clue: string; braces: boolean }> => {
+  const lines = excerpt.split("\n");
+  if (lines.some((line, index) => /:\s*(?:#.*)?$/u.test(line) && /^\s+\S/u.test(lines[index + 1] ?? "")
+    && (lines[index + 1]!.length - lines[index + 1]!.trimStart().length) > (line.length - line.trimStart().length))) {
+    return { clue: "Blocks open with a colon and are set by indentation.", braces: false };
+  }
+  if (lines.some((line) => line.trim() === "end")) return { clue: "Blocks close with a line that says end.", braces: false };
+  if (excerpt.includes("{")) return { clue: "Blocks are wrapped in braces.", braces: true };
+  return { clue: "Look at how each block starts and ends.", braces: false };
+};
+
+/** Two answer-free hints drawn from this excerpt: its block structure, then a piece of telling syntax. */
+const cluesFor = (profile: CrawlProfile, excerpt: string, language: StackLanguage) => {
+  const block = blockStyle(excerpt);
+  const found = SYNTAX[language].find((syntax) => excerpt.includes(syntax));
+  const syntax = found === undefined ? UNTELLING_SYNTAX : `\`${found.trim()}\``;
+  const clues = [block.clue, fill(profile.templates.language.syntaxClue, { syntax })];
+  if (clues.some((clue) => STACK_LANGUAGES.some((label) => mentionsLabel(clue, label)))) fail();
+  return Object.freeze({ clues: Object.freeze(clues), syntax: found?.trim(), braces: block.braces });
+};
+
+const BRACE_LANGUAGES = new Set<StackLanguage>(["TypeScript", "Go", "Rust"]);
+const HASH_COMMENT_LANGUAGES = new Set<StackLanguage>(["Python", "Ruby"]);
+
+/** What the reveal teaches: the syntax that settles it, and a feature the excerpt shares with a wrong option. */
+const signalsFor = (excerpt: string, language: StackLanguage, options: readonly StackLanguage[], hints: ReturnType<typeof cluesFor>) => {
+  const helpful = hints.syntax === undefined
+    ? [`The file's extension and The Stack v2 both record ${language}.`]
+    : [`\`${hints.syntax}\` is typical ${language} syntax.`];
+  const others = options.filter((option) => option !== language);
+  const brace = others.find((option) => BRACE_LANGUAGES.has(option));
+  const hash = others.find((option) => HASH_COMMENT_LANGUAGES.has(option));
+  const misleading = hints.braces && brace !== undefined
+    ? `${brace} wraps blocks in braces too.`
+    : /^\s*#/mu.test(excerpt) && hash !== undefined
+      ? `${hash} starts comments with # too.`
+      : "A short excerpt can read like several languages.";
+  return Object.freeze({ helpful: Object.freeze(helpful), misleading: Object.freeze([misleading]) });
+};
+
+/**
+ * Each round offers its answer and three of the other four languages the deck can hold, so the options never
+ * name the answer. The language each round leaves out follows a balanced design: the languages are put in a
+ * private order (keyed by blob identities no player sees), and a language's r-th round leaves out the language
+ * r + 1 places further along. Rounds that share an answer leave out different languages, and every language is
+ * left out equally often, so neither an option set nor how often an option appears points to the answer.
+ */
+const optionSets = (classified: readonly ClassifiedCandidate[]): ReadonlyMap<ClassifiedCandidate, readonly StackLanguage[]> => {
+  const seed = sha256(classified.map(({ candidate }) => String(candidate.blob)).sort().join("|"));
+  const order = [...STACK_LANGUAGES].sort((left, right) => sha256(`${seed}:${left}`) < sha256(`${seed}:${right}`) ? -1 : 1);
+  const sets = new Map<ClassifiedCandidate, readonly StackLanguage[]>();
+  for (const language of STACK_LANGUAGES) {
+    const position = order.indexOf(language);
+    const rounds = classified.filter((entry) => entry.language === language)
+      .sort((left, right) => sha256(String(left.candidate.blob)) < sha256(String(right.candidate.blob)) ? -1 : 1);
+    rounds.forEach((entry, index) => {
+      const excluded = order[(position + (index % (order.length - 1)) + 1) % order.length]!;
+      sets.set(entry, Object.freeze(STACK_LANGUAGES.filter((option) => option !== excluded)));
+    });
+  }
+  return sets;
+};
+
+const fixtureFor = (classified: ClassifiedCandidate, options: readonly StackLanguage[], profile: CrawlProfile): ExperimentFixture => {
+  const { candidate, language } = classified;
+  const template = profile.templates.language;
+  const source = deepFreeze(sourceRecord(candidate, ["excerpt"]));
+  const roundId = roundIdFor("language", source);
+  const candidates = shuffled(roundId, options, (label) => label)
+    .map((label) => Object.freeze({ id: languageCandidateId(label), label, detail: null }));
+  const panes = Object.freeze([Object.freeze({ label: null, text: candidate.excerpt })]);
+  const hints = cluesFor(profile, candidate.excerpt, language);
+  const signals = signalsFor(candidate.excerpt, language, options, hints);
   return Object.freeze({
     kind: "LANGUAGE",
     roundId,
-    roundVersion: canonicalHash({ source, excerpt: candidate.excerpt, template, candidates, prompt: languageTemplate.prompt }),
-    excerpt: candidate.excerpt,
-    prompt: languageTemplate.prompt,
+    roundVersion: canonicalHash({ source, panes, candidates, clues: hints.clues, prompt: template.prompt }),
+    panes,
+    prompt: template.prompt,
     candidates: Object.freeze(candidates),
-    clues,
+    clues: hints.clues,
     correctCandidateId: languageCandidateId(language),
-    evidence,
-    explanation: languageTemplate.explanation,
+    evidence: fill(template.evidence, { path: String(candidate.path), language }),
+    explanation: template.explanation,
     attribution: attributionFor(source),
-    helpfulSignals: Object.freeze([evidence]),
-    misleadingSignals: Object.freeze([clues[0]!]),
+    helpfulSignals: signals.helpful,
+    misleadingSignals: signals.misleading,
     source,
   });
 };
 
 export const generateLanguageRounds = (options: LanguageRoundsOptions): GeneratedRounds => {
   const { profile } = options;
-  if (options.candidates.length !== profile.selection.languageRounds) fail();
+  if (options.candidates.length !== profile.selection.languagePool) fail();
   const classified = options.candidates.map((candidate) => classify(profile, candidate));
   if (new Set(classified.map(({ candidate }) => candidate.crawlSnapshotId)).size !== 1) fail();
-  if (new Set(classified.map(({ language }) => language)).size !== profile.selection.languageRounds) fail();
   for (const key of profile.deduplication) {
     const values = classified.map(({ candidate }) => text(candidate[key]));
     if (new Set(values).size !== values.length) fail();
   }
-  const fixtures = classified.map((entry) => fixtureFor(entry, profile));
-  return generatedDeck(fixtures, profile, { deck: "language", languages: STACK_LANGUAGES });
+  const sets = optionSets(classified);
+  return orderedPool(classified.map((entry) => fixtureFor(entry, sets.get(entry)!, profile)));
 };

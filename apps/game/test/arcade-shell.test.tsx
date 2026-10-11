@@ -16,22 +16,23 @@ import {
 } from "../src/components/arcade/index.js";
 
 const modeInput = (): PublicModeContractInput => ({
-  sessionContractVersionId: "mixed-session-1",
+  sessionContractVersionId: "language-session-1",
   rounds: Array.from({ length: 5 }, (_, index) => ({
     roundId: `round-${index + 1}`,
     roundVersionId: `round-version-${index + 1}`,
-    excerpt: {
-      versionId: `excerpt-version-${index + 1}`,
-      text: index === 0 ? "if (value < 3) return value; <script>alert(1)</script>" : `sample ${index + 1}`,
+    content: {
+      versionId: `content-version-${index + 1}`,
+      panes: [{ label: null, text: index === 0 ? "if (value < 3) return value; <script>alert(1)</script>" : `sample ${index + 1}` }],
     },
     mode: {
-      kind: index < 3 ? "provenance" as const : "language" as const,
+      kind: "language" as const,
       contractVersionId: `mode-contract-${index + 1}`,
       calibrationVersionId: `calibration-${index + 1}`,
-      prompt: index < 3 ? "Which source best explains this code?" : "Which language is this?",
-      candidates: [{ candidateId: "candidate-a", label: "Option A" }, { candidateId: "candidate-b", label: "Option B" }],
+      prompt: "Which language is this?",
+      candidates: [{ candidateId: "candidate-a", label: "Option A", detail: null }, { candidateId: "candidate-b", label: "Option B", detail: null }],
       clues: [{ order: 1 as const, label: "First public hint" }, { order: 2 as const, label: "Second public hint" }],
     },
+    points: [1000, 800, 500] as [number, number, number],
     versions: {
       candidateSet: `candidate-set-${index + 1}`,
       clueSet: `clue-set-${index + 1}`,
@@ -52,8 +53,8 @@ describe("static arcade shell", () => {
     expect((html.match(/data-round-nav=/gu) ?? []).length).toBe(5);
     expect(html).toContain('data-round-count="5"');
     expect(html).toContain("Round 1 of 5");
-    expect(html).toContain("Which source best explains this code?");
-    expect(html).not.toContain("Where did this code come from?");
+    expect(html).toContain("Which language is this?");
+    expect(html).toContain('data-round-id="round-1"');
     expect(html).toContain("Option A");
     expect(html).toContain("Reveal hint 1");
     // Hint costs are visible up front and announced with the hint button.
@@ -80,31 +81,59 @@ describe("static arcade shell", () => {
 
   it("rejects any round count other than five and more than two clues", () => {
     expect(() => createPublicModeContract({ ...modeInput(), rounds: modeInput().rounds.slice(0, 4) }))
-      .toThrowError(new ArcadeShellRuleError("mode contract must define exactly five rounds"));
+      .toThrowError(new ArcadeShellRuleError("a session deals exactly five rounds"));
     const input = modeInput();
     input.rounds[0]!.mode.clues.push({ order: 3 as 2, label: "Third hint" });
     expect(() => createPublicModeContract(input)).toThrow("a round may expose at most two clues");
   });
 
-  it("adapts exactly three provenance and two language rounds with mode-owned semantics", () => {
-    const mode = createPublicModeContract(modeInput());
-    expect(mode.rounds.map((round) => round.mode.kind)).toEqual(["provenance", "provenance", "provenance", "language", "language"]);
-    expect(mode.rounds[3]!.mode.prompt).toBe("Which language is this?");
-    expect(mode.rounds[3]!.mode.calibrationVersionId).toBe("calibration-4");
-    const invalid = modeInput();
-    invalid.rounds[2]!.mode.kind = "language";
-    expect(() => createPublicModeContract(invalid)).toThrow("session must be one five-round deck or exactly three provenance and two language rounds");
-    const mixedDeck = modeInput();
-    mixedDeck.rounds.forEach((round, index) => { round.mode.kind = index === 0 ? "ai" : "project"; });
-    expect(() => createPublicModeContract(mixedDeck)).toThrow("session must be one five-round deck");
-    for (const kind of ["project", "language", "ai"] as const) {
+  it("deals every session from one deck and accepts each deck's kind", () => {
+    for (const kind of ["project", "language", "before-after"] as const) {
       const deck = modeInput();
       deck.rounds.forEach((round) => { round.mode.kind = kind; });
       expect(createPublicModeContract(deck).rounds.every((round) => round.mode.kind === kind)).toBe(true);
     }
+    const mixed = modeInput();
+    mixed.rounds[0]!.mode.kind = "project";
+    expect(() => createPublicModeContract(mixed)).toThrow("a session deals from one deck");
     const unknown = modeInput();
-    unknown.rounds[4]!.mode.kind = "algorithm" as "language";
+    unknown.rounds.forEach((round) => { round.mode.kind = "ai" as "language"; });
     expect(() => createPublicModeContract(unknown)).toThrow("unsupported round mode");
+    const rising = modeInput();
+    rising.rounds[0]!.points = [500, 800, 1000];
+    expect(() => createPublicModeContract(rising)).toThrow("points must fall with each hint");
+  });
+
+  it("shows two labelled panes to compare, option details, and the round's own hint costs", () => {
+    const input = modeInput();
+    input.rounds.forEach((round) => {
+      round.mode.kind = "before-after";
+      round.content.panes = [{ label: "A", text: "total = sum(values)" }, { label: "B", text: "total = 0\nfor v in values: total += v" }];
+      round.points = [500, 400, 250];
+    });
+    input.rounds[0]!.mode.candidates[0]!.detail = "A short public note";
+    const html = renderToStaticMarkup(createElement(ArcadeShell, {
+      mode: createPublicModeContract(input),
+      authorizeRevealAction: async () => { throw new Error("not called during render"); },
+    }));
+    expect(html).toContain('<div class="code-panes compare">');
+    expect(html).toContain("<figcaption>Version A</figcaption>");
+    expect(html).toMatch(/aria-label="Code, version B"/u);
+    expect(html).toContain("Each hint lowers this round’s points: 500 → 400 → 250.");
+    expect(html).toMatch(/aria-label="Option A" aria-describedby="detail-round-1-candidate-a"/u);
+    expect(html).toContain('<span class="candidate-detail" id="detail-round-1-candidate-a">A short public note</span>');
+  });
+
+  it("scores a correct answer from the round's points and requires the reveal to name the locked answer", () => {
+    const input = modeInput();
+    input.rounds.forEach((round) => { round.points = [500, 400, 250]; });
+    const mode = createPublicModeContract(input);
+    let session = transitionArcadeSession(mode, createArcadeSession(mode), { type: "lock-answer", candidateId: "candidate-a" });
+    session = transitionArcadeSession(mode, session, { type: "accept-reveal", reveal: displayReveal(0, 500, 2500, 1, 500) });
+    expect(session.score).toBe(500);
+    const wrongAnswer = transitionArcadeSession(mode, createArcadeSession(mode), { type: "lock-answer", candidateId: "candidate-b" });
+    expect(() => transitionArcadeSession(mode, wrongAnswer, { type: "accept-reveal", reveal: displayReveal(0, 500, 2500, 1, 500) }))
+      .toThrow("reveal does not match the locked answer");
   });
 
   it("orders and caps progressive clues, then locks exactly one answer", () => {
@@ -137,7 +166,7 @@ describe("static arcade shell", () => {
     const reveal = projectDisplayReveal(displayReveal(0, 1000, 5000, 1));
     expect(reveal.helpfulSignals).toEqual(["Helpful"]);
     expect(reveal.misleadingSignals).toEqual(["Misleading"]);
-    expect(reveal.versions).toEqual({ content: "excerpt-version-1", candidateSet: "candidate-set-1", scoring: "scoring-1", rules: "rules-1", evidence: "evidence-1", reveal: "reveal-1" });
+    expect(reveal.versions).toEqual({ content: "content-version-1", candidateSet: "candidate-set-1", scoring: "scoring-1", rules: "rules-1", evidence: "evidence-1", reveal: "reveal-1" });
     session = transitionArcadeSession(mode, session, { type: "accept-reveal", reveal });
     expect(session.reveal?.evidence).toBe("Shown");
   });
@@ -248,8 +277,8 @@ describe("static arcade shell", () => {
 
 const displayReveal = (index: number, score: number, attainableMaximum: number, completedRounds: number, roundScore = 1000) => ({
   roundId: `round-${index + 1}`, roundVersionId: `round-version-${index + 1}`,
-  correct: true, score: roundScore, evidence: "Shown", explanation: "Useful", attribution: "Public source",
+  correct: true, answerCandidateId: "candidate-a", score: roundScore, evidence: "Shown", explanation: "Useful", attribution: "Public source",
   helpfulSignals: ["Helpful"], misleadingSignals: ["Misleading"],
-  versions: { content: `excerpt-version-${index + 1}`, candidateSet: `candidate-set-${index + 1}`, scoring: "scoring-1", rules: "rules-1", evidence: `evidence-${index + 1}`, reveal: `reveal-${index + 1}` },
+  versions: { content: `content-version-${index + 1}`, candidateSet: `candidate-set-${index + 1}`, scoring: "scoring-1", rules: "rules-1", evidence: `evidence-${index + 1}`, reveal: `reveal-${index + 1}` },
   result: { score, attainableMaximum, completedRounds, resultVersionId: `result-${completedRounds}` },
 });

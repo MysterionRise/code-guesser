@@ -2,12 +2,12 @@ import { publishArtifact } from "../artifact-store";
 import { canonicalBytes, canonicalHash } from "../canonical";
 import { createCapacityMeter, type CapacityMeter } from "../capacity";
 import { composeExperimentArtifact } from "../compose";
-import { admitGitHubCandidates, screenGitHubRepository } from "../github-admission";
+import { generateBeforeAfterRounds } from "../before-after-rounds";
+import { admitGitHubCandidates, describeGitHubRepository, screenGitHubRepository } from "../github-admission";
 import { bindGitHubLineage } from "../github-lineage";
 import { crawlGitHubCommitSearch } from "../github-search";
 import { createPreparationRuntime, type PreparationDependencies } from "../index";
 import { generateLanguageRounds, validateLanguageCandidate } from "../language-rounds";
-import { generateAiRounds } from "../ai-rounds";
 import { generateProjectRounds } from "../project-rounds";
 import { RetryRequestError } from "../retry";
 import { createRunReport } from "../run-report";
@@ -16,6 +16,7 @@ import { collectStackMetadata, type StackMetadataRow } from "../stack-metadata";
 import { revalidateStackCandidate, type SelectedStackBlob } from "../stack-revalidation";
 import type { BoundedTransport } from "../transport";
 import type { CrawlProfile } from "../profile";
+import type { StackSelection } from "../types";
 import type { CapturedResponses } from "./captured-responses";
 
 export type CapturedFailure =
@@ -75,7 +76,7 @@ const responseValue = (state: CapturedDependencyState, url: string): unknown => 
   if (state.failure === "freshness" && url === REVISION_URL) return { ...(value as object), sha: "0".repeat(40) };
   if (state.failure === "malformed" && url.includes("/search/commits")) return { unexpected: true };
   if (state.failure === "insufficient" && url.includes("/search/commits")
-    && new URL(url).searchParams.get("q") === state.profile.github.queries.find(({ id }) => id === "ordinary-google")!.query) {
+    && new URL(url).searchParams.get("q") === state.profile.github.queries[1]!.query) {
     return { total_count: 0, incomplete_results: false, items: [] };
   }
   return copy(value);
@@ -154,13 +155,17 @@ const discoveryLane = (
 
 const githubLane = (
   state: CapturedDependencyState, reference: RuntimeReference,
-): Pick<PreparationDependencies, "screenGitHubRepository" | "bindGitHubLineage" | "admitGitHubCandidate"> => ({
+): Pick<PreparationDependencies, "screenGitHubRepository" | "describeRepository" | "bindGitHubLineage" | "admitGitHubCandidate"> => ({
   screenGitHubRepository: (context) => record(state, "github-repository", () => {
     const runtime = runtimeOf(reference);
     return stage(runtime, async () => {
       await screenGitHubRepository({ profile: context.profile, transport: runtime.transport, retry: runtime.retry }, context.repository);
       return context.repository;
     });
+  }),
+  describeRepository: (context) => record(state, "github-description", () => {
+    const runtime = runtimeOf(reference);
+    return stage(runtime, () => describeGitHubRepository({ profile: context.profile, transport: runtime.transport, retry: runtime.retry }, context.repository));
   }),
   bindGitHubLineage: (context) => record(state, "github-lineage", () => {
     const runtime = runtimeOf(reference);
@@ -175,9 +180,9 @@ const githubLane = (
   }),
 });
 
-const CAPTURED_METADATA_COUNTERS = { counters: { networkBytes: 2048, peakTemporaryDiskBytes: 512, redirectsFollowed: 0, requests: 2, rowsInspected: 1 } };
-const metadataOutput = (row: StackMetadataRow): Uint8Array =>
-  Buffer.from(`${JSON.stringify(row)}\n${JSON.stringify(CAPTURED_METADATA_COUNTERS)}\n`);
+const metadataCounters = (rows: number) => ({ counters: { networkBytes: 2048, peakTemporaryDiskBytes: 512, redirectsFollowed: 0, requests: 2, rowsInspected: rows } });
+const metadataOutput = (rows: readonly StackMetadataRow[]): Uint8Array =>
+  Buffer.from(`${rows.map((row) => JSON.stringify(row)).join("\n")}\n${JSON.stringify(metadataCounters(rows.length))}\n`);
 const stackLane = (
   state: CapturedDependencyState, reference: RuntimeReference,
 ): Pick<PreparationDependencies, "collectStackMetadata" | "fetchStackBlob"
@@ -185,7 +190,7 @@ const stackLane = (
   collectStackMetadata: (context) => record(state, `stack-metadata-${context.configuration}`, async () => {
     state.metadataConfigurations.push(context.configuration);
     const value = await collectStackMetadata({ profile: context.profile, capacity: context.capacity,
-      configuration: context.configuration, rowLimit: 1, environment: context.environment,
+      configuration: context.configuration, rowLimit: state.captures.metadata[context.configuration].length, environment: context.environment,
       blobAccess: async () => undefined, runWorker: async () => ({
         exitCode: state.failure === "cleanup" ? 1 : 0,
         stdout: state.failure === "cleanup" ? new Uint8Array()
@@ -218,27 +223,26 @@ const finalizeLane = (
   finalizeBindings: (context) => record(state, "finalize", async () => {
     const runtime = runtimeOf(reference);
     runtime.beginReplay();
-    const readmit = (candidates: readonly unknown[]) => Promise.all(candidates.map(async (candidate: any) =>
-      (await admitGitHubCandidates({ profile: context.profile, profileHash: context.profileHash,
-        crawlSnapshotId: context.crawlSnapshotId, candidates: [candidate.lineage],
-        transport: runtime.transport, retry: runtime.retry }))[0]!));
-    const projectCandidates = await readmit(context.projectCandidates);
-    const aiCandidates = await readmit(context.aiCandidates);
-    const languageCandidates = await Promise.all(context.languageSelections.map(({ row, blob }) =>
+    const revalidate = (selections: readonly StackSelection[]) => Promise.all(selections.map(({ row, blob }) =>
       revalidateStackCandidate({ profile: context.profile, profileHash: context.profileHash,
         crawlSnapshotId: context.crawlSnapshotId, metadata: row as StackMetadataRow,
         selectedBlob: blob as SelectedStackBlob, transport: runtime.transport, retry: runtime.retry })));
-    return Object.freeze({ projectCandidates: Object.freeze(projectCandidates), aiCandidates: Object.freeze(aiCandidates),
-      languageCandidates: Object.freeze(languageCandidates) });
+    const beforeAfterCandidates = await Promise.all(context.beforeAfterCandidates.map(async (candidate: any) =>
+      (await admitGitHubCandidates({ profile: context.profile, profileHash: context.profileHash,
+        crawlSnapshotId: context.crawlSnapshotId, candidates: [candidate.lineage],
+        transport: runtime.transport, retry: runtime.retry }))[0]!));
+    return Object.freeze({ beforeAfterCandidates: Object.freeze(beforeAfterCandidates),
+      projectCandidates: Object.freeze(await revalidate(context.projectSelections)),
+      languageCandidates: Object.freeze(await revalidate(context.languageSelections)) });
   }),
 });
 
 const outputLane = (state: CapturedDependencyState): Pick<PreparationDependencies,
-  "generateProject" | "generateLanguage" | "generateAi" | "compose" | "createReport" | "stageReport"
+  "generateProject" | "generateLanguage" | "generateBeforeAfter" | "compose" | "createReport" | "stageReport"
   | "publishArtifact" | "now" | "uuid" | "log"> => ({
   generateProject: (context) => generateProjectRounds(context as any),
   generateLanguage: (context) => generateLanguageRounds(context as any),
-  generateAi: (context) => generateAiRounds(context as any),
+  generateBeforeAfter: (context) => generateBeforeAfterRounds(context as any),
   compose: composeExperimentArtifact,
   createReport: createRunReport,
   stageReport: async (report) => {

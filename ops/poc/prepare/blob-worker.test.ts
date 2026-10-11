@@ -1,3 +1,4 @@
+import { CAPACITY_CEILINGS } from "../limits";
 import { readFile } from "node:fs/promises";
 
 import { createCapacityMeter } from "./capacity";
@@ -7,7 +8,7 @@ import { blobWorkerRequest, fetchSelectedBlob, parseBlobWorkerOutput, type BlobW
 const testModuleName: string = "vitest";
 const { describe, expect, it } = await import(testModuleName) as any;
 
-const profilePath = new URL("../profiles/local-real-rounds.v2.json", import.meta.url);
+const profilePath = new URL("../profiles/local-real-rounds.v3.json", import.meta.url);
 const runtimeDirectory = new URL("../stack/", import.meta.url).pathname.replace(/\/$/u, "");
 const workerPath = `${runtimeDirectory}/fetch_blob.py`;
 const row = {
@@ -21,7 +22,7 @@ const row = {
 } as const;
 const limits: BlobWorkerLimits = Object.freeze({
   blobAttempts: 50, successfulBlobs: 50, perBlobBytes: 262_144, totalBlobBytes: 16_777_216,
-  temporaryDiskBytes: 33_554_432, requestLimit: 600, networkByteLimit: 262_144,
+  temporaryDiskBytes: 33_554_432, requestLimit: CAPACITY_CEILINGS.requestCount, networkByteLimit: 262_144,
 });
 const environment = {
   PATH: "/project/bin", HOME: "/external/home", AWS_ACCESS_KEY_ID: "id", AWS_SECRET_ACCESS_KEY: "secret",
@@ -89,7 +90,7 @@ describe("selected-blob worker bridge", () => {
       ["COUNTERS_REJECTED", result(output(blob, counters({ networkBytes: -1 })))],
       ["TEMPORARY_DISK", result(output(blob, counters({ peakTemporaryDiskBytes: 1 })))],
       ["REDIRECT_REJECTED", result(output(blob, counters({ redirectsFollowed: 1, requests: 2 })))],
-      ["BLOB_CAPACITY", result(output(blob, counters({ requests: 601 })))],
+      ["BLOB_CAPACITY", result(output(blob, counters({ requests: CAPACITY_CEILINGS.requestCount + 1 })))],
       ["NETWORK_BYTES", result(output(blob, counters({ networkBytes: 262_145 })))],
     ] as const;
     for (const [code, workerResult] of cases) {
@@ -126,7 +127,7 @@ describe("selected-blob worker bridge", () => {
     expect(requests).toHaveLength(1);
     expect(capacity.snapshot().requestCount).toBe(2);
 
-    for (let index = 0; index < 598; index += 1) capacity.beginRequest().release();
+    for (let index = 0; index < profile.capacity.requestCount - 2; index += 1) capacity.beginRequest().release();
     await expect(fetchSelectedBlob({ row, limits: { ...limits, requestLimit: 1 }, environment, capacity,
       runWorker: async () => result(output(blob, counters({ requests: 1 }))) })).rejects.toThrow("BLOB_CAPACITY");
     await expect(fetchSelectedBlob({ row, limits, environment, capacity,

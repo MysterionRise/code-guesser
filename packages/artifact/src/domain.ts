@@ -1,30 +1,44 @@
 import type { JsonRecord } from "./validation";
 
 /** The decks an artifact may carry, in this order; a run publishes every deck it could fill. */
-export const DECK_IDS = Object.freeze(["project", "language", "ai"] as const);
+export const DECK_IDS = Object.freeze(["project", "language", "before-after"] as const);
 export type DeckId = typeof DECK_IDS[number];
-export type FixtureKind = "PROJECT" | "LANGUAGE" | "AI_CREDIT";
+export type FixtureKind = "PROJECT" | "LANGUAGE" | "BEFORE_AFTER";
 export const DECK_KINDS: Readonly<Record<DeckId, FixtureKind>> = Object.freeze({
-  project: "PROJECT", language: "LANGUAGE", ai: "AI_CREDIT",
+  project: "PROJECT", language: "LANGUAGE", "before-after": "BEFORE_AFTER",
 });
 export const MODE_KINDS: Readonly<Record<FixtureKind, DeckId>> = Object.freeze({
-  PROJECT: "project", LANGUAGE: "language", AI_CREDIT: "ai",
+  PROJECT: "project", LANGUAGE: "language", BEFORE_AFTER: "before-after",
 });
-export const ROUNDS_PER_DECK = 5;
-export const ARTIFACT_SCHEMA_VERSION = "local-experiment-artifact.v2";
+export const ARTIFACT_SCHEMA_VERSION = "local-experiment-artifact.v3";
 export const CONTENT_CLASS = "LOCAL_UNREVIEWED_EXPERIMENT";
-export const PROFILE_VERSION = "local-real-rounds.v2";
+export const PROFILE_VERSION = "local-real-rounds.v3";
+/** A session deals this many rounds from a deck's pool. */
+export const ROUNDS_PER_SESSION = 5;
+/** A deck's pool holds at least one session's rounds and at most this many. */
+export const MAXIMUM_POOL_SIZE = 40;
 export const STACK_LANGUAGES = Object.freeze(["Python", "TypeScript", "Go", "Rust", "Ruby"] as const);
 export type StackLanguage = typeof STACK_LANGUAGES[number];
-export const AI_CANDIDATE_IDS = Object.freeze([
-  "local-experiment.ai-credit-recorded.v2",
-  "local-experiment.ai-credit-absent.v2",
+/** Options per round: four for project and language rounds, two for before-or-after rounds. */
+export const CANDIDATE_COUNTS: Readonly<Record<FixtureKind, number>> = Object.freeze({ PROJECT: 4, LANGUAGE: 4, BEFORE_AFTER: 2 });
+/** Before-or-after answers, in pane order: the first names pane A as the later version. */
+export const BEFORE_AFTER_CANDIDATE_IDS = Object.freeze([
+  "local-experiment.before-after.a-later.v3",
+  "local-experiment.before-after.b-later.v3",
 ] as const);
-/** The language-round candidate universe: the five answers and every distractor, with identifier slugs. */
-export const LANGUAGE_SLUGS: Readonly<Record<string, string>> = Object.freeze({
-  Python: "python", TypeScript: "typescript", JavaScript: "javascript", Go: "go", Rust: "rust", Java: "java",
-  Ruby: "ruby", "C#": "csharp", Kotlin: "kotlin", Swift: "swift", PHP: "php", "C++": "cpp",
+export const PANE_LABELS = Object.freeze(["A", "B"] as const);
+/** Identifier slugs for every language a language round may offer. */
+export const LANGUAGE_SLUGS: Readonly<Record<StackLanguage, string>> = Object.freeze({
+  Python: "python", TypeScript: "typescript", Go: "go", Rust: "rust", Ruby: "ruby",
 });
+
+/**
+ * Points for a correct answer after zero, one, or two hints. A round with k options is worth 250·k, so
+ * guessing at random earns 250 a round on every deck; each hint takes 20% and then 50% of that.
+ */
+export const HINT_MULTIPLIERS = Object.freeze([1, 0.8, 0.5] as const);
+export const roundPoints = (candidateCount: number, hintsUsed: number): number =>
+  Math.round(250 * candidateCount * (HINT_MULTIPLIERS[hintsUsed] ?? 0));
 
 export const BASE_SOURCE_KEYS = [
   "discoverySource", "repository", "repositoryUrl", "authorName", "authorLogin",
@@ -32,20 +46,19 @@ export const BASE_SOURCE_KEYS = [
   "licenseName", "licenseSpdx", "licenseFileUrl", "commit", "commitUrl", "blobUrl",
   "profileVersion", "crawlSnapshotId",
 ] as const;
-export const LINEAGE_SOURCE_KEYS = [
-  "queryId", "childCommit", "childTree", "parentCommit", "parentTree",
-  "parentPath", "childPath", "parentMode", "childMode", "parentBlob", "childBlob",
-  "parentRawContentHash", "childRawContentHash", "changedLineHash",
-] as const;
-export const PROJECT_SOURCE_KEYS = [...BASE_SOURCE_KEYS, ...LINEAGE_SOURCE_KEYS] as const;
-export const AI_SOURCE_KEYS = [
-  ...PROJECT_SOURCE_KEYS, "aiCreditRecorded", "aiAssistant", "changedFileCount", "commitAdditions", "commitDeletions",
-] as const;
-export const LANGUAGE_SOURCE_KEYS = [
+/** A file chosen from The Stack v2 and revalidated against GitHub: the source of project and language rounds. */
+export const STACK_SOURCE_KEYS = [
   ...BASE_SOURCE_KEYS, "stackRelease", "stackRevision", "configuration", "stableRowId",
   "swhBlobId", "swhContentId", "swhDirectoryId", "swhSnapshotId", "swhRevisionId",
   "stackRepository", "stackPath", "detectedLicenses", "detectedLanguage", "generated",
   "vendor", "sourceEncoding", "byteLength", "visitDate", "revisionDate", "committerDate",
+  "starEventsCount", "forkEventsCount",
+] as const;
+/** A commit found by GitHub search: one file's parent and child versions. `excerptHash` is the later pane's. */
+export const LINEAGE_SOURCE_KEYS = [
+  ...BASE_SOURCE_KEYS, "queryId", "childCommit", "childTree", "parentCommit", "parentTree",
+  "parentPath", "childPath", "parentMode", "childMode", "parentBlob", "childBlob",
+  "parentRawContentHash", "childRawContentHash", "parentExcerptHash", "linesRemoved", "linesAdded",
 ] as const;
 /** Identities that may not repeat within a deck. */
 export const DECK_DEDUPLICATION_KEYS = ["repository", "commit", "path", "blob", "rawContentHash", "excerptHash"] as const;
@@ -71,18 +84,23 @@ export interface ParsedSource extends JsonRecord {
   readonly blobUrl: string;
   readonly profileVersion: string;
   readonly crawlSnapshotId: string;
-  readonly aiCreditRecorded?: boolean;
   readonly configuration?: StackLanguage;
+  readonly parentExcerptHash?: string;
 }
+
+/** A code pane: one for project and language rounds, two labelled `A` and `B` for before-or-after rounds. */
+export interface Pane { readonly label: string | null; readonly text: string }
+/** An answer option; `detail` is a short public note, such as a repository's description. */
+export interface CandidateRecord { readonly id: string; readonly label: string; readonly detail: string | null }
 
 /** One round as the artifact stores it: public text, the answer, the reveal, and its provenance. */
 export interface FixtureRecord<Source = Readonly<JsonRecord>> {
   readonly kind: FixtureKind;
   readonly roundId: string;
   readonly roundVersion: string;
-  readonly excerpt: string;
+  readonly panes: readonly Pane[];
   readonly prompt: string;
-  readonly candidates: readonly Readonly<{ id: string; label: string }>[];
+  readonly candidates: readonly CandidateRecord[];
   readonly clues: readonly string[];
   readonly correctCandidateId: string;
   readonly evidence: string;
@@ -95,11 +113,12 @@ export interface FixtureRecord<Source = Readonly<JsonRecord>> {
 export type ExperimentFixture = FixtureRecord;
 export type ParsedFixture = FixtureRecord<Readonly<ParsedSource>>;
 
+/** A deck: its pool of rounds, from which each session deals `roundsPerSession`. */
 export interface DeckRecord<Fixture = ExperimentFixture> {
   readonly id: DeckId;
   readonly title: string;
   readonly description: string;
-  readonly notice: string | null;
+  readonly roundsPerSession: number;
   readonly fixtures: readonly Fixture[];
 }
 export type ExperimentDeck = DeckRecord;

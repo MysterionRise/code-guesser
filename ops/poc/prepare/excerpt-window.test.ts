@@ -1,8 +1,12 @@
-import { languageExcerpt, looksGenerated } from "./excerpt-window";
+import { firstCodeLine, looksGenerated } from "./excerpt-window";
 
 const testModuleName: string = "vitest";
 const { describe, expect, it } = await import(testModuleName) as any;
-const limits = { maxLines: 20, maxBytes: 4096, minBytes: 64 };
+const firstLine = (source: string, language: Parameters<typeof firstCodeLine>[1]): string | undefined => {
+  const lines = source.split("\n");
+  const index = firstCodeLine(lines, language);
+  return index === undefined ? undefined : lines[index];
+};
 
 describe("FR-023 experiment generated-file screen", () => {
   it("rejects files whose first thirty lines carry a generated marker, ignoring case", () => {
@@ -24,7 +28,7 @@ describe("FR-023 experiment generated-file screen", () => {
   });
 });
 
-describe("FR-025 language excerpt window", () => {
+describe("first code line", () => {
   const body = (count: number, line = (index: number) => `value_${index} = compute(${index}) + offset`) =>
     Array.from({ length: count }, (_, index) => line(index)).join("\n");
 
@@ -41,37 +45,23 @@ describe("FR-025 language excerpt window", () => {
       "import os",
       body(3),
     ].join("\n");
-    const excerpt = languageExcerpt(source, "Python", limits)!;
-    expect(excerpt.split("\n")[0]).toBe("import os");
-    expect(excerpt).not.toMatch(/Licensed|Copyright|docstring|#!/u);
+    expect(firstLine(source, "Python")).toBe("import os");
   });
 
   it("skips block and line comments for C-family languages, including a Rust inner doc", () => {
-    const typescript = ["/* tslint:disable */", "/**", " * Licensed under MIT", " */", "// helper", "", "import { a } from './a';", body(3, (i) => `export const v${i} = a(${i}) + 1000;`)].join("\n");
-    expect(languageExcerpt(typescript, "TypeScript", limits)!.split("\n")[0]).toBe("import { a } from './a';");
-    const rust = ["//! Crate docs", "/// item docs", "use std::fmt;", body(3, (i) => `let v${i} = compute(${i}) + 1000;`)].join("\n");
-    expect(languageExcerpt(rust, "Rust", limits)!.split("\n")[0]).toBe("use std::fmt;");
-    const go = ["// Copyright 2026", "// SPDX-License-Identifier: MIT", "", "package main", body(3, (i) => `var v${i} = compute(${i}) + 1000`)].join("\n");
-    expect(languageExcerpt(go, "Go", limits)!.split("\n")[0]).toBe("package main");
+    const typescript = ["/* tslint:disable */", "/**", " * Licensed under MIT", " */", "// helper", "", "import { a } from './a';"].join("\n");
+    expect(firstLine(typescript, "TypeScript")).toBe("import { a } from './a';");
+    expect(firstLine(["//! Crate docs", "/// item docs", "use std::fmt;"].join("\n"), "Rust")).toBe("use std::fmt;");
+    expect(firstLine(["// Copyright 2026", "// SPDX-License-Identifier: MIT", "", "package main"].join("\n"), "Go")).toBe("package main");
   });
 
   it("skips Ruby magic comments and =begin blocks", () => {
-    const ruby = ["# frozen_string_literal: true", "=begin", "Licence text", "=end", "", "module Example", body(3, (i) => `  VALUE_${i} = compute(${i}) + 1000`)].join("\n");
-    expect(languageExcerpt(ruby, "Ruby", limits)!.split("\n")[0]).toBe("module Example");
+    const ruby = ["# frozen_string_literal: true", "=begin", "Licence text", "=end", "", "module Example"].join("\n");
+    expect(firstLine(ruby, "Ruby")).toBe("module Example");
   });
 
-  it("caps the window at twenty lines and 4,096 bytes on a line boundary and trims trailing blank lines", () => {
-    const excerpt = languageExcerpt(`import os\n${body(40)}\n\n`, "Python", limits)!;
-    expect(excerpt.split("\n")).toHaveLength(20);
-    const wide = languageExcerpt(`import os\n${body(19, (i) => `x_${i} = "${"y".repeat(300)}"`)}`, "Python", limits)!;
-    expect(Buffer.byteLength(wide)).toBeLessThanOrEqual(4096);
-    expect(wide.endsWith('"')).toBe(true);
-    expect(languageExcerpt("import os\nx = 1\n\n\n", "Python", { ...limits, minBytes: 1 })).toBe("import os\nx = 1");
-  });
-
-  it("returns undefined when too little code remains or nothing but comments exists", () => {
-    expect(languageExcerpt("# only a comment\n\n", "Python", limits)).toBeUndefined();
-    expect(languageExcerpt("x = 1\n", "Python", limits)).toBeUndefined();
-    expect(languageExcerpt('"""never closed\nstill docstring\n', "Python", limits)).toBeUndefined();
+  it("finds no code in a file of comments or an unclosed docstring", () => {
+    expect(firstLine("# only a comment\n\n", "Python")).toBeUndefined();
+    expect(firstLine('"""never closed\nstill docstring\n', "Python")).toBeUndefined();
   });
 });

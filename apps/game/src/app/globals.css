@@ -54,4 +54,17 @@ noscript { display: block; padding: 12px; margin-bottom: 16px; background: #522;
 .deck-card:focus-visible { outline: 3px solid #baff65; outline-offset: 3px; }
 .deck-title { color: #baff65; font-size: 1.3rem; font-weight: 900; }
 .deck-description { color: #cdeada; }
-.candidate, .hint, .deck-card { overflow-wrap: anywhere; }
+.candidate, .hint, .deck-card, .reveal p { overflow-wrap: anywhere; }
+.code-panes { display: grid; gap: 12px; margin: 0 0 12px; }
+.code-panes.compare { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.code-pane { margin: 0; min-width: 0; }
+.code-pane figcaption { margin: 0 0 6px; color: #baff65; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; font-size: .8rem; }
+.code-panes .code-window { margin: 0; }
+.candidate-text { display: grid; gap: 2px; min-width: 0; }
+.candidate-detail { color: #9fbcae; font-size: .86rem; }
+.candidate.correct { border-color: #baff65; background: #1d3a24; box-shadow: inset 0 0 0 1px #baff65; }
+.candidate.missed { border-color: #ff8f7d; background: #3a1d1d; }
+.answer-line { margin: 0 0 8px; }
+.deck-size { color: #8ead9f; font-size: .88rem; }
+.deck-link { margin-right: 16px; }
+@media (max-width: 760px) { .code-panes.compare { grid-template-columns: 1fr; } }

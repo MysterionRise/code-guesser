@@ -3,14 +3,14 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { generateAiRounds } from "./ai-rounds";
+import { generateBeforeAfterRounds } from "./before-after-rounds";
 import { publishArtifact } from "./artifact-store";
 import { fetchSelectedBlob } from "./blob-worker";
 import { canonicalBytes } from "./canonical";
 import { createCapacityMeter } from "./capacity";
 import { composeExperimentArtifact } from "./compose";
 import { PreparationError } from "./diagnostics";
-import { admitGitHubCandidates, screenGitHubRepository } from "./github-admission";
+import { admitGitHubCandidates, describeGitHubRepository, screenGitHubRepository } from "./github-admission";
 import { bindGitHubLineage, type GitHubLineageCandidate } from "./github-lineage";
 import { crawlGitHubCommitSearch } from "./github-search";
 import { generateLanguageRounds, validateLanguageCandidate } from "./language-rounds";
@@ -23,10 +23,10 @@ import { createPreparationRuntime, runtimeOf, stage, workerStage, type Runtime }
 import { preflightStackAccess } from "./stack-access";
 import { collectStackMetadata, type StackMetadataRow } from "./stack-metadata";
 import { revalidateStackCandidate, type SelectedStackBlob } from "./stack-revalidation";
-import type { Environment, PreparationDependencies } from "./types";
+import type { Environment, PreparationDependencies, StackSelection } from "./types";
 import { journaledWorker } from "./worker-journal";
 
-const PROFILE_URL = new URL("../profiles/local-real-rounds.v2.json", import.meta.url);
+const PROFILE_URL = new URL("../profiles/local-real-rounds.v3.json", import.meta.url);
 const ARTIFACT_PATH = fileURLToPath(new URL("../../../apps/game/src/demo/generated/local-real-rounds.json", import.meta.url));
 const REPORT_PATH = fileURLToPath(new URL("../stack/tmp/local-experiment-run.json", import.meta.url));
 const PIN_PATH = fileURLToPath(new URL("../../../apps/game/src/demo/local-real-experiment.pin.server.ts", import.meta.url));
@@ -134,6 +134,10 @@ export const defaultDependencies = (options: DependencyOptions = { journal: "fre
       return options.repository;
     });
   },
+  describeRepository: (options) => {
+    const runtime = runtimeOf(options);
+    return stage(runtime, () => describeGitHubRepository({ profile: options.profile, transport: runtime.transport, retry: runtime.retry }, options.repository));
+  },
   bindGitHubLineage: (options) => {
     const runtime = runtimeOf(options);
     return stage(runtime, async () => (await bindGitHubLineage({ profile: options.profile,
@@ -163,22 +167,21 @@ export const defaultDependencies = (options: DependencyOptions = { journal: "fre
   finalizeBindings: async (options) => {
     const runtime = runtimeOf(options);
     runtime.beginReplay();
-    const readmit = (candidates: readonly unknown[]) => Promise.all(candidates.map(async (candidate) =>
-      (await admitGitHubCandidates({ profile: options.profile, profileHash: options.profileHash,
-        crawlSnapshotId: options.crawlSnapshotId, candidates: [lineageOf(candidate)], transport: runtime.transport,
-        retry: runtime.retry }))[0]!));
-    const projectCandidates = await readmit(options.projectCandidates);
-    const aiCandidates = await readmit(options.aiCandidates);
-    const languageCandidates = await Promise.all(options.languageSelections.map(({ row, blob }) =>
+    const revalidate = (selections: readonly StackSelection[]) => Promise.all(selections.map(({ row, blob }) =>
       revalidateStackCandidate({ profile: options.profile, profileHash: options.profileHash,
         crawlSnapshotId: options.crawlSnapshotId, metadata: row as StackMetadataRow, selectedBlob: blob as SelectedStackBlob,
         transport: runtime.transport, retry: runtime.retry })));
-    return Object.freeze({ projectCandidates: Object.freeze(projectCandidates), aiCandidates: Object.freeze(aiCandidates),
-      languageCandidates: Object.freeze(languageCandidates) });
+    const beforeAfterCandidates = await Promise.all(options.beforeAfterCandidates.map(async (candidate) =>
+      (await admitGitHubCandidates({ profile: options.profile, profileHash: options.profileHash,
+        crawlSnapshotId: options.crawlSnapshotId, candidates: [lineageOf(candidate)], transport: runtime.transport,
+        retry: runtime.retry }))[0]!));
+    return Object.freeze({ beforeAfterCandidates: Object.freeze(beforeAfterCandidates),
+      projectCandidates: Object.freeze(await revalidate(options.projectSelections)),
+      languageCandidates: Object.freeze(await revalidate(options.languageSelections)) });
   },
   generateProject: (options) => generateProjectRounds(options as Parameters<typeof generateProjectRounds>[0]),
   generateLanguage: (options) => generateLanguageRounds(options as Parameters<typeof generateLanguageRounds>[0]),
-  generateAi: (options) => generateAiRounds(options as Parameters<typeof generateAiRounds>[0]),
+  generateBeforeAfter: (options) => generateBeforeAfterRounds(options as Parameters<typeof generateBeforeAfterRounds>[0]),
   compose: composeExperimentArtifact,
   createReport: createRunReport,
   stageReport,

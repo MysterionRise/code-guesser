@@ -8,15 +8,15 @@ const hash = (digit: string): string => digit.repeat(64);
 const commit = (digit: string): string => digit.repeat(40);
 
 const successReport = () => ({
-  schemaVersion: "local-experiment-run.v2",
+  schemaVersion: "local-experiment-run.v3",
   executionId: "11111111-1111-4111-8111-111111111111",
   observedAt: "2026-07-31T12:00:00.000Z",
-  profileVersion: "local-real-rounds.v2",
+  profileVersion: "local-real-rounds.v3",
   githubApiVersion: "2022-11-28",
   stackRelease: "v2.2.0",
   stackRevision: "e565caa3a78c2423bd374333a472b049eb090e47",
   githubQueries: [{
-    id: "copilot-trailer", role: "ai-credit", query: "\"Co-authored-by: GitHub Copilot\"",
+    id: "copilot-trailer", query: "\"Co-authored-by: GitHub Copilot\"",
     sort: "committer-date", order: "desc", pageCeiling: 3, resultCeiling: 300,
     completeness: "COMPLETE",
   }],

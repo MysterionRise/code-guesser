@@ -3,7 +3,8 @@ import { createHash } from "node:crypto";
 import { screenBlob, screenLicenseEvidence } from "@codeguessr/content/local-poc-support";
 import { canonicalHash } from "./canonical";
 import type { CrawlProfile, StackLanguage } from "./profile";
-import { languageExcerpt, looksGenerated } from "./excerpt-window";
+import { codeWindow } from "./code-windows";
+import { looksGenerated } from "./excerpt-window";
 import type { RetryController } from "./retry";
 import type { StackMetadataRow } from "./stack-metadata";
 import type { BoundedTransport } from "./transport";
@@ -259,13 +260,13 @@ export const revalidateStackCandidate = async (
     || githubBytes.some((value, index) => value !== selected[index])) fail("REVALIDATION_BINDING");
   const licenseUrl = await licenseState(options, api, web, commit, repo, metadata.detectedLicenses);
   const screened = screenBlob({ path, bytes: githubBytes }, options.seenNormalizedHashes ?? new Set());
-  // FR-023 as amended: stricter experiment-local generated-file screen; FR-025: header-skipping window.
-  if (looksGenerated(screened.text, options.profile.screening.generatedScanLines)) fail("REVALIDATION_BINDING");
-  const excerptText = languageExcerpt(screened.text, metadata.detectedLanguage as StackLanguage, {
-    maxLines: options.profile.screening.languageExcerptLines,
+  // A generated file is never a round; the window skips the licence header and the import preamble.
+  if (looksGenerated(screened.text, options.profile.screening.generatedScanLines)) fail("REVALIDATION_GENERATED");
+  const excerptText = codeWindow(screened.text, metadata.detectedLanguage as StackLanguage, {
+    maxLines: options.profile.screening.excerptLines,
     maxBytes: options.profile.screening.excerptBytes,
     minBytes: options.profile.screening.minimumExcerptBytes,
-  }) ?? fail("REVALIDATION_BINDING");
+  }) ?? fail("REVALIDATION_WINDOW");
   return Object.freeze({
     discoverySource: "STACK_V2", repository, repositoryUrl: web,
     authorName: commitRecord.name, authorLogin: commitRecord.login, authorBasis: "SELECTED_COMMIT",
@@ -282,5 +283,6 @@ export const revalidateStackCandidate = async (
     detectedLanguage: metadata.detectedLanguage, generated: false, vendor: false,
     sourceEncoding: "UTF-8", byteLength: metadata.byteLength, visitDate: metadata.visitDate,
     revisionDate: metadata.revisionDate, committerDate: metadata.committerDate,
+    starEventsCount: metadata.starEventsCount, forkEventsCount: metadata.forkEventsCount,
   });
 };

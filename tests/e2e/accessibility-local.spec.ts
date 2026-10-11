@@ -9,7 +9,7 @@ test("the deck chooser and every deck fit the minimum viewport", async ({ page }
   await expect(page.getByRole("main")).toBeVisible();
   await expect(page.getByRole("heading", { level: 1, name: "Pick a deck" })).toBeVisible();
   expect(await page.evaluate(noHorizontalScroll)).toBe(true);
-  for (const deck of ["project", "language", "ai"]) {
+  for (const deck of ["project", "language", "before-after"]) {
     await page.goto(`/?deck=${deck}`);
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
     await expect(page.getByText("Round 1 of 5")).toBeVisible();

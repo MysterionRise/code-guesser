@@ -1,10 +1,12 @@
 import "server-only";
 
 export {
+  CANDIDATE_COUNTS,
   DECK_IDS,
   DECK_KINDS,
   MODE_KINDS,
-  ROUNDS_PER_DECK as ROUND_COUNT,
+  ROUNDS_PER_SESSION,
+  roundPoints,
   type DeckId,
   type FixtureKind,
   type JsonRecord,
@@ -14,15 +16,11 @@ export {
 } from "../../../../packages/artifact/src/index";
 import type { FixtureKind } from "../../../../packages/artifact/src/index";
 
-/** Every score one round can award. */
-export const ROUND_SCORES = [0, 500, 800, 1000] as const;
-/** Points for a correct answer after zero, one, or two clues; a wrong answer scores nothing. */
-export const CORRECT_ROUND_SCORES = [1000, 800, 500] as const;
-export const MAXIMUM_SCORE = 5000;
+/** What decides each kind's answer; part of every round's rules version. */
 export const RULE_SEMANTICS: Readonly<Record<FixtureKind, string>> = Object.freeze({
-  PROJECT: "pinned-repository-record.v2",
-  LANGUAGE: "pinned-extension-language.v2",
-  AI_CREDIT: "commit-message-ai-credit.v2",
+  PROJECT: "stack-repository-record.v3",
+  LANGUAGE: "stack-recorded-language.v3",
+  BEFORE_AFTER: "commit-parent-lineage.v3",
 });
 
 export interface PrivateReveal {

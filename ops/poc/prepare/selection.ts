@@ -1,4 +1,3 @@
-import { aiCreditFor } from "./ai-credit";
 import { canonicalHash } from "./canonical";
 import { containsProtected } from "./compose";
 import { noteRejection, PreparationError, rejectCandidate, type DiagnosticStage, type RunState } from "./diagnostics";
@@ -13,11 +12,13 @@ import type { Context, PreparationDependencies } from "./types";
  */
 export interface CandidateView {
   readonly repository?: unknown;
+  readonly path?: unknown;
   readonly queryId?: unknown;
   readonly excerpt?: unknown;
   readonly detectedLanguage?: unknown;
   readonly detectedLicenses?: unknown;
-  readonly lineage?: Readonly<{ excerpt?: unknown; commitMessage?: unknown }>;
+  readonly lineage?: Readonly<{ excerpt?: unknown; beforeExcerpt?: unknown; afterExcerpt?: unknown; commitMessage?: unknown }>;
+  readonly subject?: unknown;
   readonly source?: Readonly<Record<string, unknown>>;
 }
 export const view = (value: unknown): CandidateView =>
@@ -33,16 +34,18 @@ export const addHashes = (target: string[], values: readonly string[]): void => 
   }
 };
 
-export const aiCredited = (candidate: unknown, profile: CrawlProfile): boolean =>
-  aiCreditFor(String(view(candidate).lineage?.commitMessage ?? ""), profile.aiCredits).recorded;
-export const queryRole = (profile: CrawlProfile, candidate: unknown): string | undefined =>
-  profile.github.queries.find(({ id }) => id === view(candidate).queryId)?.role;
 export const provisionalSnapshot = (profileHash: string, hashes: readonly string[]): string =>
   canonicalHash({ profileHash, acceptedResponseHashes: hashes.length > 0 ? hashes : [canonicalHash("capture")] });
 
 const PROTECTED_SOURCE_KEYS = ["repository", "repositoryUrl", "authorName", "authorLogin", "authorSourceUrl", "path", "blob", "rawContentHash",
   "licenseName", "licenseSpdx", "licenseFileUrl", "commit", "commitUrl", "blobUrl"] as const;
-const excerptOf = (candidate: unknown): string => String(view(candidate).lineage?.excerpt ?? view(candidate).excerpt ?? "");
+/** Every pane of code a candidate's round would show, and for a commit the subject its first hint quotes. */
+const excerptOf = (candidate: unknown): string => {
+  const { lineage, excerpt } = view(candidate);
+  if (!lineage) return String(excerpt ?? "");
+  const subject = String(lineage.commitMessage ?? "").split(/\r?\n/u)[0] ?? "";
+  return [lineage.beforeExcerpt, lineage.afterExcerpt ?? lineage.excerpt, subject].map((part) => String(part ?? "")).join("\n");
+};
 
 /**
  * FR-009 applied per candidate: the public text the five rounds would expose (fixed templates plus every
@@ -100,3 +103,13 @@ export const repositoryScreen = (context: Context, deps: PreparationDependencies
     return verdict;
   };
 };
+
+/** Every protected value of the given candidates, for screening text that will be public. */
+export const protectedValuesOf = (candidates: readonly unknown[]): readonly string[] => [...new Set(candidates.flatMap((candidate) => {
+  const source = sourceOf(candidate);
+  return PROTECTED_SOURCE_KEYS.map((key) => source[key]).filter((value): value is string => typeof value === "string" && value.length > 0);
+}))];
+
+/** A description is shown only when it names no protected value of any selected source. */
+export const safeDescription = (description: string | null, protectedValues: readonly string[]): string | null =>
+  description !== null && protectedValues.some((value) => containsProtected(description, value)) ? null : description;

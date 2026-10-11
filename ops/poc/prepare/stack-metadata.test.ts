@@ -1,3 +1,4 @@
+import { CAPACITY_CEILINGS } from "../limits";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 
@@ -12,7 +13,7 @@ const collectStackMetadata = typeof metadataModule.collectStackMetadata === "fun
   ? metadataModule.collectStackMetadata as (...args: any[]) => Promise<any>
   : async (): Promise<never> => { throw new Error("STACK_METADATA_NOT_IMPLEMENTED"); };
 
-const profilePath = new URL("../profiles/local-real-rounds.v2.json", import.meta.url);
+const profilePath = new URL("../profiles/local-real-rounds.v3.json", import.meta.url);
 const runtimeDirectory = new URL("../stack/", import.meta.url);
 const lockPath = new URL("uv.lock", runtimeDirectory);
 const pythonPath = new URL(".python-version", runtimeDirectory);
@@ -160,7 +161,7 @@ describe("Stack metadata worker bridge", () => {
         revision: "e565caa3a78c2423bd374333a472b049eb090e47",
         rowLimit: 1,
         perBlobByteLimit: 262_144,
-        requestLimit: 600,
+        requestLimit: CAPACITY_CEILINGS.requestCount,
         networkByteLimit: 100_663_296,
         temporaryDiskBytes: 33_554_432,
       }) + "\n",
@@ -189,7 +190,7 @@ describe("Stack metadata worker bridge", () => {
     release();
 
     expect(JSON.parse(calls[0].stdin)).toMatchObject({
-      requestLimit: 595,
+      requestLimit: CAPACITY_CEILINGS.requestCount - 5,
       networkByteLimit: 100_662_296,
       temporaryDiskBytes: 33_553_408,
     });
@@ -197,7 +198,7 @@ describe("Stack metadata worker bridge", () => {
 
     let spawns = 0;
     const exhausted = await setup({ runWorker: async () => { spawns += 1; return { exitCode: 0, stdout: ndjson(metadataRow()), stderr: new Uint8Array() }; } });
-    for (let index = 0; index < 600; index += 1) exhausted.capacity.beginRequest().release();
+    for (let index = 0; index < CAPACITY_CEILINGS.requestCount; index += 1) exhausted.capacity.beginRequest().release();
     await expect(collectStackMetadata(exhausted)).rejects.toMatchObject({ code: "LIMIT_REJECTED" });
     expect(spawns).toBe(0);
   });
@@ -226,7 +227,7 @@ describe("Stack metadata worker bridge", () => {
       ["COUNTERS_REJECTED", lines(row, counters({ requests: 1.5 }))],
       ["COUNTERS_REJECTED", lines(row, counters({ redirectsFollowed: 4 }))],
       ["COUNTERS_REJECTED", lines(row, { trailer: counters().counters })],
-      ["METADATA_CAPACITY", lines(row, counters({ requests: 601 }))],
+      ["METADATA_CAPACITY", lines(row, counters({ requests: CAPACITY_CEILINGS.requestCount + 1 }))],
       ["METADATA_BYTES", lines(row, counters({ networkBytes: 100_663_297 }))],
       ["TEMPORARY_DISK", lines(row, counters({ peakTemporaryDiskBytes: 33_554_433 }))],
     ] as const;

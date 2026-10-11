@@ -9,6 +9,8 @@ import types
 import unittest
 from unittest.mock import patch
 
+from limits import CEILINGS
+
 try:
     from fetch_blob import BlobFetchError, _main, fetch_selected_blobs, fetch_selected_blobs_with_counters
 except (ModuleNotFoundError, ImportError):
@@ -32,12 +34,12 @@ MAXIMUM_BLOB_BYTES = 256 * 1024
 
 def limits(**overrides):
     value = {
-        "blobAttempts": 50,
-        "successfulBlobs": 50,
+        "blobAttempts": CEILINGS["blobAttempts"],
+        "successfulBlobs": CEILINGS["successfulBlobs"],
         "perBlobBytes": MAXIMUM_BLOB_BYTES,
         "totalBlobBytes": 16 * 1024 * 1024,
         "temporaryDiskBytes": 32 * 1024 * 1024,
-        "requestLimit": 600,
+        "requestLimit": CEILINGS["requestCount"],
         "networkByteLimit": MAXIMUM_BLOB_BYTES,
     }
     value.update(overrides)
@@ -226,8 +228,8 @@ class FetchSelectedBlobTests(unittest.TestCase):
             ("SUCCESSFUL_BLOBS", limits(successfulBlobs=1)),
             ("DECLARED_SIZE_REJECTED", limits(perBlobBytes=3)),
             ("TOTAL_BLOB_BYTES", limits(totalBlobBytes=7)),
-            ("LIMIT_RAISED", limits(blobAttempts=51)),
-            ("LIMIT_RAISED", limits(requestLimit=601)),
+            ("LIMIT_RAISED", limits(blobAttempts=CEILINGS["blobAttempts"] + 1)),
+            ("LIMIT_RAISED", limits(requestLimit=CEILINGS["requestCount"] + 1)),
             ("LIMIT_RAISED", limits(networkByteLimit=MAXIMUM_BLOB_BYTES + 1)),
             ("LIMIT_VALUE", limits(temporaryDiskBytes=0)),
             ("LIMIT_VALUE", limits(requestLimit=0)),
@@ -268,7 +270,7 @@ class FetchSelectedBlobTests(unittest.TestCase):
             ("ROW_DUPLICATE", [valid, {**other, "swhBlobId": valid["swhBlobId"]}]),
             ("ROW_DUPLICATE", [valid, {**other, "swhContentId": valid["swhContentId"]}]),
             ("BLOB_ATTEMPTS", [
-                selected_row(f"value {index}".encode()) for index in range(51)
+                selected_row(f"value {index}".encode()) for index in range(CEILINGS["blobAttempts"] + 1)
             ]),
         ]
         for code, rows in failures:

@@ -6,6 +6,7 @@ const GENERATED_MARKERS = /automatically generated|auto-generated|@generated|do 
 export const looksGenerated = (text: string, scanLines: number): boolean =>
   text.split(/\r?\n/u).slice(0, scanLines).some((line) => GENERATED_MARKERS.test(line));
 
+/** The bounds of a code window: whole lines, at most `maxLines` and `maxBytes`, at least `minBytes`. */
 export interface ExcerptLimits {
   readonly maxLines: number;
   readonly maxBytes: number;
@@ -50,31 +51,4 @@ export const firstCodeLine = (lines: readonly string[], language: StackLanguage)
     return index;
   }
   return undefined;
-};
-
-/**
- * FR-025 as amended: the excerpt starts at the first code line, spans at most `maxLines` lines and
- * `maxBytes` bytes on a whole-line boundary, ends without trailing blank lines, and has at least
- * `minBytes` bytes. Returns undefined when no such excerpt exists.
- */
-export const languageExcerpt = (
-  text: string,
-  language: StackLanguage,
-  limits: ExcerptLimits,
-): string | undefined => {
-  const lines = text.replace(/\r\n?/gu, "\n").split("\n");
-  const start = firstCodeLine(lines, language);
-  if (start === undefined) return undefined;
-  const window: string[] = [];
-  let bytes = 0;
-  for (const line of lines.slice(start, start + limits.maxLines)) {
-    const added = Buffer.byteLength(line) + (window.length > 0 ? 1 : 0);
-    if (bytes + added > limits.maxBytes) break;
-    window.push(line);
-    bytes += added;
-  }
-  while (window.length > 0 && window.at(-1)!.trim().length === 0) window.pop();
-  const excerpt = window.join("\n");
-  if (Buffer.byteLength(excerpt) < limits.minBytes || excerpt.trim().length === 0) return undefined;
-  return excerpt;
 };

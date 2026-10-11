@@ -1,8 +1,9 @@
 import type { CapacitySnapshot } from "./capacity";
 import {
-  DECK_SHORT, PreparationError, rejectCandidate, noteRejection, type DeckAttempts, type DeckOutcome, type DiagnosticStage, type RunState,
+  DECK_SHORT, PreparationError, noteRejection, rejectCandidate, type DeckAttempts, type DeckOutcome, type DiagnosticStage, type RunState,
 } from "./diagnostics";
-import type { CrawlProfile } from "./profile";
+import type { CrawlProfile, StackLanguage } from "./profile";
+import { projectRoundAllowed, type RepositoryOption } from "./project-rounds";
 import {
   addHashes, collidesWithSelected, provisionalSnapshot, revealsProtected, unreportable, view, type RepositoryScreen,
 } from "./selection";
@@ -22,7 +23,7 @@ export const remainingBlobLimits = (profile: CrawlProfile, snapshot: CapacitySna
   });
 };
 
-/** FR-029: licence screening precedes any blob download. A row without a licence list is left to revalidation. */
+/** Licence screening precedes any blob download. A row without a licence list is left to revalidation. */
 const licensesAllowed = (profile: CrawlProfile, row: unknown): boolean => {
   const licenses = view(row).detectedLicenses;
   if (!Array.isArray(licenses)) return true;
@@ -38,60 +39,178 @@ const stackOrder = (left: unknown, right: unknown): number => {
   }
   return 0;
 };
+const starEvents = (row: unknown): number => Number((row as { starEventsCount?: unknown }).starEventsCount ?? 0);
+const languageOf = (row: unknown): unknown => view(row).detectedLanguage;
+
+/** Rounds per language: the pool split evenly, the remainder going to the first languages. */
+const shares = (pool: number, languages: readonly StackLanguage[]): ReadonlyMap<StackLanguage, number> =>
+  new Map(languages.map((language, index) => [language, Math.floor(pool / languages.length) + (index < pool % languages.length ? 1 : 0)]));
+
+/** A project round in waiting: its revalidated file, and the four repositories every round of its language offers. */
+export interface ProjectSelection extends StackSelection {
+  readonly description: string | null;
+  readonly distractors: readonly RepositoryOption[];
+}
+
+interface StackDecks {
+  readonly project: DeckOutcome<ProjectSelection>;
+  readonly language: DeckOutcome<StackSelection>;
+}
+
+/** Ranks a language's repositories by star events, keeping each one's files in stable order. */
+const popularRepositories = (rows: readonly unknown[], minimumStarEvents: number): readonly Readonly<{ repository: string; rows: readonly unknown[] }>[] => {
+  const byRepository = new Map<string, unknown[]>();
+  for (const row of [...rows].sort(stackOrder)) {
+    if (starEvents(row) < minimumStarEvents) continue;
+    const repository = String(view(row).repository);
+    byRepository.set(repository, [...(byRepository.get(repository) ?? []), row]);
+  }
+  return [...byRepository].map(([repository, files]) => Object.freeze({ repository, rows: Object.freeze(files) }))
+    .sort((left, right) => starEvents(right.rows[0]) - starEvents(left.rows[0]) || (left.repository < right.repository ? -1 : 1));
+};
+
+const FILES_PER_REPOSITORY = 3;
+const OPTIONS_PER_ROUND = 4;
 
 /**
- * One language round per configured language: the first row, in stable order, that survives every check.
- * A language with no surviving row leaves the deck short, so the remaining languages are not fetched.
+ * Selects the two Stack decks. Project rounds come from the most popular repositories of each language,
+ * one file each; every round of a language offers the same four repositories (its answers plus decoys), so
+ * no option shows up more often than another. Language rounds come from any repository, in stable order.
  */
 export const selectStack = async (
   context: Context,
   deps: PreparationDependencies,
   hashes: string[],
   rows: readonly unknown[],
-  github: readonly unknown[],
   state: RunState,
   screenRepository: RepositoryScreen,
   attempt: DeckAttempts,
-): Promise<DeckOutcome<StackSelection>> => attempt(async () => {
-  const selected: StackSelection[] = [];
-  const chosen = (): unknown[] => selected.map(({ candidate }) => candidate);
-  for (const configuration of context.profile.stack.configurations) {
-    const ordered = rows.filter((item) => view(item).detectedLanguage === configuration.language).sort(stackOrder);
-    const before = selected.length;
-    for (const row of ordered) {
-      if (!licensesAllowed(context.profile, row)) { noteRejection(state, "SCREENING", new Error("LICENSE_REJECTED")); continue; }
-      if (!(await screenRepository(row, "GITHUB_REVALIDATION"))) continue;
-      const lease = context.capacity.beginBlob();
-      let stage: DiagnosticStage = "BLOB_RETRIEVAL";
-      try {
-        const fetched = await deps.fetchStackBlob({ ...context, row,
-          limits: remainingBlobLimits(context.profile, context.capacity.snapshot()) });
-        addHashes(hashes, fetched.acceptedResponseHashes);
-        lease.addBytes(fetched.value.byteLength);
-        stage = "GITHUB_REVALIDATION";
-        const checked = await deps.revalidateStackCandidate({ ...context, row, blob: fetched.value,
-          crawlSnapshotId: provisionalSnapshot(context.profileHash, hashes) });
-        addHashes(hashes, checked.acceptedResponseHashes);
-        state.githubRevalidations += 1;
-        if (view(checked.value).detectedLanguage !== configuration.language) throw new PreparationError();
-        stage = "SCREENING";
-        state.screened += 1;
-        if (unreportable(checked.value)) throw new Error("SOURCE_IDENTITY_UNREPORTABLE");
-        const eligible = deps.validateLanguageCandidate({ ...context, candidate: checked.value });
-        stage = "DEDUPLICATION";
-        if (collidesWithSelected(context.profile, eligible, chosen(), github)) {
-          state.duplicatesRejected += 1;
-          throw new Error("SOURCE_DUPLICATE");
-        }
-        stage = "SCREENING";
-        if (revealsProtected(context.profile, eligible, [...github, ...chosen()])) throw new Error("PUBLIC_CONTAINMENT_REJECTED");
-        lease.accept();
-        selected.push(Object.freeze({ row, blob: fetched.value, candidate: eligible }));
-        break;
-      } catch (error) { lease.release(); rejectCandidate(state, stage, error); }
+  otherDecks: () => readonly unknown[],
+): Promise<StackDecks> => {
+  const { profile } = context;
+  const languages = profile.stack.configurations.map(({ language }) => language);
+  const chosen: StackSelection[] = [];
+  const chosenCandidates = (): unknown[] => chosen.map(({ candidate }) => candidate);
+
+  /** Fetches, revalidates, and screens one row; undefined when any check rejects it. */
+  const tryRow = async (row: unknown, language: StackLanguage, deck: readonly StackSelection[], screen: (candidate: unknown) => void) => {
+    if (!licensesAllowed(profile, row)) { noteRejection(state, "SCREENING", new Error("LICENSE_REJECTED")); return undefined; }
+    if (!(await screenRepository(row, "GITHUB_REVALIDATION"))) return undefined;
+    let lease: ReturnType<typeof context.capacity.beginBlob>;
+    try {
+      lease = context.capacity.beginBlob();
+    } catch (error) {
+      // A spent blob budget ends this deck and every later one; rejectCandidate turns it into that skip.
+      rejectCandidate(state, "BLOB_RETRIEVAL", error);
+      return undefined;
     }
-    if (selected.length === before) return { skipped: DECK_SHORT };
-  }
-  if (selected.length !== context.profile.selection.languageRounds) throw new PreparationError();
-  return { candidates: Object.freeze(selected) };
-});
+    let stage: DiagnosticStage = "BLOB_RETRIEVAL";
+    try {
+      const fetched = await deps.fetchStackBlob({ ...context, row, limits: remainingBlobLimits(profile, context.capacity.snapshot()) });
+      addHashes(hashes, fetched.acceptedResponseHashes);
+      lease.addBytes(fetched.value.byteLength);
+      stage = "GITHUB_REVALIDATION";
+      const checked = await deps.revalidateStackCandidate({ ...context, row, blob: fetched.value,
+        crawlSnapshotId: provisionalSnapshot(context.profileHash, hashes) });
+      addHashes(hashes, checked.acceptedResponseHashes);
+      state.githubRevalidations += 1;
+      if (view(checked.value).detectedLanguage !== language) throw new PreparationError();
+      stage = "SCREENING";
+      state.screened += 1;
+      if (unreportable(checked.value)) throw new Error("SOURCE_IDENTITY_UNREPORTABLE");
+      screen(checked.value);
+      stage = "DEDUPLICATION";
+      if (collidesWithSelected(profile, checked.value, deck.map(({ candidate }) => candidate), [...chosenCandidates(), ...otherDecks()])) {
+        state.duplicatesRejected += 1;
+        throw new Error("SOURCE_DUPLICATE");
+      }
+      stage = "SCREENING";
+      if (revealsProtected(profile, checked.value, [...otherDecks(), ...chosenCandidates()])) throw new Error("PUBLIC_CONTAINMENT_REJECTED");
+      lease.accept();
+      const selection = Object.freeze({ row, blob: fetched.value, candidate: checked.value });
+      chosen.push(selection);
+      return selection;
+    } catch (error) {
+      lease.release();
+      rejectCandidate(state, stage, error);
+      return undefined;
+    }
+  };
+
+  const describe = async (repository: string) => {
+    try {
+      const described = await deps.describeRepository({ ...context, repository });
+      addHashes(hashes, described.acceptedResponseHashes);
+      return described.value;
+    } catch (error) {
+      rejectCandidate(state, "SCREENING", error);
+      return undefined;
+    }
+  };
+
+  const project = await attempt<ProjectSelection>(async () => {
+    const rounds: ProjectSelection[] = [];
+    const perLanguage = shares(profile.selection.projectPool, languages);
+    for (const language of languages) {
+      const ranked = popularRepositories(rows.filter((row) => languageOf(row) === language), profile.selection.minimumStarEvents);
+      const answers: StackSelection[] = [];
+      const answered = new Set<string>();
+      for (const { repository, rows: files } of ranked) {
+        if (answers.length >= perLanguage.get(language)!) break;
+        for (const row of files.slice(0, FILES_PER_REPOSITORY)) {
+          const selection = await tryRow(row, language, answers, (candidate) => {
+            if (!projectRoundAllowed(String(view(candidate).excerpt), String(view(candidate).path), [repository])) throw new Error("PROJECT_NAME_IN_EXCERPT");
+          });
+          if (selection) { answers.push(selection); answered.add(repository); break; }
+        }
+      }
+      if (answers.length < perLanguage.get(language)!) return { skipped: DECK_SHORT };
+      // Decoys fill the language's four options; none may be named by any of its rounds' code or file names.
+      const options: RepositoryOption[] = [];
+      for (const answer of answers) {
+        const description = await describe(String(view(answer.candidate).repository));
+        if (description === undefined) return { skipped: DECK_SHORT };
+        options.push({ repository: String(view(answer.candidate).repository), description: description.description });
+      }
+      for (const { repository } of ranked) {
+        if (options.length >= OPTIONS_PER_ROUND) break;
+        if (answered.has(repository) || !answers.every(({ candidate }) =>
+          projectRoundAllowed(String(view(candidate).excerpt), String(view(candidate).path), [repository]))) continue;
+        const description = await describe(repository);
+        if (description === undefined || description.fork || description.archived) continue;
+        options.push({ repository, description: description.description });
+      }
+      if (options.length < OPTIONS_PER_ROUND) return { skipped: DECK_SHORT };
+      for (const answer of answers) {
+        const own = String(view(answer.candidate).repository);
+        rounds.push(Object.freeze({ ...answer, description: options.find((option) => option.repository === own)!.description,
+          distractors: Object.freeze(options.filter((option) => option.repository !== own)) }));
+      }
+    }
+    return { candidates: Object.freeze(rounds) };
+  });
+
+  const projectRepositories = new Set((project.candidates ?? []).map(({ candidate }) => String(view(candidate).repository)));
+  const language = await attempt<StackSelection>(async () => {
+    const rounds: StackSelection[] = [];
+    const perLanguage = shares(profile.selection.languagePool, languages);
+    for (const configured of languages) {
+      const ordered = rows.filter((row) => languageOf(row) === configured
+        && !projectRepositories.has(String(view(row).repository))).sort(stackOrder);
+      const deck: StackSelection[] = [];
+      for (const row of ordered) {
+        if (deck.length >= perLanguage.get(configured)!) break;
+        if (rounds.some(({ candidate }) => view(candidate).repository === view(row).repository)) {
+          noteRejection(state, "DEDUPLICATION", new Error("REPOSITORY_REPEATED"));
+          continue;
+        }
+        const selection = await tryRow(row, configured, rounds, (candidate) => { deps.validateLanguageCandidate({ ...context, candidate }); });
+        if (selection) deck.push(selection);
+      }
+      if (deck.length < perLanguage.get(configured)!) return { skipped: DECK_SHORT };
+      rounds.push(...deck);
+    }
+    return { candidates: Object.freeze(rounds) };
+  });
+  return Object.freeze({ project, language });
+};

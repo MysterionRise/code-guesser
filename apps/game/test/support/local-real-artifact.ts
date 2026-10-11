@@ -1,12 +1,12 @@
 /**
- * Builds one schema-valid in-memory v2 local-experiment artifact for tests by running the
+ * Builds one schema-valid in-memory v3 local-experiment artifact for tests by running the
  * operator composer on its own deterministic test candidates. The game authority must accept
  * exactly what the preparer produces, so the tests share one source of truth for the shape.
  */
 import { createHash } from "node:crypto";
 
 import { composeExperimentArtifact } from "../../../../ops/poc/prepare/compose";
-import { composeInput } from "../../../../ops/poc/prepare/testdata/v2-builders";
+import { composeInput } from "../../../../ops/poc/prepare/testdata/v3-builders";
 
 export const canonical = (value: unknown): string => {
   if (value === null || typeof value === "boolean" || typeof value === "number") {

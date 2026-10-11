@@ -1,5 +1,3 @@
-import { createHash } from "node:crypto";
-
 import {
   canonicalArtifactBytes,
   canonicalArtifactHash,
@@ -10,27 +8,20 @@ import {
   CROSS_DECK_KEYS,
   DECK_IDS,
   DECK_KINDS,
-  ROUNDS_PER_DECK,
+  ROUNDS_PER_SESSION,
+  mentionsRepository,
   parseExperimentArtifact,
-  parseRoundRecordSet,
   type DeckId,
   type ExperimentArtifact,
   type ExperimentFixture,
-  type PrivateRevealRecord,
-  type PublicRoundRecord,
-  type RoundRecordSet,
 } from "./model";
-import { mentionsLabel, type CrawlProfile } from "./profile";
-import { mentionsRepository } from "./project-rounds";
-import type { GeneratedRounds } from "./round-projection";
+import { STACK_LANGUAGES, mentionsLabel, type CrawlProfile } from "./profile";
+import type { GeneratedRounds } from "./round-helpers";
 
 const SHA256 = /^[0-9a-f]{64}$/u;
-const MODE_KINDS: Readonly<Record<ExperimentFixture["kind"], string>> = Object.freeze({
-  PROJECT: "project", LANGUAGE: "language", AI_CREDIT: "ai",
-});
 
 export class ComposeError extends Error {
-  /** A safe, data-free reason code such as PUBLIC_CONTAINMENT_LICENSESPDX_IN_EXCERPT, when one is known. */
+  /** A safe, data-free reason code such as PUBLIC_CONTAINMENT_LICENSESPDX_IN_PANES, when one is known. */
   public readonly code: string | undefined;
 
   public constructor(code?: string) {
@@ -45,24 +36,18 @@ export interface ComposeOptions {
   readonly canonicalProfileBytes: Uint8Array;
   readonly acceptedResponseHashes: readonly string[];
   /** The decks this run filled; at least one. */
-  readonly project?: GeneratedRounds;
-  readonly language?: GeneratedRounds;
-  readonly ai?: GeneratedRounds;
+  readonly decks: Partial<Readonly<Record<DeckId, GeneratedRounds>>>;
 }
 
 export interface ComposedExperiment {
   readonly artifact: ExperimentArtifact;
   readonly artifactBytes: Uint8Array;
   readonly artifactHash: string;
-  readonly roundRecordSet: RoundRecordSet;
 }
 
 const fail = (code?: string): never => { throw new ComposeError(code); };
 const sameBytes = (left: Uint8Array, right: Uint8Array): boolean =>
   left.byteLength === right.byteLength && left.every((value, index) => value === right[index]);
-const exactCanonical = (left: unknown, right: unknown): boolean =>
-  canonicalHash(left) === canonicalHash(right);
-const rawHash = (value: string): string => createHash("sha256").update(value).digest("hex");
 /** True when the protected value appears in public text as a whole token (non-alphanumeric boundaries). */
 export const containsProtected = (publicText: string, value: string): boolean => {
   const escaped = value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
@@ -80,45 +65,16 @@ const parseResponseHashes = (values: readonly string[]): readonly string[] => {
   return Object.freeze([...values]);
 };
 
-const requireProjection = (
-  fixture: ExperimentFixture,
-  publicRound: PublicRoundRecord | undefined,
-  privateReveal: PrivateRevealRecord | undefined,
-): void => {
-  if (publicRound === undefined || privateReveal === undefined) return fail();
-  const expectedCandidates = fixture.candidates.map(({ id, label }) => ({ candidateId: id, label }));
-  const expectedClues = fixture.clues.map((label, index) => ({ order: index + 1, label }));
-  if (fixture.source.excerptHash !== rawHash(fixture.excerpt)
-    || publicRound.roundId !== fixture.roundId || publicRound.roundVersionId !== fixture.roundVersion
-    || publicRound.excerpt.versionId !== fixture.source.excerptHash
-    || publicRound.excerpt.text !== fixture.excerpt || publicRound.mode.prompt !== fixture.prompt
-    || publicRound.mode.kind !== MODE_KINDS[fixture.kind]
-    || !exactCanonical(publicRound.mode.candidates, expectedCandidates)
-    || !exactCanonical(publicRound.mode.clues, expectedClues)) fail();
-  const expectedPrivate = {
-    roundId: fixture.roundId, roundVersionId: fixture.roundVersion,
-    correctCandidateId: fixture.correctCandidateId, evidence: fixture.evidence,
-    explanation: fixture.explanation, attribution: fixture.attribution,
-    helpfulSignals: fixture.helpfulSignals, misleadingSignals: fixture.misleadingSignals,
-  };
-  const actualPrivate = Object.fromEntries(Object.entries(privateReveal).filter(([key]) => key !== "versions"));
-  if (!exactCanonical(actualPrivate, expectedPrivate)) fail();
+const POOL_SIZES = (profile: CrawlProfile): Readonly<Record<DeckId, number>> => ({
+  project: profile.selection.projectPool, language: profile.selection.languagePool, "before-after": profile.selection.beforeAfterPool,
+});
+
+const requireDeck = (generated: GeneratedRounds, id: DeckId, profile: CrawlProfile): void => {
+  if (generated.fixtures.length !== POOL_SIZES(profile)[id] || generated.fixtures.length < ROUNDS_PER_SESSION) fail(`DECK_SIZE_${id.toUpperCase().replace("-", "_")}`);
+  if (generated.fixtures.some((fixture) => fixture.kind !== DECK_KINDS[id])) fail();
 };
 
-const requireDeck = (generated: GeneratedRounds, id: DeckId): void => {
-  if (generated.fixtures.length !== ROUNDS_PER_DECK || generated.publicRounds.length !== ROUNDS_PER_DECK
-    || Object.keys(generated.privateReveals).length !== ROUNDS_PER_DECK) fail();
-  generated.fixtures.forEach((fixture, index) => {
-    if (fixture.kind !== DECK_KINDS[id]) fail();
-    requireProjection(fixture, generated.publicRounds[index], generated.privateReveals[fixture.roundId]);
-  });
-};
-
-const requireBindings = (
-  decks: readonly (readonly ExperimentFixture[])[],
-  profile: CrawlProfile,
-  snapshotId: string,
-): void => {
+const requireBindings = (decks: readonly (readonly ExperimentFixture[])[], profile: CrawlProfile, snapshotId: string): void => {
   const all = decks.flat();
   const ids = new Set<string>();
   for (const fixture of all) {
@@ -137,33 +93,33 @@ const requireBindings = (
   distinct(all, CROSS_DECK_KEYS);
 };
 
-/** FR-009 as amended: a repository name may appear pre-answer only as a project-round candidate label. */
-const publicTextWithoutProjectLabels = (publicRounds: readonly PublicRoundRecord[]): string =>
-  new TextDecoder().decode(canonicalBytes(publicRounds.map((round) => round.mode.kind !== "project" ? round : {
-    ...round, mode: { ...round.mode, candidates: round.mode.candidates.map(({ candidateId }) => ({ candidateId })) },
-  })));
+/** What a round shows before the answer; project-round labels are the one place a repository may appear. */
+const publicParts = (fixture: ExperimentFixture) => ({
+  panes: fixture.panes.map(({ text }) => text).join("\n"),
+  prompt: fixture.prompt,
+  candidates: JSON.stringify(fixture.kind === "PROJECT"
+    ? fixture.candidates.map(({ id, detail }) => ({ id, detail }))
+    : fixture.candidates),
+  clues: fixture.clues.join("\n"),
+});
 
 const requireOwnCandidatesAbsent = (fixture: ExperimentFixture): void => {
-  if (fixture.kind === "PROJECT") {
-    // FR-032 authorizes clue 2 to state the owner; the excerpt, prompt, and clue 1 may not name any candidate.
-    const publicParts = [["EXCERPT", fixture.excerpt], ["PROMPT", fixture.prompt], ["CLUE1", fixture.clues[0]!]] as const;
-    for (const [part, value] of publicParts) {
-      if (fixture.candidates.some(({ label }) => mentionsRepository(value, label))) fail(`PUBLIC_CONTAINMENT_CANDIDATE_IN_${part}`);
+  const parts = publicParts(fixture);
+  const shown = [["PANES", parts.panes], ["PROMPT", parts.prompt], ["CLUES", parts.clues]] as const;
+  for (const [part, value] of shown) {
+    if (fixture.kind === "PROJECT" && fixture.candidates.some(({ label }) => mentionsRepository(value, label))) {
+      fail(`PUBLIC_CONTAINMENT_CANDIDATE_IN_${part}`);
     }
-  }
-  if (fixture.kind === "LANGUAGE") {
-    if (fixture.candidates.some(({ label }) => mentionsLabel(fixture.excerpt, label))) fail("PUBLIC_CONTAINMENT_CANDIDATE_IN_EXCERPT");
-    if ([fixture.prompt, ...fixture.clues].some((value) => fixture.candidates.some(({ label }) => mentionsLabel(value, label)))) {
-      fail("PUBLIC_CONTAINMENT_CANDIDATE_IN_CLUES");
+    if (fixture.kind === "LANGUAGE" && STACK_LANGUAGES.some((label) => mentionsLabel(value, label))) {
+      fail(`PUBLIC_CONTAINMENT_CANDIDATE_IN_${part}`);
     }
   }
 };
 
-const requirePublicContainment = (
-  fixtures: readonly ExperimentFixture[],
-  publicRounds: readonly PublicRoundRecord[],
-): void => {
-  const publicText = publicTextWithoutProjectLabels(publicRounds);
+/** Names the protected key and the public part that exposed it, never the value. */
+const requirePublicContainment = (fixtures: readonly ExperimentFixture[]): void => {
+  const shown = fixtures.map(publicParts);
+  const publicText = shown.map((parts) => Object.values(parts).join("\n")).join("\n");
   for (const fixture of fixtures) {
     requireOwnCandidatesAbsent(fixture);
     const protectedEntries: readonly (readonly [string, unknown])[] = [
@@ -173,21 +129,14 @@ const requirePublicContainment = (
     for (const [name, value] of protectedEntries) {
       if (typeof value !== "string" || !containsProtected(publicText, value)) continue;
       // A whole-file excerpt makes rawContentHash equal the public excerpt hash: a hash of public text.
-      if (name === "rawContentHash" && value === fixture.source.excerptHash) continue;
-      // Name only the protected key and the public field that exposed it; never the value.
-      const stripped = JSON.parse(publicText) as Record<string, unknown>[];
-      const field = stripped.flatMap((round) => Object.entries(round))
-        .find(([, part]) => containsProtected(JSON.stringify(part), value))?.[0] ?? "UNKNOWN";
-      fail(`PUBLIC_CONTAINMENT_${name.toUpperCase()}_IN_${field.toUpperCase()}`);
+      if (name === "rawContentHash" && (value === fixture.source.excerptHash || value === fixture.source.parentExcerptHash)) continue;
+      const part = shown.flatMap((parts) => Object.entries(parts)).find(([, text]) => containsProtected(text, value))?.[0] ?? "UNKNOWN";
+      fail(`PUBLIC_CONTAINMENT_${name.toUpperCase()}_IN_${part.toUpperCase()}`);
     }
   }
 };
 
-const crawlSnapshot = (
-  profile: CrawlProfile,
-  profileHash: string,
-  acceptedResponseHashes: readonly string[],
-) => Object.freeze({
+const crawlSnapshot = (profile: CrawlProfile, profileHash: string, acceptedResponseHashes: readonly string[]) => Object.freeze({
   id: canonicalHash({ profileHash, acceptedResponseHashes }),
   profileVersion: profile.profileVersion,
   profileHash,
@@ -204,10 +153,7 @@ const crawlSnapshot = (
   acceptedResponseHashes,
 });
 
-const deckMetadata = (profile: CrawlProfile, id: DeckId) => {
-  const template = profile.templates[id];
-  return { id, title: template.title, description: template.description, notice: id === "ai" ? profile.templates.ai.notice : null };
-};
+const TEMPLATE_KEYS = Object.freeze({ project: "project", language: "language", "before-after": "beforeAfter" } as const);
 
 export const composeExperimentArtifact = (options: ComposeOptions): ComposedExperiment => {
   if (!(options.canonicalProfileBytes instanceof Uint8Array)
@@ -215,31 +161,26 @@ export const composeExperimentArtifact = (options: ComposeOptions): ComposedExpe
   const acceptedResponseHashes = parseResponseHashes(options.acceptedResponseHashes);
   const profileHash = canonicalHash(options.profile);
   const snapshot = crawlSnapshot(options.profile, profileHash, acceptedResponseHashes);
-  const present = DECK_IDS.filter((id) => options[id] !== undefined);
+  const present = DECK_IDS.filter((id) => options.decks[id] !== undefined);
   if (present.length === 0) fail("NO_DECK");
-  const generated = Object.fromEntries(present.map((id) => [id, options[id]!])) as Readonly<Record<DeckId, GeneratedRounds>>;
-  for (const id of present) requireDeck(generated[id], id);
-  requireBindings(present.map((id) => generated[id].fixtures), options.profile, snapshot.id);
-  const fixtures = present.flatMap((id) => generated[id].fixtures);
-  const publicRounds = present.flatMap((id) => generated[id].publicRounds);
-  // Named first, so a leak reports its key and field instead of the parser's single rejection.
-  requirePublicContainment(fixtures, publicRounds);
+  for (const id of present) requireDeck(options.decks[id]!, id, options.profile);
+  requireBindings(present.map((id) => options.decks[id]!.fixtures), options.profile, snapshot.id);
+  // Named first, so a leak reports its key and part instead of the parser's single rejection.
+  requirePublicContainment(present.flatMap((id) => options.decks[id]!.fixtures));
   const artifact = parseExperimentArtifact({
-    schemaVersion: "local-experiment-artifact.v2",
+    schemaVersion: "local-experiment-artifact.v3",
     contentClass: "LOCAL_UNREVIEWED_EXPERIMENT",
     profileHash,
     crawlSnapshot: snapshot,
-    decks: present.map((id) => ({ ...deckMetadata(options.profile, id), fixtures: generated[id].fixtures })),
-  });
-  const roundRecordSet = parseRoundRecordSet({
-    sessionContractVersionId: canonicalHash({ schemaVersion: artifact.schemaVersion, profileHash, crawlSnapshotId: snapshot.id }),
-    publicRounds,
-    privateReveals: Object.assign({}, ...present.map((id) => generated[id].privateReveals)),
+    decks: present.map((id) => {
+      const template = options.profile.templates[TEMPLATE_KEYS[id]];
+      return { id, title: template.title, description: template.description, roundsPerSession: ROUNDS_PER_SESSION,
+        fixtures: options.decks[id]!.fixtures };
+    }),
   });
   return Object.freeze({
     artifact,
     artifactBytes: canonicalArtifactBytes(artifact),
     artifactHash: canonicalArtifactHash(artifact),
-    roundRecordSet,
   });
 };
