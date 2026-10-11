@@ -97,7 +97,7 @@ export const SCENES: readonly Scene[] = Object.freeze([
     opening: "Which project is this from?",
     hint: "Hints cost points.",
     answer: "Four real repos. Pick one.",
-  }, ANSWER_CHOREOGRAPHY[0] ?? 0),
+  }, ANSWER_CHOREOGRAPHY[0] ?? 0, { width: 360, maximumColors: 96 }),
   deckScene("language", {
     opening: "Name the language.",
     hint: "Stuck? Take a hint.",
@@ -110,7 +110,7 @@ export const SCENES: readonly Scene[] = Object.freeze([
   }, Math.min(ANSWER_CHOREOGRAPHY[3] ?? 1, 1), { width: 360, maximumColors: 96 }),
   {
     id: "full-run",
-    gif: { speed: 2, framesPerSecond: 12, width: 360, maximumColors: 80 },
+    gif: { speed: 2, framesPerSecond: 10, width: 360, maximumColors: 80 },
     mp4: "codeguessr-demo",
     steps: [
       goto("/"),

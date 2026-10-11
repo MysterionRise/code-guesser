@@ -38,31 +38,35 @@ gate: changing queries, retries, ceilings, deck rules, or running
 
 ## Current state
 
-- Branch `claude/demoable-poc`, draft PR #7.
-- The three-deck game is implemented: profile
+- Branch `claude/demoable-poc`, PR #7.
+- The three-deck game plays real rounds: profile
   `ops/poc/profiles/local-real-rounds.v2.json`, artifact schema
-  `local-experiment-artifact.v2`, run report `local-experiment-run.v2`, and the
-  root-route deck chooser (`/?deck=project|language|ai`).
+  `local-experiment-artifact.v2`, and the root-route deck chooser
+  (`/?deck=project|language|ai`).
 - The committed artifact `apps/game/src/demo/generated/local-real-rounds.json`
-  is still the older v1 five-round artifact, which the v2 game rejects, so `/`
-  shows its "nothing to play" notice until a v2 run publishes and its hash is
-  pinned in `apps/game/src/demo/local-real-experiment.pin.server.ts`.
-- Phase 0 pipeline fixes are in: worker reason codes, a Node↔Python seam test,
-  Stack metadata first, fatal budget exhaustion, bounded retries, repository
-  screening, and GET reuse.
-- Live runs on 2026-10-10 failed closed twice (stale Python worker limits, then
-  one transient GitHub search response); see
-  `docs/gangsta/codeguessr-poc-readiness/evidence/2026-10-10-revision-12-live-run-attempts.md`.
-- The README media still show the v1 rounds.
+  came from the 2026-10-11 live run (384 of 600 requests). Its canonical
+  SHA-256 `27e117c9b6f7c5c509b22eb220aef211cb3a87b79a92ead099f326b41ed0f018` is
+  pinned in `apps/game/src/demo/local-real-experiment.pin.server.ts`; see
+  `docs/review/evidence/2026-10-11-three-deck-live-run.md`.
+- Phase 0 of the review roadmap is done: worker reason codes, a Node↔Python
+  seam test, Stack metadata first, fatal budget exhaustion, bounded retries,
+  repository screening, GET reuse, the UI quick wins, and re-recorded media.
+- Port 3000 may be taken locally by an unrelated Docker container; run browser
+  tests with `E2E_PORT=3200 pnpm test:e2e`.
 
 ## Next steps
 
-Phase 0 of the review roadmap: worker reason codes, a Node↔Python seam test,
-Stack metadata first, budget exhaustion as a fatal error, bounded retries,
-request-saving screens, UI quick wins, then a live run, pin, full verification,
-and re-recorded media. Phases 1–3 (run journal and per-deck publish, deck
-redesign with "Before or after?" replacing the AI deck, growing The Stack v2)
-follow; see the review.
+Phases 1–3 of the review roadmap:
+
+1. Pipeline structure: a run journal with `--resume` and `--offline`, per-deck
+   publication, a failure report, `index.ts` split into modules, one shared
+   artifact parser, one limits file for Node and Python.
+2. Deck redesign: language deck without leaks, "Before or after?" replacing the
+   AI deck, a project deck from popular Stack v2 repositories (today all five
+   answers come from facebook), sampled and shuffled sessions, and a leakage
+   test.
+3. Grow The Stack v2 (probe row-group repository spread first), then other
+   sources.
 
 Live run:
 
