@@ -47,6 +47,9 @@ gate: changing queries, retries, ceilings, deck rules, or running
   is still the older v1 five-round artifact, which the v2 game rejects, so `/`
   shows its "nothing to play" notice until a v2 run publishes and its hash is
   pinned in `apps/game/src/demo/local-real-experiment.pin.server.ts`.
+- Phase 0 pipeline fixes are in: worker reason codes, a Node↔Python seam test,
+  Stack metadata first, fatal budget exhaustion, bounded retries, repository
+  screening, and GET reuse.
 - Live runs on 2026-10-10 failed closed twice (stale Python worker limits, then
   one transient GitHub search response); see
   `docs/gangsta/codeguessr-poc-readiness/evidence/2026-10-10-revision-12-live-run-attempts.md`.
@@ -81,8 +84,13 @@ Read the `PREPARATION_STAGE_FAILED <stage> <code> <status-class>` line first.
 
 - `RETRY_SIGNAL_MISSING 4xx`: a 403/429 without a usable retry instruction.
 - `WAIT_LIMIT`: a retry instruction longer than the fifteen-second wait.
-- `REQUEST_COUNT` or `REQUEST_LIMIT` in the rejections: the request ceiling was
-  spent.
+- `BUDGET_EXHAUSTED_<BUDGET>`: a run-wide budget (requests, blob attempts or
+  bytes, metadata bytes, retries, waits, temporary disk) ran out; the run stops
+  instead of rejecting every later candidate. `PREPARATION_SPEND` shows the
+  requests each stage used.
+- `LOGICAL_RETRY_LIMIT`, `RUN_RETRY_LIMIT`, `WAIT_LIMIT`: a GitHub 5xx, network
+  error, timeout, or rate limit was retried once and failed again, or the
+  run's five retries or 30 s of waiting were spent.
 - `WORKER_EXIT_<CODE>`: a Python worker exited non-zero with its own stable
   code (`WORKER_UNEXPECTED` for an unmapped exception). A bare `WORKER_EXIT`
   means its stderr was not a code.
@@ -91,6 +99,11 @@ Read the `PREPARATION_STAGE_FAILED <stage> <code> <status-class>` line first.
 - `GITHUB_SEARCH_*`: the discovery check that rejected a search response.
   `INCOMPLETE`, `TOTAL_CHANGED`, `ITEM_COUNT`, and `DUPLICATE` are provider
   inconsistencies; `SHAPE`, `IDENTITY`, and `DATE` are record drift.
+
+Rejection aggregates name the failing check: `LINEAGE_*`, `ADMISSION_*`
+(`ADMISSION_REPOSITORY_LICENSE` is a repository licence outside the
+allowlist), and `REVALIDATION_*`. `REPOSITORY_SCREENED_OUT` counts later
+candidates of a repository already rejected once.
 
 Selection diagnostics `REPOSITORY_REPEATED`, `PROJECT_NAME_IN_EXCERPT`,
 `PROJECT_REPOSITORY_SKIPPED`, `AI_CREDIT_ABSENT`, and

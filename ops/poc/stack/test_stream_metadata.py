@@ -235,6 +235,12 @@ class StreamMetadataTests(unittest.TestCase):
             row(blob_id="a" * 40, extension="txt"),
             row(blob_id="b" * 40, path="/src/EXAMPLE.PY", extension="py"),
             row(blob_id="c" * 40, extension=""),
+            # Observed on a live Rust row: a root directory whose name starts with a space. Node trims
+            # with JavaScript's whitespace set, so edge whitespace, a byte-order mark, or a control
+            # character in the relative path is screened out rather than emitted.
+            row(blob_id="d" * 40, path="/ src/example.py"),
+            row(blob_id="e" * 40, path="/\ufeffsrc/example.py"),
+            row(blob_id="f" * 40, path="/src/exa\u0007mple.py"),
         ]
         eligible = row(blob_id="9" * 40, github_id=None, branch_name="HEAD")
         rows = [*screened_out[:4], eligible, *screened_out[4:]]

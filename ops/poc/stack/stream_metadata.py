@@ -5,6 +5,7 @@ import os
 import re
 import sys
 import tempfile
+import unicodedata
 
 
 PINNED_REVISION = "e565caa3a78c2423bd374333a472b049eb090e47"
@@ -131,6 +132,15 @@ def _path(value):
     return relative
 
 
+def _plain_path(relative):
+    """Node validates the emitted path with JavaScript's trim, whose whitespace set differs from
+    Python's at the edges (a byte-order mark, the C0 separators). A path either side would trim, or
+    one carrying a control character, is a screening rejection rather than an emitted row."""
+    return (relative == relative.strip() and not relative.startswith("\ufeff")
+            and not relative.endswith("\ufeff")
+            and not any(unicodedata.category(character) == "Cc" for character in relative))
+
+
 def _extensions(configuration):
     return EXTENSIONS[configuration]
 
@@ -187,6 +197,7 @@ def _validate_row(value, configuration, byte_limit):
     screened_out = (
         value["is_generated"] or value["is_vendor"] or encoding != "UTF-8"
         or not 1 <= length <= byte_limit or not licenses or len(set(licenses)) != len(licenses)
+        or not _plain_path(path)
         or not path.endswith(_extensions(configuration))
         or value["extension"] != path.rsplit(".", 1)[-1]
     )
