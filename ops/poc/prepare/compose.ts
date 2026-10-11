@@ -217,6 +217,10 @@ export const composeExperimentArtifact = (options: ComposeOptions): ComposedExpe
   const generated: Readonly<Record<DeckId, GeneratedRounds>> = { project: options.project, language: options.language, ai: options.ai };
   for (const id of DECK_IDS) requireDeck(generated[id], id);
   requireBindings(DECK_IDS.map((id) => generated[id].fixtures), options.profile, snapshot.id);
+  const fixtures = DECK_IDS.flatMap((id) => generated[id].fixtures);
+  const publicRounds = DECK_IDS.flatMap((id) => generated[id].publicRounds);
+  // Named first, so a leak reports its key and field instead of the parser's single rejection.
+  requirePublicContainment(fixtures, publicRounds);
   const artifact = parseExperimentArtifact({
     schemaVersion: "local-experiment-artifact.v2",
     contentClass: "LOCAL_UNREVIEWED_EXPERIMENT",
@@ -224,9 +228,6 @@ export const composeExperimentArtifact = (options: ComposeOptions): ComposedExpe
     crawlSnapshot: snapshot,
     decks: DECK_IDS.map((id) => ({ ...deckMetadata(options.profile, id), fixtures: generated[id].fixtures })),
   });
-  const fixtures = DECK_IDS.flatMap((id) => generated[id].fixtures);
-  const publicRounds = DECK_IDS.flatMap((id) => generated[id].publicRounds);
-  requirePublicContainment(fixtures, publicRounds);
   const roundRecordSet = parseRoundRecordSet({
     sessionContractVersionId: canonicalHash({ schemaVersion: artifact.schemaVersion, profileHash, crawlSnapshotId: snapshot.id }),
     publicRounds,

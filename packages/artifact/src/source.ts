@@ -1,44 +1,31 @@
-import "server-only";
-
 import {
+  AI_SOURCE_KEYS,
+  LANGUAGE_SOURCE_KEYS,
   PROFILE_VERSION,
+  PROJECT_SOURCE_KEYS,
   STACK_LANGUAGES,
-  STACK_REVISION,
-  fail,
-  type JsonRecord,
   type ParsedSource,
-} from "./local-real-experiment-domain.server";
+} from "./domain";
+import { fail } from "./errors";
 import {
   bool,
   count,
   gitId,
+  gitMode,
   positiveInteger,
   record,
   sha256,
   text,
   texts,
-} from "./local-real-experiment-validation.server";
+  utcTimestamp,
+  type JsonRecord,
+} from "./validation";
 
-const BASE_SOURCE_KEYS = [
-  "discoverySource", "repository", "repositoryUrl", "authorName", "authorLogin",
-  "authorBasis", "authorSourceUrl", "path", "blob", "rawContentHash", "excerptHash",
-  "licenseName", "licenseSpdx", "licenseFileUrl", "commit", "commitUrl", "blobUrl",
-  "profileVersion", "crawlSnapshotId",
-] as const;
-const PROJECT_SOURCE_KEYS = [
-  ...BASE_SOURCE_KEYS, "queryId", "childCommit", "childTree", "parentCommit", "parentTree",
-  "parentPath", "childPath", "parentMode", "childMode", "parentBlob", "childBlob",
-  "parentRawContentHash", "childRawContentHash", "changedLineHash",
-] as const;
-const AI_SOURCE_KEYS = [
-  ...PROJECT_SOURCE_KEYS, "aiCreditRecorded", "aiAssistant", "changedFileCount", "commitAdditions", "commitDeletions",
-] as const;
-const LANGUAGE_SOURCE_KEYS = [
-  ...BASE_SOURCE_KEYS, "stackRelease", "stackRevision", "configuration", "stableRowId",
-  "swhBlobId", "swhContentId", "swhDirectoryId", "swhSnapshotId", "swhRevisionId",
-  "stackRepository", "stackPath", "detectedLicenses", "detectedLanguage", "generated",
-  "vendor", "sourceEncoding", "byteLength", "visitDate", "revisionDate", "committerDate",
-] as const;
+/** The Stack v2 release and revision the crawl snapshot names; every language source must match it. */
+export interface StackIdentity {
+  readonly release: string;
+  readonly revision: string;
+}
 
 const encodedPath = (value: string): string =>
   value.split("/").map(encodeURIComponent).join("/");
@@ -85,8 +72,8 @@ const validateLineage = (source: JsonRecord, queryRoles: ReadonlyMap<string, str
     "parentRawContentHash", "childRawContentHash", "changedLineHash",
   ]) sha256(source[key]);
   for (const key of ["parentPath", "childPath"]) text(source[key]);
-  if ((source.parentMode !== "100644" && source.parentMode !== "100755")
-    || (source.childMode !== "100644" && source.childMode !== "100755")) fail();
+  gitMode(source.parentMode);
+  gitMode(source.childMode);
   if (source.commit !== source.childCommit || source.blob !== source.childBlob
     || source.path !== source.parentPath || source.path !== source.childPath
     || source.rawContentHash !== source.childRawContentHash
@@ -125,26 +112,16 @@ export const validateAiSource = (
   return source as ParsedSource;
 };
 
-const validTimestamp = (value: unknown): void => {
-  const parsed = text(value);
-  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{6})?Z$/u.exec(parsed);
-  if (match === null) return fail();
-  const date = new Date(parsed);
-  if (Number.isNaN(date.valueOf())) fail();
-  const parts = match.slice(1, 7).map(Number);
-  if (date.getUTCFullYear() !== parts[0] || date.getUTCMonth() + 1 !== parts[1]
-    || date.getUTCDate() !== parts[2] || date.getUTCHours() !== parts[3]
-    || date.getUTCMinutes() !== parts[4] || date.getUTCSeconds() !== parts[5]) fail();
-};
-
+/** A Stack v2 row revalidated against GitHub: the Stack identities are the revalidated blob and commit. */
 export const validateLanguageSource = (
   value: unknown,
   snapshotId: string,
+  stack: StackIdentity,
 ): ParsedSource => {
   const source = record(value, LANGUAGE_SOURCE_KEYS);
   validateBaseSource(source, snapshotId);
-  if (source.discoverySource !== "STACK_V2" || source.stackRelease !== "v2.2.0"
-    || source.stackRevision !== STACK_REVISION
+  if (source.discoverySource !== "STACK_V2" || source.stackRelease !== stack.release
+    || source.stackRevision !== stack.revision
     || !(STACK_LANGUAGES as readonly unknown[]).includes(source.configuration)
     || source.detectedLanguage !== source.configuration || source.sourceEncoding !== "UTF-8"
     || bool(source.generated) || bool(source.vendor)) fail();
@@ -155,7 +132,7 @@ export const validateLanguageSource = (
   for (const key of ["stackRepository", "stackPath", "detectedLanguage"]) text(source[key]);
   const licences = texts(source.detectedLicenses);
   positiveInteger(source.byteLength);
-  for (const key of ["visitDate", "revisionDate", "committerDate"]) validTimestamp(source[key]);
+  for (const key of ["visitDate", "revisionDate", "committerDate"]) utcTimestamp(source[key]);
   if (source.repository !== source.stackRepository || source.path !== source.stackPath
     || source.commit !== source.swhRevisionId || source.blob !== source.swhContentId
     || !licences.includes(source.licenseSpdx as string)) fail();

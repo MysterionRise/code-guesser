@@ -87,11 +87,21 @@ describe("server-only local real experiment authority v2", () => {
     rejects(stale);
   });
 
+  it("plays any one to three decks a run could fill, in deck order", () => {
+    for (const kept of [[0], [1], [2], [0, 2], [1, 2]]) {
+      const partial = artifact();
+      partial.decks = kept.map((index: number) => partial.decks[index]);
+      expect(create(partial).decks.map((deck: any) => deck.id)).toEqual(kept.map((index) => ["project", "language", "ai"][index]));
+    }
+  });
+
   it("rejects the revision 11 schema, wrong deck order or size, and missing or extra notices", () => {
     for (const mutate of [
       (value: any) => { value.schemaVersion = "local-experiment-artifact.v1"; },
       (value: any) => { value.decks.reverse(); },
-      (value: any) => { value.decks.pop(); },
+      (value: any) => { value.decks = []; },
+      (value: any) => { value.decks.push(structuredClone(value.decks[0])); },
+      (value: any) => { value.decks[1].id = "before-after"; },
       (value: any) => { value.decks[0].fixtures.pop(); },
       (value: any) => { value.decks[2].fixtures.push(structuredClone(value.decks[2].fixtures[0])); },
       (value: any) => { value.decks[2].notice = null; },

@@ -8,26 +8,12 @@ export class CanonicalValueError extends Error {
 const fail = (): never => { throw new CanonicalValueError(); };
 const encode = new TextEncoder();
 
-const serialize = (value: unknown, active: Set<object>): string => {
-  if (value === null || typeof value === "boolean") return String(value);
-  if (typeof value === "string") return JSON.stringify(value);
-  if (typeof value === "number") return Number.isFinite(value) ? JSON.stringify(value) : fail();
-  if (typeof value !== "object") return fail();
-  if (active.has(value)) return fail();
-  active.add(value);
+/** The game's serializer, so the preparer and the game hash the same bytes. */
+const serialize = (value: unknown): string => {
   try {
-    if (Array.isArray(value)) {
-      if (Object.keys(value).length !== value.length) return fail();
-      return `[${value.map((item) => serialize(item, active)).join(",")}]`;
-    }
-    const prototype = Object.getPrototypeOf(value);
-    if (prototype !== Object.prototype && prototype !== null) return fail();
-    if (Object.getOwnPropertySymbols(value).length > 0) return fail();
-    const record = value as Record<string, unknown>;
-    return `{${Object.keys(record).sort().map((key) =>
-      `${JSON.stringify(key)}:${serialize(record[key], active)}`).join(",")}}`;
-  } finally {
-    active.delete(value);
+    return serializeCanonical(value);
+  } catch {
+    return fail();
   }
 };
 
@@ -44,7 +30,7 @@ const enforceArtifactBoundary = (value: unknown, seen = new Set<object>()): void
   }
 };
 
-export const canonicalBytes = (value: unknown): Uint8Array => encode.encode(serialize(value, new Set()));
+export const canonicalBytes = (value: unknown): Uint8Array => encode.encode(serialize(value));
 
 export const canonicalHash = (value: unknown): string =>
   createHash("sha256").update(canonicalBytes(value)).digest("hex");
@@ -57,3 +43,5 @@ export const canonicalArtifactBytes = (value: unknown): Uint8Array => {
 export const canonicalArtifactHash = (value: unknown): string =>
   createHash("sha256").update(canonicalArtifactBytes(value)).digest("hex");
 import { createHash } from "node:crypto";
+
+import { serializeCanonical } from "../../../packages/artifact/src/validation";

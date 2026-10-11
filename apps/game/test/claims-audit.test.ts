@@ -7,7 +7,7 @@ type Literal = Readonly<{ file: string; text: string }>;
 type ClaimPattern = Readonly<{ id: string; expression: RegExp }>;
 
 const ROOT = resolve(process.cwd());
-const SOURCE_ROOTS = ["apps/game/app", "apps/game/src", "packages/domain/src", "packages/measurement/src", "docs/operations"];
+const SOURCE_ROOTS = ["apps/game/app", "apps/game/src", "packages/domain/src", "packages/measurement/src", "packages/artifact/src", "docs/operations"];
 const SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".md", ".mdx"]);
 const EXCLUDED = /(?:^|\/)(?:docs\/gangsta|test|tests|support|fixtures|node_modules|\.next|coverage|reports|artifacts)(?:\/|$)/;
 const PERMITTED_RECORDED_SOURCE_PHRASES = new Set([

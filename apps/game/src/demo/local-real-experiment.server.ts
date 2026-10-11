@@ -243,8 +243,13 @@ export const createLocalRealExperiment = (
       artifactHash: expectedArtifactHash,
       decks,
       privateReveals,
-      createReveal: (request: RevealRequest) =>
-        revealFor(decks, privateReveals, expectedArtifactHash, request),
+      createReveal: (request: RevealRequest) => {
+        try {
+          return revealFor(decks, privateReveals, expectedArtifactHash, request);
+        } catch {
+          return fail();
+        }
+      },
     });
   } catch {
     return fail();
