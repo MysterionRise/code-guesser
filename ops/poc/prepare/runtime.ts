@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 
 import { canonicalBytes, canonicalHash } from "./canonical";
 import type { CapacityMeter } from "./capacity";
-import { PreparationError } from "./diagnostics";
+import { decodeEntry, type ReplayPolicy, type RunJournal } from "./journal";
 import type { CrawlProfile } from "./profile";
 import type { RequestInput } from "./request-policy";
 import { createRetryController, RUN_RETRY_LIMIT, type RetryController } from "./retry";
@@ -14,11 +14,17 @@ export interface Runtime {
   transport: BoundedTransport;
   readonly retry: RetryController;
   readonly environment: Environment;
-  readonly responses: Map<string, unknown[]>;
+  readonly responses: Map<string, unknown>;
   readonly hashes: string[];
-  readonly replayCursors: Map<string, number>;
+  readonly journal?: RunJournal;
   replay: boolean;
+  /** From now on every request must be one this run already accepted; finalization rebinds sources without new requests. */
   beginReplay(): void;
+}
+
+export class ReplayMissError extends Error {
+  public readonly code = "FINALIZE_REPLAY_MISS";
+  public constructor() { super("FINALIZE_REPLAY_MISS"); this.name = "ReplayMissError"; }
 }
 
 export const runtimeOf = (context: Context): Runtime => context.runtime as Runtime;
@@ -42,12 +48,17 @@ const SEARCH_PATH = "/search/commits";
 /** Identical GitHub GETs within one run reuse the first response; search pages stay fresh so a re-crawl sees new data. */
 const reusable = (request: RequestInput): boolean =>
   request.provider === "github" && request.method === "GET" && new URL(request.url).pathname !== SEARCH_PATH;
+/** Repository, commit, tree, blob, and licence GETs are deterministic; search pages are ordered; the access check is always live. */
+const replayPolicy = (request: RequestInput): ReplayPolicy =>
+  reusable(request) ? "fixed" : request.provider === "github" && new URL(request.url).pathname === SEARCH_PATH ? "sequence" : "offline";
+const sha256 = (bytes: Uint8Array): string => createHash("sha256").update(bytes).digest("hex");
 
 export const createPreparationRuntime = (
   profile: CrawlProfile,
   environment: Environment,
   capacity: CapacityMeter,
   fetchLike: typeof fetch = fetch,
+  journal?: RunJournal,
 ): Runtime => {
   const retry = createRetryController({
     maxRunRetries: RUN_RETRY_LIMIT,
@@ -64,30 +75,46 @@ export const createPreparationRuntime = (
     requestCount: profile.capacity.requestCount, responseBytes: profile.capacity.responseBytes, pages: profile.capacity.githubPages,
   } });
   const runtime: Runtime = {
-    capacity, retry, environment, responses: new Map(), hashes: [], replayCursors: new Map(), replay: false,
+    capacity, retry, environment, responses: new Map(), hashes: [], replay: false,
+    ...(journal ? { journal } : {}),
     transport: undefined as unknown as BoundedTransport,
-    beginReplay: () => { runtime.replay = true; runtime.replayCursors.clear(); },
+    beginReplay: () => { runtime.replay = true; },
   };
   const request = async (kind: "json" | "bytes", input: RequestInput, page?: number): Promise<unknown> => {
     const key = responseKey(input);
-    const cached = runtime.responses.get(key) ?? [];
+    const cached = runtime.responses.get(key);
     if (runtime.replay) {
-      const offset = runtime.replayCursors.get(key) ?? 0;
-      const value = reusable(input) ? cached[0] : cached[offset];
-      if (value === undefined) throw new PreparationError();
-      runtime.replayCursors.set(key, offset + 1);
-      return structuredClone(value);
+      if (!reusable(input) || cached === undefined) throw new ReplayMissError();
+      return structuredClone(cached);
     }
-    if (reusable(input) && cached.length > 0) return structuredClone(cached[0]);
+    if (reusable(input) && cached !== undefined) return structuredClone(cached);
+    const policy = replayPolicy(input);
+    // A journal replay is metered like a live response, so a replayed run spends what a live one would.
+    const recorded = journal?.take(key, policy);
     const lease = capacity.beginRequest();
     try {
-      const value = kind === "json" ? await base.requestJson(input, page) : await base.requestBytes(input, page);
-      const bytes = kind === "json" ? canonicalBytes(value) : value as Uint8Array;
-      lease.complete(bytes.byteLength);
-      runtime.hashes.push(createHash("sha256").update(bytes).digest("hex"));
-      runtime.responses.set(key, [...cached, structuredClone(value)]);
+      let value: unknown;
+      let accepted: string;
+      let byteLength: number;
+      if (recorded) {
+        value = decodeEntry(recorded);
+        accepted = recorded.sha256;
+        byteLength = recorded.byteLength;
+      } else {
+        value = kind === "json" ? await base.requestJson(input, page) : await base.requestBytes(input, page);
+        const bytes = kind === "json" ? canonicalBytes(value) : value as Uint8Array;
+        accepted = sha256(bytes);
+        byteLength = bytes.byteLength;
+      }
+      lease.complete(byteLength);
+      if (!recorded) {
+        journal?.record({ key, policy, sha256: accepted, byteLength, encoding: kind === "json" ? "json" : "base64",
+          body: kind === "json" ? value : Buffer.from(value as Uint8Array).toString("base64") });
+      }
+      runtime.hashes.push(accepted);
+      if (reusable(input)) runtime.responses.set(key, structuredClone(value));
       if (kind === "json" && new URL(input.url).pathname === SEARCH_PATH) {
-        const query = profile.github.queries.find(({ query: value }) => value === new URL(input.url).searchParams.get("q"));
+        const query = profile.github.queries.find(({ query: text }) => text === new URL(input.url).searchParams.get("q"));
         const body = value as Record<string, unknown>;
         capacity.recordGitHubPage(query?.id ?? "", Array.isArray(body.items) ? body.items.length : 0);
       }

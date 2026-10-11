@@ -55,6 +55,10 @@ export interface PreparationDependencies {
   createReport(input: Readonly<Record<string, unknown>>): unknown;
   stageReport(report: unknown): Promise<StagedRunReport>;
   publishArtifact(input: Readonly<{ artifact: unknown; expectedHash: string; beforeCommit?: () => Promise<void> }>): Promise<unknown>;
+  /** Keeps the counts-only record of a failed run for diagnosis; never provider data. */
+  writeFailureReport?(report: FailureReport): Promise<void>;
+  /** Closes the runtime after success or failure; returns one counts-only log line, if any. */
+  finishRuntime?(runtime: unknown): string | undefined;
   now(): Date;
   uuid(): string;
   log(message: string): void;
@@ -64,4 +68,20 @@ export interface PreparationResult {
   readonly artifactHash: string;
   readonly crawlSnapshotId: string;
   readonly publication: unknown;
+}
+
+/** What a failed run leaves behind: stable codes, counts, and spend only, the same aggregates its log lines carry. */
+export interface FailureReport {
+  readonly schemaVersion: "local-experiment-failure.v1";
+  readonly executionId: string;
+  readonly observedAt: string;
+  readonly stage: string;
+  readonly code: string;
+  readonly statusClass: string;
+  readonly site: string | null;
+  readonly spend: Readonly<Record<string, number>>;
+  readonly counts: Readonly<Record<string, number>>;
+  readonly capacity: Readonly<Record<string, unknown>> | null;
+  readonly rejections: readonly Readonly<{ stage: string; reasonCode: string; count: number }>[];
+  readonly journal: string | null;
 }

@@ -433,7 +433,46 @@ const logLines = (calls: readonly string[]): string[] =>
     ]);
   });
 
-  it("replays captured responses in order without a second live request", async () => {
+  it("closes the runtime after success and after failure, logging its counts-only journal line", async () => {
+    const closed: unknown[] = [];
+    const harness = await makeHarness({ finishRuntime: (runtime) => { closed.push(runtime); return "PREPARATION_JOURNAL mode=fresh replayed=0 live=3"; } });
+    await prepareLocalExperiment(harness.dependencies);
+    expect(closed).toHaveLength(1);
+    expect(logLines(harness.calls).slice(-2)).toEqual(["log:PREPARATION_JOURNAL mode=fresh replayed=0 live=3", "log:PREPARATION_COMPLETE"]);
+
+    const failing = await makeHarness({
+      finishRuntime: () => { throw new Error("disk full at /secret/path"); },
+      searchGitHub: async () => { throw new GitHubSearchError("GITHUB_SEARCH_SHAPE"); },
+    });
+    await expect(prepareLocalExperiment(failing.dependencies)).rejects.toThrow("PREPARATION_FAILED");
+    expect(logLines(failing.calls).slice(-2)).toEqual(["log:PREPARATION_JOURNAL_FAILED", "log:PREPARATION_FAILED"]);
+    expect(failing.calls.join(" ")).not.toContain("/secret/path");
+  });
+
+  it("writes a counts-only failure report with the stage, code, spend, and rejection aggregates", async () => {
+    const reports: any[] = [];
+    const harness = await makeHarness({
+      writeFailureReport: async (report) => { reports.push(report); },
+      fetchStackBlob: async () => { throw new StackMetadataError("WORKER_EXIT_TOKEN_REJECTED"); },
+      log: () => undefined,
+    });
+    await expect(prepareLocalExperiment(harness.dependencies)).rejects.toThrow("PREPARATION_FAILED");
+    expect(reports).toHaveLength(1);
+    expect(reports[0]).toMatchObject({ schemaVersion: "local-experiment-failure.v1", stage: "BLOB_RETRIEVAL",
+      code: "INVARIANT_REJECTED", statusClass: "none", journal: null });
+    expect(reports[0].rejections).toContainEqual({ stage: "BLOB_RETRIEVAL", reasonCode: "WORKER_EXIT_TOKEN_REJECTED", count: expect.any(Number) });
+    expect(reports[0].capacity.requests).toBeTypeOf("number");
+    expect(JSON.stringify(reports[0])).not.toMatch(/external-(?:hf|gh)|Bearer/u);
+
+    const unwritable = await makeHarness({
+      writeFailureReport: async () => { throw new Error("EACCES /secret"); },
+      preflight: async () => { throw new Error("PREFLIGHT_REJECTED"); },
+    });
+    await expect(prepareLocalExperiment(unwritable.dependencies)).rejects.toThrow("PREPARATION_FAILED");
+    expect(logLines(unwritable.calls).slice(-2)).toEqual(["log:PREPARATION_FAILURE_REPORT_FAILED", "log:PREPARATION_FAILED"]);
+  });
+
+  it("finalizes from responses this run accepted and refuses any request it did not", async () => {
     const command = await import("./index") as Record<string, any>;
     const profile = await loadProfile();
     const capacity = createCapacityMeter({ limits: profile.capacity,
@@ -443,14 +482,19 @@ const logLines = (calls: readonly string[]): string[] =>
       async () => new Response(JSON.stringify({ sequence: ++liveRequests }), {
         status: 200, headers: { "content-type": "application/json" },
       }));
-    const request = { provider: "huggingFace", method: "GET",
+    const headers = { accept: "application/vnd.github+json", "x-github-api-version": profile.github.apiVersion };
+    const commit = { provider: "github", method: "GET", headers,
+      url: `https://api.github.com/repos/example/project/commits/${"a".repeat(40)}` };
+    const access = { provider: "huggingFace", method: "GET",
       url: "https://huggingface.co/api/datasets/bigcode/the-stack-v2", headers: { accept: "application/json" } };
 
-    expect(await runtime.transport.requestJson(request)).toEqual({ sequence: 1 });
-    expect(await runtime.transport.requestJson(request)).toEqual({ sequence: 2 });
+    expect(await runtime.transport.requestJson(commit)).toEqual({ sequence: 1 });
+    expect(await runtime.transport.requestJson(access)).toEqual({ sequence: 2 });
     runtime.beginReplay();
-    expect(await runtime.transport.requestJson(request)).toEqual({ sequence: 1 });
-    expect(await runtime.transport.requestJson(request)).toEqual({ sequence: 2 });
+    expect(await runtime.transport.requestJson(commit)).toEqual({ sequence: 1 });
+    await expect(runtime.transport.requestJson(access)).rejects.toMatchObject({ code: "FINALIZE_REPLAY_MISS" });
+    await expect(runtime.transport.requestJson({ ...commit, url: commit.url.replace("a", "b") }))
+      .rejects.toMatchObject({ code: "FINALIZE_REPLAY_MISS" });
     expect(liveRequests).toBe(2);
     expect(capacity.snapshot().requestCount).toBe(2);
   });

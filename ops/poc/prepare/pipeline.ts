@@ -12,7 +12,7 @@ import { STACK_LANGUAGES, type CrawlProfile } from "./profile";
 import { selectGitHub } from "./select-github";
 import { selectStack } from "./select-stack";
 import { addHashes, provisionalSnapshot, queryRole, repositoryScreen, view } from "./selection";
-import type { Context, PreparationDependencies, PreparationResult } from "./types";
+import type { Context, FailureReport, PreparationDependencies, PreparationResult } from "./types";
 
 const QUERY_COMPLETENESS = new Set(["COMPLETE", "PROVIDER_REPORTED_INCOMPLETE"]);
 const validateClassifications = (profile: CrawlProfile, values: unknown): readonly GitHubQueryClassification[] => {
@@ -63,6 +63,33 @@ const publishWithReport = async (deps: PreparationDependencies, composed: Compos
   return publication;
 };
 
+const failureReport = (
+  deps: PreparationDependencies,
+  failure: Readonly<{ stage: string; code: string; statusClass: string; site: string | undefined }>,
+  state: RunState,
+  spent: readonly (readonly [string, number])[],
+  snapshot: ReturnType<CapacityMeter["snapshot"]> | undefined,
+  journal: string | undefined,
+): FailureReport => Object.freeze({
+  schemaVersion: "local-experiment-failure.v1",
+  executionId: deps.uuid(),
+  observedAt: deps.now().toISOString(),
+  stage: failure.stage,
+  code: failure.code,
+  statusClass: failure.statusClass,
+  site: failure.site ?? null,
+  spend: Object.fromEntries(spent),
+  counts: { discovered: state.discovered, repositoriesAdmitted: state.repositoriesAdmitted, githubRevalidations: state.githubRevalidations,
+    screened: state.screened, duplicatesRejected: state.duplicatesRejected },
+  capacity: snapshot ? {
+    requests: snapshot.requestCount, responseBytes: snapshot.responseBytes, github: snapshot.github, stackRows: snapshot.stackRows,
+    stackMetadataBytes: snapshot.stackMetadataBytes, blobAttempts: snapshot.blobAttempts, blobsRetrieved: snapshot.successfulBlobs,
+    blobBytes: snapshot.totalBlobBytes, retries: snapshot.retryWaits, waitedMilliseconds: snapshot.waitedMilliseconds,
+  } : null,
+  rejections: [...state.diagnostics].map(([key, count]) => { const [stage, reasonCode] = key.split("\0") as [string, string]; return { stage, reasonCode, count }; }),
+  journal: journal ?? null,
+});
+
 /** Request spend per stage, logged as counts only on success and on failure. */
 const createStageTracker = () => {
   let stage = "PREFLIGHT" as FailureStage;
@@ -77,15 +104,17 @@ const createStageTracker = () => {
     }
     stage = next;
   };
+  const spent = (): [FailureStage, number][] => [...spend].filter(([, requests]) => requests > 0);
   return {
     current: (): FailureStage => stage,
     meter: (value: CapacityMeter): void => { meter = value; },
+    snapshot: () => meter?.snapshot(),
+    spent,
     enter,
     spendLine: (): string | undefined => {
       if (!meter) return undefined;
       enter(stage);
-      const parts = [...spend].filter(([, requests]) => requests > 0).map(([name, requests]) => `${name}=${requests} `).join("");
-      return `PREPARATION_SPEND ${parts}total=${meter.snapshot().requestCount}`;
+      return `PREPARATION_SPEND ${spent().map(([name, requests]) => `${name}=${requests} `).join("")}total=${meter.snapshot().requestCount}`;
     },
   };
 };
@@ -94,6 +123,14 @@ export const prepareLocalExperiment = async (deps: PreparationDependencies = def
   const state = createRunState();
   const tracker = createStageTracker();
   const logSpend = (): void => { const line = tracker.spendLine(); if (line) deps.log(line); };
+  let runtime: unknown;
+  const finishRuntime = (): string | undefined => {
+    if (runtime === undefined || !deps.finishRuntime) return undefined;
+    let line: string | undefined;
+    try { line = deps.finishRuntime(runtime); } catch { line = "PREPARATION_JOURNAL_FAILED"; }
+    if (line) deps.log(line);
+    return line;
+  };
   try {
     const loaded = await deps.loadProfile();
     const profileHash = canonicalHash(loaded.profile);
@@ -102,7 +139,7 @@ export const prepareLocalExperiment = async (deps: PreparationDependencies = def
     const capacity = deps.createCapacity({ limits: loaded.profile.capacity,
       githubQueryIds: loaded.profile.github.queries.map(({ id }) => id), stackLanguages: STACK_LANGUAGES });
     tracker.meter(capacity);
-    const runtime = deps.createRuntime({ profile: loaded.profile, environment, capacity });
+    runtime = deps.createRuntime({ profile: loaded.profile, environment, capacity });
     const context: Context = Object.freeze({ ...loaded, profileHash, environment, capacity, runtime });
     const hashes: string[] = [];
     addHashes(hashes, (await deps.preflight(context)).acceptedResponseHashes);
@@ -147,6 +184,7 @@ export const prepareLocalExperiment = async (deps: PreparationDependencies = def
     const publication = await publishWithReport(deps, composed, report);
     if (classifications.some(({ completeness }) => completeness === "PROVIDER_REPORTED_INCOMPLETE")) deps.log("GITHUB_SEARCH_INCOMPLETE");
     logSpend();
+    finishRuntime();
     deps.log("PREPARATION_COMPLETE");
     return Object.freeze({ artifactHash: composed.artifactHash, crawlSnapshotId, publication });
   } catch (error) {
@@ -161,6 +199,12 @@ export const prepareLocalExperiment = async (deps: PreparationDependencies = def
       deps.log(`PREPARATION_COUNTS discovered=${state.discovered} admitted=${state.repositoriesAdmitted} duplicates=${state.duplicatesRejected}`);
       const rejections = rejectionSummary(state);
       if (rejections.length > 0) deps.log(`PREPARATION_REJECTIONS ${rejections.join(" ")}`);
+    }
+    const journal = finishRuntime();
+    if (deps.writeFailureReport) {
+      try {
+        await deps.writeFailureReport(failureReport(deps, { stage, ...diagnostic, site }, state, tracker.spent(), tracker.snapshot(), journal));
+      } catch { deps.log("PREPARATION_FAILURE_REPORT_FAILED"); }
     }
     deps.log("PREPARATION_FAILED");
     throw new PreparationError();
