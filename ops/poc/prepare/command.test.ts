@@ -19,7 +19,8 @@ import {
 
 const testModuleName: string = "vitest";
 const { afterEach, describe, expect, it } = await import(testModuleName) as any;
-const sourcePath = new URL("./index.ts", import.meta.url);
+const COMMAND_MODULES = ["index", "pipeline", "dependencies", "runtime", "selection", "select-github", "select-stack", "diagnostics", "types"];
+const sourceOf = (module: string) => readFile(new URL(`./${module}.ts`, import.meta.url), "utf8");
 const originalArguments = [...process.argv];
 afterEach(() => { process.argv.splice(0, process.argv.length, ...originalArguments); });
 const admittedWith = (candidate: any, source: Record<string, unknown> = {}) => accepted({
@@ -789,9 +790,10 @@ const logLines = (calls: readonly string[]): string[] =>
   });
 
   it("keeps game and browser code out of the command and redacts top-level failures", async () => {
-    const source = await readFile(sourcePath, "utf8");
-    expect(source).not.toMatch(/from\s+["'][^"']*(?:apps\/game|next\/|playwright)|startGame|demo-game/u);
-    expect(source).toMatch(/publishArtifact: async \(\{ artifact, expectedHash, beforeCommit \}\)[\s\S]*?targetPath: ARTIFACT_PATH, \.\.\.\(beforeCommit \? \{ beforeCommit \} : \{\}\)/u);
+    for (const module of COMMAND_MODULES) {
+      expect(await sourceOf(module)).not.toMatch(/from\s+["'][^"']*(?:apps\/game|next\/|playwright)|startGame|demo-game/u);
+    }
+    expect(await sourceOf("dependencies")).toMatch(/publishArtifact: async \(\{ artifact, expectedHash, beforeCommit \}\)[\s\S]*?targetPath: ARTIFACT_PATH, \.\.\.\(beforeCommit \? \{ beforeCommit \} : \{\}\)/u);
     const messages: string[] = [];
     const harness = await makeHarness({
       preflight: async () => { throw new Error("Bearer raw-secret account@example.test"); },
