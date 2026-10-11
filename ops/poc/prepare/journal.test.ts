@@ -139,6 +139,30 @@ describe("run journal", () => {
     expect(offline.summary.replayed).toBe(3);
   });
 
+  it("replays a deterministic not-found answer as the same error and metering, but never a rate limit", async () => {
+    const profile = await loadProfile();
+    const path = journalPath();
+    const statusFetch = (status: number) => (async () => new Response("{}", { status,
+      headers: { "content-type": "application/json" } })) as typeof fetch;
+    const record = async (status: number, sha: string) => {
+      const capacity = capacityFor(profile);
+      const journal = openJournal({ mode: status === 404 ? "fresh" : "resume", path });
+      const runtime = createPreparationRuntime(profile, { PATH: "/bin" }, capacity, statusFetch(status), journal);
+      await expect(runtime.transport.requestJson(commitRequest(profile, sha) as any)).rejects.toMatchObject({ code: "UNSUPPORTED_STATUS" });
+      journal.markDiscoveryComplete();
+      return { summary: journal.finish(), requests: capacity.snapshot().requestCount };
+    };
+    expect(await record(404, "a")).toEqual({ summary: { mode: "fresh", replayed: 0, live: 1 }, requests: 1 });
+    expect((await record(403, "b")).summary).toEqual({ mode: "resume", replayed: 0, live: 0 });
+
+    const capacity = capacityFor(profile);
+    const runtime = createPreparationRuntime(profile, { PATH: "/bin" }, capacity, refusingFetch, openJournal({ mode: "offline", path }));
+    await expect(runtime.transport.requestJson(commitRequest(profile, "a") as any))
+      .rejects.toMatchObject({ code: "UNSUPPORTED_STATUS", status: 404, diagnostic: { statusClass: "4xx" } });
+    await expect(runtime.transport.requestJson(commitRequest(profile, "b") as any)).rejects.toMatchObject({ code: "JOURNAL_MISS" });
+    expect(capacity.snapshot().requestCount).toBe(1);
+  });
+
   it("fails closed on a missing, altered, or truncated journal", async () => {
     const profile = await loadProfile();
     expect(() => openJournal({ mode: "resume", path: journalPath() })).toThrow("JOURNAL_MISSING");

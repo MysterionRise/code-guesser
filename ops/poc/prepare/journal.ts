@@ -21,7 +21,8 @@ import { canonicalBytes } from "./canonical";
 export type JournalMode = "fresh" | "resume" | "offline";
 /** `fixed` replays in resume and offline, `sequence` replays in order once discovery finished, `offline` replays offline only. */
 export type ReplayPolicy = "fixed" | "sequence" | "offline";
-export type JournalEncoding = "json" | "base64" | "text";
+/** `failure` records a deterministic provider answer such as a 404, replayed as the same error. */
+export type JournalEncoding = "json" | "base64" | "text" | "failure";
 
 export const JOURNAL_SCHEMA = "codeguessr-run-journal.v1";
 export const REDACTED_EMAIL = "redacted@journal.invalid";
@@ -65,7 +66,7 @@ export interface RunJournal {
 const sha256 = (bytes: Uint8Array): string => createHash("sha256").update(bytes).digest("hex");
 const HEX_64 = /^[0-9a-f]{64}$/u;
 const POLICIES = new Set<ReplayPolicy>(["fixed", "sequence", "offline"]);
-const ENCODINGS = new Set<JournalEncoding>(["json", "base64", "text"]);
+const ENCODINGS = new Set<JournalEncoding>(["json", "base64", "text", "failure"]);
 
 /** Replaces every string under an `email` key; nothing the preparer reads is stored there. */
 export const redactEmails = (value: unknown): unknown => {
@@ -76,7 +77,7 @@ export const redactEmails = (value: unknown): unknown => {
 };
 
 const storedBytes = (encoding: JournalEncoding, body: unknown): Uint8Array =>
-  encoding === "json" ? canonicalBytes(body) : new TextEncoder().encode(String(body));
+  encoding === "json" || encoding === "failure" ? canonicalBytes(body) : new TextEncoder().encode(String(body));
 
 /** Decodes a replayed entry into the value a live request would have returned. */
 export const decodeEntry = (entry: JournalEntry): unknown => {
@@ -91,7 +92,8 @@ const parseEntry = (value: unknown): JournalEntry => {
   if (typeof key !== "string" || key.length === 0 || !POLICIES.has(policy as ReplayPolicy)
     || typeof accepted !== "string" || !HEX_64.test(accepted) || !Number.isSafeInteger(byteLength) || (byteLength as number) < 0
     || !ENCODINGS.has(encoding as JournalEncoding) || typeof storedSha256 !== "string"
-    || (encoding !== "json" && typeof body !== "string")) return fail("JOURNAL_CORRUPT");
+    || ((encoding === "base64" || encoding === "text") && typeof body !== "string")
+    || (encoding === "failure" && !Number.isSafeInteger((body as { status?: unknown } | null)?.status))) return fail("JOURNAL_CORRUPT");
   let actual: string;
   try { actual = sha256(storedBytes(encoding as JournalEncoding, body)); } catch { return fail("JOURNAL_CORRUPT"); }
   if (actual !== storedSha256) fail("JOURNAL_CORRUPT");

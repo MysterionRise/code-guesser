@@ -6,7 +6,7 @@ import { decodeEntry, type ReplayPolicy, type RunJournal } from "./journal";
 import type { CrawlProfile } from "./profile";
 import type { RequestInput } from "./request-policy";
 import { createRetryController, RUN_RETRY_LIMIT, type RetryController } from "./retry";
-import { createBoundedTransport, type BoundedTransport } from "./transport";
+import { createBoundedTransport, statusError, TransportError, type BoundedTransport } from "./transport";
 import type { Context, Environment, StageResult } from "./types";
 
 export interface Runtime {
@@ -52,6 +52,11 @@ const reusable = (request: RequestInput): boolean =>
 const replayPolicy = (request: RequestInput): ReplayPolicy =>
   reusable(request) ? "fixed" : request.provider === "github" && new URL(request.url).pathname === SEARCH_PATH ? "sequence" : "offline";
 const sha256 = (bytes: Uint8Array): string => createHash("sha256").update(bytes).digest("hex");
+/** Answers that say what the provider holds (missing, gone, unprocessable), not how it is doing; rate limits are excluded. */
+const DETERMINISTIC_STATUSES = new Set([404, 409, 410, 422, 451]);
+const deterministicStatus = (request: RequestInput, error: unknown): number | undefined =>
+  reusable(request) && error instanceof TransportError && error.code === "UNSUPPORTED_STATUS"
+    && error.status !== undefined && DETERMINISTIC_STATUSES.has(error.status) ? error.status : undefined;
 
 export const createPreparationRuntime = (
   profile: CrawlProfile,
@@ -93,6 +98,7 @@ export const createPreparationRuntime = (
     const recorded = journal?.take(key, policy);
     const lease = capacity.beginRequest();
     try {
+      if (recorded?.encoding === "failure") throw statusError(input, (recorded.body as { status: number }).status);
       let value: unknown;
       let accepted: string;
       let byteLength: number;
@@ -119,7 +125,15 @@ export const createPreparationRuntime = (
         capacity.recordGitHubPage(query?.id ?? "", Array.isArray(body.items) ? body.items.length : 0);
       }
       return value;
-    } catch (error) { lease.release(); throw error; }
+    } catch (error) {
+      lease.release();
+      const status = recorded ? undefined : deterministicStatus(input, error);
+      if (status !== undefined) {
+        const body = { status };
+        journal?.record({ key, policy, sha256: sha256(canonicalBytes(body)), byteLength: 0, encoding: "failure", body });
+      }
+      throw error;
+    }
   };
   runtime.transport = Object.freeze({
     requestJson: (input: RequestInput, page?: number) => request("json", input, page),

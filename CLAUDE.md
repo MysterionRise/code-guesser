@@ -44,28 +44,40 @@ gate: changing queries, retries, ceilings, deck rules, or running
   `local-experiment-artifact.v2`, and the root-route deck chooser
   (`/?deck=project|language|ai`).
 - The committed artifact `apps/game/src/demo/generated/local-real-rounds.json`
-  came from the 2026-10-11 live run (384 of 600 requests). Its canonical
-  SHA-256 `27e117c9b6f7c5c509b22eb220aef211cb3a87b79a92ead099f326b41ed0f018` is
-  pinned in `apps/game/src/demo/local-real-experiment.pin.server.ts`; see
-  `docs/review/evidence/2026-10-11-three-deck-live-run.md`.
+  came from the 2026-10-11 journal run (384 of 600 requests), reproduced byte
+  for byte by `--resume` and `--offline`. Its canonical SHA-256
+  `602ca9f5fb48a699da68ded37b944d30ca236023f3618937d1d5ad5bbc8dfe06` is pinned
+  in `apps/game/src/demo/local-real-experiment.pin.server.ts`; see
+  `docs/review/evidence/2026-10-11-phase-1-journal-runs.md`. The journal for
+  that run is in `ops/poc/stack/tmp/journal/run.jsonl` on this machine.
 - Phase 0 of the review roadmap is done: worker reason codes, a Node↔Python
   seam test, Stack metadata first, fatal budget exhaustion, bounded retries,
   repository screening, GET reuse, the UI quick wins, and re-recorded media.
+- Phase 1 is done (branch `claude/phase-1-pipeline`, stacked on PR #7):
+  - `ops/poc/prepare/index.ts` is a thin CLI over `pipeline.ts`,
+    `select-github.ts`, `select-stack.ts`, `selection.ts`, `runtime.ts`,
+    `diagnostics.ts`, and `dependencies.ts`.
+  - A run journal (`journal.ts`, `worker-journal.ts`) backs `--resume` and
+    `--offline`.
+  - A failed run writes `ops/poc/stack/tmp/local-experiment-last-failure.json`.
+  - Every deck that fills is published; publication writes the pin too.
+  - `ops/poc/limits.json` is the one limits file for Node and Python.
+  - `packages/artifact` is the one artifact parser and hash for the game and
+    the preparer.
+  - The unreachable beta modules under `apps/game/src` are gone.
 - Port 3000 may be taken locally by an unrelated Docker container; run browser
   tests with `E2E_PORT=3200 pnpm test:e2e`.
 
 ## Next steps
 
-Phases 1–3 of the review roadmap:
+Phases 2–3 of the review roadmap:
 
-1. Pipeline structure: a run journal with `--resume` and `--offline`, per-deck
-   publication, a failure report, `index.ts` split into modules, one shared
-   artifact parser, one limits file for Node and Python.
-2. Deck redesign: language deck without leaks, "Before or after?" replacing the
-   AI deck, a project deck from popular Stack v2 repositories (today all five
+1. Deck redesign, iterating with `pnpm prepare:poc --offline` against the
+   journal: language deck without leaks, "Before or after?" replacing the AI
+   deck, a project deck from popular Stack v2 repositories (today all five
    answers come from facebook), sampled and shuffled sessions, and a leakage
    test.
-3. Grow The Stack v2 (probe row-group repository spread first), then other
+2. Grow The Stack v2 (probe row-group repository spread first), then other
    sources.
 
 Live run:
@@ -77,21 +89,34 @@ STACK_V2_ACKNOWLEDGED_USABLE_REVISION=e565caa3a78c2423bd374333a472b049eb090e47 \
 pnpm prepare:poc
 ```
 
-After a success: verify the artifact (it parses under the v2 model, preparer
-and game canonical hashes equal the report's `artifactHash`, decks are
-project/language/ai of five, no token-like strings), pin the hash, run the full
+Add `--resume` after a failed run to replay what the journal holds and fetch
+only the rest, or `--offline` to replay the journal with no network and no
+token (it fails with `JOURNAL_MISS` on anything unrecorded). The journal is
+`ops/poc/stack/tmp/journal/run.jsonl` (ignored).
+
+After a success the artifact and its pin are already written together. Check
+the `PREPARATION_DECKS` line for which decks published, run the full
 verification matrix, and re-record the media with `pnpm demo:record`.
 
 ## Reading failures
 
-Read the `PREPARATION_STAGE_FAILED <stage> <code> <status-class>` line first.
+Read the `PREPARATION_STAGE_FAILED <stage> <code> <status-class>` line first;
+`ops/poc/stack/tmp/local-experiment-last-failure.json` holds the same codes
+with spend, capacity counts, and rejection aggregates.
+
+- `PREPARATION_DECK_SKIPPED <deck> <code>`: that deck did not fill (`DECK_SHORT`,
+  or the `BUDGET_EXHAUSTED_*` budget that ran out) and was left out; the others
+  still publish. `SELECTION DECK_SHORT` or `NO_DECK_FILLED` means none filled.
+- `JOURNAL_MISS`, `JOURNAL_MISSING`, `JOURNAL_CORRUPT`: `--offline` needed a
+  response the journal lacks, there is no journal, or a journal entry failed its
+  hash check. Run without `--offline` (or with `--resume`).
 
 - `RETRY_SIGNAL_MISSING 4xx`: a 403/429 without a usable retry instruction.
 - `WAIT_LIMIT`: a retry instruction longer than the fifteen-second wait.
 - `BUDGET_EXHAUSTED_<BUDGET>`: a run-wide budget (requests, blob attempts or
-  bytes, metadata bytes, retries, waits, temporary disk) ran out; the run stops
-  instead of rejecting every later candidate. `PREPARATION_SPEND` shows the
-  requests each stage used.
+  bytes, metadata bytes, retries, waits, temporary disk) ran out; the deck
+  being filled and every later deck are skipped instead of rejecting every
+  later candidate. `PREPARATION_SPEND` shows the requests each stage used.
 - `LOGICAL_RETRY_LIMIT`, `RUN_RETRY_LIMIT`, `WAIT_LIMIT`: a GitHub 5xx, network
   error, timeout, or rate limit was retried once and failed again, or the
   run's five retries or 30 s of waiting were spent.
@@ -131,8 +156,8 @@ pnpm --filter @codeguessr/game build
 ## Done means
 
 1. `pnpm prepare:poc` exits successfully with its completion marker.
-2. The artifact holds the three decks of five and passes server-side
-   validation; its hash is pinned.
+2. The artifact holds the intended decks of five and passes server-side
+   validation; its pinned hash matches.
 3. The root route plays every deck offline.
 4. Browser, build, accessibility, performance, containment, unit, and type
    checks pass freshly.

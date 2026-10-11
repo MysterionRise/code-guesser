@@ -31,6 +31,8 @@ export class TransportError extends Error {
   public constructor(
     public readonly code: TransportErrorCode,
     public readonly diagnostic: TransportDiagnostic,
+    /** The exact HTTP status, kept on the error for the run journal; diagnostics carry only its class. */
+    public readonly status?: number,
   ) {
     super(code);
     this.name = "TransportError";
@@ -99,8 +101,12 @@ const diagnostic = (
 };
 
 const reject = (request: RequestInput, code: TransportErrorCode, status?: number): never => {
-  throw new TransportError(code, diagnostic(request, code, status));
+  throw new TransportError(code, diagnostic(request, code, status), status);
 };
+
+/** Rebuilds the error a request answered with, for a replayed journal entry. */
+export const statusError = (request: RequestInput, status: number): TransportError =>
+  new TransportError("UNSUPPORTED_STATUS", diagnostic(request, "UNSUPPORTED_STATUS", status), status);
 
 const readMetered = async (
   request: RequestInput,
