@@ -16,7 +16,7 @@ const HASH_COMMENT_LANGUAGES = new Set<StackLanguage>(["Python", "Ruby"]);
 const DOCSTRING_OPEN = /^[rRuUbBfF]{0,2}("""|''')/u;
 
 /** Index of the first line that is code: not blank, not a comment, shebang, docstring, or licence header. */
-const firstCodeLine = (lines: readonly string[], language: StackLanguage): number | undefined => {
+export const firstCodeLine = (lines: readonly string[], language: StackLanguage): number | undefined => {
   let index = 0;
   while (index < lines.length) {
     const line = lines[index]!.trim();
