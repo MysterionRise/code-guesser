@@ -5,6 +5,17 @@ read-only reviews fed this document: a product-owner review, a principal-enginee
 of the preparation pipeline, and research into other code sources. A planning pass
 turned them into one roadmap, and the main claims were checked against the code.
 
+## Status (updated 2026-10-11, end of day)
+
+| Phase | State | Where |
+| --- | --- | --- |
+| 0: reliability, request savings, UI quick wins | done | PR #7; [evidence](evidence/2026-10-11-three-deck-live-run.md) |
+| 1: run journal, per-deck publication, one artifact model | done | PR #8; [evidence](evidence/2026-10-11-phase-1-journal-runs.md) |
+| 2: deck redesign | done | `claude/phase-2-decks`; [evidence](evidence/2026-10-11-v3-decks-run.md) |
+| 3: grow The Stack v2, then other sources | next | `CLAUDE.md` next steps |
+
+The findings below describe the state before Phase 0 and are kept as written.
+
 ## Summary
 
 After about ten weeks, thirteen Contract revisions and sixteen live preparation runs, a
