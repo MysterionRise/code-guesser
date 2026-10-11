@@ -80,6 +80,14 @@ describe("server-only local real experiment loader", () => {
     expect(LOCAL_REAL_EXPERIMENT_NOTICE).toMatch(/Not approved beta content/u);
   });
 
+  it("binds the root route and its reveal action to the local experiment loader", () => {
+    const page = readFileSync(new URL("../src/app/page.tsx", import.meta.url), "utf8");
+    const actions = readFileSync(new URL("../src/app/actions.ts", import.meta.url), "utf8");
+    expect(page).toContain("local-real-experiment-loader.server");
+    expect(page).toContain("authorizeLocalExperimentReveal");
+    expect(actions).toContain("local-real-experiment-loader.server");
+  });
+
   it("stays server-only, reads only the generated file, and never imports the synthetic catalogue", () => {
     const source = readFileSync(new URL("../src/demo/local-real-experiment-loader.server.ts", import.meta.url), "utf8");
     const pin = readFileSync(new URL("../src/demo/local-real-experiment.pin.server.ts", import.meta.url), "utf8");
