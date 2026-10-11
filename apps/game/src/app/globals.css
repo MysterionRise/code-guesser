@@ -16,7 +16,13 @@ button:focus-visible, input:focus-visible, a:focus-visible { outline: 3px solid 
 .game-card { background: rgba(15, 31, 25, .92); border: 1px solid #25483c; border-radius: 24px; padding: clamp(22px, 5vw, 48px); box-shadow: 0 22px 80px #0008; }
 .eyebrow { color: #baff65; margin: 0; font-size: .82rem; text-transform: uppercase; letter-spacing: .15em; font-weight: 800; }
 h1 { font-size: clamp(1.8rem, 5vw, 3.4rem); line-height: 1; margin: 12px 0 28px; max-width: 700px; }
-.code-window { margin: 0 0 20px; padding: 24px; min-height: 150px; overflow: auto; white-space: pre-wrap; background: #030a08; border: 1px solid #2b5043; border-radius: 14px; color: #cdeada; font: 500 .95rem/1.7 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.code-window { margin: 0 0 12px; padding: 24px; min-height: 150px; max-width: 100%; overflow: auto; white-space: pre; tab-size: 4; background: #030a08; border: 1px solid #2b5043; border-radius: 14px; color: #cdeada; font: 500 .95rem/1.7 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.hint-cost { margin: 0 0 10px; color: #9fbcae; font-size: .88rem; }
+h1[tabindex="-1"]:focus, h2[tabindex="-1"]:focus { outline: none; }
+.reveal small a { color: #baff65; overflow-wrap: anywhere; }
+.empty-state { width: min(980px, calc(100% - 32px)); margin: 36px auto 64px; }
+.empty-state h1 { margin: 0 0 12px; }
+.empty-state .operator-note { color: #9fbcae; font-size: .9rem; }
 .hints { min-height: 54px; display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
 .hint, .hint-button { margin: 0; padding: 9px 13px; border: 1px dashed #527565; border-radius: 10px; background: #10251d; color: #cdeada; }
 .hint-button { cursor: pointer; color: #baff65; }

@@ -44,16 +44,20 @@ export default async function Page({ searchParams }: PageProps) {
       <noscript><p className="demo-notice">CodeGuessr needs JavaScript to accept answers and reveal progressive evidence.</p></noscript>
       {!loaded.ok
         ? (
-          <p className="demo-notice" role="alert">
-            The generated experiment artifact is missing or failed validation, so there is nothing to play.
-            Run <code>pnpm prepare:poc</code>, verify the artifact hash, and record it before starting the game.
-          </p>
+          <section className="empty-state" role="alert" aria-labelledby="empty-state-title">
+            <h1 id="empty-state-title">No rounds are ready yet</h1>
+            <p>The decks are prepared from real open-source code before play, and this copy has none to serve.</p>
+            <p className="operator-note">
+              For the operator: run <code>pnpm prepare:poc</code>, verify the new artifact, and pin its hash. The
+              current artifact is missing, from an older format, or does not match its pinned hash.
+            </p>
+          </section>
         )
         : deck
           ? (
             <>
               <nav className="deck-nav" aria-label="Decks"><a href="/">All decks</a></nav>
-              <DemoArcade key={deck.id} mode={deck.mode} authorizeRevealAction={authorizeLocalExperimentReveal} chooseAnotherDeckHref="/" />
+              <DemoArcade key={deck.id} mode={deck.mode} deckTitle={deck.title} authorizeRevealAction={authorizeLocalExperimentReveal} chooseAnotherDeckHref="/" />
             </>
           )
           : <DeckChooser decks={loaded.experiment.decks} />}

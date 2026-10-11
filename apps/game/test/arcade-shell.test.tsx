@@ -56,6 +56,11 @@ describe("static arcade shell", () => {
     expect(html).not.toContain("Where did this code come from?");
     expect(html).toContain("Option A");
     expect(html).toContain("Reveal hint 1");
+    // Hint costs are visible up front and announced with the hint button.
+    expect(html).toMatch(/<p class="hint-cost" id="hint-cost-round-1">Each hint lowers this round’s points: 1,000 → 800 → 500\.<\/p>/u);
+    expect(html).toMatch(/<button class="hint-button"[^>]*aria-describedby="hint-cost-round-1"/u);
+    // Long lines scroll inside a keyboard-reachable code window instead of wrapping.
+    expect(html).toMatch(/<pre class="code-window" tabindex="0" aria-label="Code excerpt">/u);
     expect(html).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
     expect(html).not.toContain("<script>alert(1)</script>");
     expect(html).toContain("This game needs JavaScript for answers and progressive evidence.");
@@ -197,10 +202,14 @@ describe("static arcade shell", () => {
     }
     expect(session.status).toBe("complete");
     expect(session.roundIndex).toBe(4);
-    const share = projectSpoilerFreeShare(session.result!);
-    expect(share).toEqual({ text: "CodeGuessr 5000/5000 · 5/5", score: 5000, rounds: 5 });
+    expect(session.correctRounds).toBe(5);
+    const share = projectSpoilerFreeShare(session.result!, session.correctRounds, "Which language?");
+    expect(share).toEqual({ text: "CodeGuessr · Which language? · 5/5 correct · 5,000/5,000", score: 5000, rounds: 5, correct: 5 });
     expect(JSON.stringify(share)).not.toMatch(/candidate|answer|evidence|excerpt/iu);
-    expect(formatCompletionResult(session.result!)).toBe("Run complete — 5,000 points. Share: CodeGuessr 5000/5000 · 5/5.");
+    expect(projectSpoilerFreeShare(session.result!, 3).text).toBe("CodeGuessr · 3/5 correct · 5,000/5,000");
+    expect(() => projectSpoilerFreeShare(session.result!, 6)).toThrow(ArcadeShellRuleError);
+    expect(formatCompletionResult(session.result!, session.correctRounds, "Which language?"))
+      .toBe("Run complete — 5,000 points, 5 of 5 correct. Share: CodeGuessr · Which language? · 5/5 correct · 5,000/5,000.");
 
     const restarted = transitionArcadeSession(
       mode,
