@@ -43,6 +43,8 @@ export interface GitHubSearchOptions {
   readonly profile: CrawlProfile;
   readonly transport: Pick<BoundedTransport, "requestJson">;
   readonly retry: Pick<RetryController, "execute">;
+  /** Called before a query's one fresh pass, so the caller can forget the discarded pass's pages. */
+  readonly onQueryRestart?: (queryId: string) => void;
 }
 
 export interface GitHubSearchCandidate {
@@ -94,13 +96,6 @@ const searchResponse = (value: unknown): Readonly<{
     ])),
   });
 };
-
-/**
- * Revision 11 authorized provider-reported incomplete pages only for its three literal query tuples.
- * Revision 12 replaced that query set and authorized no incomplete tuple, so every incomplete page
- * now fails closed.
- */
-const hasAuthorizedIncompleteProfile = (_profile: CrawlProfile): boolean => false;
 
 const repositoryName = (value: unknown): string => {
   if (typeof value !== "string") return fail("GITHUB_SEARCH_IDENTITY");
@@ -214,6 +209,54 @@ const loadSearchPage = (
   }, page));
 };
 
+/** Provider inconsistencies that one fresh pass over the same query can clear; record drift is never retried. */
+const RECRAWLED_REJECTIONS: ReadonlySet<GitHubSearchRejection> = new Set([
+  "GITHUB_SEARCH_INCOMPLETE", "GITHUB_SEARCH_TOTAL_CHANGED", "GITHUB_SEARCH_ITEM_COUNT", "GITHUB_SEARCH_DUPLICATE",
+] as const);
+
+interface QueryPass {
+  readonly candidates: readonly GitHubSearchCandidate[];
+  readonly responses: readonly unknown[];
+}
+
+const identityOf = (candidate: GitHubSearchCandidate): string => `${candidate.repository}\0${candidate.commit}`;
+
+/** One complete, consistent pass over every page of a query, or a rejection naming the failed check. */
+const crawlQuery = async (
+  options: GitHubSearchOptions,
+  query: CrawlProfile["github"]["queries"][number],
+  queryIndex: number,
+  earlierQueries: ReadonlySet<string>,
+): Promise<QueryPass> => {
+  const perPage = Math.min(GITHUB_PAGE_SIZE, options.profile.capacity.githubResults);
+  const candidates: GitHubSearchCandidate[] = [];
+  const responses: unknown[] = [];
+  const seen = new Set<string>();
+  let pages = 1;
+  let expectedTotal: number | undefined;
+  for (let page = 1; page <= pages; page += 1) {
+    const response = await loadSearchPage(options, query, page, perPage);
+    const parsed = searchResponse(response);
+    if (parsed.incompleteResults) fail("GITHUB_SEARCH_INCOMPLETE");
+    if (parsed.totalCount > options.profile.capacity.githubResults) fail("GITHUB_SEARCH_RESULT_CEILING");
+    if (expectedTotal !== undefined && parsed.totalCount !== expectedTotal) fail("GITHUB_SEARCH_TOTAL_CHANGED");
+    expectedTotal = parsed.totalCount;
+    pages = Math.max(1, Math.ceil(parsed.totalCount / perPage));
+    if (pages > options.profile.capacity.githubPages) fail("GITHUB_SEARCH_PAGE_CEILING");
+    const remaining = Math.max(0, parsed.totalCount - ((page - 1) * perPage));
+    if (parsed.items.length !== Math.min(perPage, remaining)) fail("GITHUB_SEARCH_ITEM_COUNT");
+    responses.push(response);
+    for (const item of parsed.items) {
+      const candidate = parseCandidate(item, query.id, queryIndex);
+      const identity = identityOf(candidate);
+      if (seen.has(identity) || earlierQueries.has(identity)) fail("GITHUB_SEARCH_DUPLICATE");
+      seen.add(identity);
+      candidates.push(candidate);
+    }
+  }
+  return Object.freeze({ candidates, responses });
+};
+
 export const crawlGitHubCommitSearch = async (
   options: GitHubSearchOptions,
 ): Promise<GitHubSearchPool> => {
@@ -223,39 +266,25 @@ export const crawlGitHubCommitSearch = async (
   const seenResponseHashes = new Set<string>();
   const seenCandidates = new Set<string>();
   for (const [queryIndex, query] of options.profile.github.queries.entries()) {
-    const perPage = Math.min(GITHUB_PAGE_SIZE, options.profile.capacity.githubResults);
-    let pages = 1;
-    let expectedTotal: number | undefined;
-    let providerReportedIncomplete = false;
-    for (let page = 1; page <= pages; page += 1) {
-      const response = await loadSearchPage(options, query, page, perPage);
-      const parsed = searchResponse(response);
-      if (parsed.incompleteResults && !hasAuthorizedIncompleteProfile(options.profile)) fail("GITHUB_SEARCH_INCOMPLETE");
-      providerReportedIncomplete ||= parsed.incompleteResults;
-      if (parsed.totalCount > options.profile.capacity.githubResults) fail("GITHUB_SEARCH_RESULT_CEILING");
-      if (expectedTotal !== undefined && parsed.totalCount !== expectedTotal) fail("GITHUB_SEARCH_TOTAL_CHANGED");
-      expectedTotal = parsed.totalCount;
-      pages = Math.max(1, Math.ceil(parsed.totalCount / perPage));
-      if (pages > options.profile.capacity.githubPages) fail("GITHUB_SEARCH_PAGE_CEILING");
-      const remaining = Math.max(0, parsed.totalCount - ((page - 1) * perPage));
-      if (parsed.items.length !== Math.min(perPage, remaining)) fail("GITHUB_SEARCH_ITEM_COUNT");
+    let pass: QueryPass;
+    try {
+      pass = await crawlQuery(options, query, queryIndex, seenCandidates);
+    } catch (error) {
+      if (!(error instanceof GitHubSearchError) || !RECRAWLED_REJECTIONS.has(error.code)) throw error;
+      // One fresh pass: a transient inconsistency clears, a real one fails the same way again.
+      options.onQueryRestart?.(query.id);
+      pass = await crawlQuery(options, query, queryIndex, seenCandidates);
+    }
+    for (const response of pass.responses) {
       const responseHash = canonicalHash(response);
       if (!seenResponseHashes.has(responseHash)) {
         seenResponseHashes.add(responseHash);
         acceptedResponseHashes.push(responseHash);
       }
-      candidates.push(...parsed.items.map((item) => {
-        const candidate = parseCandidate(item, query.id, queryIndex);
-        const identity = `${candidate.repository}\0${candidate.commit}`;
-        if (seenCandidates.has(identity)) fail("GITHUB_SEARCH_DUPLICATE");
-        seenCandidates.add(identity);
-        return candidate;
-      }));
     }
-    queryClassifications.push(Object.freeze({
-      queryId: query.id,
-      completeness: providerReportedIncomplete ? "PROVIDER_REPORTED_INCOMPLETE" : "COMPLETE",
-    }));
+    for (const candidate of pass.candidates) seenCandidates.add(identityOf(candidate));
+    candidates.push(...pass.candidates);
+    queryClassifications.push(Object.freeze({ queryId: query.id, completeness: "COMPLETE" }));
   }
   return Object.freeze({
     candidates: Object.freeze(candidates.sort(discoveryOrder)),

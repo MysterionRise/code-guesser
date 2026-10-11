@@ -1,4 +1,5 @@
 import { createCapacityMeter, CapacityError } from "./capacity";
+import { RUN_RETRY_LIMIT } from "./retry";
 import { SIGNED_CAPACITY_CEILINGS, type CapacityLimits, STACK_LANGUAGES } from "./profile";
 
 const testModuleName: string = "vitest";
@@ -121,12 +122,23 @@ describe("preparation capacity", () => {
     expect(() => single.recordRetryWait(15_001)).toThrow(CapacityError);
     expect(single.snapshot().retryWaits).toBe(0);
 
+    const discarded = createCapacityMeter({ limits: { ...SIGNED_CAPACITY_CEILINGS, githubPages: 2 },
+      githubQueryIds: ["q"], stackLanguages: STACK_LANGUAGES });
+    discarded.recordGitHubPage("q", 100);
+    discarded.recordGitHubPage("q", 50);
+    expect(() => discarded.recordGitHubPage("q", 1)).toThrow(CapacityError);
+    const spentBefore = discarded.snapshot().requestCount;
+    // A discarded pass no longer counts toward the query's accepted pages and results.
+    discarded.discardGitHubQuery("q");
+    discarded.recordGitHubPage("q", 100);
+    expect(discarded.snapshot().github.q).toEqual({ pages: 1, results: 100 });
+    expect(discarded.snapshot().requestCount).toBe(spentBefore);
+    expect(() => discarded.discardGitHubQuery("unknown")).toThrow(CapacityError);
+
     const retries = meter();
-    retries.recordRetryWait(1);
-    retries.recordRetryWait(1);
-    retries.recordRetryWait(1);
+    for (let retry = 0; retry < RUN_RETRY_LIMIT; retry += 1) retries.recordRetryWait(1);
     expect(() => retries.recordRetryWait(1)).toThrow(CapacityError);
-    expect(retries.snapshot().retryWaits).toBe(3);
+    expect(retries.snapshot().retryWaits).toBe(RUN_RETRY_LIMIT);
   });
 
   it("meters live and peak temporary disk with idempotent release and frozen snapshots", () => {

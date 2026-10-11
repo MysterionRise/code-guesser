@@ -17,7 +17,7 @@ import { artifactFixtures, CROSS_DECK_KEYS } from "./model";
 import { isReportableSourceIdentity } from "./model-run";
 import { parseCrawlProfile, STACK_LANGUAGES, type CrawlProfile, type StackLanguage } from "./profile";
 import { generateProjectRounds, projectExcerptAllowed } from "./project-rounds";
-import { createRetryController, type RetryController } from "./retry";
+import { createRetryController, RUN_RETRY_LIMIT, type RetryController } from "./retry";
 import type { GeneratedRounds } from "./round-projection";
 import { stageRunReport, type StagedRunReport } from "./report-store";
 import { createRunReport } from "./run-report";
@@ -395,7 +395,7 @@ const stage = async <Value>(runtime: Runtime, operation: () => Promise<Value>): 
 const workerStage = async <Value>(operation: () => Promise<Value>): Promise<StageResult<Value>> => { const value = await operation(); return Object.freeze({ value, acceptedResponseHashes: Object.freeze([canonicalHash(value)]) }); };
 const responseKey = (request: { provider: string; method: string; url: string }): string => `${request.provider}\0${request.method}\0${request.url}`;
 export const createPreparationRuntime = (profile: CrawlProfile, environment: Environment, capacity: CapacityMeter, fetchLike: typeof fetch = fetch): Runtime => {
-  const retry = createRetryController({ maxRunRetries: 3, maxWaitMilliseconds: profile.capacity.waitMilliseconds, maxTotalWaitMilliseconds: profile.capacity.totalWaitMilliseconds,
+  const retry = createRetryController({ maxRunRetries: RUN_RETRY_LIMIT, maxWaitMilliseconds: profile.capacity.waitMilliseconds, maxTotalWaitMilliseconds: profile.capacity.totalWaitMilliseconds,
     sleep: async (milliseconds) => { capacity.recordRetryWait(milliseconds); await new Promise((done) => setTimeout(done, milliseconds)); } });
   const credentials = { ...(environment.GITHUB_TOKEN ? { github: `Bearer ${environment.GITHUB_TOKEN}` } : {}),
     ...(environment.HF_TOKEN ? { huggingFace: `Bearer ${environment.HF_TOKEN}` } : {}) };
@@ -446,7 +446,8 @@ const defaultDependencies = (): PreparationDependencies => ({
     return stage(runtime, () => preflightStackAccess({ profile: context.profile, acknowledgedUsableRevision,
     transport: runtime.transport })); },
   searchGitHub: (context) => { const runtime = runtimeOf(context); return stage(runtime, () => crawlGitHubCommitSearch({
-    profile: context.profile, transport: runtime.transport, retry: runtime.retry })); },
+    profile: context.profile, transport: runtime.transport, retry: runtime.retry,
+    onQueryRestart: (queryId) => context.capacity.discardGitHubQuery(queryId) })); },
   bindGitHubLineage: (options) => { const runtime = runtimeOf(options); return stage(runtime, async () =>
     (await bindGitHubLineage({ profile: options.profile, candidates: [options.candidate as any],
       transport: runtime.transport, retry: runtime.retry }))[0]!); },

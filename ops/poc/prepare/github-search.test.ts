@@ -425,6 +425,51 @@ describe("GitHub commit search adapter", () => {
     }
   });
 
+  it("re-crawls a query once after an inconsistent pass and accepts only a consistent second pass", async () => {
+    const raw = JSON.parse(await readFile(profilePath, "utf8")) as Record<string, any>;
+    raw.github.queries = [raw.github.queries[0]];
+    Object.assign(raw.capacity, { githubPages: 1, githubResults: 1 });
+    const profile = profileFrom(raw);
+    const consistent = { total_count: 1, incomplete_results: false, items: [searchItem(shaFor(1))] };
+    const inconsistent = [
+      { total_count: 1, incomplete_results: true, items: [searchItem(shaFor(1))] },
+      { total_count: 1, incomplete_results: false, items: [] },
+    ];
+    for (const first of inconsistent) {
+      const restarts: string[] = [];
+      let calls = 0;
+      const pool = await crawlGitHubCommitSearch({
+        profile,
+        transport: { requestJson: async () => (calls += 1) === 1 ? first : consistent },
+        retry: { execute: async (operation: () => Promise<unknown>) => operation() },
+        onQueryRestart: (queryId: string) => { restarts.push(queryId); },
+      });
+      expect(calls).toBe(2);
+      expect(restarts).toEqual([profile.github.queries[0]!.id]);
+      expect(pool.candidates.map(({ commit }: any) => commit)).toEqual([shaFor(1)]);
+      // The discarded pass leaves nothing behind: only the consistent response is accepted.
+      expect(pool.acceptedResponseHashes).toEqual([canonicalHash(consistent)]);
+    }
+
+    const restarts: string[] = [];
+    await expect(crawlGitHubCommitSearch({
+      profile,
+      transport: { requestJson: async () => inconsistent[0] },
+      retry: { execute: async (operation: () => Promise<unknown>) => operation() },
+      onQueryRestart: (queryId: string) => { restarts.push(queryId); },
+    })).rejects.toMatchObject(searchRejection("GITHUB_SEARCH_INCOMPLETE"));
+    expect(restarts).toHaveLength(1);
+
+    // Record drift is not a provider hiccup: no second pass.
+    let driftCalls = 0;
+    await expect(crawlGitHubCommitSearch({
+      profile,
+      transport: { requestJson: async () => { driftCalls += 1; return { total_count: 1, incomplete_results: false, items: [{ sha: shaFor(1) }] }; } },
+      retry: { execute: async (operation: () => Promise<unknown>) => operation() },
+    })).rejects.toMatchObject(searchRejection("GITHUB_SEARCH_SHAPE"));
+    expect(driftCalls).toBe(1);
+  });
+
   it("rejects changing totals and duplicate identities across requests", async () => {
     const raw = JSON.parse(await readFile(profilePath, "utf8")) as Record<string, any>;
     raw.github.queries = [raw.github.queries[0]];
