@@ -22,7 +22,7 @@ test("records local Chromium language observations without promoting them to sup
 test("no JavaScript exposes only the static explanation and no partial language controls", async ({ browser }) => {
   const context = await browser.newContext({ javaScriptEnabled: false, viewport: { width: 320, height: 568 } });
   const page = await context.newPage();
-  await page.goto("http://127.0.0.1:3000/");
+  await page.goto("/");
   expect(await page.locator("body").innerText()).toContain("CodeGuessr needs JavaScript to accept answers and reveal progressive evidence.");
   await expect(page.getByRole("radio")).toHaveCount(0);
   await expect(page.getByRole("button")).toHaveCount(0);

@@ -24,7 +24,7 @@ test("records the local Chromium privacy-flow limitation without promoting it to
 test("no JavaScript exposes only the static explanation and no partial privacy controls", async ({ browser }) => {
   const context = await browser.newContext({ javaScriptEnabled: false, viewport: { width: 320, height: 568 } });
   const page = await context.newPage();
-  await page.goto("http://127.0.0.1:3000/");
+  await page.goto("/");
   expect(await page.locator("body").innerText()).toContain("CodeGuessr needs JavaScript to accept answers and reveal progressive evidence.");
   await expect(page.getByRole("textbox")).toHaveCount(0);
   await expect(page.getByRole("checkbox")).toHaveCount(0);

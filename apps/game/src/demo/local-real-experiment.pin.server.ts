@@ -1,12 +1,11 @@
 import "server-only";
 
 /**
- * The trusted artifact hash: the SHA-256 of the canonical five-round artifact,
+ * The trusted artifact hash: the SHA-256 of the canonical three-deck artifact,
  * recorded by the operator from independent verification of one successful
- * preparation run (see the dated evidence under docs/gangsta). The preparer
- * never writes this value; it is the separate consumption input FR-007 requires,
- * so an edited, stale, or substituted artifact cannot be played.
+ * preparation run. The preparer never writes this value; it is a separate
+ * consumption input, so an edited, stale, or substituted artifact cannot be played.
  */
-// Recorded by the operator on 2026-10-08 after independent verification of the live run
-// (docs/gangsta/codeguessr-poc-readiness/evidence/2026-10-08-combined-live-run.md).
-export const TRUSTED_ARTIFACT_HASH = "0eab7f489f311125b9a1ae8574fd2a3b072c3c954e48c8284aac39559a607498";
+// Recorded on 2026-10-11 after independent verification of the live run
+// (docs/review/evidence/2026-10-11-three-deck-live-run.md).
+export const TRUSTED_ARTIFACT_HASH = "27e117c9b6f7c5c509b22eb220aef211cb3a87b79a92ead099f326b41ed0f018";
