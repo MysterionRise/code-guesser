@@ -3,10 +3,11 @@
 ## Mission
 
 A local-only "guess from the code" game. One preparation run crawls real
-open-source code before play and freezes three decks of five rounds: "Which
-project?" and an AI-credit deck from GitHub commit search, and "Which
-language?" from The Stack v2. The goal is a demo on one machine, not public
-play.
+open-source code before play and freezes three decks, each a pool of ten
+rounds from which every game deals five: "Which project?" (popular
+repositories from The Stack v2), "Which language?" (The Stack v2), and
+"Before or after?" (refactor commits from GitHub search). The goal is a demo on
+one machine, not public play.
 
 ## Read first
 
@@ -38,47 +39,46 @@ gate: changing queries, retries, ceilings, deck rules, or running
 
 ## Current state
 
-- Branch `claude/demoable-poc`, PR #7.
-- The three-deck game plays real rounds: profile
-  `ops/poc/profiles/local-real-rounds.v2.json`, artifact schema
-  `local-experiment-artifact.v2`, and the root-route deck chooser
-  (`/?deck=project|language|ai`).
+- Branches and PRs, stacked: `claude/demoable-poc` (#7, Phase 0),
+  `claude/phase-1-pipeline` (#8, Phase 1), `claude/phase-2-decks` (Phase 2).
+- The game plays profile `ops/poc/profiles/local-real-rounds.v3.json` and
+  artifact schema `local-experiment-artifact.v3` from the root-route deck
+  chooser (`/?deck=project|language|before-after`). A page load deals five
+  rounds from the deck's pool; `dealSession` in
+  `apps/game/src/demo/local-real-experiment.server.ts` does it server-side.
 - The committed artifact `apps/game/src/demo/generated/local-real-rounds.json`
-  came from the 2026-10-11 journal run (384 of 600 requests), reproduced byte
-  for byte by `--resume` and `--offline`. Its canonical SHA-256
-  `602ca9f5fb48a699da68ded37b944d30ca236023f3618937d1d5ad5bbc8dfe06` is pinned
-  in `apps/game/src/demo/local-real-experiment.pin.server.ts`; see
-  `docs/review/evidence/2026-10-11-phase-1-journal-runs.md`. The journal for
-  that run is in `ops/poc/stack/tmp/journal/run.jsonl` on this machine.
-- Phase 0 of the review roadmap is done: worker reason codes, a Node↔Python
-  seam test, Stack metadata first, fatal budget exhaustion, bounded retries,
-  repository screening, GET reuse, the UI quick wins, and re-recorded media.
-- Phase 1 is done (branch `claude/phase-1-pipeline`, stacked on PR #7):
-  - `ops/poc/prepare/index.ts` is a thin CLI over `pipeline.ts`,
-    `select-github.ts`, `select-stack.ts`, `selection.ts`, `runtime.ts`,
-    `diagnostics.ts`, and `dependencies.ts`.
-  - A run journal (`journal.ts`, `worker-journal.ts`) backs `--resume` and
-    `--offline`.
-  - A failed run writes `ops/poc/stack/tmp/local-experiment-last-failure.json`.
-  - Every deck that fills is published; publication writes the pin too.
-  - `ops/poc/limits.json` is the one limits file for Node and Python.
-  - `packages/artifact` is the one artifact parser and hash for the game and
-    the preparer.
-  - The unreachable beta modules under `apps/game/src` are gone.
+  came from the 2026-10-11 v3 run (569 of 1,500 requests). Its canonical SHA-256
+  `cf5bc8d31407b0dad797ffb372dda7d11d4d5da50ed1c30e0218bead31e14e0a` is pinned
+  in `apps/game/src/demo/local-real-experiment.pin.server.ts` (the preparer
+  writes it); see `docs/review/evidence/2026-10-11-v3-decks-run.md`. The
+  journal for that run is in `ops/poc/stack/tmp/journal/run.jsonl` on this
+  machine, so `pnpm prepare:poc --offline` rebuilds it with no network.
+- Phases 0–2 of the review roadmap are done:
+  - Phase 0: diagnostics, retries, yield, and UI quick wins.
+  - Phase 1: the module split, the run journal (`--resume`, `--offline`),
+    per-deck publication, the failure report, `ops/poc/limits.json`, and
+    `packages/artifact` as the one parser and hash.
+  - Phase 2: the v3 decks. The generators are `project-rounds.ts`,
+    `language-rounds.ts`, and `before-after-rounds.ts`; the selectors are
+    `select-stack.ts` and `select-github.ts`. The windows come from
+    `code-windows.ts`. The game deals sessions, shows panes and option
+    details, highlights the answer, and scores 250 × options per round. The
+    leakage test is `packages/artifact/test/deck-leakage.test.ts`.
 - Port 3000 may be taken locally by an unrelated Docker container; run browser
   tests with `E2E_PORT=3200 pnpm test:e2e`.
 
 ## Next steps
 
-Phases 2–3 of the review roadmap:
+Phase 3 of the review roadmap: grow the sources.
 
-1. Deck redesign, iterating with `pnpm prepare:poc --offline` against the
-   journal: language deck without leaks, "Before or after?" replacing the AI
-   deck, a project deck from popular Stack v2 repositories (today all five
-   answers come from facebook), sampled and shuffled sessions, and a leakage
-   test.
-2. Grow The Stack v2 (probe row-group repository spread first), then other
-   sources.
+1. More Stack v2 row groups and languages (look-alike pairs such as
+   TypeScript/JavaScript, Java/Kotlin, C/C++), so pools can grow past ten and
+   the language deck's options stay answerable.
+2. A `SourceAdapter` seam, then the next source (the Software Heritage API or
+   curated GitHub repositories).
+
+Iterate on deck rules with `pnpm prepare:poc --offline`; use `--resume` when
+a change needs responses the journal lacks.
 
 Live run:
 
@@ -95,8 +95,10 @@ token (it fails with `JOURNAL_MISS` on anything unrecorded). The journal is
 `ops/poc/stack/tmp/journal/run.jsonl` (ignored).
 
 After a success the artifact and its pin are already written together. Check
-the `PREPARATION_DECKS` line for which decks published, run the full
-verification matrix, and re-record the media with `pnpm demo:record`.
+the `PREPARATION_DECKS` line for which decks published, read a few rounds of
+each deck, run the full verification matrix (the leakage test runs against the
+committed artifact), and re-record the media with `pnpm demo:record` (each GIF
+under 4 MB).
 
 ## Reading failures
 
@@ -129,13 +131,16 @@ with spend, capacity counts, and rejection aggregates.
   `INCOMPLETE`, `TOTAL_CHANGED`, `ITEM_COUNT`, and `DUPLICATE` are provider
   inconsistencies; `SHAPE`, `IDENTITY`, and `DATE` are record drift.
 
-Rejection aggregates name the failing check: `LINEAGE_*`, `ADMISSION_*`
-(`ADMISSION_REPOSITORY_LICENSE` is a repository licence outside the
-allowlist), and `REVALIDATION_*`. `REPOSITORY_SCREENED_OUT` counts later
+Rejection aggregates name the failing check: `LINEAGE_*` (`LINEAGE_CHANGE_WINDOW`
+is a commit whose change does not fit one before-and-after window),
+`ADMISSION_*` (`ADMISSION_REPOSITORY_LICENSE` is a repository licence outside
+the allowlist), and `REVALIDATION_*` (`REVALIDATION_WINDOW` is a file with no
+code window past its preamble). `REPOSITORY_SCREENED_OUT` counts later
 candidates of a repository already rejected once.
 
-Selection diagnostics `REPOSITORY_REPEATED`, `PROJECT_NAME_IN_EXCERPT`,
-`PROJECT_REPOSITORY_SKIPPED`, `AI_CREDIT_ABSENT`, and
+Selection diagnostics `REPOSITORY_REPEATED`, `SUBJECT_UNUSABLE` (a commit
+subject no hint can quote), `PROJECT_NAME_IN_EXCERPT` (code or a file name
+that names an option), `LANGUAGE_ROUNDS_REJECTED`, and
 `SOURCE_IDENTITY_UNREPORTABLE` are expected screening outcomes, not faults.
 
 ## Commands
@@ -156,8 +161,9 @@ pnpm --filter @codeguessr/game build
 ## Done means
 
 1. `pnpm prepare:poc` exits successfully with its completion marker.
-2. The artifact holds the intended decks of five and passes server-side
-   validation; its pinned hash matches.
+2. The artifact holds the intended decks, each a pool of at least five rounds,
+   passes server-side validation and the leakage test, and its pinned hash
+   matches.
 3. The root route plays every deck offline.
 4. Browser, build, accessibility, performance, containment, unit, and type
    checks pass freshly.
