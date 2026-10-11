@@ -83,8 +83,9 @@ Read the `PREPARATION_STAGE_FAILED <stage> <code> <status-class>` line first.
 - `WAIT_LIMIT`: a retry instruction longer than the fifteen-second wait.
 - `REQUEST_COUNT` or `REQUEST_LIMIT` in the rejections: the request ceiling was
   spent.
-- `WORKER_EXIT`: a Python worker exited non-zero; reproduce it directly to read
-  its stderr code.
+- `WORKER_EXIT_<CODE>`: a Python worker exited non-zero with its own stable
+  code (`WORKER_UNEXPECTED` for an unmapped exception). A bare `WORKER_EXIT`
+  means its stderr was not a code.
 - `PUBLIC_CONTAINMENT_*`: names the protected key and public field that
   collided.
 - `GITHUB_SEARCH_*`: the discovery check that rejected a search response.

@@ -312,18 +312,27 @@ def stream_metadata(request, *, read_rows_fn=None, environment=None, output=None
             _restore_environment(active_environment, previous)
 
 
-def _main():
+def _main(argv=()):
+    """`--check-request` validates the request the orchestrator would send and exits without
+    any network access; it lets an offline test cross the Node-to-Python boundary."""
+    if list(argv) not in ([], ["--check-request"]):
+        sys.stderr.write("ARGUMENTS_REJECTED\n")
+        return 1
     try:
-        stream_metadata(json.load(sys.stdin))
+        request = json.load(sys.stdin)
+        if argv:
+            _parse_request(request, os.environ)
+            return 0
+        stream_metadata(request)
         return 0
     except MetadataStreamError as error:
         sys.stderr.write(error.code + "\n")
         return 1
     except Exception as error:
         code = getattr(error, "code", None)
-        sys.stderr.write((code if isinstance(code, str) and code.isupper() else "REQUEST_MALFORMED") + "\n")
+        sys.stderr.write((code if isinstance(code, str) and code.isupper() else "WORKER_UNEXPECTED") + "\n")
         return 1
 
 
 if __name__ == "__main__":
-    raise SystemExit(_main())
+    raise SystemExit(_main(sys.argv[1:]))

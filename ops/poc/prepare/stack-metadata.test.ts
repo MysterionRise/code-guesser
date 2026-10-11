@@ -354,6 +354,19 @@ describe("Stack metadata worker bridge", () => {
         stderr: Buffer.from("warning: secret=value"),
       }),
     });
+    // The worker's own stable reason code is named; any other stderr stays undisclosed.
+    for (const [stderr, code] of [
+      ["NETWORK_LIMIT_REJECTED\n", "WORKER_EXIT_NETWORK_LIMIT_REJECTED"],
+      ["EARLY_STOP", "WORKER_EXIT_EARLY_STOP"],
+      ["network_limit_rejected\n", "WORKER_EXIT"],
+      ["FIRST\nSECOND\n", "WORKER_EXIT"],
+      [`${"A".repeat(65)}\n`, "WORKER_EXIT"],
+      ["TOKEN hf_secret\n", "WORKER_EXIT"],
+    ] as const) {
+      await expectBeforeBlob(code, {
+        runWorker: async () => ({ exitCode: 1, stdout: new Uint8Array(), stderr: Buffer.from(stderr) }),
+      });
+    }
     const error = await collectStackMetadata(await setup({
       runWorker: async () => { throw new Error("Bearer hidden-token"); },
     })).catch((caught: unknown) => caught as Error);

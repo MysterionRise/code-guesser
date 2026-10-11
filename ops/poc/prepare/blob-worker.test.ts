@@ -96,6 +96,21 @@ describe("selected-blob worker bridge", () => {
     }
   });
 
+  it("names the worker's own reason code on a non-zero exit and drops any other stderr", () => {
+    const codeOf = (stderr: string): unknown => {
+      try {
+        parseBlobWorkerOutput(result(new Uint8Array(), 1, Buffer.from(stderr)), row, limits);
+      } catch (error) {
+        return (error as { code?: unknown }).code;
+      }
+      return undefined;
+    };
+    expect(codeOf("LIMIT_RAISED\n")).toBe("WORKER_EXIT_LIMIT_RAISED");
+    expect(codeOf("Bearer secret\n")).toBe("WORKER_EXIT");
+    expect(codeOf("ONE\nTWO\n")).toBe("WORKER_EXIT");
+    expect(codeOf("")).toBe("WORKER_EXIT");
+  });
+
   it("runs the worker, records its requests on the capacity meter, and returns the frozen blob", async () => {
     const profile = parseCrawlProfile(JSON.parse(await readFile(profilePath, "utf8")));
     const capacity = createCapacityMeter({ limits: profile.capacity,

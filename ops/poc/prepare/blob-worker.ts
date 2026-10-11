@@ -6,6 +6,7 @@ import {
   parseWorkerCounters,
   runLockedWorker,
   splitWorkerOutput,
+  workerExitCode,
   type StackMetadataRow,
   type WorkerCounters,
   type WorkerRequest,
@@ -131,7 +132,7 @@ export const parseBlobWorkerOutput = (
 ): ParsedBlobOutput => {
   if (result.stdout.byteLength > limits.perBlobBytes * STDOUT_EXPANSION) fail("NETWORK_BYTES");
   if (result.stderr.byteLength > STDERR_LIMIT) fail("WORKER_STDERR");
-  if (result.exitCode !== 0) fail("WORKER_EXIT");
+  if (result.exitCode !== 0) fail(workerExitCode(result.stderr));
   if (result.stderr.byteLength !== 0) fail("WORKER_STDERR");
   const { lines, trailer } = splitWorkerOutput(result.stdout);
   if (lines.length !== 1) fail("OUTPUT_MALFORMED");

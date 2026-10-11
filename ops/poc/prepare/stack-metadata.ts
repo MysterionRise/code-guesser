@@ -148,7 +148,8 @@ const validateRuntime = async (
   if (createHash("sha256").update(lock).digest("hex") !== LOCK_HASH) fail("LOCK_MISMATCH");
 };
 
-const workerRequest = (options: StackMetadataOptions): WorkerRequest => {
+/** The exact request the orchestrator hands the metadata worker, budgets taken from what remains. */
+export const metadataWorkerRequest = (options: StackMetadataOptions): WorkerRequest => {
   if (!(STACK_LANGUAGES as readonly string[]).includes(options.configuration)) {
     fail("CONFIGURATION_REJECTED");
   }
@@ -214,6 +215,23 @@ export const parseWorkerCounters = (line: string): WorkerCounters =>
 
 export const parseMetadataCounters = (line: string): MetadataCounters =>
   parseCounters(line, METADATA_COUNTER_KEYS) as unknown as MetadataCounters;
+
+const WORKER_REASON = /^[A-Z][A-Z0-9_]{0,63}$/u;
+
+/**
+ * The failure code for a worker that exited non-zero. A worker writes exactly one stable
+ * reason code to stderr on failure; that code is named, and anything else is dropped unread.
+ */
+export const workerExitCode = (stderr: Uint8Array): string => {
+  let text: string;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true }).decode(stderr);
+  } catch {
+    return "WORKER_EXIT";
+  }
+  const reason = text.endsWith("\n") ? text.slice(0, -1) : text;
+  return WORKER_REASON.test(reason) ? `WORKER_EXIT_${reason}` : "WORKER_EXIT";
+};
 
 /** Splits decoded worker stdout into its payload lines and the mandatory counters trailer. */
 export const splitWorkerOutput = (bytes: Uint8Array): Readonly<{ lines: readonly string[]; trailer: string }> => {
@@ -365,7 +383,7 @@ export const collectStackMetadata = async (
   options: StackMetadataOptions,
 ): Promise<readonly StackMetadataRow[]> => {
   await validateRuntime(options.readRuntimeFile ?? readFile);
-  const request = workerRequest(options);
+  const request = metadataWorkerRequest(options);
   let result: WorkerResult;
   try {
     result = await (options.runWorker ?? runLockedWorker)(request);
@@ -376,7 +394,7 @@ export const collectStackMetadata = async (
   try {
     if (result.stdout.byteLength > request.stdoutByteLimit) fail("METADATA_BYTES");
     if (result.stderr.byteLength > request.stderrByteLimit) fail("WORKER_STDERR");
-    if (result.exitCode !== 0) fail("WORKER_EXIT");
+    if (result.exitCode !== 0) fail(workerExitCode(result.stderr));
     if (result.stderr.byteLength !== 0) fail("WORKER_STDERR");
     const parsed = parseOutput(result.stdout, options);
     meterWorkerCounters(options, request, parsed);

@@ -355,14 +355,22 @@ def _read_request(stream):
         _fail("REQUEST_MALFORMED")
 
 
-def _main(*, stdin=None, stdout=None, stderr=None, session_factory=None):
+def _main(*, argv=(), stdin=None, stdout=None, stderr=None, session_factory=None):
+    """`--check-request` validates the rows and limits the orchestrator would send and exits
+    without creating a session; it lets an offline test cross the Node-to-Python boundary."""
     active_input = sys.stdin.buffer if stdin is None else stdin
     active_output = sys.stdout if stdout is None else stdout
     active_error = sys.stderr if stderr is None else stderr
+    if list(argv) not in ([], ["--check-request"]):
+        active_error.write("ARGUMENTS_REJECTED\n")
+        return 1
     try:
         request = _read_request(active_input)
         if not isinstance(request, dict) or set(request) != {"rows", "limits"}:
             _fail("REQUEST_MALFORMED")
+        if argv:
+            _validate_rows(request["rows"], _parse_limits(request["limits"]))
+            return 0
         results, counters = fetch_selected_blobs_with_counters(
             request["rows"], limits=request["limits"], session_factory=session_factory,
         )
@@ -374,9 +382,9 @@ def _main(*, stdin=None, stdout=None, stderr=None, session_factory=None):
         active_error.write(error.code + "\n")
         return 1
     except Exception:
-        active_error.write("REQUEST_MALFORMED\n")
+        active_error.write("WORKER_UNEXPECTED\n")
         return 1
 
 
 if __name__ == "__main__":
-    raise SystemExit(_main())
+    raise SystemExit(_main(argv=sys.argv[1:]))
