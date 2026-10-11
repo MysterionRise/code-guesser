@@ -454,6 +454,59 @@ const logLines = (calls: readonly string[]): string[] =>
     expect(capacity.snapshot().requestCount).toBe(2);
   });
 
+  it("reuses an identical GitHub GET within a run and in replay, but never a search page", async () => {
+    const command = await import("./index") as Record<string, any>;
+    const profile = await loadProfile();
+    const capacity = createCapacityMeter({ limits: profile.capacity,
+      githubQueryIds: profile.github.queries.map(({ id }) => id), stackLanguages: STACK_LANGUAGES });
+    let liveRequests = 0;
+    const runtime = command.createPreparationRuntime(profile, { PATH: "/bin" }, capacity,
+      async () => new Response(JSON.stringify({ sequence: ++liveRequests, items: [] }), {
+        status: 200, headers: { "content-type": "application/json" },
+      }));
+    const headers = { accept: "application/vnd.github+json", "x-github-api-version": profile.github.apiVersion };
+    const commit = { provider: "github", method: "GET", headers,
+      url: `https://api.github.com/repos/example/project/commits/${"a".repeat(40)}` };
+    const search = new URL("https://api.github.com/search/commits");
+    search.searchParams.set("q", profile.github.queries[0]!.query);
+    search.searchParams.set("sort", "committer-date");
+    search.searchParams.set("order", "desc");
+    search.searchParams.set("page", "1");
+    search.searchParams.set("per_page", "100");
+    const page = { provider: "github", method: "GET", headers, url: search.href };
+
+    expect(await runtime.transport.requestJson(commit)).toMatchObject({ sequence: 1 });
+    expect(await runtime.transport.requestJson(commit)).toMatchObject({ sequence: 1 });
+    expect(await runtime.transport.requestJson(page, 1)).toMatchObject({ sequence: 2 });
+    expect(await runtime.transport.requestJson(page, 1)).toMatchObject({ sequence: 3 });
+    runtime.beginReplay();
+    for (let replayed = 0; replayed < 3; replayed += 1) {
+      expect(await runtime.transport.requestJson(commit)).toMatchObject({ sequence: 1 });
+    }
+    expect(liveRequests).toBe(3);
+    expect(capacity.snapshot().requestCount).toBe(3);
+  });
+
+  it("screens each repository once before lineage and skips every candidate of a rejected one", async () => {
+    const candidates = [...HARNESS_CANDIDATES, { id: 9, queryId: "ordinary-facebook", repository: "org1/repo-1" }];
+    const screened: string[] = [];
+    const harness = await makeHarness({
+      searchGitHub: async () => accepted({ candidates, queryClassifications: classificationsFor(profile) }, "2"),
+      screenGitHubRepository: async ({ repository }) => {
+        screened.push(repository);
+        if (repository === "org1/repo-1") throw Object.assign(new Error("GITHUB_ADMISSION_REJECTED"), { code: "GITHUB_ADMISSION_REJECTED" });
+        return accepted({ repository }, "5");
+      },
+    });
+    const profile = await loadProfile();
+    await prepareLocalExperiment(harness.dependencies).catch(() => undefined);
+    expect(screened.filter((repository) => repository === "org1/repo-1")).toHaveLength(1);
+    expect(new Set(screened).size).toBe(screened.length);
+    expect(harness.calls.some((call) => call === "lineage:1" || call === "lineage:9")).toBe(false);
+    expect(screened.indexOf("org0/repo-0")).toBeGreaterThanOrEqual(0);
+    expect(harness.calls.indexOf("lineage:0")).toBeGreaterThan(-1);
+  });
+
   it("rejects a composed snapshot that disagrees with captured hashes before publication", async () => {
     const harness = await makeHarness({
       compose: () => ({ artifact: { crawlSnapshot: { id: hash("e") }, decks: [] },

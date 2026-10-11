@@ -221,6 +221,18 @@ describe("GitHub public repository admission", () => {
     const providerResponses = mutableResponses();
     mutate(providerResponses.get(api));
     await expect(invoke(providerResponses)).rejects.toBeInstanceOf(admissionModule.GitHubAdmissionError);
+    await expect(invoke(providerResponses)).rejects.toMatchObject({
+      message: "GITHUB_ADMISSION_REJECTED", code: "ADMISSION_REPOSITORY",
+    });
+  });
+
+  it("names a repository licence outside the allowlist apart from other repository failures", async () => {
+    const providerResponses = mutableResponses();
+    Object.assign(providerResponses.get(api).license, {
+      key: "gpl-3.0", name: "GNU General Public License v3.0", spdx_id: "GPL-3.0",
+      url: "https://api.github.com/licenses/gpl-3.0",
+    });
+    await expect(invoke(providerResponses)).rejects.toMatchObject({ code: "ADMISSION_REPOSITORY_LICENSE" });
   });
 
   it.each([

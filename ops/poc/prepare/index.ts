@@ -9,7 +9,7 @@ import { CapacityError, createCapacityMeter, type CapacityMeter, type CapacitySn
 import { aiCreditFor } from "./ai-credit";
 import { generateAiRounds } from "./ai-rounds";
 import { composeExperimentArtifact, containsProtected, type ComposedExperiment } from "./compose";
-import { admitGitHubCandidates } from "./github-admission";
+import { admitGitHubCandidates, screenGitHubRepository } from "./github-admission";
 import { bindGitHubLineage } from "./github-lineage";
 import { crawlGitHubCommitSearch, type GitHubQueryClassification } from "./github-search";
 import { generateLanguageRounds, validateLanguageCandidate } from "./language-rounds";
@@ -37,6 +37,7 @@ export interface PreparationDependencies {
   loadProfile(): Promise<Readonly<{ profile: CrawlProfile; canonicalProfileBytes: Uint8Array }>>; environment(): Environment;
   createCapacity(options: Parameters<typeof createCapacityMeter>[0]): CapacityMeter; createRuntime(options: Readonly<{ profile: CrawlProfile; environment: Environment; capacity: CapacityMeter }>): unknown;
   preflight(options: Context): Promise<StageResult<unknown>>; searchGitHub(options: Context): Promise<StageResult<Readonly<{ candidates: readonly unknown[]; queryClassifications: readonly GitHubQueryClassification[] }>>>;
+  screenGitHubRepository(options: Context & Readonly<{ repository: string }>): Promise<StageResult<unknown>>;
   bindGitHubLineage(options: Context & Readonly<{ candidate: unknown }>): Promise<StageResult<unknown>>; admitGitHubCandidate(options: Context & Readonly<{ candidate: unknown; crawlSnapshotId: string }>): Promise<StageResult<unknown>>;
   collectStackMetadata(options: Context & Readonly<{ configuration: StackLanguage }>): Promise<StageResult<readonly unknown[]>>; fetchStackBlob(options: Context & Readonly<{ row: unknown; limits: BlobLimits }>): Promise<StageResult<Readonly<{ byteLength: number }>>>;
   revalidateStackCandidate(options: Context & Readonly<{ row: unknown; blob: unknown; crawlSnapshotId: string }>): Promise<StageResult<unknown>>;
@@ -189,7 +190,26 @@ const selectGitHub = async (context: Context, deps: PreparationDependencies, has
   const credited = pool.filter((candidate) => queryRole(profile, candidate) === "ai-credit");
   const project: unknown[] = []; const aiYes: unknown[] = []; const aiNo: unknown[] = []; const spare: unknown[] = [];
   const all = (): unknown[] => [...project, ...aiYes, ...aiNo];
+  // The repository check is the cheapest admission gate and repositories repeat, so it runs once per
+  // repository before any lineage request; every later candidate of a rejected repository is skipped.
+  const repositoryVerdicts = new Map<string, boolean>();
+  const screenRepository = async (candidate: unknown): Promise<boolean> => {
+    const repository = String((candidate as { repository?: unknown } | undefined)?.repository ?? "");
+    const known = repositoryVerdicts.get(repository);
+    if (known !== undefined) {
+      if (!known) noteRejection(state, "ADMISSION", new Error("REPOSITORY_SCREENED_OUT"));
+      return known;
+    }
+    let verdict = false;
+    try {
+      addHashes(hashes, (await deps.screenGitHubRepository({ ...context, repository })).acceptedResponseHashes);
+      verdict = true;
+    } catch (error) { rejectCandidate(state, "ADMISSION", error); }
+    repositoryVerdicts.set(repository, verdict);
+    return verdict;
+  };
   const admit = async (candidate: unknown): Promise<unknown | undefined> => {
+    if (!(await screenRepository(candidate))) return undefined;
     let lineage: StageResult<unknown>;
     try { lineage = await deps.bindGitHubLineage({ ...context, candidate }); addHashes(hashes, lineage.acceptedResponseHashes);
     } catch (error) { rejectCandidate(state, "DISCOVERY", error); return undefined; }
@@ -394,6 +414,9 @@ const stage = async <Value>(runtime: Runtime, operation: () => Promise<Value>): 
 };
 const workerStage = async <Value>(operation: () => Promise<Value>): Promise<StageResult<Value>> => { const value = await operation(); return Object.freeze({ value, acceptedResponseHashes: Object.freeze([canonicalHash(value)]) }); };
 const responseKey = (request: { provider: string; method: string; url: string }): string => `${request.provider}\0${request.method}\0${request.url}`;
+/** Identical GitHub GETs within one run reuse the first response; search pages stay fresh so a re-crawl sees new data. */
+const reusable = (request: RequestInput): boolean =>
+  request.provider === "github" && request.method === "GET" && new URL(request.url).pathname !== "/search/commits";
 export const createPreparationRuntime = (profile: CrawlProfile, environment: Environment, capacity: CapacityMeter, fetchLike: typeof fetch = fetch): Runtime => {
   const retry = createRetryController({ maxRunRetries: RUN_RETRY_LIMIT, maxWaitMilliseconds: profile.capacity.waitMilliseconds, maxTotalWaitMilliseconds: profile.capacity.totalWaitMilliseconds,
     sleep: async (milliseconds) => { capacity.recordRetryWait(milliseconds); await new Promise((done) => setTimeout(done, milliseconds)); } });
@@ -405,8 +428,9 @@ export const createPreparationRuntime = (profile: CrawlProfile, environment: Env
     beginReplay: () => { runtime.replay = true; runtime.replayCursors.clear(); } };
   const request = async (kind: "json" | "bytes", input: RequestInput, page?: number): Promise<unknown> => {
     const key = responseKey(input); const cached = runtime.responses.get(key) ?? [];
-    if (runtime.replay) { const offset = runtime.replayCursors.get(key) ?? 0; const value = cached[offset];
+    if (runtime.replay) { const offset = runtime.replayCursors.get(key) ?? 0; const value = reusable(input) ? cached[0] : cached[offset];
       if (value === undefined) throw new PreparationError(); runtime.replayCursors.set(key, offset + 1); return structuredClone(value); }
+    if (reusable(input) && cached.length > 0) return structuredClone(cached[0]);
     const lease = capacity.beginRequest();
     try {
       const value = kind === "json" ? await base.requestJson(input, page) : await base.requestBytes(input, page);
@@ -448,6 +472,9 @@ const defaultDependencies = (): PreparationDependencies => ({
   searchGitHub: (context) => { const runtime = runtimeOf(context); return stage(runtime, () => crawlGitHubCommitSearch({
     profile: context.profile, transport: runtime.transport, retry: runtime.retry,
     onQueryRestart: (queryId) => context.capacity.discardGitHubQuery(queryId) })); },
+  screenGitHubRepository: (options) => { const runtime = runtimeOf(options); return stage(runtime, async () => {
+    await screenGitHubRepository({ profile: options.profile, transport: runtime.transport, retry: runtime.retry }, options.repository);
+    return options.repository; }); },
   bindGitHubLineage: (options) => { const runtime = runtimeOf(options); return stage(runtime, async () =>
     (await bindGitHubLineage({ profile: options.profile, candidates: [options.candidate as any],
       transport: runtime.transport, retry: runtime.retry }))[0]!); },

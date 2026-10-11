@@ -103,11 +103,16 @@ const makeFoundationDependencies = (
 
 const makeGitHubDependencies = (
   state: HarnessState,
-): Pick<PreparationDependencies, "searchGitHub" | "bindGitHubLineage" | "admitGitHubCandidate"> => ({
+): Pick<PreparationDependencies, "searchGitHub" | "screenGitHubRepository" | "bindGitHubLineage" | "admitGitHubCandidate"> => ({
   searchGitHub: async ({ capacity }) => {
     state.calls.push("search");
     state.dependencyMeters.push(capacity);
     return accepted({ candidates: state.candidates, queryClassifications: classificationsFor(state.profile) }, "2");
+  },
+  screenGitHubRepository: async ({ repository, capacity }) => {
+    state.calls.push(`screen:${repository}`);
+    state.dependencyMeters.push(capacity);
+    return accepted({ repository }, "2");
   },
   bindGitHubLineage: async ({ candidate, capacity }) => {
     state.calls.push(`lineage:${(candidate as any).id}`);

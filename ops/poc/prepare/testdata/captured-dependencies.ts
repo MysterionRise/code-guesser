@@ -2,7 +2,7 @@ import { publishArtifact } from "../artifact-store";
 import { canonicalBytes, canonicalHash } from "../canonical";
 import { createCapacityMeter, type CapacityMeter } from "../capacity";
 import { composeExperimentArtifact } from "../compose";
-import { admitGitHubCandidates } from "../github-admission";
+import { admitGitHubCandidates, screenGitHubRepository } from "../github-admission";
 import { bindGitHubLineage } from "../github-lineage";
 import { crawlGitHubCommitSearch } from "../github-search";
 import { createPreparationRuntime, type PreparationDependencies } from "../index";
@@ -154,7 +154,14 @@ const discoveryLane = (
 
 const githubLane = (
   state: CapturedDependencyState, reference: RuntimeReference,
-): Pick<PreparationDependencies, "bindGitHubLineage" | "admitGitHubCandidate"> => ({
+): Pick<PreparationDependencies, "screenGitHubRepository" | "bindGitHubLineage" | "admitGitHubCandidate"> => ({
+  screenGitHubRepository: (context) => record(state, "github-repository", () => {
+    const runtime = runtimeOf(reference);
+    return stage(runtime, async () => {
+      await screenGitHubRepository({ profile: context.profile, transport: runtime.transport, retry: runtime.retry }, context.repository);
+      return context.repository;
+    });
+  }),
   bindGitHubLineage: (context) => record(state, "github-lineage", () => {
     const runtime = runtimeOf(reference);
     return stage(runtime, async () => (await bindGitHubLineage({ profile: context.profile,

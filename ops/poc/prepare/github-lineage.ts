@@ -8,7 +8,8 @@ import type { BoundedTransport } from "./transport";
 type UnknownRecord = Record<string, unknown>;
 type GitMode = "100644" | "100755";
 export class GitHubLineageError extends Error {
-  public constructor() {
+  /** `code` names the check that rejected the candidate; the message stays the stable stage code. */
+  public constructor(public readonly code: string = "GITHUB_LINEAGE_REJECTED") {
     super("GITHUB_LINEAGE_REJECTED");
     this.name = "GitHubLineageError";
   }
@@ -58,15 +59,15 @@ interface TreeEntry {
   readonly type: string;
   readonly sha: string;
 }
-const fail = (): never => { throw new GitHubLineageError(); };
+const fail = (code: string): never => { throw new GitHubLineageError(code); };
 const record = (value: unknown): UnknownRecord =>
   typeof value === "object" && value !== null && !Array.isArray(value)
     ? value as UnknownRecord
-    : fail();
+    : fail("LINEAGE_SHAPE");
 const text = (value: unknown): string =>
-  typeof value === "string" && value.length > 0 ? value : fail();
+  typeof value === "string" && value.length > 0 ? value : fail("LINEAGE_SHAPE");
 const gitId = (value: unknown): string =>
-  typeof value === "string" && /^[0-9a-f]{40}$/u.test(value) ? value : fail();
+  typeof value === "string" && /^[0-9a-f]{40}$/u.test(value) ? value : fail("LINEAGE_SHAPE");
 const sha256 = (value: Uint8Array | string): string =>
   createHash("sha256").update(value).digest("hex");
 const gitObject = (type: "blob" | "tree", bytes: Uint8Array): string =>
@@ -74,7 +75,7 @@ const gitObject = (type: "blob" | "tree", bytes: Uint8Array): string =>
 const compareText = (left: string, right: string): number => left < right ? -1 : left > right ? 1 : 0;
 const repositoryParts = (repository: string): readonly [string, string] => {
   const parts = repository.split("/");
-  if (parts.length !== 2 || parts.some((part) => !/^[A-Za-z0-9_.-]+$/u.test(part))) fail();
+  if (parts.length !== 2 || parts.some((part) => !/^[A-Za-z0-9_.-]+$/u.test(part))) fail("LINEAGE_SHAPE");
   return parts as unknown as readonly [string, string];
 };
 
@@ -100,23 +101,23 @@ const parseCommit = (
   const response = record(value);
   if (gitId(response.sha) !== expectedSha
     || response.url !== `${api}/commits/${expectedSha}`
-    || response.html_url !== `${web}/commit/${expectedSha}`) fail();
+    || response.html_url !== `${web}/commit/${expectedSha}`) fail("LINEAGE_COMMIT");
   const commit = record(response.commit);
   const tree = record(commit.tree);
   const treeSha = gitId(tree.sha);
-  if (tree.url !== `${api}/git/trees/${treeSha}`) fail();
+  if (tree.url !== `${api}/git/trees/${treeSha}`) fail("LINEAGE_COMMIT");
   const parents = Array.isArray(response.parents) ? response.parents.map((item) => {
     const parent = record(item);
     const sha = gitId(parent.sha);
-    if (parent.url !== `${api}/commits/${sha}` || parent.html_url !== `${web}/commit/${sha}`) fail();
+    if (parent.url !== `${api}/commits/${sha}` || parent.html_url !== `${web}/commit/${sha}`) fail("LINEAGE_COMMIT");
     return sha;
-  }) : fail();
+  }) : fail("LINEAGE_COMMIT");
   return Object.freeze({
     sha: expectedSha,
     tree: treeSha,
     message: text(commit.message),
     parents: Object.freeze(parents),
-    files: Object.freeze(Array.isArray(response.files) ? response.files.map(record) : fail()),
+    files: Object.freeze(Array.isArray(response.files) ? response.files.map(record) : fail("LINEAGE_COMMIT")),
     stats: response.stats,
   });
 };
@@ -131,7 +132,7 @@ const parseChangedPath = (
   api: string,
   web: string,
 ): Readonly<{ path: string; blob: string }> => {
-  if (commit.parents.length !== 1 || commit.files.length === 0) fail();
+  if (commit.parents.length !== 1 || commit.files.length === 0) fail("LINEAGE_CHANGED_PATH");
   // A recorded patch that cannot fit the excerpt window disqualifies its file up front; an
   // absent patch leaves the decision to the authoritative reconstruction from pinned blobs.
   const modifications = commit.files.filter((entry) => entry.status === "modified"
@@ -139,7 +140,7 @@ const parseChangedPath = (
     && isScreenablePath(entry.filename)
     && (typeof entry.patch !== "string" || patchFitsExcerptWindow(entry.patch)));
   const names = modifications.map((entry) => text(entry.filename));
-  if (names.length === 0 || new Set(names).size !== names.length) fail();
+  if (names.length === 0 || new Set(names).size !== names.length) fail("LINEAGE_CHANGED_PATH");
   const file = [...modifications].sort((left, right) => compareText(text(left.filename), text(right.filename)))[0]!;
   const path = text(file.filename);
   const blob = gitId(file.sha);
@@ -148,13 +149,13 @@ const parseChangedPath = (
   if (file.status !== "modified" || file.previous_filename !== undefined
     || file.blob_url !== `${web}/blob/${commit.sha}/${encoded}`
     || file.raw_url !== `${web}/raw/${commit.sha}/${encoded}`
-    || file.contents_url !== `${api}/contents/${encoded}?ref=${commit.sha}`) fail();
+    || file.contents_url !== `${api}/contents/${encoded}?ref=${commit.sha}`) fail("LINEAGE_CHANGED_PATH");
   return Object.freeze({ path, blob });
 };
 
 const commitStats = (commit: CommitRecord): Readonly<{ additions: number; deletions: number }> => {
   const stats = record(commit.stats);
-  const count = (value: unknown): number => Number.isSafeInteger(value) && (value as number) >= 0 ? value as number : fail();
+  const count = (value: unknown): number => Number.isSafeInteger(value) && (value as number) >= 0 ? value as number : fail("LINEAGE_COMMIT_STATS");
   return Object.freeze({ additions: count(stats.additions), deletions: count(stats.deletions) });
 };
 
@@ -177,8 +178,8 @@ const loadTree = async (
   const response = record(await requestJson(options, `${api}/git/trees/${sha}`));
   const treeValues = response.tree;
   if (response.sha !== sha || response.url !== `${api}/git/trees/${sha}`
-    || response.truncated !== false) fail();
-  const treeEntries: unknown[] = Array.isArray(treeValues) ? treeValues : fail();
+    || response.truncated !== false) fail("LINEAGE_TREE");
+  const treeEntries: unknown[] = Array.isArray(treeValues) ? treeValues : fail("LINEAGE_TREE");
   const entries: readonly TreeEntry[] = treeEntries.map((value: unknown) => {
     const item = record(value);
     const entry = Object.freeze({
@@ -187,13 +188,13 @@ const loadTree = async (
       type: text(item.type),
       sha: gitId(item.sha),
     });
-    if (item.url !== `${api}/git/${entry.type}s/${entry.sha}`) fail();
+    if (item.url !== `${api}/git/${entry.type}s/${entry.sha}`) fail("LINEAGE_TREE");
     const regular = entry.type === "blob" && (entry.mode === "100644" || entry.mode === "100755");
     const directory = entry.type === "tree" && entry.mode === "040000";
-    if (!regular && !directory) fail();
+    if (!regular && !directory) fail("LINEAGE_TREE");
     return entry;
   });
-  if (new Set(entries.map(({ path }) => path)).size !== entries.length || treeHash(entries) !== sha) fail();
+  if (new Set(entries.map(({ path }) => path)).size !== entries.length || treeHash(entries) !== sha) fail("LINEAGE_TREE");
   return Object.freeze(entries);
 };
 
@@ -204,23 +205,23 @@ const resolvePath = async (
   path: string,
 ): Promise<Readonly<{ mode: GitMode; blob: string }>> => {
   const segments = path.split("/");
-  if (segments.some((segment) => !/^(?!\.{1,2}$)[^/\\\0]+$/u.test(segment))) fail();
+  if (segments.some((segment) => !/^(?!\.{1,2}$)[^/\\\0]+$/u.test(segment))) fail("LINEAGE_PATH");
   let tree = rootTree;
   for (const [index, segment] of segments.entries()) {
-    const entry = (await loadTree(options, api, tree)).find(({ path: name }) => name === segment) ?? fail();
+    const entry = (await loadTree(options, api, tree)).find(({ path: name }) => name === segment) ?? fail("LINEAGE_PATH");
     if (index < segments.length - 1) {
-      if (entry.type !== "tree" || entry.mode !== "040000") fail();
+      if (entry.type !== "tree" || entry.mode !== "040000") fail("LINEAGE_PATH");
       tree = entry.sha;
       continue;
     }
     const entryMode = entry.mode;
-    if (entry.type !== "blob") fail();
+    if (entry.type !== "blob") fail("LINEAGE_PATH");
     const mode: GitMode = entryMode === "100644"
       ? "100644"
-      : entryMode === "100755" ? "100755" : fail();
+      : entryMode === "100755" ? "100755" : fail("LINEAGE_PATH");
     return Object.freeze({ mode, blob: entry.sha });
   }
-  return fail();
+  return fail("LINEAGE_PATH");
 };
 
 const loadBlob = async (
@@ -230,12 +231,12 @@ const loadBlob = async (
 ): Promise<Uint8Array> => {
   const response = record(await requestJson(options, `${api}/git/blobs/${sha}`));
   if (response.sha !== sha || response.url !== `${api}/git/blobs/${sha}`
-    || response.encoding !== "base64" || !Number.isSafeInteger(response.size)) fail();
+    || response.encoding !== "base64" || !Number.isSafeInteger(response.size)) fail("LINEAGE_BLOB");
   const encoded = text(response.content).replace(/\s/gu, "");
-  if (!/^[A-Za-z0-9+/]*={0,2}$/u.test(encoded)) fail();
+  if (!/^[A-Za-z0-9+/]*={0,2}$/u.test(encoded)) fail("LINEAGE_BLOB");
   const bytes = Buffer.from(encoded, "base64");
   if (bytes.byteLength !== response.size || gitObject("blob", bytes) !== sha
-    || bytes.toString("base64") !== encoded) fail();
+    || bytes.toString("base64") !== encoded) fail("LINEAGE_BLOB");
   return bytes;
 };
 
@@ -251,7 +252,7 @@ const screenChange = (
   const seen = options.seenNormalizedHashes ?? new Set<string>();
   const parentScreen = screenBlob({ path, bytes: parent.bytes }, seen);
   const childScreen = screenBlob({ path, bytes: child.bytes }, seen);
-  if (parentScreen.rawSha256 !== parentHash || childScreen.rawSha256 !== childHash) fail();
+  if (parentScreen.rawSha256 !== parentHash || childScreen.rawSha256 !== childHash) fail("LINEAGE_CHANGE_SCREEN");
   const diff = reconstructChangedLines({
     parentCommits: parents,
     changeKind: "modified",
@@ -270,23 +271,23 @@ const bindCandidate = async (
   repositoryParts(candidate.repository);
   const api = `https://api.github.com/repos/${candidate.repository}`;
   const web = `https://github.com/${candidate.repository}`;
-  if (candidate.repositoryUrl !== web || candidate.commitUrl !== `${web}/commit/${candidate.commit}`) fail();
+  if (candidate.repositoryUrl !== web || candidate.commitUrl !== `${web}/commit/${candidate.commit}`) fail("LINEAGE_BINDING");
   const child = parseCommit(await requestJson(options, `${api}/commits/${candidate.commit}`),
     candidate.commit, api, web);
   const changed = parseChangedPath(child, api, web);
   // Child side first: its tree binding and blob screening reject most candidates, and every
   // request they save is a request the signed ceiling keeps for the next candidate.
   const childPath = await resolvePath(options, api, child.tree, changed.path);
-  if (childPath.blob !== changed.blob) fail();
+  if (childPath.blob !== changed.blob) fail("LINEAGE_BINDING");
   const childBytes = await loadBlob(options, api, childPath.blob);
   const childScreen = screenBlob({ path: changed.path, bytes: childBytes }, options.seenNormalizedHashes ?? new Set<string>());
   // FR-023 as amended: the experiment's stricter generated-file screen applies to every fixture.
-  if (looksGenerated(childScreen.text, options.profile.screening.generatedScanLines)) fail();
+  if (looksGenerated(childScreen.text, options.profile.screening.generatedScanLines)) fail("LINEAGE_BINDING");
   const stats = commitStats(child);
   const parentSha = child.parents[0]!;
   const parent = parseCommit(await requestJson(options, `${api}/commits/${parentSha}`), parentSha, api, web);
   const parentPath = await resolvePath(options, api, parent.tree, changed.path);
-  if (childPath.blob === parentPath.blob) fail();
+  if (childPath.blob === parentPath.blob) fail("LINEAGE_BINDING");
   const parentBytes = await loadBlob(options, api, parentPath.blob);
   const { parentHash, childHash, diff } = screenChange(options, changed.path, child.parents,
     { blob: parentPath.blob, bytes: parentBytes }, { blob: childPath.blob, bytes: childBytes });

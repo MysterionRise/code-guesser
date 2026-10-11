@@ -13,7 +13,8 @@ type BoundLineageKey =
   | "parentMode" | "childMode" | "parentBlob" | "childBlob"
   | "parentRawContentHash" | "childRawContentHash" | "changedLineHash";
 export class GitHubAdmissionError extends Error {
-  public constructor() {
+  /** `code` names the check that rejected the candidate; the message stays the stable stage code. */
+  public constructor(public readonly code: string = "GITHUB_ADMISSION_REJECTED") {
     super("GITHUB_ADMISSION_REJECTED");
     this.name = "GitHubAdmissionError";
   }
@@ -58,15 +59,15 @@ interface LicenseAdmission {
   readonly path: string;
   readonly url: string;
 }
-const fail = (): never => { throw new GitHubAdmissionError(); };
+const fail = (code: string): never => { throw new GitHubAdmissionError(code); };
 const record = (value: unknown): UnknownRecord =>
-  typeof value === "object" && value !== null && !Array.isArray(value) ? value as UnknownRecord : fail();
+  typeof value === "object" && value !== null && !Array.isArray(value) ? value as UnknownRecord : fail("ADMISSION_SHAPE");
 const text = (value: unknown): string =>
-  typeof value === "string" && value.trim() === value && value.length > 0 ? value : fail();
+  typeof value === "string" && value.trim() === value && value.length > 0 ? value : fail("ADMISSION_SHAPE");
 const gitId = (value: unknown): string =>
-  typeof value === "string" && /^[0-9a-f]{40}$/u.test(value) ? value : fail();
+  typeof value === "string" && /^[0-9a-f]{40}$/u.test(value) ? value : fail("ADMISSION_SHAPE");
 const hash = (value: unknown): string =>
-  typeof value === "string" && /^[0-9a-f]{64}$/u.test(value) ? value : fail();
+  typeof value === "string" && /^[0-9a-f]{64}$/u.test(value) ? value : fail("ADMISSION_SHAPE");
 const encodePath = (value: string): string => value.split("/").map(encodeURIComponent).join("/");
 
 const requestJson = (options: GitHubAdmissionOptions, url: string): Promise<unknown> => {
@@ -87,7 +88,7 @@ const detectedLicense = (value: unknown): RepositoryAdmission => {
   const licenseName = text(license.name);
   const licenseSpdx = text(license.spdx_id);
   text(license.key);
-  if (license.url !== `https://api.github.com/licenses/${license.key as string}`) fail();
+  if (license.url !== `https://api.github.com/licenses/${license.key as string}`) fail("ADMISSION_LICENSE_SHAPE");
   return Object.freeze({ licenseName, licenseSpdx });
 };
 
@@ -101,9 +102,9 @@ const admitRepository = (
   const response = record(value);
   if (response.full_name !== repository || response.url !== api || response.html_url !== web
     || response.private !== false || response.visibility !== "public" || response.disabled !== false
-    || response.archived !== false || response.fork !== false) fail();
+    || response.archived !== false || response.fork !== false) fail("ADMISSION_REPOSITORY");
   const license = detectedLicense(response.license);
-  if (!allowlist.includes(license.licenseSpdx)) fail();
+  if (!allowlist.includes(license.licenseSpdx)) fail("ADMISSION_REPOSITORY_LICENSE");
   return license;
 };
 
@@ -115,27 +116,27 @@ const selectedAuthor = (
 ): Readonly<{ name: string; login: string | null }> => {
   const response = record(value);
   if (response.sha !== commit || response.url !== `${api}/commits/${commit}`
-    || response.html_url !== `${web}/commit/${commit}`) fail();
+    || response.html_url !== `${web}/commit/${commit}`) fail("ADMISSION_AUTHOR");
   const name = text(record(record(response.commit).author).name);
   if (response.author === null) return Object.freeze({ name, login: null });
   const author = record(response.author);
   const login = text(author.login);
   if (author.url !== `https://api.github.com/users/${login}`
-    || author.html_url !== `https://github.com/${login}`) fail();
+    || author.html_url !== `https://github.com/${login}`) fail("ADMISSION_AUTHOR");
   return Object.freeze({ name, login });
 };
 
 const decodeLicense = (response: UnknownRecord): Uint8Array => {
-  if (response.encoding !== "base64" || !Number.isSafeInteger(response.size)) fail();
+  if (response.encoding !== "base64" || !Number.isSafeInteger(response.size)) fail("ADMISSION_LICENSE_DECODE");
   // The provider wraps base64 content at 60 columns with a trailing newline; only the
   // whitespace-free payload is validated and decoded.
   const content = typeof response.content === "string" && response.content.trim().length > 0
     ? response.content
-    : fail();
+    : fail("ADMISSION_LICENSE_DECODE");
   const encoded = content.replace(/\s/gu, "");
-  if (!/^[A-Za-z0-9+/]*={0,2}$/u.test(encoded)) fail();
+  if (!/^[A-Za-z0-9+/]*={0,2}$/u.test(encoded)) fail("ADMISSION_LICENSE_DECODE");
   const bytes = Buffer.from(encoded, "base64");
-  if (bytes.byteLength !== response.size || bytes.toString("base64") !== encoded) fail();
+  if (bytes.byteLength !== response.size || bytes.toString("base64") !== encoded) fail("ADMISSION_LICENSE_DECODE");
   return bytes;
 };
 
@@ -155,9 +156,9 @@ const admitLicense = (
     || response.url !== `${api}/contents/${encodedPath}?ref=${candidate.commit}`
     || response.html_url !== `${web}/blob/${candidate.commit}/${encodedPath}`
     || response.git_url !== `${api}/git/blobs/${blob}`
-    || response.download_url !== `https://raw.githubusercontent.com/${candidate.repository}/${candidate.commit}/${encodedPath}`) fail();
+    || response.download_url !== `https://raw.githubusercontent.com/${candidate.repository}/${candidate.commit}/${encodedPath}`) fail("ADMISSION_LICENSE");
   const detected = detectedLicense(response.license);
-  if (detected.licenseName !== metadata.licenseName || detected.licenseSpdx !== metadata.licenseSpdx) fail();
+  if (detected.licenseName !== metadata.licenseName || detected.licenseSpdx !== metadata.licenseSpdx) fail("ADMISSION_LICENSE");
   const bytes = decodeLicense(response);
   const textHash = createHash("sha256").update(bytes).digest("hex");
   const evidence = screenLicenseEvidence({
@@ -172,7 +173,7 @@ const admitLicense = (
     repositoryPolicyHash: options.profileHash,
   });
   if (evidence.decision !== "ADMISSION_SCREENING_ONLY" || evidence.licenseBlobSha !== blob
-    || evidence.licenseTextSha256 !== textHash) fail();
+    || evidence.licenseTextSha256 !== textHash) fail("ADMISSION_LICENSE");
   return Object.freeze({ path, url: response.html_url as string });
 };
 
@@ -207,7 +208,7 @@ const admitCandidate = async (
 ): Promise<GitHubAdmissionCandidate> => {
   const api = `https://api.github.com/repos/${candidate.repository}`;
   const web = `https://github.com/${candidate.repository}`;
-  if (candidate.repositoryUrl !== web || candidate.commit !== candidate.childCommit) fail();
+  if (candidate.repositoryUrl !== web || candidate.commit !== candidate.childCommit) fail("ADMISSION_BINDING");
   const metadata = admitRepository(await requestJson(options, api), candidate.repository,
     api, web, options.profile.licenses);
   const author = selectedAuthor(await requestJson(options, `${api}/commits/${candidate.commit}`),
@@ -221,10 +222,24 @@ const admitCandidate = async (
   });
 };
 
+/**
+ * The repository half of admission (public, not archived, not a fork, licence allowed). The
+ * orchestrator runs it once per repository before any lineage request; admission repeats it,
+ * and the run's GET reuse answers that repeat without a second request.
+ */
+export const screenGitHubRepository = async (
+  options: Pick<GitHubAdmissionOptions, "profile" | "transport" | "retry">,
+  repository: string,
+): Promise<void> => {
+  const api = `https://api.github.com/repos/${repository}`;
+  admitRepository(await requestJson(options as GitHubAdmissionOptions, api), repository, api,
+    `https://github.com/${repository}`, options.profile.licenses);
+};
+
 export const admitGitHubCandidates = async (
   options: GitHubAdmissionOptions,
 ): Promise<readonly GitHubAdmissionCandidate[]> => {
-  if (canonicalHash(options.profile) !== hash(options.profileHash)) fail();
+  if (canonicalHash(options.profile) !== hash(options.profileHash)) fail("ADMISSION_SHAPE");
   hash(options.crawlSnapshotId);
   return Object.freeze(
     await Promise.all(options.candidates.map((candidate) => admitCandidate(options, candidate))),
