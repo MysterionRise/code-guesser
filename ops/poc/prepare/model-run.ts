@@ -12,9 +12,11 @@ import {
   type RecordValue,
 } from "./model-validation";
 import { CAPACITY_CEILINGS, STACK_LANGUAGES } from "./profile";
+import { RUN_RETRY_LIMIT } from "./retry";
 
-/** Revision 12: three decks of five fixtures. */
+/** One to three decks of five fixtures. */
 const EXPERIMENT_ROUND_COUNT = 15;
+const ROUNDS_PER_DECK = 5;
 const RUN_COUNT_KEYS = [
   "requests", "githubPages", "githubResults", "repositoriesAdmitted", "stackRows",
   "blobAttempts", "blobsRetrieved", "githubRevalidations", "screened",
@@ -25,7 +27,7 @@ const GITHUB_RESPONSE_STATES = new Set([
 ]);
 const STACK_RESPONSE_STATES = new Set(["COMPLETE", "INCOMPLETE", "NOT_STARTED"]);
 const SUCCESSFUL_GITHUB_STATES = new Set(["COMPLETE", "PROVIDER_REPORTED_INCOMPLETE"]);
-const MAX_RUN_RETRIES = 3;
+const MAX_RUN_RETRIES = RUN_RETRY_LIMIT;
 const EXPERIMENT_SOURCE_ID = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+@[0-9a-f]{40}:[^?#\r\n]+$/u;
 /** True when the run report can record `repository@commit:path` as a source identity. */
 export const isReportableSourceIdentity = (identity: string): boolean => EXPERIMENT_SOURCE_ID.test(identity);
@@ -128,12 +130,13 @@ const validateRunResult = (run: RecordValue, queries: readonly RecordValue[], co
     if (queries.some(({ completeness }) => !SUCCESSFUL_GITHUB_STATES.has(completeness as string))
       || configurations.some(({ completeness }) => completeness !== "COMPLETE")) fail();
     const counts = run.counts as RecordValue;
-    if (counts.selected !== EXPERIMENT_ROUND_COUNT) fail();
+    const selected = count(counts.selected);
+    if (selected === 0 || selected > EXPERIMENT_ROUND_COUNT || selected % ROUNDS_PER_DECK !== 0) fail();
     const result = record(run.result, ["artifactHash", "crawlSnapshotId", "sourceIdentities"]);
     sha256(result.artifactHash);
     sha256(result.crawlSnapshotId);
     const identities = texts(result.sourceIdentities);
-    if (identities.length !== EXPERIMENT_ROUND_COUNT || identities.some((identity) => !EXPERIMENT_SOURCE_ID.test(identity))) fail();
+    if (identities.length !== selected || identities.some((identity) => !EXPERIMENT_SOURCE_ID.test(identity))) fail();
     return;
   }
   exact(run.outcome, "FAILURE");

@@ -1,7 +1,7 @@
 import { CapacityError } from "./capacity";
 
 /** Where a rejected candidate failed; rejection aggregates are keyed by stage and reason code. */
-export type DiagnosticStage = "DISCOVERY" | "ADMISSION" | "BLOB_RETRIEVAL" | "GITHUB_REVALIDATION" | "SCREENING" | "DEDUPLICATION";
+export type DiagnosticStage = "DISCOVERY" | "ADMISSION" | "BLOB_RETRIEVAL" | "GITHUB_REVALIDATION" | "SCREENING" | "DEDUPLICATION" | "SELECTION";
 /** The stage a run was in when it failed, as named on the `PREPARATION_STAGE_FAILED` line. */
 export type FailureStage = "PREFLIGHT" | "DISCOVERY" | "ADMISSION" | "STACK_METADATA" | "BLOB_RETRIEVAL" | "SELECTION" | "PUBLICATION";
 
@@ -111,3 +111,29 @@ export const rejectCandidate = (state: RunState, stage: DiagnosticStage, error: 
   if (budget !== undefined) throw new BudgetExhaustedError(`BUDGET_EXHAUSTED_${budget}`, error);
   noteRejection(state, stage, error);
 };
+
+/** One deck's selection: its candidates, or the code that kept it from filling. */
+export type DeckOutcome<Candidate = unknown> =
+  | Readonly<{ candidates: readonly Candidate[]; skipped?: undefined }>
+  | Readonly<{ skipped: string; candidates?: undefined }>;
+/** A deck that ran out of qualifying candidates before it held a full set of rounds. */
+export const DECK_SHORT = "DECK_SHORT";
+
+/**
+ * Runs one deck's selection. A spent run-wide budget skips this deck and every later one with the same
+ * code instead of failing the run, so the decks already filled can still be published.
+ */
+export const createDeckAttempts = () => {
+  let exhausted: string | undefined;
+  return async <Candidate>(fill: () => Promise<DeckOutcome<Candidate>>): Promise<DeckOutcome<Candidate>> => {
+    if (exhausted !== undefined) return Object.freeze({ skipped: exhausted });
+    try {
+      return await fill();
+    } catch (error) {
+      if (!(error instanceof BudgetExhaustedError)) throw error;
+      exhausted = error.code;
+      return Object.freeze({ skipped: error.code });
+    }
+  };
+};
+export type DeckAttempts = ReturnType<typeof createDeckAttempts>;

@@ -1,4 +1,4 @@
-import { noteRejection, PreparationError, rejectCandidate, type RunState } from "./diagnostics";
+import { DECK_SHORT, noteRejection, rejectCandidate, type DeckAttempts, type DeckOutcome, type RunState } from "./diagnostics";
 import { projectExcerptAllowed } from "./project-rounds";
 import {
   addHashes, aiCredited, collidesWithSelected, provisionalSnapshot, queryRole, revealsProtected, unreportable, view,
@@ -6,12 +6,13 @@ import {
 } from "./selection";
 import type { Context, PreparationDependencies, StageResult } from "./types";
 
-export type GitHubDecks = Readonly<{ project: readonly unknown[]; ai: readonly unknown[] }>;
+export type GitHubDecks = Readonly<{ project: DeckOutcome; ai: DeckOutcome }>;
 
 /**
  * Five project rounds from `ordinary` queries with distinct repositories; five AI rounds with up to three
  * credited commits from `ai-credit` queries and the rest uncredited from `ordinary` queries, at least two
- * of each. Admitted ordinary candidates the project deck cannot use stay available to the AI deck.
+ * of each. Admitted ordinary candidates the project deck cannot use stay available to the AI deck, and so
+ * does a whole project deck that fell short. Each deck that cannot fill is skipped with its reason.
  */
 export const selectGitHub = async (
   context: Context,
@@ -20,6 +21,7 @@ export const selectGitHub = async (
   pool: readonly unknown[],
   state: RunState,
   screenRepository: RepositoryScreen,
+  attempt: DeckAttempts,
 ): Promise<GitHubDecks> => {
   const { profile } = context;
   const { projectRounds, aiRounds, aiMinimumPerOutcome } = profile.selection;
@@ -84,40 +86,46 @@ export const selectGitHub = async (
     return true;
   };
   let cursor = 0;
-  while (project.length < projectRounds && cursor < ordinary.length) {
-    const candidate = ordinary[cursor++];
-    if (repeatsRepository(candidate, project)) continue;
-    if (selfNamed.has(String(view(candidate).repository))) {
-      noteRejection(state, "SCREENING", new Error("PROJECT_REPOSITORY_SKIPPED"));
-      continue;
+  const projectDeck = await attempt(async () => {
+    while (project.length < projectRounds && cursor < ordinary.length) {
+      const candidate = ordinary[cursor++];
+      if (repeatsRepository(candidate, project)) continue;
+      if (selfNamed.has(String(view(candidate).repository))) {
+        noteRejection(state, "SCREENING", new Error("PROJECT_REPOSITORY_SKIPPED"));
+        continue;
+      }
+      const admitted = await admit(candidate);
+      if (admitted === undefined) continue;
+      if (projectEligible(admitted)) project.push(admitted); else spare.push(admitted);
     }
-    const admitted = await admit(candidate);
-    if (admitted === undefined) continue;
-    if (projectEligible(admitted)) project.push(admitted); else spare.push(admitted);
-  }
-  if (project.length < projectRounds) throw new PreparationError();
-  const creditedTarget = aiRounds - aiMinimumPerOutcome;
-  for (const candidate of credited) {
-    if (aiYes.length >= creditedTarget) break;
-    if (repeatsRepository(candidate, aiYes)) continue;
-    const admitted = await admit(candidate);
-    if (admitted === undefined) continue;
-    if (!aiCredited(admitted, profile)) { noteRejection(state, "SCREENING", new Error("AI_CREDIT_ABSENT")); continue; }
-    if (accepts(admitted, [...aiYes, ...aiNo], project)) aiYes.push(admitted);
-  }
-  if (aiYes.length < aiMinimumPerOutcome) throw new PreparationError();
-  const absentTarget = aiRounds - aiYes.length;
-  for (const admitted of spare) {
-    if (aiNo.length >= absentTarget) break;
-    if (absentEligible(admitted)) aiNo.push(admitted);
-  }
-  while (aiNo.length < absentTarget && cursor < ordinary.length) {
-    const candidate = ordinary[cursor++];
-    if (repeatsRepository(candidate, [...aiYes, ...aiNo])) continue;
-    const admitted = await admit(candidate);
-    if (admitted === undefined) continue;
-    if (absentEligible(admitted)) aiNo.push(admitted);
-  }
-  if (aiNo.length < absentTarget) throw new PreparationError();
-  return Object.freeze({ project: Object.freeze(project), ai: Object.freeze([...aiYes, ...aiNo]) });
+    return project.length < projectRounds ? { skipped: DECK_SHORT } : { candidates: Object.freeze([...project]) };
+  });
+  // A project deck that cannot publish keeps nothing; its admitted candidates may still serve the AI deck.
+  if (projectDeck.skipped !== undefined) spare.unshift(...project.splice(0));
+  const aiDeck = await attempt(async () => {
+    const creditedTarget = aiRounds - aiMinimumPerOutcome;
+    for (const candidate of credited) {
+      if (aiYes.length >= creditedTarget) break;
+      if (repeatsRepository(candidate, aiYes)) continue;
+      const admitted = await admit(candidate);
+      if (admitted === undefined) continue;
+      if (!aiCredited(admitted, profile)) { noteRejection(state, "SCREENING", new Error("AI_CREDIT_ABSENT")); continue; }
+      if (accepts(admitted, [...aiYes, ...aiNo], project)) aiYes.push(admitted);
+    }
+    if (aiYes.length < aiMinimumPerOutcome) return { skipped: DECK_SHORT };
+    const absentTarget = aiRounds - aiYes.length;
+    for (const admitted of spare) {
+      if (aiNo.length >= absentTarget) break;
+      if (absentEligible(admitted)) aiNo.push(admitted);
+    }
+    while (aiNo.length < absentTarget && cursor < ordinary.length) {
+      const candidate = ordinary[cursor++];
+      if (repeatsRepository(candidate, [...aiYes, ...aiNo])) continue;
+      const admitted = await admit(candidate);
+      if (admitted === undefined) continue;
+      if (absentEligible(admitted)) aiNo.push(admitted);
+    }
+    return aiNo.length < absentTarget ? { skipped: DECK_SHORT } : { candidates: Object.freeze([...aiYes, ...aiNo]) };
+  });
+  return Object.freeze({ project: projectDeck, ai: aiDeck });
 };

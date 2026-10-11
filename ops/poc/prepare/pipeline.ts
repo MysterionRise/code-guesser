@@ -3,11 +3,11 @@ import type { CapacityMeter } from "./capacity";
 import type { ComposedExperiment } from "./compose";
 import { defaultDependencies } from "./dependencies";
 import {
-  createRunState, failureDiagnostic, failureSite, PreparationError, rejectionSummary, uncodedDiagnostic,
-  type FailureStage, type RunState,
+  createDeckAttempts, createRunState, failureDiagnostic, failureSite, noteRejection, PreparationError, rejectionSummary,
+  uncodedDiagnostic, type DeckOutcome, type FailureStage, type RunState,
 } from "./diagnostics";
 import type { GitHubQueryClassification } from "./github-search";
-import { artifactFixtures } from "./model";
+import { artifactFixtures, DECK_IDS, type DeckId } from "./model";
 import { STACK_LANGUAGES, type CrawlProfile } from "./profile";
 import { selectGitHub } from "./select-github";
 import { selectStack } from "./select-stack";
@@ -90,6 +90,28 @@ const failureReport = (
   journal: journal ?? null,
 });
 
+export class DeckSelectionError extends Error {
+  public constructor(public readonly code: string) { super(code); this.name = "DeckSelectionError"; }
+}
+
+/**
+ * The decks this run publishes: every deck that filled. Each skipped deck is logged with its reason and
+ * counted in the rejection aggregates; a run that filled none fails with the shared reason, if any.
+ */
+const publishedDecks = (deps: PreparationDependencies, state: RunState, outcomes: Readonly<Record<DeckId, DeckOutcome>>): readonly DeckId[] => {
+  const skipped = DECK_IDS.filter((id) => outcomes[id].skipped !== undefined);
+  for (const id of skipped) {
+    deps.log(`PREPARATION_DECK_SKIPPED ${id} ${outcomes[id].skipped}`);
+    noteRejection(state, "SELECTION", new Error(`${id.toUpperCase()}_DECK_SKIPPED`));
+  }
+  const published = DECK_IDS.filter((id) => outcomes[id].skipped === undefined);
+  if (published.length === 0) {
+    const reasons = new Set(skipped.map((id) => outcomes[id].skipped));
+    throw new DeckSelectionError(reasons.size === 1 ? [...reasons][0]! : "NO_DECK_FILLED");
+  }
+  return published;
+};
+
 /** Request spend per stage, logged as counts only on success and on failure. */
 const createStageTracker = () => {
   let stage = "PREFLIGHT" as FailureStage;
@@ -159,30 +181,45 @@ export const prepareLocalExperiment = async (deps: PreparationDependencies = def
     const classifications = validateClassifications(loaded.profile, search.value.queryClassifications);
     tracker.enter("ADMISSION");
     const screenRepository = repositoryScreen(context, deps, hashes, state);
-    const githubDecks = await selectGitHub(context, deps, hashes, search.value.candidates, state, screenRepository);
+    const attempt = createDeckAttempts();
+    const github = await selectGitHub(context, deps, hashes, search.value.candidates, state, screenRepository, attempt);
     const distractorPool = [...new Set(search.value.candidates.filter((candidate) => queryRole(loaded.profile, candidate) === "ordinary")
       .map((candidate) => String(view(candidate).repository)))];
     tracker.enter("BLOB_RETRIEVAL");
-    const languageSelections = await selectStack(context, deps, hashes, metadata, [...githubDecks.project, ...githubDecks.ai], state, screenRepository);
+    const githubCandidates = [...github.project.candidates ?? [], ...github.ai.candidates ?? []];
+    const language = await selectStack(context, deps, hashes, metadata, githubCandidates, state, screenRepository, attempt);
     tracker.enter("SELECTION");
+    const outcomes: Readonly<Record<DeckId, DeckOutcome>> = { project: github.project, language, ai: github.ai };
+    const published = publishedDecks(deps, state, outcomes);
     const crawlSnapshotId = provisionalSnapshot(profileHash, hashes);
+    const languageSelections = language.candidates ?? [];
     const finalized = deps.finalizeBindings
-      ? await deps.finalizeBindings({ ...context, crawlSnapshotId, projectCandidates: githubDecks.project, aiCandidates: githubDecks.ai, languageSelections })
-      : { projectCandidates: githubDecks.project, aiCandidates: githubDecks.ai, languageCandidates: languageSelections.map(({ candidate }) => candidate) };
+      ? await deps.finalizeBindings({ ...context, crawlSnapshotId, projectCandidates: github.project.candidates ?? [],
+        aiCandidates: github.ai.candidates ?? [], languageSelections })
+      : { projectCandidates: github.project.candidates ?? [], aiCandidates: github.ai.candidates ?? [],
+        languageCandidates: languageSelections.map(({ candidate }) => candidate) };
     if (deps.finalizeBindings && ([...finalized.projectCandidates, ...finalized.aiCandidates].some((candidate) => view(candidate).source?.crawlSnapshotId !== crawlSnapshotId)
       || finalized.languageCandidates.some((candidate) => (candidate as { crawlSnapshotId?: unknown }).crawlSnapshotId !== crawlSnapshotId))) throw new PreparationError();
-    const project = deps.generateProject({ profile: loaded.profile, candidates: finalized.projectCandidates, distractorPool });
-    const language = deps.generateLanguage({ profile: loaded.profile, candidates: finalized.languageCandidates });
-    const ai = deps.generateAi({ profile: loaded.profile, candidates: finalized.aiCandidates });
     const { projectRounds, languageRounds, aiRounds } = loaded.profile.selection;
-    if (project.fixtures.length !== projectRounds || language.fixtures.length !== languageRounds || ai.fixtures.length !== aiRounds) throw new PreparationError();
+    const generate = {
+      project: () => deps.generateProject({ profile: loaded.profile, candidates: finalized.projectCandidates, distractorPool }),
+      language: () => deps.generateLanguage({ profile: loaded.profile, candidates: finalized.languageCandidates }),
+      ai: () => deps.generateAi({ profile: loaded.profile, candidates: finalized.aiCandidates }),
+    };
+    const expected: Readonly<Record<DeckId, number>> = { project: projectRounds, language: languageRounds, ai: aiRounds };
+    const rounds = Object.fromEntries(published.map((id) => {
+      const generated = generate[id]();
+      if (generated.fixtures.length !== expected[id]) throw new PreparationError();
+      return [id, generated];
+    }));
     const composed = deps.compose({ profile: loaded.profile, canonicalProfileBytes: loaded.canonicalProfileBytes,
-      acceptedResponseHashes: Object.freeze(hashes), project, language, ai });
+      acceptedResponseHashes: Object.freeze(hashes), ...rounds });
     if (composed.artifact.crawlSnapshot.id !== crawlSnapshotId) throw new PreparationError();
     const report = deps.createReport(reportInput(context, composed, deps.uuid(), deps.now().toISOString(), state, classifications));
     tracker.enter("PUBLICATION");
     const publication = await publishWithReport(deps, composed, report);
     if (classifications.some(({ completeness }) => completeness === "PROVIDER_REPORTED_INCOMPLETE")) deps.log("GITHUB_SEARCH_INCOMPLETE");
+    deps.log(`PREPARATION_DECKS ${published.join(",")}`);
     logSpend();
     finishRuntime();
     deps.log("PREPARATION_COMPLETE");

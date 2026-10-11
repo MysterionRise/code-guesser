@@ -42,10 +42,10 @@ describe("three-deck experiment composition", () => {
 
   it("rejects a deck in the wrong slot, a short deck, and projection drift", () => {
     const input = composeInput();
-    expect(() => composeExperimentArtifact({ ...input, project: input.ai })).toThrow(ComposeError);
-    expect(() => composeExperimentArtifact({ ...input, language: { ...input.language, fixtures: input.language.fixtures.slice(0, 4) } })).toThrow(ComposeError);
+    expect(() => composeExperimentArtifact({ ...input, project: input.ai! })).toThrow(ComposeError);
+    expect(() => composeExperimentArtifact({ ...input, language: { ...input.language!, fixtures: input.language!.fixtures.slice(0, 4) } })).toThrow(ComposeError);
     const drifted = structuredClone(input);
-    (drifted.language.publicRounds[0] as any).excerpt.text = "different public source";
+    (drifted.language!.publicRounds[0] as any).excerpt.text = "different public source";
     expect(() => composeExperimentArtifact(drifted)).toThrow(ComposeError);
   });
 
@@ -62,9 +62,9 @@ describe("three-deck experiment composition", () => {
   it("names the protected key and public field when containment fails, without the value", () => {
     const input = composeInput();
     const leaked = structuredClone(input);
-    const fixture = leaked.ai.fixtures[0]! as any;
+    const fixture = leaked.ai!.fixtures[0]! as any;
     fixture.prompt = `${fixture.prompt} ${fixture.source.authorName}`;
-    (leaked.ai.publicRounds[0] as any).mode.prompt = fixture.prompt;
+    (leaked.ai!.publicRounds[0] as any).mode.prompt = fixture.prompt;
     const code = codeOf(() => composeExperimentArtifact(leaked));
     expect(code).toBe("PUBLIC_CONTAINMENT_AUTHORNAME_IN_MODE");
   });
@@ -73,11 +73,11 @@ describe("three-deck experiment composition", () => {
     const input = composeInput();
     expect(() => composeExperimentArtifact(input)).not.toThrow();
     const leaked = structuredClone(input);
-    const project = leaked.project.fixtures[0]! as any;
+    const project = leaked.project!.fixtures[0]! as any;
     const repository = String(project.source.repository);
-    const language = leaked.language.fixtures[0]! as any;
+    const language = leaked.language!.fixtures[0]! as any;
     language.clues = [language.clues[0], `Compare it with ${repository}.`];
-    (leaked.language.publicRounds[0] as any).mode.clues[1].label = language.clues[1];
+    (leaked.language!.publicRounds[0] as any).mode.clues[1].label = language.clues[1];
     expect(codeOf(() => composeExperimentArtifact(leaked))).toBe("PUBLIC_CONTAINMENT_REPOSITORY_IN_MODE");
   });
 });

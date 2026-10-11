@@ -1,5 +1,7 @@
 import type { CapacitySnapshot } from "./capacity";
-import { PreparationError, rejectCandidate, noteRejection, type DiagnosticStage, type RunState } from "./diagnostics";
+import {
+  DECK_SHORT, PreparationError, rejectCandidate, noteRejection, type DeckAttempts, type DeckOutcome, type DiagnosticStage, type RunState,
+} from "./diagnostics";
 import type { CrawlProfile } from "./profile";
 import {
   addHashes, collidesWithSelected, provisionalSnapshot, revealsProtected, unreportable, view, type RepositoryScreen,
@@ -37,7 +39,10 @@ const stackOrder = (left: unknown, right: unknown): number => {
   return 0;
 };
 
-/** One language round per configured language: the first row, in stable order, that survives every check. */
+/**
+ * One language round per configured language: the first row, in stable order, that survives every check.
+ * A language with no surviving row leaves the deck short, so the remaining languages are not fetched.
+ */
 export const selectStack = async (
   context: Context,
   deps: PreparationDependencies,
@@ -46,11 +51,13 @@ export const selectStack = async (
   github: readonly unknown[],
   state: RunState,
   screenRepository: RepositoryScreen,
-): Promise<readonly StackSelection[]> => {
+  attempt: DeckAttempts,
+): Promise<DeckOutcome<StackSelection>> => attempt(async () => {
   const selected: StackSelection[] = [];
   const chosen = (): unknown[] => selected.map(({ candidate }) => candidate);
   for (const configuration of context.profile.stack.configurations) {
     const ordered = rows.filter((item) => view(item).detectedLanguage === configuration.language).sort(stackOrder);
+    const before = selected.length;
     for (const row of ordered) {
       if (!licensesAllowed(context.profile, row)) { noteRejection(state, "SCREENING", new Error("LICENSE_REJECTED")); continue; }
       if (!(await screenRepository(row, "GITHUB_REVALIDATION"))) continue;
@@ -83,7 +90,8 @@ export const selectStack = async (
         break;
       } catch (error) { lease.release(); rejectCandidate(state, stage, error); }
     }
+    if (selected.length === before) return { skipped: DECK_SHORT };
   }
   if (selected.length !== context.profile.selection.languageRounds) throw new PreparationError();
-  return Object.freeze(selected);
-};
+  return { candidates: Object.freeze(selected) };
+});

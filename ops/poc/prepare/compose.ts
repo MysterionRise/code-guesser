@@ -44,9 +44,10 @@ export interface ComposeOptions {
   readonly profile: CrawlProfile;
   readonly canonicalProfileBytes: Uint8Array;
   readonly acceptedResponseHashes: readonly string[];
-  readonly project: GeneratedRounds;
-  readonly language: GeneratedRounds;
-  readonly ai: GeneratedRounds;
+  /** The decks this run filled; at least one. */
+  readonly project?: GeneratedRounds;
+  readonly language?: GeneratedRounds;
+  readonly ai?: GeneratedRounds;
 }
 
 export interface ComposedExperiment {
@@ -214,11 +215,13 @@ export const composeExperimentArtifact = (options: ComposeOptions): ComposedExpe
   const acceptedResponseHashes = parseResponseHashes(options.acceptedResponseHashes);
   const profileHash = canonicalHash(options.profile);
   const snapshot = crawlSnapshot(options.profile, profileHash, acceptedResponseHashes);
-  const generated: Readonly<Record<DeckId, GeneratedRounds>> = { project: options.project, language: options.language, ai: options.ai };
-  for (const id of DECK_IDS) requireDeck(generated[id], id);
-  requireBindings(DECK_IDS.map((id) => generated[id].fixtures), options.profile, snapshot.id);
-  const fixtures = DECK_IDS.flatMap((id) => generated[id].fixtures);
-  const publicRounds = DECK_IDS.flatMap((id) => generated[id].publicRounds);
+  const present = DECK_IDS.filter((id) => options[id] !== undefined);
+  if (present.length === 0) fail("NO_DECK");
+  const generated = Object.fromEntries(present.map((id) => [id, options[id]!])) as Readonly<Record<DeckId, GeneratedRounds>>;
+  for (const id of present) requireDeck(generated[id], id);
+  requireBindings(present.map((id) => generated[id].fixtures), options.profile, snapshot.id);
+  const fixtures = present.flatMap((id) => generated[id].fixtures);
+  const publicRounds = present.flatMap((id) => generated[id].publicRounds);
   // Named first, so a leak reports its key and field instead of the parser's single rejection.
   requirePublicContainment(fixtures, publicRounds);
   const artifact = parseExperimentArtifact({
@@ -226,12 +229,12 @@ export const composeExperimentArtifact = (options: ComposeOptions): ComposedExpe
     contentClass: "LOCAL_UNREVIEWED_EXPERIMENT",
     profileHash,
     crawlSnapshot: snapshot,
-    decks: DECK_IDS.map((id) => ({ ...deckMetadata(options.profile, id), fixtures: generated[id].fixtures })),
+    decks: present.map((id) => ({ ...deckMetadata(options.profile, id), fixtures: generated[id].fixtures })),
   });
   const roundRecordSet = parseRoundRecordSet({
     sessionContractVersionId: canonicalHash({ schemaVersion: artifact.schemaVersion, profileHash, crawlSnapshotId: snapshot.id }),
     publicRounds,
-    privateReveals: Object.assign({}, ...DECK_IDS.map((id) => generated[id].privateReveals)),
+    privateReveals: Object.assign({}, ...present.map((id) => generated[id].privateReveals)),
   });
   return Object.freeze({
     artifact,

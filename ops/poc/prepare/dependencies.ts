@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -29,6 +29,7 @@ import { journaledWorker } from "./worker-journal";
 const PROFILE_URL = new URL("../profiles/local-real-rounds.v2.json", import.meta.url);
 const ARTIFACT_PATH = fileURLToPath(new URL("../../../apps/game/src/demo/generated/local-real-rounds.json", import.meta.url));
 const REPORT_PATH = fileURLToPath(new URL("../stack/tmp/local-experiment-run.json", import.meta.url));
+const PIN_PATH = fileURLToPath(new URL("../../../apps/game/src/demo/local-real-experiment.pin.server.ts", import.meta.url));
 const FAILURE_REPORT_PATH = fileURLToPath(new URL("../stack/tmp/local-experiment-last-failure.json", import.meta.url));
 export const JOURNAL_PATH = fileURLToPath(new URL("../stack/tmp/journal/run.jsonl", import.meta.url));
 
@@ -55,6 +56,45 @@ const stageReport = async (report: unknown): Promise<StagedRunReport> => {
 };
 
 const workerRunner = (runtime: Runtime) => runtime.journal ? { runWorker: journaledWorker(runtime.journal) } : {};
+
+/** The game module that pins the artifact hash; the game plays an artifact only when its hash matches. */
+export const pinSource = (hash: string): string => `import "server-only";
+
+/**
+ * The trusted artifact hash: the SHA-256 of the canonical artifact the last successful
+ * \`pnpm prepare:poc\` run validated and published. The preparer writes this file as part of
+ * publication; the game plays an artifact only when its hash matches, so an edited, stale,
+ * or substituted artifact cannot be played.
+ */
+export const TRUSTED_ARTIFACT_HASH = "${hash}";
+`;
+
+const writeAtomically = async (path: string, text: string): Promise<void> => {
+  const temporary = `${path}.${randomUUID()}.tmp`;
+  await writeFile(temporary, text, { mode: 0o644 });
+  await rename(temporary, path);
+};
+
+/**
+ * Writes the pin inside the artifact's commit window: a failure here restores the previous artifact, and
+ * a later failure restores the previous pin, so the artifact and its pin always change together.
+ */
+const publishWithPin = async (input: Readonly<{ artifact: unknown; expectedHash: string; beforeCommit?: () => Promise<void> }>) => {
+  const previousPin = await readFile(PIN_PATH, "utf8").catch(() => undefined);
+  let pinned = false;
+  await mkdir(dirname(ARTIFACT_PATH), { recursive: true });
+  try {
+    return await publishArtifact({ artifact: input.artifact, expectedHash: input.expectedHash, targetPath: ARTIFACT_PATH,
+      beforeCommit: async () => {
+        await input.beforeCommit?.();
+        await writeAtomically(PIN_PATH, pinSource(input.expectedHash));
+        pinned = true;
+      } });
+  } catch (error) {
+    if (pinned && previousPin !== undefined) await writeAtomically(PIN_PATH, previousPin).catch(() => undefined);
+    throw error;
+  }
+};
 
 const lineageOf = (candidate: unknown): GitHubLineageCandidate => (candidate as { lineage: GitHubLineageCandidate }).lineage;
 
@@ -142,10 +182,7 @@ export const defaultDependencies = (options: DependencyOptions = { journal: "fre
   compose: composeExperimentArtifact,
   createReport: createRunReport,
   stageReport,
-  publishArtifact: async ({ artifact, expectedHash, beforeCommit }) => {
-    await mkdir(dirname(ARTIFACT_PATH), { recursive: true });
-    return publishArtifact({ artifact, expectedHash, targetPath: ARTIFACT_PATH, ...(beforeCommit ? { beforeCommit } : {}) });
-  },
+  publishArtifact: publishWithPin,
   writeFailureReport: async (report) => {
     await mkdir(dirname(FAILURE_REPORT_PATH), { recursive: true });
     await writeFile(FAILURE_REPORT_PATH, `${JSON.stringify(report, null, 2)}\n`, { mode: 0o600 });
