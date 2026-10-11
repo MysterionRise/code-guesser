@@ -1,12 +1,13 @@
 import { readFile } from "node:fs/promises";
 
 import { canonicalHash } from "./canonical";
-import { createCapacityMeter } from "./capacity";
+import { CapacityError, createCapacityMeter } from "./capacity";
 import { GitHubSearchError } from "./github-search";
 import { HARNESS_CANDIDATES, HARNESS_CREDIT, accepted, classificationsFor, hash, loadProfile, makeHarness } from "./command-test-harness";
 import { STACK_LANGUAGES } from "./profile";
 import { RetryError } from "./retry";
 import { createRunReport } from "./run-report";
+import { StackMetadataError } from "./stack-metadata";
 import { TransportError } from "./transport";
 import {
   prepareLocalExperiment,
@@ -44,7 +45,8 @@ const searchWith = (queryClassifications: unknown): PreparationDependencies["sea
 describe("local experiment preparation command", () => {
 /** Marker lines only; the failure-site line is asserted separately. */
 const logLines = (calls: readonly string[]): string[] =>
-  calls.filter((call) => call.startsWith("log:") && !call.startsWith("log:PREPARATION_FAILURE_SITE "));
+  calls.filter((call) => call.startsWith("log:") && !call.startsWith("log:PREPARATION_FAILURE_SITE ")
+    && !call.startsWith("log:PREPARATION_SPEND "));
 
   it("exposes one preparation entry point and one no-argument project command", async () => {
     expect(prepareLocalExperiment).toBeTypeOf("function");
@@ -490,7 +492,8 @@ const logLines = (calls: readonly string[]): string[] =>
       },
     });
     const profile = await loadProfile();
-    const acceptedResponseHashes = ["1", "2", "3", "4", "5", "6", "7", "8", "9"].map(hash);
+    // Preflight, then the five Stack metadata configurations, then search, lineage, and admission.
+    const acceptedResponseHashes = ["1", "5", "6", "7", "8", "9", "2", "3", "4"].map(hash);
     const expected = canonicalHash({ profileHash: canonicalHash(profile), acceptedResponseHashes });
 
     const result = await prepareLocalExperiment(harness.dependencies);
@@ -528,6 +531,47 @@ const logLines = (calls: readonly string[]): string[] =>
       AWS_SECRET_ACCESS_KEY: "secret", AWS_SESSION_TOKEN: "session", AWS_PROFILE: "poc",
       AWS_SHARED_CREDENTIALS_FILE: "/external/credentials",
     });
+  });
+
+  it("reads Stack metadata before GitHub discovery, so a Stack failure spends no GitHub requests", async () => {
+    const harness = await makeHarness();
+    await prepareLocalExperiment(harness.dependencies);
+    const first = (prefix: string): number => harness.calls.findIndex((call) => call.startsWith(prefix));
+    expect(first("metadata:")).toBeGreaterThan(first("preflight"));
+    expect(first("metadata:")).toBeLessThan(first("search"));
+
+    const failing = await makeHarness({
+      collectStackMetadata: async () => { throw new StackMetadataError("WORKER_EXIT_NETWORK_LIMIT_REJECTED"); },
+    });
+    await expect(prepareLocalExperiment(failing.dependencies)).rejects.toThrow("PREPARATION_FAILED");
+    expect(failing.calls.some((call) => call === "search" || call.startsWith("lineage:"))).toBe(false);
+    expect(logLines(failing.calls)).toEqual([
+      "log:PREPARATION_STAGE_FAILED STACK_METADATA WORKER_EXIT_NETWORK_LIMIT_REJECTED none",
+      "log:PREPARATION_FAILED",
+    ]);
+  });
+
+  it("stops at the first spent run-wide budget instead of rejecting every later candidate", async () => {
+    let lineageCalls = 0;
+    const harness = await makeHarness({
+      bindGitHubLineage: async () => {
+        lineageCalls += 1;
+        throw new RetryError("RETRY_SIGNAL_MISSING", new CapacityError("REQUEST_COUNT"));
+      },
+    });
+    await expect(prepareLocalExperiment(harness.dependencies)).rejects.toThrow("PREPARATION_FAILED");
+    expect(lineageCalls).toBe(1);
+    expect(logLines(harness.calls)[0]).toBe("log:PREPARATION_STAGE_FAILED ADMISSION BUDGET_EXHAUSTED_REQUEST_COUNT none");
+  });
+
+  it("logs request spend per stage on success and on failure, counts only", async () => {
+    const harness = await makeHarness();
+    await prepareLocalExperiment(harness.dependencies);
+    const spendLine = /^log:PREPARATION_SPEND (?:[A-Z_]+=\d+ )*total=\d+$/u;
+    expect(harness.calls.filter((call) => spendLine.test(call))).toHaveLength(1);
+    const failing = await makeHarness({ searchGitHub: async () => { throw new GitHubSearchError("GITHUB_SEARCH_ITEM_COUNT"); } });
+    await expect(prepareLocalExperiment(failing.dependencies)).rejects.toThrow("PREPARATION_FAILED");
+    expect(failing.calls.filter((call) => spendLine.test(call))).toHaveLength(1);
   });
 
   it("logs stage, reason code, and status class for every failure, naming uncoded ones safely", async () => {
@@ -685,7 +729,7 @@ const logLines = (calls: readonly string[]): string[] =>
       log: (message) => { messages.push(message); },
     });
     await expect(prepareLocalExperiment(harness.dependencies)).rejects.toThrow("PREPARATION_FAILED");
-    expect(messages.filter((message) => !message.startsWith("PREPARATION_FAILURE_SITE "))).toEqual(["PREPARATION_STAGE_FAILED PREFLIGHT UNCODED_ERROR none", "PREPARATION_FAILED"]);
+    expect(messages.filter((message) => !/^PREPARATION_(?:FAILURE_SITE|SPEND) /u.test(message))).toEqual(["PREPARATION_STAGE_FAILED PREFLIGHT UNCODED_ERROR none", "PREPARATION_FAILED"]);
     expect(messages.some((message) => /^PREPARATION_FAILURE_SITE [A-Za-z0-9_$.<>]+@[A-Za-z0-9_.-]+\.[cm]?[jt]sx?$/u.test(message))).toBe(true);
     expect(messages.join(" ")).not.toMatch(/raw-secret|@example|Bearer/u);
   });

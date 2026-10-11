@@ -5,7 +5,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { publishArtifact } from "./artifact-store";
 import { fetchSelectedBlob, projectBlobWorkerEnvironment, type BlobWorkerLimits } from "./blob-worker";
 import { canonicalBytes, canonicalHash } from "./canonical";
-import { createCapacityMeter, type CapacityMeter, type CapacitySnapshot } from "./capacity";
+import { CapacityError, createCapacityMeter, type CapacityMeter, type CapacitySnapshot } from "./capacity";
 import { aiCreditFor } from "./ai-credit";
 import { generateAiRounds } from "./ai-rounds";
 import { composeExperimentArtifact, containsProtected, type ComposedExperiment } from "./compose";
@@ -116,6 +116,26 @@ const rejectionCode = (error: unknown): string => {
 const noteRejection = (state: RunState, stage: DiagnosticStage, error: unknown): void => { const message = rejectionCode(error);
   const key = `${stage}\0${message}`; state.diagnostics.set(key, (state.diagnostics.get(key) ?? 0) + 1);
 };
+/** Run-wide budgets: once one is spent every later candidate would fail the same way, so the run stops. */
+const RUN_BUDGETS = new Set(["REQUEST_COUNT", "BLOB_ATTEMPTS", "SUCCESSFUL_BLOBS", "TOTAL_BLOB_BYTES",
+  "STACK_METADATA_BYTES", "RETRY_COUNT", "TOTAL_WAIT", "TEMPORARY_DISK"]);
+class BudgetExhaustedError extends Error {
+  public constructor(public readonly code: string, cause: unknown) { super(code, { cause }); this.name = "BudgetExhaustedError"; }
+}
+const spentBudget = (error: unknown): string | undefined => {
+  let current: unknown = error;
+  for (let depth = 0; depth < FAILURE_CAUSE_DEPTH && current instanceof Error; depth += 1) {
+    if (current instanceof CapacityError && RUN_BUDGETS.has(current.code)) return current.code;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return undefined;
+};
+/** Records one rejected candidate, or ends the run when the rejection is a spent run-wide budget. */
+const rejectCandidate = (state: RunState, stage: DiagnosticStage, error: unknown): void => {
+  const budget = spentBudget(error);
+  if (budget !== undefined) throw new BudgetExhaustedError(`BUDGET_EXHAUSTED_${budget}`, error);
+  noteRejection(state, stage, error);
+};
 const aiCredited = (candidate: unknown, profile: CrawlProfile): boolean => aiCreditFor(String((candidate as any).lineage?.commitMessage ?? ""), profile.aiCredits).recorded;
 const queryRole = (profile: CrawlProfile, candidate: unknown): string | undefined => profile.github.queries.find(({ id }) => id === (candidate as any)?.queryId)?.role;
 const provisionalSnapshot = (profileHash: string, hashes: readonly string[]): string => canonicalHash({ profileHash, acceptedResponseHashes: hashes.length > 0 ? hashes : [canonicalHash("capture")] });
@@ -172,13 +192,13 @@ const selectGitHub = async (context: Context, deps: PreparationDependencies, has
   const admit = async (candidate: unknown): Promise<unknown | undefined> => {
     let lineage: StageResult<unknown>;
     try { lineage = await deps.bindGitHubLineage({ ...context, candidate }); addHashes(hashes, lineage.acceptedResponseHashes);
-    } catch (error) { noteRejection(state, "DISCOVERY", error); return undefined; }
+    } catch (error) { rejectCandidate(state, "DISCOVERY", error); return undefined; }
     try {
       const admitted = await deps.admitGitHubCandidate({ ...context, candidate: lineage.value, crawlSnapshotId: provisionalSnapshot(context.profileHash, hashes) });
       addHashes(hashes, admitted.acceptedResponseHashes); state.repositoriesAdmitted += 1; state.screened += 1;
       if (unreportable((admitted.value as { source?: unknown }).source)) { noteRejection(state, "SCREENING", new Error("SOURCE_IDENTITY_UNREPORTABLE")); return undefined; }
       return admitted.value;
-    } catch (error) { noteRejection(state, "ADMISSION", error); return undefined; }
+    } catch (error) { rejectCandidate(state, "ADMISSION", error); return undefined; }
   };
   const accepts = (admitted: any, deck: readonly unknown[], others: readonly unknown[]): boolean => {
     if (collidesWithSelected(profile, admitted, deck, others)) { state.duplicatesRejected += 1; noteRejection(state, "DEDUPLICATION", new Error("SOURCE_DUPLICATE")); return false; }
@@ -259,7 +279,7 @@ const selectStack = async (context: Context, deps: PreparationDependencies, hash
         lease.accept();
         selected.push(Object.freeze({ row, blob: fetched.value, candidate: eligible }));
         break;
-      } catch (error) { noteRejection(state, stage, error); lease.release(); }
+      } catch (error) { lease.release(); rejectCandidate(state, stage, error); }
     }
   }
   if (selected.length !== context.profile.selection.languageRounds) throw new PreparationError();
@@ -285,8 +305,20 @@ const reportInput = (context: Context, composed: ComposedExperiment, executionId
   };
 };
 export const prepareLocalExperiment = async (deps: PreparationDependencies = defaultDependencies()): Promise<PreparationResult> => {
-  let stage: FailureStage = "PREFLIGHT";
+  let stage = "PREFLIGHT" as FailureStage;
   const state: RunState = { diagnostics: new Map(), discovered: 0, repositoriesAdmitted: 0, githubRevalidations: 0, screened: 0, duplicatesRejected: 0 };
+  // Request spend per stage, logged as counts only on success and on failure.
+  let meter: CapacityMeter | undefined; let mark = 0; const spend = new Map<FailureStage, number>();
+  const enter = (next: FailureStage): void => {
+    if (meter) { const now = meter.snapshot().requestCount; spend.set(stage, (spend.get(stage) ?? 0) + now - mark); mark = now; }
+    stage = next;
+  };
+  const logSpend = (): void => {
+    if (!meter) return;
+    enter(stage);
+    const parts = [...spend].filter(([, requests]) => requests > 0).map(([name, requests]) => `${name}=${requests} `).join("");
+    deps.log(`PREPARATION_SPEND ${parts}total=${meter.snapshot().requestCount}`);
+  };
   try {
     const loaded = await deps.loadProfile();
     const profileHash = canonicalHash(loaded.profile);
@@ -294,27 +326,30 @@ export const prepareLocalExperiment = async (deps: PreparationDependencies = def
     const environment = deps.environment();
     const capacity = deps.createCapacity({ limits: loaded.profile.capacity,
       githubQueryIds: loaded.profile.github.queries.map(({ id }) => id), stackLanguages: STACK_LANGUAGES });
+    meter = capacity;
     const runtime = deps.createRuntime({ profile: loaded.profile, environment, capacity });
     const context = Object.freeze({ ...loaded, profileHash, environment, capacity, runtime });
     const hashes: string[] = [];
     addHashes(hashes, (await deps.preflight(context)).acceptedResponseHashes);
-    stage = "DISCOVERY";
-    const search = await deps.searchGitHub(context); addHashes(hashes, search.acceptedResponseHashes);
-    state.discovered = Array.isArray(search.value.candidates) ? search.value.candidates.length : 0;
-    const classifications = validateClassifications(loaded.profile, search.value.queryClassifications);
-    stage = "ADMISSION";
-    const githubDecks = await selectGitHub(context, deps, hashes, search.value.candidates, state);
-    const distractorPool = [...new Set(search.value.candidates.filter((candidate) => queryRole(loaded.profile, candidate) === "ordinary")
-      .map((candidate) => String((candidate as any).repository)))];
+    // Stack metadata needs nothing from GitHub and is the likeliest stage to fail, so it runs first:
+    // a failure here spends no GitHub requests.
     const metadata: unknown[] = [];
-    stage = "STACK_METADATA";
+    enter("STACK_METADATA");
     for (const { configuration } of loaded.profile.stack.configurations) {
       const result = await deps.collectStackMetadata({ ...context, configuration });
       addHashes(hashes, result.acceptedResponseHashes); metadata.push(...result.value);
     }
-    stage = "BLOB_RETRIEVAL";
+    enter("DISCOVERY");
+    const search = await deps.searchGitHub(context); addHashes(hashes, search.acceptedResponseHashes);
+    state.discovered = Array.isArray(search.value.candidates) ? search.value.candidates.length : 0;
+    const classifications = validateClassifications(loaded.profile, search.value.queryClassifications);
+    enter("ADMISSION");
+    const githubDecks = await selectGitHub(context, deps, hashes, search.value.candidates, state);
+    const distractorPool = [...new Set(search.value.candidates.filter((candidate) => queryRole(loaded.profile, candidate) === "ordinary")
+      .map((candidate) => String((candidate as any).repository)))];
+    enter("BLOB_RETRIEVAL");
     const languageSelections = await selectStack(context, deps, hashes, metadata, [...githubDecks.project, ...githubDecks.ai], state);
-    stage = "SELECTION";
+    enter("SELECTION");
     const crawlSnapshotId = provisionalSnapshot(profileHash, hashes);
     const finalized = deps.finalizeBindings
       ? await deps.finalizeBindings({ ...context, crawlSnapshotId, projectCandidates: githubDecks.project, aiCandidates: githubDecks.ai, languageSelections })
@@ -330,9 +365,10 @@ export const prepareLocalExperiment = async (deps: PreparationDependencies = def
       acceptedResponseHashes: Object.freeze(hashes), project, language, ai });
     if (composed.artifact.crawlSnapshot.id !== crawlSnapshotId) throw new PreparationError();
     const report = deps.createReport(reportInput(context, composed, deps.uuid(), deps.now().toISOString(), state, classifications));
-    stage = "PUBLICATION";
+    enter("PUBLICATION");
     const publication = await publishWithReport(deps, composed, report);
     if (classifications.some(({ completeness }) => completeness === "PROVIDER_REPORTED_INCOMPLETE")) deps.log("GITHUB_SEARCH_INCOMPLETE");
+    logSpend();
     deps.log("PREPARATION_COMPLETE");
     return Object.freeze({ artifactHash: composed.artifactHash, crawlSnapshotId, publication });
   } catch (error) {
@@ -340,6 +376,7 @@ export const prepareLocalExperiment = async (deps: PreparationDependencies = def
     deps.log(`PREPARATION_STAGE_FAILED ${stage} ${diagnostic.code} ${diagnostic.statusClass}`);
     const site = failureSite(error);
     if (site) deps.log(`PREPARATION_FAILURE_SITE ${site}`);
+    logSpend();
     if (stage === "ADMISSION" || stage === "BLOB_RETRIEVAL" || stage === "SELECTION") {
       // Counts and stable rejection codes only: the same aggregates a successful run report carries.
       deps.log(`PREPARATION_COUNTS discovered=${state.discovered} admitted=${state.repositoriesAdmitted} duplicates=${state.duplicatesRejected}`);

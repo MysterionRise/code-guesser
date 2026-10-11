@@ -88,8 +88,11 @@ describe("captured two-source preparation", () => {
         expect(first.reports).toHaveLength(1);
         expect(second.reports).toHaveLength(1);
         expect(first.reports[0]).not.toEqual(second.reports[0]);
-        expect(first.logs).toEqual(["PREPARATION_COMPLETE"]);
-        expect(second.logs).toEqual(["PREPARATION_COMPLETE"]);
+        for (const logs of [first.logs, second.logs]) {
+          expect(logs).toHaveLength(2);
+          expect(logs[0]).toMatch(/^PREPARATION_SPEND (?:[A-Z_]+=\d+ )*total=\d+$/u);
+          expect(logs[1]).toBe("PREPARATION_COMPLETE");
+        }
         const artifact = JSON.parse(new TextDecoder().decode(firstArtifact));
         expect(artifact.decks.map(({ id, fixtures }: any) => `${id}:${fixtures.map(({ kind }: any) => kind).join(",")}`)).toEqual([
           "project:PROJECT,PROJECT,PROJECT,PROJECT,PROJECT",
