@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { STACK_REVISION } from "../limits";
 import type { CapacityMeter } from "./capacity";
 import { STACK_LANGUAGES, type CrawlProfile, type StackLanguage } from "./profile";
 
@@ -13,7 +14,7 @@ const LOCK_PATH = new URL("../stack/uv.lock", import.meta.url);
 const PYTHON_PATH = new URL("../stack/.python-version", import.meta.url);
 const LOCK_HASH = "c58acb21cc4a0dd5bf97d088a35c8343a0c3ffd2da7150f30a195fa9836b3e07";
 const STDERR_LIMIT = 4096;
-const REVISION = "e565caa3a78c2423bd374333a472b049eb090e47";
+const REVISION = STACK_REVISION;
 const ROW_KEYS = [
   "stableRowId", "swhBlobId", "swhContentId", "swhDirectoryId", "swhSnapshotId",
   "swhRevisionId", "repository", "path", "detectedLicenses", "detectedLanguage",

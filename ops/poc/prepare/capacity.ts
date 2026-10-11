@@ -1,5 +1,5 @@
 import {
-  SIGNED_CAPACITY_CEILINGS,
+  CAPACITY_CEILINGS,
   STACK_LANGUAGES,
   type CapacityLimits,
   type StackLanguage,
@@ -92,12 +92,12 @@ const addWithin = (current: number, increment: number, maximum: number, code: st
 };
 
 const validateLimits = (limits: CapacityLimits): void => {
-  const signedKeys = Object.keys(SIGNED_CAPACITY_CEILINGS) as (keyof CapacityLimits)[];
+  const signedKeys = Object.keys(CAPACITY_CEILINGS) as (keyof CapacityLimits)[];
   const actualKeys = Object.keys(limits).sort();
   if (actualKeys.join("|") !== [...signedKeys].sort().join("|")) fail("LIMIT_SHAPE");
   for (const key of signedKeys) {
     const value = positive(limits[key], "LIMIT_VALUE");
-    if (value > SIGNED_CAPACITY_CEILINGS[key]) fail("LIMIT_RAISED");
+    if (value > CAPACITY_CEILINGS[key]) fail("LIMIT_RAISED");
   }
 };
 

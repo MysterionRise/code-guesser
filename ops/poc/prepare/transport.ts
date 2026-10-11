@@ -1,3 +1,4 @@
+import { STACK_DATASET } from "../limits";
 import {
   authorizeRequest,
   type CredentialPolicy,
@@ -72,7 +73,7 @@ export interface BoundedTransport {
 const pathTemplate = (provider: Provider, pathname: string): string => {
   if (provider === "github" && pathname === "/search/commits") return "/search/commits";
   if (provider === "github") return "/repos/{owner}/{repository}/{resource}";
-  if (provider === "huggingFace") return "/datasets/bigcode/the-stack-v2/{resource}";
+  if (provider === "huggingFace") return `/datasets/${STACK_DATASET}/{resource}`;
   return "/content/{object}";
 };
 

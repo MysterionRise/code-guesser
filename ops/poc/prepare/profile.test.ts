@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import {
   AUTHORIZED_QUERIES,
   CrawlProfileError,
-  SIGNED_CAPACITY_CEILINGS,
+  CAPACITY_CEILINGS,
   parseCrawlProfile,
 } from "./profile";
 
@@ -96,13 +96,13 @@ describe("local crawl profile v2", () => {
   });
 
   it("accepts each signed v2 capacity exactly and rejects its first over-ceiling value", async () => {
-    expect(SIGNED_CAPACITY_CEILINGS.requestCount).toBe(600);
-    expect(SIGNED_CAPACITY_CEILINGS.stackMetadataBytes).toBe(96 * 1024 * 1024);
+    expect(CAPACITY_CEILINGS.requestCount).toBe(600);
+    expect(CAPACITY_CEILINGS.stackMetadataBytes).toBe(96 * 1024 * 1024);
     const base = await validProfile();
-    expect(parseCrawlProfile(base).capacity).toEqual(SIGNED_CAPACITY_CEILINGS);
-    for (const key of Object.keys(SIGNED_CAPACITY_CEILINGS)) {
+    expect(parseCrawlProfile(base).capacity).toEqual(CAPACITY_CEILINGS);
+    for (const key of Object.keys(CAPACITY_CEILINGS)) {
       const changed = structuredClone(base);
-      changed.capacity[key] = (SIGNED_CAPACITY_CEILINGS as Record<string, number>)[key]! + 1;
+      changed.capacity[key] = (CAPACITY_CEILINGS as Record<string, number>)[key]! + 1;
       rejects(changed);
     }
   });

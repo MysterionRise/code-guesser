@@ -1,3 +1,4 @@
+import { STACK_RELEASE, STACK_REVISION } from "../limits";
 import {
   bool,
   codeText,
@@ -162,8 +163,8 @@ const validStackPath = (value: unknown): boolean => {
 
 const validateLanguageSource = (source: RecordValue): void => {
   exact(source.discoverySource, "STACK_V2");
-  exact(source.stackRelease, "v2.2.0");
-  exact(source.stackRevision, "e565caa3a78c2423bd374333a472b049eb090e47");
+  exact(source.stackRelease, STACK_RELEASE);
+  exact(source.stackRevision, STACK_REVISION);
   if (!(STACK_LANGUAGES as readonly unknown[]).includes(source.configuration)) fail();
   sha256(source.stableRowId);
   for (const key of [
@@ -274,8 +275,8 @@ const parseCrawlSnapshot = (
   text(github.apiVersion);
   const queryRoles = parseSnapshotQueries(github.queries);
   const stack = record(snapshot.stack, ["release", "revision", "configurations"]);
-  exact(stack.release, "v2.2.0");
-  exact(stack.revision, "e565caa3a78c2423bd374333a472b049eb090e47");
+  exact(stack.release, STACK_RELEASE);
+  exact(stack.revision, STACK_REVISION);
   if (!Array.isArray(stack.configurations)
     || stack.configurations.join("|") !== STACK_LANGUAGES.join("|")) fail();
   const responseHashes = Array.isArray(snapshot.acceptedResponseHashes)

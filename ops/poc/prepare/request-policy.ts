@@ -1,3 +1,5 @@
+import { STACK_DATASET } from "../limits";
+
 export class RequestPolicyError extends Error {
   public constructor() {
     super("REQUEST_POLICY_REJECTED");
@@ -34,7 +36,7 @@ const PROVIDERS = new Set<Provider>(["github", "huggingFace", "softwareHeritage"
 const CALLER_HEADERS = new Set(["accept", "user-agent", "x-github-api-version"]);
 const CREDENTIAL_LIKE_VALUE = /(?:\bbearer\b|\bbasic\b|\btoken\s*[:=]|\bsecret\s*[:=]|\bpassword\s*[:=]|\bcredential\s*[:=]|\baws4-hmac-sha256\b)/iu;
 const SENSITIVE_QUERY = /^(?:access_token|token|authorization|signature|x-amz-.+|awsaccesskeyid)$/iu;
-const STACK_CARD_PATH = "/datasets/bigcode/the-stack-v2/raw/main/README.md";
+const STACK_CARD_PATH = `/datasets/${STACK_DATASET}/raw/main/README.md`;
 // Exact hosts a Hugging Face resolve redirect may target. The one entry was observed under
 // authorization on 2026-10-08 (HEAD on the pinned resolve endpoint answered 302 to this host);
 // see docs/gangsta/codeguessr-poc-readiness/evidence/2026-10-08-hugging-face-redirect-observation.md.
