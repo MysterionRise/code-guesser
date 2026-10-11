@@ -19,7 +19,7 @@ const ROW_KEYS = [
   "stableRowId", "swhBlobId", "swhContentId", "swhDirectoryId", "swhSnapshotId",
   "swhRevisionId", "repository", "path", "detectedLicenses", "detectedLanguage",
   "generated", "vendor", "sourceEncoding", "byteLength", "visitDate", "revisionDate",
-  "committerDate",
+  "committerDate", "starEventsCount", "forkEventsCount",
 ] as const;
 const COUNTER_KEYS = ["networkBytes", "peakTemporaryDiskBytes", "redirectsFollowed", "requests"] as const;
 /** The metadata worker additionally reports every row it inspected, emitted or screened out. */
@@ -54,6 +54,9 @@ export interface StackMetadataRow extends Readonly<Record<string, unknown>> {
   readonly visitDate: string;
   readonly revisionDate: string;
   readonly committerDate: string;
+  /** GitHub Archive star and fork events for the repository: a popularity signal, never a total. */
+  readonly starEventsCount: number;
+  readonly forkEventsCount: number;
 }
 
 export interface WorkerRequest {
@@ -318,7 +321,8 @@ const validateRow = (
     || licenses.some((license) => !validText(license)) || new Set(licenses).size !== licenses.length
     || row.generated !== false || row.vendor !== false || row.sourceEncoding !== "UTF-8"
     || !Number.isSafeInteger(row.byteLength) || (row.byteLength as number) < 1
-    || (row.byteLength as number) > byteLimit) {
+    || (row.byteLength as number) > byteLimit
+    || [row.starEventsCount, row.forkEventsCount].some((count) => !Number.isSafeInteger(count) || (count as number) < 0)) {
     fail("ROW_VALUE_REJECTED");
   }
   return Object.freeze({

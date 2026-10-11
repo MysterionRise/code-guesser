@@ -57,7 +57,7 @@ const METADATA_KEYS = [
   "stableRowId", "swhBlobId", "swhContentId", "swhDirectoryId", "swhSnapshotId",
   "swhRevisionId", "repository", "path", "detectedLicenses", "detectedLanguage",
   "generated", "vendor", "sourceEncoding", "byteLength", "visitDate", "revisionDate",
-  "committerDate",
+  "committerDate", "starEventsCount", "forkEventsCount",
 ] as const;
 const UTC_DATE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{6})?Z$/u;
 const MAX_TREE_ENTRIES = 10_000;

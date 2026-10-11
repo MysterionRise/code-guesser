@@ -226,6 +226,9 @@ def _project(value, configuration, repository, path, length):
         "visitDate": _date(value["visit_date"]),
         "revisionDate": _date(value["revision_date"]),
         "committerDate": _date(value["committer_date"]),
+        # GitHub Archive star and fork events: the popularity signal the project deck ranks by.
+        "starEventsCount": value["star_events_count"],
+        "forkEventsCount": value["fork_events_count"],
     }
     canonical = json.dumps(fields, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
     return {"stableRowId": hashlib.sha256(canonical.encode("utf-8")).hexdigest(), **fields}

@@ -39,6 +39,8 @@ const metadataRow = (overrides: Record<string, unknown> = {}) => {
     visitDate: "2023-09-06T10:44:38.631000Z",
     revisionDate: "2023-09-05T09:30:00Z",
     committerDate: "2023-09-05T09:30:00Z",
+    starEventsCount: 4,
+    forkEventsCount: 2,
     ...fieldOverrides,
   };
   const canonical = JSON.stringify(Object.fromEntries(Object.keys(fields).sort()
@@ -400,6 +402,8 @@ describe("Stack metadata worker bridge", () => {
       metadataRow({ visitDate: "not-a-date" }),
       metadataRow({ revisionDate: "not-a-date" }),
       metadataRow({ committerDate: "not-a-date" }),
+      metadataRow({ starEventsCount: -1 }),
+      metadataRow({ forkEventsCount: 1.5 }),
     ];
     for (const row of invalidRows) {
       await expect(collectStackMetadata(await setup({

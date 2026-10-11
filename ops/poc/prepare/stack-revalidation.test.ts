@@ -63,6 +63,8 @@ const row = (overrides: Record<string, unknown> = {}) => {
     visitDate: "2023-09-06T10:44:38Z",
     revisionDate: "2023-09-05T09:30:00Z",
     committerDate: "2023-09-05T09:30:00Z",
+    starEventsCount: 4,
+    forkEventsCount: 2,
     ...overrides,
   };
   return {

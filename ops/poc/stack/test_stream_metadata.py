@@ -160,8 +160,9 @@ class StreamMetadataTests(unittest.TestCase):
             "swhSnapshotId", "swhRevisionId", "repository", "path",
             "detectedLicenses", "detectedLanguage", "generated", "vendor",
             "sourceEncoding", "byteLength", "visitDate", "revisionDate",
-            "committerDate",
+            "committerDate", "starEventsCount", "forkEventsCount",
         ])
+        self.assertEqual((emitted[0]["starEventsCount"], emitted[0]["forkEventsCount"]), (4, 2))
         self.assertRegex(emitted[0]["stableRowId"], r"^[0-9a-f]{64}$")
         self.assertNotIn("firstCrawlDate", emitted[0])
         self.assertNotIn("lastCrawlDate", emitted[0])

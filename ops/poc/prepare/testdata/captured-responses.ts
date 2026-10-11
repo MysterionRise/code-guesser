@@ -120,7 +120,7 @@ const metadataRow = (
     repository, path, detectedLicenses: ["MIT"], detectedLanguage: language,
     generated: false, vendor: false, sourceEncoding: "UTF-8", byteLength: bytes.byteLength,
     visitDate: "2023-09-06T10:44:38Z", revisionDate: "2023-09-05T09:30:00Z",
-    committerDate: "2023-09-05T09:30:00Z",
+    committerDate: "2023-09-05T09:30:00Z", starEventsCount: 4, forkEventsCount: 2,
   } as const;
   const canonical = JSON.stringify(Object.fromEntries(Object.entries(fields).sort()));
   return Object.freeze({ stableRowId: digest("sha256", canonical), ...fields });

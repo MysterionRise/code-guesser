@@ -17,6 +17,7 @@ const row = {
   detectedLanguage: "Python", generated: false, vendor: false, sourceEncoding: "UTF-8",
   byteLength: 128, visitDate: "2023-09-06T10:44:38.631000Z",
   revisionDate: "2023-09-05T09:30:00Z", committerDate: "2023-09-05T09:30:00Z",
+  starEventsCount: 4, forkEventsCount: 2,
 } as const;
 const limits: BlobWorkerLimits = Object.freeze({
   blobAttempts: 50, successfulBlobs: 50, perBlobBytes: 262_144, totalBlobBytes: 16_777_216,
