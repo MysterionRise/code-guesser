@@ -507,6 +507,22 @@ const logLines = (calls: readonly string[]): string[] =>
     expect(harness.calls.indexOf("lineage:0")).toBeGreaterThan(-1);
   });
 
+  it("screens a Stack row's repository before fetching its blob", async () => {
+    const harness = await makeHarness({
+      collectStackMetadata: async ({ configuration }) => accepted([{ id: configuration.toLowerCase(),
+        detectedLanguage: configuration, repository: "mirror/rejected" }], "5"),
+      screenGitHubRepository: async ({ repository }) => {
+        if (repository === "mirror/rejected") throw Object.assign(new Error("GITHUB_ADMISSION_REJECTED"), { code: "ADMISSION_REPOSITORY" });
+        return accepted({ repository }, "2");
+      },
+    });
+    await expect(prepareLocalExperiment(harness.dependencies)).rejects.toThrow("PREPARATION_FAILED");
+    expect(harness.calls.some((call) => call.startsWith("fetch:"))).toBe(false);
+    const rejections = harness.calls.find((call) => call.startsWith("log:PREPARATION_REJECTIONS "));
+    expect(rejections).toContain("GITHUB_REVALIDATION:ADMISSION_REPOSITORY=1");
+    expect(rejections).toContain("GITHUB_REVALIDATION:REPOSITORY_SCREENED_OUT=4");
+  });
+
   it("rejects a composed snapshot that disagrees with captured hashes before publication", async () => {
     const harness = await makeHarness({
       compose: () => ({ artifact: { crawlSnapshot: { id: hash("e") }, decks: [] },

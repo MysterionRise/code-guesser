@@ -184,32 +184,37 @@ const unreportable = (value: unknown): boolean => {
   return typeof repository === "string" && typeof commit === "string" && typeof path === "string"
     && !isReportableSourceIdentity(`${repository}@${commit}:${path}`);
 };
-const selectGitHub = async (context: Context, deps: PreparationDependencies, hashes: string[], pool: readonly unknown[], state: RunState): Promise<GitHubDecks> => {
-  const { profile } = context; const { projectRounds, aiRounds, aiMinimumPerOutcome } = profile.selection;
-  const ordinary = pool.filter((candidate) => queryRole(profile, candidate) === "ordinary");
-  const credited = pool.filter((candidate) => queryRole(profile, candidate) === "ai-credit");
-  const project: unknown[] = []; const aiYes: unknown[] = []; const aiNo: unknown[] = []; const spare: unknown[] = [];
-  const all = (): unknown[] => [...project, ...aiYes, ...aiNo];
-  // The repository check is the cheapest admission gate and repositories repeat, so it runs once per
-  // repository before any lineage request; every later candidate of a rejected repository is skipped.
-  const repositoryVerdicts = new Map<string, boolean>();
-  const screenRepository = async (candidate: unknown): Promise<boolean> => {
+type RepositoryScreen = (candidate: unknown, stage: DiagnosticStage) => Promise<boolean>;
+/**
+ * The repository check is the cheapest gate and repositories repeat, so each repository is screened
+ * once per run, before any lineage request or blob fetch; every later candidate of a rejected one is skipped.
+ */
+const repositoryScreen = (context: Context, deps: PreparationDependencies, hashes: string[], state: RunState): RepositoryScreen => {
+  const verdicts = new Map<string, boolean>();
+  return async (candidate, stage) => {
     const repository = String((candidate as { repository?: unknown } | undefined)?.repository ?? "");
-    const known = repositoryVerdicts.get(repository);
+    const known = verdicts.get(repository);
     if (known !== undefined) {
-      if (!known) noteRejection(state, "ADMISSION", new Error("REPOSITORY_SCREENED_OUT"));
+      if (!known) noteRejection(state, stage, new Error("REPOSITORY_SCREENED_OUT"));
       return known;
     }
     let verdict = false;
     try {
       addHashes(hashes, (await deps.screenGitHubRepository({ ...context, repository })).acceptedResponseHashes);
       verdict = true;
-    } catch (error) { rejectCandidate(state, "ADMISSION", error); }
-    repositoryVerdicts.set(repository, verdict);
+    } catch (error) { rejectCandidate(state, stage, error); }
+    verdicts.set(repository, verdict);
     return verdict;
   };
+};
+const selectGitHub = async (context: Context, deps: PreparationDependencies, hashes: string[], pool: readonly unknown[], state: RunState, screenRepository: RepositoryScreen): Promise<GitHubDecks> => {
+  const { profile } = context; const { projectRounds, aiRounds, aiMinimumPerOutcome } = profile.selection;
+  const ordinary = pool.filter((candidate) => queryRole(profile, candidate) === "ordinary");
+  const credited = pool.filter((candidate) => queryRole(profile, candidate) === "ai-credit");
+  const project: unknown[] = []; const aiYes: unknown[] = []; const aiNo: unknown[] = []; const spare: unknown[] = [];
+  const all = (): unknown[] => [...project, ...aiYes, ...aiNo];
   const admit = async (candidate: unknown): Promise<unknown | undefined> => {
-    if (!(await screenRepository(candidate))) return undefined;
+    if (!(await screenRepository(candidate, "ADMISSION"))) return undefined;
     let lineage: StageResult<unknown>;
     try { lineage = await deps.bindGitHubLineage({ ...context, candidate }); addHashes(hashes, lineage.acceptedResponseHashes);
     } catch (error) { rejectCandidate(state, "DISCOVERY", error); return undefined; }
@@ -271,12 +276,13 @@ const selectGitHub = async (context: Context, deps: PreparationDependencies, has
   if (aiNo.length < absentTarget) throw new PreparationError();
   return Object.freeze({ project: Object.freeze(project), ai: Object.freeze([...aiYes, ...aiNo]) });
 };
-const selectStack = async (context: Context, deps: PreparationDependencies, hashes: string[], rows: readonly unknown[], github: readonly unknown[], state: RunState) => {
+const selectStack = async (context: Context, deps: PreparationDependencies, hashes: string[], rows: readonly unknown[], github: readonly unknown[], state: RunState, screenRepository: RepositoryScreen) => {
   const selected: StackSelection[] = [];
   for (const configuration of context.profile.stack.configurations) {
     const ordered = rows.filter((item) => (item as any).detectedLanguage === configuration.language).sort(stackOrder);
     for (const row of ordered) {
       if (!licensesAllowed(context.profile, row)) { noteRejection(state, "SCREENING", new Error("LICENSE_REJECTED")); continue; }
+      if (!(await screenRepository(row, "GITHUB_REVALIDATION"))) continue;
       const lease = context.capacity.beginBlob();
       let stage: DiagnosticStage = "BLOB_RETRIEVAL";
       try {
@@ -364,11 +370,12 @@ export const prepareLocalExperiment = async (deps: PreparationDependencies = def
     state.discovered = Array.isArray(search.value.candidates) ? search.value.candidates.length : 0;
     const classifications = validateClassifications(loaded.profile, search.value.queryClassifications);
     enter("ADMISSION");
-    const githubDecks = await selectGitHub(context, deps, hashes, search.value.candidates, state);
+    const screenRepository = repositoryScreen(context, deps, hashes, state);
+    const githubDecks = await selectGitHub(context, deps, hashes, search.value.candidates, state, screenRepository);
     const distractorPool = [...new Set(search.value.candidates.filter((candidate) => queryRole(loaded.profile, candidate) === "ordinary")
       .map((candidate) => String((candidate as any).repository)))];
     enter("BLOB_RETRIEVAL");
-    const languageSelections = await selectStack(context, deps, hashes, metadata, [...githubDecks.project, ...githubDecks.ai], state);
+    const languageSelections = await selectStack(context, deps, hashes, metadata, [...githubDecks.project, ...githubDecks.ai], state, screenRepository);
     enter("SELECTION");
     const crawlSnapshotId = provisionalSnapshot(profileHash, hashes);
     const finalized = deps.finalizeBindings
