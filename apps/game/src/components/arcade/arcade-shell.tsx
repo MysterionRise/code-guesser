@@ -43,6 +43,8 @@ export interface ArcadeSession {
   readonly score: number;
   readonly completedRounds: number;
   readonly correctRounds: number;
+  /** Whether each answered round was right, in play order. */
+  readonly outcomes: readonly boolean[];
   readonly result: EntertainmentResultProjection | null;
   readonly status: "playing" | "complete";
 }
@@ -56,7 +58,7 @@ export type ArcadeSessionAction =
 
 export function createArcadeSession(_mode: PublicModeContract): ArcadeSession {
   return Object.freeze({ roundIndex: 0, visibleHintCount: 0, lockedCandidateId: null,
-    reveal: null, score: 0, completedRounds: 0, correctRounds: 0, result: null, status: "playing" });
+    reveal: null, score: 0, completedRounds: 0, correctRounds: 0, outcomes: Object.freeze([]), result: null, status: "playing" });
 }
 
 export function projectDisplayReveal(value: unknown): AuthorizedReveal {
@@ -140,6 +142,7 @@ export function transitionArcadeSession(
     }
     return Object.freeze({ ...session, reveal, result: reveal.result,
       score: reveal.result.score, completedRounds, correctRounds: session.correctRounds + (reveal.correct ? 1 : 0),
+      outcomes: Object.freeze([...session.outcomes, reveal.correct]),
       status: completedRounds === mode.rounds.length ? "complete" : "playing" });
   }
   // A finished run is never replayed: a new game is a fresh deal from the server, so revealed rounds stay spent.
@@ -176,6 +179,10 @@ export function formatCompletionResult(result: EntertainmentResultProjection, co
 /** What one round earned and the hints it took, as its reveal states it: "+800 points (1 hint)" or "0 points (no hints)". */
 export const roundPointsNote = (score: number, hintsUsed: number): string =>
   `${score > 0 ? "+" : ""}${points(score)} points (${hintsUsed === 0 ? "no hints" : hintsUsed === 1 ? "1 hint" : `${hintsUsed} hints`})`;
+
+/** How the round track names one round to assistive technology: "Round 2, current" or "Round 1, correct". */
+export const roundStatusText = (round: number, current: boolean, correct: boolean | undefined): string =>
+  [`Round ${round}`, ...(current ? ["current"] : []), ...(correct === undefined ? [] : [correct ? "correct" : "missed"])].join(", ");
 
 /** The round's own points after zero, one, and two hints. */
 export const hintCostNote = (values: readonly number[]): string =>
@@ -292,19 +299,25 @@ export function ArcadeShell({ mode, authorizeRevealAction, chooseAnotherDeckHref
       <noscript>This game needs JavaScript for answers and progressive evidence.</noscript>
       <header className="arcade-header">
         <a className="brand" href="/">CODEGUESSR</a>
-        <span className="score" aria-label={`Score ${session.score}`}>{session.score.toLocaleString()} pts</span>
+        <span className="score"><span className="visually-hidden">Score: </span>{points(session.score)} pts</span>
       </header>
 
-      <nav className="round-track" aria-label="Round progress">
-        {mode.rounds.map((item, index) => (
-          <span
-            className={index === session.roundIndex ? "round-dot current" : index < session.roundIndex ? "round-dot done" : "round-dot"}
-            data-round-nav={index + 1}
-            key={item.roundId}
-            aria-label={`Round ${index + 1}${index === session.roundIndex ? ", current" : ""}`}
-          >{index + 1}</span>
-        ))}
-      </nav>
+      <ol className="round-track" aria-label="Round progress">
+        {mode.rounds.map((item, index) => {
+          const current = index === session.roundIndex;
+          return (
+            <li
+              className={current ? "round-dot current" : index < session.roundIndex ? "round-dot done" : "round-dot"}
+              data-round-nav={index + 1}
+              key={item.roundId}
+              aria-current={current ? "step" : undefined}
+            >
+              <span aria-hidden="true">{index + 1}</span>
+              <span className="visually-hidden">{roundStatusText(index + 1, current, session.outcomes[index])}</span>
+            </li>
+          );
+        })}
+      </ol>
 
       <section className="game-card" aria-labelledby="round-title" data-round-id={round.roundId}>
         <p className="eyebrow">Round {session.roundIndex + 1} of {mode.rounds.length}</p>
@@ -315,21 +328,21 @@ export function ArcadeShell({ mode, authorizeRevealAction, chooseAnotherDeckHref
               {pane.label ? <figcaption>Version {pane.label}</figcaption>
                 : PANE_CAPTIONS[round.mode.kind] && <figcaption className="pane-note">{PANE_CAPTIONS[round.mode.kind]}</figcaption>}
               {numbered
-                ? <pre className="code-window numbered" tabIndex={0} aria-label="Code excerpt with numbered lines"><code>
+                ? <pre className="code-window numbered" role="region" tabIndex={0} aria-label="Code excerpt with numbered lines"><code>
                     {paneLines.map((line, lineIndex) => (
                       <span className={lineIndex + 1 === highlighted ? "code-line highlighted" : "code-line"} data-line={lineIndex + 1} key={lineIndex}>
                         <span className="line-number" aria-hidden="true">{lineIndex + 1}</span>{line}
                       </span>
                     ))}
                   </code></pre>
-                : <pre className="code-window" tabIndex={0} aria-label={pane.label ? `Code, version ${pane.label}` : "Code excerpt"}><code>{pane.text}</code></pre>}
+                : <pre className="code-window" role="region" tabIndex={0} aria-label={pane.label ? `Code, version ${pane.label}` : "Code excerpt"}><code>{pane.text}</code></pre>}
             </figure>
           ))}
         </div>
 
         <p className="hint-cost" id={`hint-cost-${round.roundId}`}>{hintCostNote(round.points)}</p>
         {/* Keyed by round, so a new round's hints arrive in a fresh live region instead of being announced. */}
-        <div className="hints" aria-label="Hints" aria-live="polite" key={round.roundId}>
+        <div className="hints" role="group" aria-label="Hints" aria-live="polite" key={round.roundId}>
           {round.mode.clues.map((clue, index) => index < session.visibleHintCount
             ? <p className="hint" key={clue.order} tabIndex={-1} ref={index === session.visibleHintCount - 1 ? latestHint : undefined}>{clue.label}</p>
             : index === session.visibleHintCount

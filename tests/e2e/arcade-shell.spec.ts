@@ -16,6 +16,8 @@ const titlePattern = (title: string) => new RegExp(`^${title.replace(/[.*+?^${}(
 const points = (value: number): string => value.toLocaleString("en-US");
 
 const currentRound = async (page: Page): Promise<string> => (await page.locator(".game-card").getAttribute("data-round-id"))!;
+/** The header score; its "Score: " prefix is visually hidden text, so it names the score for screen readers. */
+const score = (page: Page) => page.locator(".arcade-header .score");
 
 /** Answers all five rounds right, checks each reveal states its points, and returns the dealt round ids in play order. */
 const answerRounds = async (page: Page, full: number, firstRoundHint: boolean): Promise<string[]> => {
@@ -65,7 +67,7 @@ for (const deck of artifact.decks) {
 
     const first = await answerRounds(page, full, true);
     const hinted = full * 0.8 + 4 * full;
-    await expect(page.getByLabel(/Score/)).toHaveText(`${points(hinted)} pts`);
+    await expect(score(page)).toHaveText(`Score: ${points(hinted)} pts`);
     await expect(page.getByText(new RegExp(`Run complete — ${points(hinted)} points`, "u"))).toBeVisible();
 
     // A finished run offers a fresh deal and another deck, never a replay of the rounds it just revealed.
@@ -75,7 +77,7 @@ for (const deck of artifact.decks) {
     await expect(deal).toHaveClass(/primary-action/u);
     await deal.click();
     await expect(page.getByText("Round 1 of 5")).toBeVisible();
-    await expect(page.getByLabel(/Score/)).toHaveText("0 pts");
+    await expect(score(page)).toHaveText("Score: 0 pts");
     await expect(page.getByRole("heading", { name: /Nice read\.|Not this time\./u })).toHaveCount(0);
     const second = await answerRounds(page, full, false);
     // Five rounds dealt in the same order again is at most a one-in-30,240 chance, even from the ten-round pool.
@@ -95,7 +97,7 @@ test("a deck query parameter preselects the deck, and a wrong answer scores zero
   await page.getByRole("button", { name: "Lock in answer" }).click();
   await expect(page.getByRole("heading", { name: "Not this time." })).toBeVisible();
   await expect(page.locator(".reveal .round-points")).toHaveText("0 points (no hints)");
-  await expect(page.getByLabel(/Score/)).toHaveText("0 pts");
+  await expect(score(page)).toHaveText("Score: 0 pts");
   await expect(page.locator(".candidate.missed")).toContainText(wrongAnswers.get(round)!);
   await expect(page.locator(".candidate.correct")).toContainText(answers.get(round)!);
   await expect(page.getByText(`The answer: ${answers.get(round)!}`)).toBeVisible();
@@ -157,4 +159,47 @@ test("revealing a hint keeps keyboard focus, and a failed check returns it to Lo
   await expect(page.getByRole("heading", { name: "Nice read." })).toBeFocused();
   await expect(page.locator(".reveal .round-points")).toHaveText("+500 points (2 hints)");
   await expect(page.getByRole("main").getByRole("alert")).toHaveCount(0);
+});
+
+test.describe("in a de-DE browser", () => {
+  test.use({ locale: "de-DE" });
+
+  test("the header and round track name the score and the current round, with en-US numbers", async ({ page }) => {
+    await page.goto("/?deck=project");
+    await expect(page.getByText("Round 1 of 5")).toBeVisible();
+    expect(await page.evaluate(() => navigator.language)).toBe("de-DE");
+    await expect(page.locator(".arcade-header")).toMatchAriaSnapshot(`
+      - link "CODEGUESSR"
+      - text: "Score: 0 pts"
+    `);
+    await expect(page.getByRole("list", { name: "Round progress" })).toMatchAriaSnapshot(`
+      - list "Round progress":
+        - listitem: Round 1, current
+        - listitem: Round 2
+        - listitem: Round 3
+        - listitem: Round 4
+        - listitem: Round 5
+    `);
+    await expect(page.locator('.round-track [aria-current="step"]')).toHaveAttribute("data-round-nav", "1");
+    await expect(page.getByRole("group", { name: "Hints" })).toBeVisible();
+
+    await page.getByLabel(answers.get(await currentRound(page))!, { exact: true }).check();
+    await page.getByRole("button", { name: "Lock in answer" }).click();
+    await expect(page.locator(".reveal .round-points")).toHaveText("+1,000 points (no hints)");
+    await expect(score(page)).toHaveText("Score: 1,000 pts");
+    await expect(page.locator(".arcade-header")).toMatchAriaSnapshot(`
+      - link "CODEGUESSR"
+      - text: "Score: 1,000 pts"
+    `);
+    await page.getByRole("button", { name: "Next round" }).click();
+    await expect(page.getByRole("list", { name: "Round progress" })).toMatchAriaSnapshot(`
+      - list "Round progress":
+        - listitem: Round 1, correct
+        - listitem: Round 2, current
+        - listitem: Round 3
+        - listitem: Round 4
+        - listitem: Round 5
+    `);
+    await expect(page.locator('.round-track [aria-current="step"]')).toHaveAttribute("data-round-nav", "2");
+  });
 });

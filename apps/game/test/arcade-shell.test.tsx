@@ -12,6 +12,7 @@ import {
   projectDisplayReveal,
   projectSpoilerFreeShare,
   roundPointsNote,
+  roundStatusText,
   transitionArcadeSession,
   type PublicModeContractInput,
 } from "../src/components/arcade/index.js";
@@ -86,11 +87,38 @@ describe("static arcade shell", () => {
     // A revealed hint is announced politely; focus handling lives in the browser tests.
     expect(html).toMatch(/<div class="hints"[^>]*aria-live="polite"/u);
     // Long lines scroll inside a keyboard-reachable code window instead of wrapping.
-    expect(html).toMatch(/<pre class="code-window" tabindex="0" aria-label="Code excerpt">/u);
+    expect(html).toMatch(/<pre class="code-window" role="region" tabindex="0" aria-label="Code excerpt">/u);
     expect(html).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
     expect(html).not.toContain("<script>alert(1)</script>");
     expect(html).toContain("This game needs JavaScript for answers and progressive evidence.");
     expect(html).toContain('aria-live="polite"');
+  });
+
+  it("exposes the score, round progress, and hints to assistive technology without labelling generic elements", () => {
+    const html = renderToStaticMarkup(createElement(ArcadeShell, {
+      mode: createPublicModeContract(modeInput()),
+      authorizeRevealAction: async () => { throw new Error("not called during render"); },
+    }));
+    // The score is text, formatted in en-US like every other number, with a label only screen readers need.
+    expect(html).toMatch(/<span class="score"><span class="visually-hidden">Score: <\/span>0(?:<!-- -->)? pts<\/span>/u);
+    // Progress is an ordered list; the current round is the current step and says so in text.
+    expect(html).toContain('<ol class="round-track" aria-label="Round progress">');
+    expect((html.match(/<li class="round-dot[^"]*"/gu) ?? []).length).toBe(5);
+    expect((html.match(/aria-current="step"/gu) ?? []).length).toBe(1);
+    expect(html).toMatch(/<li class="round-dot current" data-round-nav="1" aria-current="step"><span aria-hidden="true">1<\/span><span class="visually-hidden">Round 1, current<\/span><\/li>/u);
+    expect(html).toContain('<span class="visually-hidden">Round 5</span>');
+    expect(html).toMatch(/<div class="hints" role="group" aria-label="Hints"/u);
+    // Every element that carries a name has a role that may be named.
+    const named = [...html.matchAll(/<([a-z]+)\b([^>]*)\baria-label="[^"]*"/gu)].map(([, tag, attributes]) => ({ tag, role: /\brole="/u.test(attributes!) }));
+    expect(named.length).toBeGreaterThan(0);
+    for (const { tag, role } of named) expect(["ol", "input", "button", "a", "nav", "section"].includes(tag!) || role, tag).toBe(true);
+  });
+
+  it("names each round on the track by its place and outcome", () => {
+    expect(roundStatusText(1, true, undefined)).toBe("Round 1, current");
+    expect(roundStatusText(1, false, true)).toBe("Round 1, correct");
+    expect(roundStatusText(2, true, false)).toBe("Round 2, current, missed");
+    expect(roundStatusText(3, false, undefined)).toBe("Round 3");
   });
 
   it("freezes a safe public mode contract without protected answers", () => {
@@ -270,6 +298,7 @@ describe("static arcade shell", () => {
     expect(session.status).toBe("complete");
     expect(session.roundIndex).toBe(4);
     expect(session.correctRounds).toBe(5);
+    expect(session.outcomes).toEqual([true, true, true, true, true]);
     const share = projectSpoilerFreeShare(session.result!, session.correctRounds, "Which language?");
     expect(share).toEqual({ text: "CodeGuessr · Which language? · 5/5 correct · 5,000/5,000", score: 5000, rounds: 5, correct: 5 });
     expect(JSON.stringify(share)).not.toMatch(/candidate|answer|evidence|excerpt/iu);

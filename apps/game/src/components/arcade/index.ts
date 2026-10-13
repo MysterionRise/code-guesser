@@ -5,6 +5,7 @@ export {
   projectDisplayReveal,
   projectSpoilerFreeShare,
   roundPointsNote,
+  roundStatusText,
   transitionArcadeSession,
   type ArcadeSession,
   type AuthorizedReveal,

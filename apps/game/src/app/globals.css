@@ -8,9 +8,9 @@ button:focus-visible, input:focus-visible, a:focus-visible { outline: 3px solid 
 .arcade-shell { width: min(980px, calc(100% - 32px)); margin: auto; padding: 28px 0 64px; }
 .arcade-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 38px; }
 .brand { color: #baff65; font-weight: 900; letter-spacing: .12em; text-decoration: none; }
-.score { border: 1px solid #315a4c; border-radius: 999px; padding: 8px 14px; font-variant-numeric: tabular-nums; }
-.round-track { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin: 0 auto 20px; max-width: 560px; }
-.round-dot { display: grid; place-items: center; height: 32px; border-radius: 999px; background: #14231e; color: #759187; font-size: .8rem; font-weight: 800; }
+.score { position: relative; border: 1px solid #315a4c; border-radius: 999px; padding: 8px 14px; font-variant-numeric: tabular-nums; }
+.round-track { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin: 0 auto 20px; padding: 0; max-width: 560px; list-style: none; }
+.round-dot { position: relative; display: grid; place-items: center; height: 32px; border-radius: 999px; background: #14231e; color: #759187; font-size: .8rem; font-weight: 800; }
 .round-dot.current { color: #07120f; background: #baff65; }
 .round-dot.done { color: #baff65; background: #214334; }
 .game-card { background: rgba(15, 31, 25, .92); border: 1px solid #25483c; border-radius: 24px; padding: clamp(22px, 5vw, 48px); box-shadow: 0 22px 80px #0008; }
@@ -84,3 +84,4 @@ noscript { display: block; padding: 12px; margin-bottom: 16px; background: #522;
 .primary-action { border-radius: 12px; padding: 14px 20px; background: #baff65; color: #07120f; font-weight: 900; text-decoration: none; }
 .reveal .secondary-action { padding: 12px 18px; border: 2px solid #baff65; background: transparent; color: #baff65; }
 .round-points { margin: 0 0 8px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
