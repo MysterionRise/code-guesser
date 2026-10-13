@@ -48,8 +48,6 @@ gate: changing queries, retries, ceilings, deck rules, or running
 - Gameplay never touches the network; it plays the frozen local artifact.
 - Malformed provider data fails closed. Transient errors may be retried within
   the request budget.
-- Preserve unrelated worktree changes (`apps/game/tsconfig.tsbuildinfo` stays
-  unstaged).
 
 ## Current state
 
