@@ -1,4 +1,4 @@
-import { DEFAULT_ANSWER_CHOREOGRAPHY, SCENES, parseAnswerChoreography } from "./scenes";
+import { DEFAULT_ANSWER_CHOREOGRAPHY, DEMO_SCENE, SCENES, parseAnswerChoreography } from "./scenes";
 
 // The operator typecheck keeps vitest types out of its program, as the other ops suites do.
 const testModuleName: string = "vitest";
@@ -16,7 +16,7 @@ describe("demo recorder scenes", () => {
 
   it("records one scene per deck, each opened through the deck parameter, plus a full run with the MP4", () => {
     expect(SCENES.map(({ id }) => id)).toEqual([
-      "deck-project", "deck-language", "deck-before-after", "deck-algorithm", "deck-output", "deck-fix", "full-run",
+      "demo", "deck-project", "deck-language", "deck-before-after", "deck-algorithm", "deck-output", "deck-fix", "full-run",
     ]);
     expect(SCENES.filter(({ mp4 }) => mp4).map(({ id, mp4 }) => `${id}:${mp4}`)).toEqual(["full-run:codeguessr-demo"]);
     for (const deck of ["project", "language", "before-after", "algorithm", "output", "fix"]) {
@@ -44,5 +44,21 @@ describe("demo recorder scenes", () => {
       .flatMap((step) => step.kind === "caption" ? [step.text] : []);
     expect(captions.some((text) => /commit/iu.test(text))).toBe(true);
     expect(captions.join(" ")).not.toMatch(/human[- ]written|detect|AI-generated/iu);
+  });
+
+  it("records the headline demo vertically, through every deck, answering each round right", () => {
+    expect(DEMO_SCENE.viewport).toEqual({ width: 360, height: 640 });
+    expect(DEMO_SCENE.viewport!.height / DEMO_SCENE.viewport!.width).toBeCloseTo(16 / 9, 2);
+    expect(DEMO_SCENE.captionStyle).toBe("sticker");
+    const visited = DEMO_SCENE.steps.flatMap((step: any) => step.kind === "goto" && step.path.startsWith("/?deck=") ? [step.path.slice(7)] : []);
+    expect(visited.sort()).toEqual(["algorithm", "before-after", "fix", "language", "output", "project"]);
+    const answers = DEMO_SCENE.steps.filter((step: any) => step.kind === "answer");
+    const verdicts = DEMO_SCENE.steps.filter((step: any) => step.kind === "expectHeading" && step.pattern === "^Nice read\\.$");
+    expect(answers).toHaveLength(6);
+    expect(verdicts).toHaveLength(6);
+    expect(DEMO_SCENE.steps.some((step: any) => step.kind === "choose")).toBe(false);
+    // Rounds are dealt at random, so no caption may name an answer, only the deck and the points.
+    const captions = DEMO_SCENE.steps.flatMap((step: any) => step.kind === "caption" ? [step.text] : []);
+    expect(captions.join(" ")).not.toMatch(/quicksort|merge sort|python|java|rust|line \d/iu);
   });
 });
