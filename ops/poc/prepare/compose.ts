@@ -5,7 +5,8 @@ import {
   canonicalHash,
 } from "./canonical";
 import {
-  CROSS_DECK_KEYS,
+  CROSS_DECK_KEYS_BY_KIND,
+  DEDUPLICATION_KEYS_BY_KIND,
   DECK_IDS,
   DECK_KINDS,
   ROUNDS_PER_SESSION,
@@ -66,7 +67,7 @@ const parseResponseHashes = (values: readonly string[]): readonly string[] => {
 };
 
 const requireDeck = (generated: GeneratedRounds, id: DeckId, profile: CrawlProfile): void => {
-  if (generated.fixtures.length !== poolSizes(profile)[id] || generated.fixtures.length < ROUNDS_PER_SESSION) fail(`DECK_SIZE_${id.toUpperCase().replace("-", "_")}`);
+  if (generated.fixtures.length !== poolSizes(profile)[id] || generated.fixtures.length < ROUNDS_PER_SESSION) fail(`DECK_SIZE_${id.toUpperCase().replaceAll("-", "_")}`);
   if (generated.fixtures.some((fixture) => fixture.kind !== DECK_KINDS[id])) fail();
 };
 
@@ -85,8 +86,11 @@ const requireBindings = (decks: readonly (readonly ExperimentFixture[])[], profi
         || new Set(values).size !== fixtures.length) fail();
     }
   };
-  for (const fixtures of decks) distinct(fixtures, profile.deduplication);
-  distinct(all, CROSS_DECK_KEYS);
+  // Within a deck, the kind's own identities; across decks, each identity among the rounds whose kind lists it.
+  for (const fixtures of decks) distinct(fixtures, fixtures.length === 0 ? [] : DEDUPLICATION_KEYS_BY_KIND[fixtures[0]!.kind]);
+  for (const key of new Set(all.flatMap(({ kind }) => CROSS_DECK_KEYS_BY_KIND[kind]))) {
+    distinct(all.filter(({ kind }) => CROSS_DECK_KEYS_BY_KIND[kind].includes(key)), [key]);
+  }
 };
 
 /** What a round shows before the answer; project-round labels are the one place a repository may appear. */

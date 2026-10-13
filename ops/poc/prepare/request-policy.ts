@@ -42,11 +42,25 @@ const STACK_CARD_PATH = `/datasets/${STACK_DATASET}/raw/main/README.md`;
 // see docs/gangsta/codeguessr-poc-readiness/evidence/2026-10-08-hugging-face-redirect-observation.md.
 const HUGGING_FACE_REDIRECT_HOSTS: ReadonlySet<string> = new Set(["us.aws.cdn.hf.co"]);
 
+/**
+ * A file's recent history up to a pinned commit, which names the file's last human author:
+ * `commits?path=<path>&sha=<40-hex commit>&per_page=<1-10>`, with no other parameter.
+ */
+const pathHistoryAllowed = (url: URL): boolean => {
+  if (!/^\/repos\/[^/]+\/[^/]+\/commits$/u.test(url.pathname)) return false;
+  const perPage = Number(url.searchParams.get("per_page"));
+  return [...url.searchParams.keys()].sort().join("|") === "path|per_page|sha"
+    && (url.searchParams.get("path") ?? "").length > 0
+    && /^[0-9a-f]{40}$/u.test(url.searchParams.get("sha") ?? "")
+    && Number.isInteger(perPage) && perPage >= 1 && perPage <= 10;
+};
+
 const pathAllowed = (provider: Provider, url: URL): boolean => {
   if (provider === "github") {
     if (url.hostname !== "api.github.com") return false;
     return url.pathname === "/search/commits" || /^\/repos\/[^/]+\/[^/]+(?:\/)?$/u.test(url.pathname)
-      || /^\/repos\/[^/]+\/[^/]+\/(?:commits\/[0-9a-f]{40}|git\/(?:commits|trees|blobs)\/[0-9a-f]{40}|license|contents(?:\/.*)?)$/u.test(url.pathname);
+      || /^\/repos\/[^/]+\/[^/]+\/(?:commits\/[0-9a-f]{40}|git\/(?:commits|trees|blobs)\/[0-9a-f]{40}|license|contents(?:\/.*)?)$/u.test(url.pathname)
+      || pathHistoryAllowed(url);
   }
   if (provider === "huggingFace") {
     if (url.hostname !== "huggingface.co") return false;

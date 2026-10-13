@@ -7,7 +7,7 @@ import type { StackMetadataRow } from "../stack-metadata";
 import { CAPTURED_AUTHOR_EMAIL } from "./captured-values";
 
 type JsonValue = Readonly<Record<string, unknown>>;
-type TreeEntry = Readonly<{ path: string; mode: "100644" | "040000"; type: "blob" | "tree"; sha: string }>;
+export type TreeEntry = Readonly<{ path: string; mode: "100644" | "040000"; type: "blob" | "tree"; sha: string }>;
 
 export interface CapturedResponses {
   readonly http: ReadonlyMap<string, JsonValue | string>;
@@ -22,16 +22,16 @@ const digest = (algorithm: "sha1" | "sha256", value: Uint8Array | string): strin
   createHash(algorithm).update(value).digest("hex");
 const gitObject = (kind: "blob" | "tree", bytes: Uint8Array): string => createHash("sha1")
   .update(`${kind} ${bytes.byteLength}\0`).update(bytes).digest("hex");
-const gitBlob = (bytes: Uint8Array): string => gitObject("blob", bytes);
+export const gitBlob = (bytes: Uint8Array): string => gitObject("blob", bytes);
 /** A git tree id, ordered and encoded the way git (and the lineage check) does. */
-const treeId = (entries: readonly TreeEntry[]): string => {
+export const treeId = (entries: readonly TreeEntry[]): string => {
   const key = (entry: TreeEntry): string => entry.type === "tree" ? `${entry.path}/` : entry.path;
   const parts = [...entries].sort((left, right) => key(left) < key(right) ? -1 : 1).map((entry) =>
     Buffer.concat([Buffer.from(`${entry.mode === "040000" ? "40000" : entry.mode} ${entry.path}\0`), Buffer.from(entry.sha, "hex")]));
   return gitObject("tree", Buffer.concat(parts));
 };
 
-const repositoryResponse = (repository: string): JsonValue => {
+export const repositoryResponse = (repository: string): JsonValue => {
   const api = `https://api.github.com/repos/${repository}`;
   return {
     full_name: repository, url: api, html_url: `https://github.com/${repository}`, description: `Captured ${repository.split("/")[1]} toolkit`,
@@ -43,7 +43,7 @@ const author = (index: number) => ({
   login: `capture-author-${index}`, url: `https://api.github.com/users/capture-author-${index}`,
   html_url: `https://github.com/capture-author-${index}`,
 });
-const licenseResponse = (repository: string, commit: string): JsonValue => {
+export const licenseResponse = (repository: string, commit: string): JsonValue => {
   const api = `https://api.github.com/repos/${repository}`;
   const web = `https://github.com/${repository}`;
   const blob = gitBlob(LICENSE_BYTES);
@@ -56,11 +56,11 @@ const licenseResponse = (repository: string, commit: string): JsonValue => {
     license: { key: "mit", name: "MIT License", spdx_id: "MIT", url: "https://api.github.com/licenses/mit" },
   };
 };
-const treeResponse = (api: string, identity: string, entries: readonly TreeEntry[]): JsonValue => ({
+export const treeResponse = (api: string, identity: string, entries: readonly TreeEntry[]): JsonValue => ({
   sha: identity, url: `${api}/git/trees/${identity}`, truncated: false,
   tree: entries.map((entry) => ({ ...entry, url: `${api}/git/${entry.type}s/${entry.sha}` })),
 });
-const blobResponse = (api: string, identity: string, bytes: Uint8Array): JsonValue => ({
+export const blobResponse = (api: string, identity: string, bytes: Uint8Array): JsonValue => ({
   sha: identity, url: `${api}/git/blobs/${identity}`, encoding: "base64",
   size: bytes.byteLength, content: Buffer.from(bytes).toString("base64"),
 });

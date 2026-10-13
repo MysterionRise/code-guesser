@@ -3,19 +3,21 @@ import {
   BEFORE_AFTER_CANDIDATE_IDS,
   CANDIDATE_COUNTS,
   CONTENT_CLASS,
-  CROSS_DECK_KEYS,
-  DECK_DEDUPLICATION_KEYS,
+  CROSS_DECK_KEYS_BY_KIND,
   DECK_IDS,
   DECK_KINDS,
+  DEDUPLICATION_KEYS_BY_KIND,
+  DETAIL_KINDS,
   LANGUAGE_PAIRS,
   LANGUAGE_SLUGS,
   MAXIMUM_POOL_SIZE,
-  PANE_LABELS,
+  PANE_LAYOUTS,
   PROFILE_VERSION,
   PROTECTED_SOURCE_KEYS,
   ROUNDS_PER_SESSION,
   STACK_LANGUAGES,
   type CandidateRecord,
+  type DeckId,
   type ExperimentArtifact,
   type ExperimentFixture,
   type FixtureKind,
@@ -26,7 +28,7 @@ import {
   type StackLanguage,
 } from "./domain";
 import { fail } from "./errors";
-import { validateLineageSource, validateStackSource, type StackIdentity } from "./source";
+import { pinKey, validateLineageSource, validateStackSource, type StackIdentity } from "./source";
 import {
   canonicalHash,
   codeText,
@@ -77,7 +79,7 @@ const parseCandidates = (value: unknown, kind: FixtureKind): readonly CandidateR
   const candidates = value.map((entry) => {
     const candidate = record(entry, ["id", "label", "detail"]);
     const detail = candidate.detail === null ? null : text(candidate.detail);
-    if (detail !== null && kind !== "PROJECT") fail();
+    if (detail !== null && !DETAIL_KINDS.has(kind)) fail();
     return Object.freeze({ id: text(candidate.id), label: text(candidate.label), detail });
   });
   if (new Set(candidates.map(({ id }) => id)).size !== expected
@@ -86,7 +88,7 @@ const parseCandidates = (value: unknown, kind: FixtureKind): readonly CandidateR
 };
 
 const parsePanes = (value: unknown, kind: FixtureKind): readonly Pane[] => {
-  const expected = kind === "BEFORE_AFTER" ? PANE_LABELS : [null];
+  const expected = PANE_LAYOUTS[kind];
   if (!Array.isArray(value) || value.length !== expected.length) return fail();
   return Object.freeze(value.map((entry, index) => {
     const pane = record(entry, ["label", "text"]);
@@ -99,6 +101,8 @@ interface Snapshot {
   readonly id: string;
   readonly queryIds: ReadonlySet<string>;
   readonly stack: StackIdentity;
+  /** The curated repositories' pinned commits, as `owner/name@commit`; empty when the run read none. */
+  readonly pins: ReadonlySet<string>;
 }
 
 type Semantics = Readonly<{
@@ -149,6 +153,22 @@ const VALIDATORS: Readonly<Record<FixtureKind, (semantics: Semantics) => void>> 
   PROJECT: validateProject, LANGUAGE: validateLanguage, BEFORE_AFTER: validateBeforeAfter,
 });
 
+/** Where each kind's source comes from, and the check that binds it to this snapshot. */
+const SOURCE_VALIDATORS: Readonly<Record<FixtureKind, (value: unknown, snapshot: Snapshot) => ParsedSource>> = Object.freeze({
+  PROJECT: (value: unknown, snapshot: Snapshot) => validateStackSource(value, snapshot.id, snapshot.stack),
+  LANGUAGE: (value: unknown, snapshot: Snapshot) => validateStackSource(value, snapshot.id, snapshot.stack),
+  BEFORE_AFTER: (value: unknown, snapshot: Snapshot) => validateLineageSource(value, snapshot.id, snapshot.queryIds),
+});
+
+/** Rules a whole deck must keep beyond its rounds' own. */
+const DECK_RULES: Readonly<Partial<Record<DeckId, (fixtures: readonly ParsedFixture[]) => void>>> = Object.freeze({
+  // Pane order carries no signal: the later version is pane A in half the pool, give or take one.
+  "before-after": (fixtures: readonly ParsedFixture[]) => {
+    const aLater = fixtures.filter(({ correctCandidateId }) => correctCandidateId === BEFORE_AFTER_CANDIDATE_IDS[0]).length;
+    if (Math.abs(2 * aLater - fixtures.length) > 1) fail();
+  },
+});
+
 const parseAttribution = (value: unknown, source: ParsedSource): string => {
   const attribution = text(value);
   for (const required of [source.authorName, source.repository, source.licenseName, source.licenseSpdx, source.blobUrl]) {
@@ -167,9 +187,7 @@ const parseFixture = (value: unknown, kind: FixtureKind, snapshot: Snapshot): Pa
   const correctCandidateId = text(fixture.correctCandidateId);
   const evidence = text(fixture.evidence);
   const explanation = text(fixture.explanation);
-  const source = kind === "BEFORE_AFTER"
-    ? validateLineageSource(fixture.source, snapshot.id, snapshot.queryIds)
-    : validateStackSource(fixture.source, snapshot.id, snapshot.stack);
+  const source = SOURCE_VALIDATORS[kind](fixture.source, snapshot);
   VALIDATORS[kind]({ panes, prompt, candidates, clues, correctCandidateId, source });
   const helpfulSignals = texts(fixture.helpfulSignals);
   const misleadingSignals = texts(fixture.misleadingSignals);
@@ -201,6 +219,12 @@ const requireDistinct = (fixtures: readonly ParsedFixture[], keys: readonly stri
   }
 };
 
+/** Across decks, each identity may appear once among the rounds whose kind lists it. */
+const requireDistinctAcrossDecks = (fixtures: readonly ParsedFixture[]): void => {
+  const keys = new Set(fixtures.flatMap(({ kind }) => CROSS_DECK_KEYS_BY_KIND[kind]));
+  for (const key of keys) requireDistinct(fixtures.filter(({ kind }) => CROSS_DECK_KEYS_BY_KIND[kind].includes(key)), [key]);
+};
+
 const parseDeck = (value: unknown, snapshot: Snapshot): ParsedDeck => {
   const deck = record(value, DECK_KEYS);
   const id = DECK_IDS.find((known) => known === deck.id) ?? fail();
@@ -210,12 +234,8 @@ const parseDeck = (value: unknown, snapshot: Snapshot): ParsedDeck => {
   const values = Array.isArray(deck.fixtures) ? deck.fixtures : fail();
   if (values.length < ROUNDS_PER_SESSION || values.length > MAXIMUM_POOL_SIZE) fail();
   const fixtures = values.map((fixture: unknown) => parseFixture(fixture, DECK_KINDS[id], snapshot));
-  requireDistinct(fixtures, DECK_DEDUPLICATION_KEYS);
-  if (id === "before-after") {
-    // Pane order carries no signal: the later version is pane A in half the pool, give or take one.
-    const aLater = fixtures.filter(({ correctCandidateId }) => correctCandidateId === BEFORE_AFTER_CANDIDATE_IDS[0]).length;
-    if (Math.abs(2 * aLater - fixtures.length) > 1) fail();
-  }
+  requireDistinct(fixtures, DEDUPLICATION_KEYS_BY_KIND[DECK_KINDS[id]]);
+  DECK_RULES[id]?.(fixtures);
   return deepFreeze({ id, title, description, roundsPerSession: ROUNDS_PER_SESSION, fixtures: Object.freeze(fixtures) });
 };
 
@@ -264,8 +284,25 @@ const validateResponseHashes = (value: unknown, snapshotId: string, profileHash:
     || snapshotId !== canonicalHash({ profileHash, acceptedResponseHashes: responseHashes })) fail();
 };
 
+/** The curated section lists each pinned repository commit once, in order. */
+const parsePins = (value: unknown): ReadonlySet<string> => {
+  const curated = record(value, ["pins"]);
+  const pins = (Array.isArray(curated.pins) ? curated.pins : fail()).map((entry: unknown) => {
+    const pin = record(entry, ["repository", "commit"]);
+    const repository = text(pin.repository);
+    if (!REPOSITORY.test(repository)) fail();
+    return pinKey(repository, gitId(pin.commit));
+  });
+  if (pins.length === 0 || pins.some((pin, index) => index > 0 && pin <= pins[index - 1]!)) fail();
+  return new Set(pins);
+};
+
+const SNAPSHOT_KEYS = ["id", "profileVersion", "profileHash", "github", "stack", "acceptedResponseHashes"] as const;
+
 const parseSnapshot = (value: unknown, profileHash: string): Snapshot => {
-  const snapshot = record(value, ["id", "profileVersion", "profileHash", "github", "stack", "acceptedResponseHashes"]);
+  // A run that read curated repositories lists their pins; one that read none has no curated section.
+  const curated = typeof value === "object" && value !== null && Object.hasOwn(value, "curated");
+  const snapshot = record(value, curated ? [...SNAPSHOT_KEYS, "curated"] : SNAPSHOT_KEYS);
   const id = sha256(snapshot.id);
   if (snapshot.profileVersion !== PROFILE_VERSION || sha256(snapshot.profileHash) !== profileHash) fail();
   const github = record(snapshot.github, ["apiVersion", "queries"]);
@@ -276,7 +313,7 @@ const parseSnapshot = (value: unknown, profileHash: string): Snapshot => {
   if (!Array.isArray(stack.configurations)
     || stack.configurations.join("|") !== STACK_LANGUAGES.join("|")) fail();
   validateResponseHashes(snapshot.acceptedResponseHashes, id, profileHash);
-  return Object.freeze({ id, queryIds, stack: identity });
+  return Object.freeze({ id, queryIds, stack: identity, pins: curated ? parsePins(snapshot.curated) : new Set<string>() });
 };
 
 export const ARTIFACT_KEYS = ["schemaVersion", "contentClass", "profileHash", "crawlSnapshot", "decks"] as const;
@@ -298,7 +335,7 @@ export const parseArtifactDecks = (value: unknown): readonly ParsedDeck[] => {
   const fixtures = decks.flatMap(({ fixtures: deckFixtures }) => deckFixtures);
   const roundIds = fixtures.map(({ roundId }) => roundId.toLocaleLowerCase("en-US"));
   if (new Set(roundIds).size !== fixtures.length) fail();
-  requireDistinct(fixtures, CROSS_DECK_KEYS);
+  requireDistinctAcrossDecks(fixtures);
   requirePublicContainment(fixtures);
   return Object.freeze(decks);
 };

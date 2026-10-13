@@ -29,7 +29,11 @@ export interface StackIdentity {
 const encodedPath = (value: string): string =>
   value.split("/").map(encodeURIComponent).join("/");
 
-const validateGitHubBinding = (source: JsonRecord): void => {
+/**
+ * Every URL of a GitHub-hosted source follows from its repository, commit, and path. The author's commit is
+ * the source commit unless the author was found in the file's history (`authorCommit`).
+ */
+export const validateGitHubBinding = (source: JsonRecord, authorCommit?: string): void => {
   const repository = text(source.repository);
   if (!/^[^/\s]+\/[^/\s]+$/u.test(repository)) fail();
   const commit = gitId(source.commit);
@@ -39,26 +43,47 @@ const validateGitHubBinding = (source: JsonRecord): void => {
   const root = `https://github.com/${repository}`;
   const commitUrl = `${root}/commit/${commit}`;
   if (source.repositoryUrl !== root || source.commitUrl !== commitUrl
-    || source.authorSourceUrl !== commitUrl
+    || source.authorSourceUrl !== `${root}/commit/${authorCommit === undefined ? commit : gitId(authorCommit)}`
     || source.blobUrl !== `${root}/blob/${commit}/${encodedPath(path)}`) fail();
   const licensePrefix = `${root}/blob/${commit}/`;
   if (!text(source.licenseFileUrl).startsWith(licensePrefix)
     || text(source.licenseFileUrl).length === licensePrefix.length) fail();
 };
 
-const validateBaseSource = (source: JsonRecord, snapshotId: string): void => {
+const validateBaseSource = (source: JsonRecord, snapshotId: string, authorBasis = "SELECTED_COMMIT", authorCommit?: string): void => {
   for (const key of [
     "repository", "repositoryUrl", "authorName", "path", "licenseName", "licenseSpdx",
     "licenseFileUrl", "commitUrl", "blobUrl", "profileVersion",
   ]) text(source[key]);
   if (source.authorLogin !== null) text(source.authorLogin);
-  if (source.authorBasis !== "SELECTED_COMMIT") fail();
+  if (source.authorBasis !== authorBasis) fail();
   gitId(source.blob);
   gitId(source.commit);
   sha256(source.rawContentHash);
   sha256(source.excerptHash);
   if (source.profileVersion !== PROFILE_VERSION || source.crawlSnapshotId !== snapshotId) fail();
-  validateGitHubBinding(source);
+  validateGitHubBinding(source, authorCommit);
+};
+
+/** `owner/name@commit`: how the snapshot lists the commits curated repositories are pinned to. */
+export const pinKey = (repository: string, commit: string): string => `${repository}@${commit}`;
+
+/**
+ * A file from a curated GitHub repository: the repository and commit must be one of the snapshot's pins, and the
+ * author is the file's last human author before the pin (`PATH_HISTORY`), credited through that author's commit.
+ * `keys` are the kind's own source keys, which start with `CURATED_SOURCE_KEYS`.
+ */
+export const validateCuratedSource = (
+  value: unknown,
+  keys: readonly string[],
+  snapshotId: string,
+  pins: ReadonlySet<string>,
+): ParsedSource => {
+  const source = record(value, keys);
+  if (source.discoverySource !== "CURATED_GITHUB") fail();
+  validateBaseSource(source, snapshotId, "PATH_HISTORY", gitId(source.authorCommit));
+  if (!pins.has(pinKey(text(source.repository), gitId(source.commit)))) fail();
+  return source as ParsedSource;
 };
 
 /** A commit from GitHub search and one file's parent and child versions; the round shows both. */

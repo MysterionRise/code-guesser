@@ -13,7 +13,8 @@ turned them into one roadmap, and the main claims were checked against the code.
 | 1: run journal, per-deck publication, one artifact model | done | PR #8; [evidence](evidence/2026-10-11-phase-1-journal-runs.md) |
 | 2: deck redesign | done | PR #9; [evidence](evidence/2026-10-11-v3-decks-run.md) |
 | 3a: grow The Stack v2 (twelve languages in look-alike pairs, 24-round Stack decks) | done | `claude/phase-3-stack`; [evidence](evidence/2026-10-13-v4-stack-growth-run.md) |
-| 3b: the `SourceAdapter` seam, then other sources | planned | [next-sources plan](2026-10-13-next-sources-plan.md) |
+| 3b: new decks (Which algorithm?, Predict the output, Spot the fix) | in progress | [new rounds research](2026-10-13-new-rounds-research.md) |
+| 3c: other forges (GitLab, Software Heritage) and Which era? | planned | [next-sources plan](2026-10-13-next-sources-plan.md) |
 
 The findings below describe the state before Phase 0 and are kept as written.
 

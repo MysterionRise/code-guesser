@@ -19,6 +19,7 @@ describe("preparation request policy", () => {
     const requests = [
       ["github", "https://api.github.com/search/commits?q=refactor&sort=committer-date"],
       ["github", "https://api.github.com/repos/owner/project/git/trees/" + "a".repeat(40)],
+      ["github", `https://api.github.com/repos/owner/project/commits?path=sorts%2Fquick_sort.py&sha=${"a".repeat(40)}&per_page=10`],
       ["huggingFace", "https://huggingface.co/api/datasets/bigcode/the-stack-v2/revision/" + "a".repeat(40)],
       ["huggingFace", "https://huggingface.co/datasets/bigcode/the-stack-v2/resolve/" + "a".repeat(40) + "/README.md"],
       ["softwareHeritage", "https://softwareheritage.s3.amazonaws.com/content/sha1_git:abc123"],
@@ -36,6 +37,12 @@ describe("preparation request policy", () => {
       { provider: "github", method: "POST", url: "https://api.github.com/search/commits?q=x" },
       { provider: "github", method: "GET", url: "https://huggingface.co/search/commits" },
       { provider: "github", method: "GET", url: "https://api.github.com/users/example" },
+      // A file's history only up to a pinned commit, one short page, and nothing else.
+      { provider: "github", method: "GET", url: "https://api.github.com/repos/owner/project/commits" },
+      { provider: "github", method: "GET", url: "https://api.github.com/repos/owner/project/commits?path=a.py&sha=main&per_page=10" },
+      { provider: "github", method: "GET", url: `https://api.github.com/repos/owner/project/commits?path=a.py&sha=${"a".repeat(40)}&per_page=100` },
+      { provider: "github", method: "GET", url: `https://api.github.com/repos/owner/project/commits?path=a.py&sha=${"a".repeat(40)}&per_page=10&page=2` },
+      { provider: "github", method: "GET", url: `https://api.github.com/repos/owner/project/commits?sha=${"a".repeat(40)}&per_page=10` },
       { provider: "huggingFace", method: "GET", url: "https://huggingface.co/api/models/example" },
       { provider: "softwareHeritage", method: "GET", url: "https://softwareheritage.s3.amazonaws.com/private/key" },
     ];
