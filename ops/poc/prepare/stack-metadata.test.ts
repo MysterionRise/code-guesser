@@ -151,7 +151,7 @@ describe("Stack metadata worker bridge", () => {
     expect(calls[0]).toEqual({
       command: "uv",
       args: [
-        "run", "--project", runtimeDirectory.pathname.replace(/\/$/u, ""), "--locked",
+        "run", "--quiet", "--project", runtimeDirectory.pathname.replace(/\/$/u, ""), "--locked",
         "python", workerPath.pathname,
       ],
       cwd: runtimeDirectory.pathname.replace(/\/$/u, ""),

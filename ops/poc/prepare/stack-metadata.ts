@@ -182,7 +182,7 @@ export const metadataWorkerRequest = (options: StackMetadataOptions): WorkerRequ
   return Object.freeze({
     command: "uv",
     args: Object.freeze([
-      "run", "--project", RUNTIME_DIRECTORY, "--locked", "python", WORKER_PATH,
+      "run", "--quiet", "--project", RUNTIME_DIRECTORY, "--locked", "python", WORKER_PATH,
     ]),
     cwd: RUNTIME_DIRECTORY,
     environment: Object.freeze({ PATH: path, HF_TOKEN: token }),

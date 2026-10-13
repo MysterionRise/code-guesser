@@ -95,7 +95,7 @@ export const blobWorkerRequest = (
   const inputRow = Object.fromEntries(ROW_INPUT_KEYS.map((key) => [key, row[key]]));
   return Object.freeze({
     command: "uv",
-    args: Object.freeze(["run", "--project", RUNTIME_DIRECTORY, "--locked", "python", WORKER_PATH]),
+    args: Object.freeze(["run", "--quiet", "--project", RUNTIME_DIRECTORY, "--locked", "python", WORKER_PATH]),
     cwd: RUNTIME_DIRECTORY,
     environment: Object.freeze(projected),
     stdin: `${JSON.stringify({ rows: [inputRow], limits })}\n`,
