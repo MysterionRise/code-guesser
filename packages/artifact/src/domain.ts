@@ -70,10 +70,31 @@ export const LINEAGE_SOURCE_KEYS = [
   "parentPath", "childPath", "parentMode", "childMode", "parentBlob", "childBlob",
   "parentRawContentHash", "childRawContentHash", "parentExcerptHash", "linesRemoved", "linesAdded",
 ] as const;
+/**
+ * A file read from a curated GitHub repository at a pinned commit. Its author is the file's last human author,
+ * found in the file's history up to the pin, so `authorSourceUrl` names that author's commit, not the pin.
+ */
+export const CURATED_SOURCE_KEYS = [...BASE_SOURCE_KEYS, "authorCommit"] as const;
 /** Identities that may not repeat within a deck. */
 export const DECK_DEDUPLICATION_KEYS = ["repository", "commit", "path", "blob", "rawContentHash", "excerptHash"] as const;
 /** Identities that may not repeat across decks; a repository may. */
 export const CROSS_DECK_KEYS = ["commit", "blob", "rawContentHash", "excerptHash"] as const;
+/**
+ * The same rules per kind. A deck of curated files holds many rounds from one repository at one pinned commit,
+ * so its kinds leave `repository` and `commit` out; two kinds compare across decks on the keys both list.
+ */
+export const DEDUPLICATION_KEYS_BY_KIND: Readonly<Record<FixtureKind, readonly string[]>> = Object.freeze({
+  PROJECT: DECK_DEDUPLICATION_KEYS, LANGUAGE: DECK_DEDUPLICATION_KEYS, BEFORE_AFTER: DECK_DEDUPLICATION_KEYS,
+});
+export const CROSS_DECK_KEYS_BY_KIND: Readonly<Record<FixtureKind, readonly string[]>> = Object.freeze({
+  PROJECT: CROSS_DECK_KEYS, LANGUAGE: CROSS_DECK_KEYS, BEFORE_AFTER: CROSS_DECK_KEYS,
+});
+/** Each kind's panes: one unlabelled pane, or panes `A` and `B`. */
+export const PANE_LAYOUTS: Readonly<Record<FixtureKind, readonly (string | null)[]>> = Object.freeze({
+  PROJECT: Object.freeze([null]), LANGUAGE: Object.freeze([null]), BEFORE_AFTER: PANE_LABELS,
+});
+/** Kinds whose options may carry a public detail, such as a repository's description. */
+export const DETAIL_KINDS: ReadonlySet<FixtureKind> = new Set<FixtureKind>(["PROJECT"]);
 /** Source values no pre-answer text may contain as a whole token. */
 export const PROTECTED_SOURCE_KEYS = [
   "repository", "repositoryUrl", "authorName", "authorLogin", "authorSourceUrl", "path",
@@ -82,7 +103,7 @@ export const PROTECTED_SOURCE_KEYS = [
 ] as const;
 
 export interface ParsedSource extends JsonRecord {
-  readonly discoverySource: "GITHUB_COMMIT_SEARCH" | "STACK_V2";
+  readonly discoverySource: "GITHUB_COMMIT_SEARCH" | "STACK_V2" | "CURATED_GITHUB";
   readonly repository: string;
   readonly authorName: string;
   readonly path: string;

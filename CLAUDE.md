@@ -17,9 +17,12 @@ The goal is a demo on one machine, not public play.
 
 1. `docs/review/2026-10-11-codeguessr-state-review.md`: current product and
    engineering review, decisions, and the roadmap.
-2. `docs/review/2026-10-13-next-sources-plan.md`: the plan for sources beyond
-   The Stack v2 and GitHub search, with the decisions it needs.
-3. `README.md`: how to play, prepare, record, and verify.
+2. `docs/review/2026-10-13-new-rounds-research.md`: the new decks being built
+   (Which algorithm?, Predict the output, Spot the fix), the sources checked,
+   and the backlog.
+3. `docs/review/2026-10-13-next-sources-plan.md`: the plan for forges beyond
+   GitHub (GitLab, Software Heritage) and the era deck.
+4. `README.md`: how to play, prepare, record, and verify.
 
 `docs/gangsta/` is the historical record of the signed-Contract process, which
 was retired on 2026-10-11. Use it for background on why rules exist, not as a
@@ -90,18 +93,25 @@ gate: changing queries, retries, ceilings, deck rules, or running
 
 ## Next steps
 
-Phase 3b of the review roadmap: the next sources, as planned in
-`docs/review/2026-10-13-next-sources-plan.md`.
+Three new decks, one pull request each, from
+`docs/review/2026-10-13-new-rounds-research.md`:
 
-1. The `SourceAdapter` seam (no new source). Its exit test is that
-   `--offline` rebuilds the same rounds.
-2. Curated GitHub repositories and a possible "Which era?" deck.
-3. A GitLab adapter.
-4. The Software Heritage API.
+1. Done: the curated-source slice. `bindGitHubFile` in `github-files.ts`
+   reads one file of a curated repository at a pinned commit, with its
+   licence and last human author. The artifact's deduplication, panes, and
+   source validators are per kind.
+2. Which algorithm? (`algorithm`): TheAlgorithms Python, Java, and Go at
+   pinned commits. Families of four, the function name masked.
+3. Predict the output (`output`): TheAlgorithms/Python doctests, parsed
+   statically in TypeScript and never executed.
+4. Spot the fix (`fix`): Defects4J and BugsInPy one-line fixes, with a
+   line-number gutter in the game.
+5. Game UX for six decks, then the go-live run on profile v5.
 
-The plan lists the decisions these steps need from the owner: widening the
-licence allowlist, a fourth deck, and the GitLab and Software Heritage
-accounts. Ask before starting a step that depends on one.
+Keep the committed profile and artifact unchanged until the go-live pull
+request. Test each deck with in-test profiles and recorded fixtures. Ask
+before widening the licence allowlist, raising the 3,000-request ceiling, or
+adding a source not named in the research note.
 
 Iterate on deck rules with
 `STACK_V2_ACKNOWLEDGED_USABLE_REVISION=e565caa3a78c2423bd374333a472b049eb090e47 pnpm prepare:poc --offline`
@@ -162,6 +172,10 @@ with spend, capacity counts, and rejection aggregates.
 - `GITHUB_SEARCH_*`: the discovery check that rejected a search response.
   `INCOMPLETE`, `TOTAL_CHANGED`, `ITEM_COUNT`, and `DUPLICATE` are provider
   inconsistencies; `SHAPE`, `IDENTITY`, and `DATE` are record drift.
+
+Curated files fail with `FILE_*` codes (`FILE_TREE`, `FILE_PATH`, `FILE_BLOB`,
+`FILE_AUTHOR`; `FILE_AUTHOR_AUTOMATED` means the file's last ten changes all
+came from bots) or with the admission codes.
 
 Rejection aggregates name the failing check: `LINEAGE_*` (`LINEAGE_CHANGE_WINDOW`
 is a commit whose change does not fit one before-and-after window),

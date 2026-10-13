@@ -104,7 +104,7 @@ const publishedDecks = (deps: PreparationDependencies, state: RunState, outcomes
   const skipped = DECK_IDS.filter((id) => outcomes[id].skipped !== undefined);
   for (const id of skipped) {
     deps.log(`PREPARATION_DECK_SKIPPED ${id} ${outcomes[id].skipped}`);
-    noteRejection(state, "SELECTION", new Error(`${id.toUpperCase().replace("-", "_")}_DECK_SKIPPED`));
+    noteRejection(state, "SELECTION", new Error(`${id.toUpperCase().replaceAll("-", "_")}_DECK_SKIPPED`));
   }
   const published = DECK_IDS.filter((id) => outcomes[id].skipped === undefined);
   if (published.length === 0) {

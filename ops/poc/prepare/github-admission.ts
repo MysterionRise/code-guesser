@@ -51,11 +51,11 @@ export interface GitHubAdmissionOptions {
   readonly transport: Pick<BoundedTransport, "requestJson">;
   readonly retry: Pick<RetryController, "execute">;
 }
-interface RepositoryAdmission {
+export interface RepositoryAdmission {
   readonly licenseName: string;
   readonly licenseSpdx: string;
 }
-interface LicenseAdmission {
+export interface LicenseAdmission {
   readonly path: string;
   readonly url: string;
 }
@@ -92,7 +92,8 @@ const detectedLicense = (value: unknown): RepositoryAdmission => {
   return Object.freeze({ licenseName, licenseSpdx });
 };
 
-const admitRepository = (
+/** The repository is public, live, not a fork, and under an allowlisted licence. */
+export const admitRepository = (
   value: unknown,
   repository: string,
   api: string,
@@ -108,7 +109,8 @@ const admitRepository = (
   return license;
 };
 
-const selectedAuthor = (
+/** The author of one commit, from that commit's own response (single or listed). */
+export const selectedAuthor = (
   value: unknown,
   commit: string,
   api: string,
@@ -140,11 +142,12 @@ const decodeLicense = (response: UnknownRecord): Uint8Array => {
   return bytes;
 };
 
-const admitLicense = (
+/** The licence file at `target.commit` agrees with the repository's licence and passes the evidence screen. */
+export const admitLicense = (
   value: unknown,
   metadata: RepositoryAdmission,
-  candidate: GitHubLineageCandidate,
-  options: GitHubAdmissionOptions,
+  target: Readonly<{ repository: string; commit: string }>,
+  policy: Readonly<{ profileVersion: string; profileHash: string }>,
   api: string,
   web: string,
 ): LicenseAdmission => {
@@ -153,10 +156,10 @@ const admitLicense = (
   const encodedPath = encodePath(path);
   const blob = gitId(response.sha);
   if (response.name !== path.split("/").at(-1) || response.type !== "file"
-    || response.url !== `${api}/contents/${encodedPath}?ref=${candidate.commit}`
-    || response.html_url !== `${web}/blob/${candidate.commit}/${encodedPath}`
+    || response.url !== `${api}/contents/${encodedPath}?ref=${target.commit}`
+    || response.html_url !== `${web}/blob/${target.commit}/${encodedPath}`
     || response.git_url !== `${api}/git/blobs/${blob}`
-    || response.download_url !== `https://raw.githubusercontent.com/${candidate.repository}/${candidate.commit}/${encodedPath}`) fail("ADMISSION_LICENSE");
+    || response.download_url !== `https://raw.githubusercontent.com/${target.repository}/${target.commit}/${encodedPath}`) fail("ADMISSION_LICENSE");
   const detected = detectedLicense(response.license);
   if (detected.licenseName !== metadata.licenseName || detected.licenseSpdx !== metadata.licenseSpdx) fail("ADMISSION_LICENSE");
   const bytes = decodeLicense(response);
@@ -169,8 +172,8 @@ const admitLicense = (
     licenseBlobSha: blob,
     licenseTextSha256: textHash,
     licenseBytes: bytes,
-    repositoryPolicyVersion: options.profile.profileVersion,
-    repositoryPolicyHash: options.profileHash,
+    repositoryPolicyVersion: policy.profileVersion,
+    repositoryPolicyHash: policy.profileHash,
   });
   if (evidence.decision !== "ADMISSION_SCREENING_ONLY" || evidence.licenseBlobSha !== blob
     || evidence.licenseTextSha256 !== textHash) fail("ADMISSION_LICENSE");
@@ -215,7 +218,7 @@ const admitCandidate = async (
   const author = selectedAuthor(await requestJson(options, `${api}/commits/${candidate.commit}`),
     candidate.commit, api, web);
   const license = admitLicense(await requestJson(options, `${api}/license?ref=${candidate.commit}`),
-    metadata, candidate, options, api, web);
+    metadata, candidate, { profileVersion: options.profile.profileVersion, profileHash: options.profileHash }, api, web);
   return Object.freeze({
     admissionDecision: "AUTOMATED_POC_ADMISSION_ONLY",
     lineage: candidate,
