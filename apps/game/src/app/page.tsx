@@ -1,14 +1,15 @@
 import { authorizeLocalExperimentReveal } from "./actions";
 import { DemoArcade } from "../demo/demo-arcade";
 import {
-  LOCAL_REAL_EXPERIMENT_NOTICE,
+  LOCAL_REAL_EXPERIMENT_NOTICE_BODY,
+  LOCAL_REAL_EXPERIMENT_NOTICE_LEAD,
   activeLocalRealExperiment,
 } from "../demo/local-real-experiment-loader.server";
 import type { LocalRealDeck } from "../demo/local-real-experiment.server";
 
 const DECK_COUNT_WORDS = ["No decks", "One deck", "Two decks", "Three decks", "Four decks", "Five decks", "Six decks"] as const;
-/** A run publishes every deck it could fill, so the notice counts what this artifact holds. */
-const deckSummary = (count: number): string => `${DECK_COUNT_WORDS[count] ?? `${count} decks`}; each game deals five rounds.`;
+/** A run publishes every deck it could fill, so the chooser counts what this artifact holds. */
+const deckSummary = (count: number): string => `${DECK_COUNT_WORDS[count] ?? `${count} decks`} to choose from.`;
 
 /** What a deck asks of a player: to recognise where code comes from, or to reason about what it does. */
 const DECK_TAGS: Readonly<Record<string, string>> = Object.freeze({
@@ -23,7 +24,10 @@ function DeckChooser({ decks }: { readonly decks: readonly LocalRealDeck[] }) {
   return (
     <main className="deck-chooser" aria-labelledby="deck-chooser-title">
       <h1 id="deck-chooser-title">Pick a deck</h1>
-      <p className="deck-intro">Each game deals five real rounds from the deck. Read the code, take up to two hints, and lock in your guess.</p>
+      <p className="deck-intro">
+        {deckSummary(decks.length)} Each game deals five real rounds from the deck. Read the code, take up to two hints,
+        and lock in your guess.
+      </p>
       <ul className="deck-list">
         {decks.map((deck) => (
           <li key={deck.id}>
@@ -60,7 +64,7 @@ export default async function Page({ searchParams }: PageProps) {
   return (
     <div className="demo-page">
       <p className="demo-notice">
-        <strong>{LOCAL_REAL_EXPERIMENT_NOTICE}</strong> {loaded.ok ? deckSummary(loaded.experiment.decks.length) : "No rounds are available."}
+        <strong>{LOCAL_REAL_EXPERIMENT_NOTICE_LEAD}</strong> {LOCAL_REAL_EXPERIMENT_NOTICE_BODY}
       </p>
       <noscript><p className="demo-notice">CodeGuessr needs JavaScript to accept answers and reveal progressive evidence.</p></noscript>
       {!loaded.ok

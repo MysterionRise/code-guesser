@@ -9,7 +9,10 @@ import { artifact, hashValue } from "./support/local-real-artifact";
 vi.mock("server-only", () => ({}));
 
 const loaderModule = await import("../src/demo/local-real-experiment-loader.server");
-const { ARTIFACT_RELATIVE_PATH, LOCAL_REAL_EXPERIMENT_NOTICE, activeLocalRealExperiment, loadLocalRealExperiment } = loaderModule;
+const {
+  ARTIFACT_RELATIVE_PATH, LOCAL_REAL_EXPERIMENT_NOTICE, LOCAL_REAL_EXPERIMENT_NOTICE_BODY, LOCAL_REAL_EXPERIMENT_NOTICE_LEAD,
+  activeLocalRealExperiment, loadLocalRealExperiment,
+} = loaderModule;
 
 const written = (value: unknown, name = "local-real-rounds.json"): string => {
   const directory = mkdtempSync(join(tmpdir(), "codeguessr-loader-"));
@@ -75,13 +78,16 @@ describe("server-only local real experiment loader", () => {
     expect(typeof first.ok).toBe("boolean");
   });
 
-  it("names both sources and the unreviewed localhost status in the permanent notice", () => {
-    expect(LOCAL_REAL_EXPERIMENT_NOTICE).toMatch(/GitHub Search/u);
-    expect(LOCAL_REAL_EXPERIMENT_NOTICE).toMatch(/Stack v2/u);
-    expect(LOCAL_REAL_EXPERIMENT_NOTICE).toMatch(/automatically/u);
-    expect(LOCAL_REAL_EXPERIMENT_NOTICE).toMatch(/unreviewed|without human review/u);
+  it("names every round source and the unreviewed localhost status in a short permanent notice", () => {
+    for (const source of ["The Stack v2", "GitHub", "TheAlgorithms", "Defects4J", "BugsInPy"]) {
+      expect(LOCAL_REAL_EXPERIMENT_NOTICE).toContain(source);
+    }
+    expect(LOCAL_REAL_EXPERIMENT_NOTICE).toMatch(/^Local unreviewed experiment\./u);
     expect(LOCAL_REAL_EXPERIMENT_NOTICE).toMatch(/localhost/u);
     expect(LOCAL_REAL_EXPERIMENT_NOTICE).toMatch(/Not approved beta content/u);
+    expect(LOCAL_REAL_EXPERIMENT_NOTICE).toBe(`${LOCAL_REAL_EXPERIMENT_NOTICE_LEAD} ${LOCAL_REAL_EXPERIMENT_NOTICE_BODY}`);
+    // The old notice ran to nine lines on a 320 px screen; the browser test holds this one to five.
+    expect(LOCAL_REAL_EXPERIMENT_NOTICE.length).toBeLessThanOrEqual(150);
   });
 
   it("binds the root route and its reveal action to the local experiment loader", () => {

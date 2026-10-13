@@ -9,10 +9,13 @@ import {
   type LocalRealExperiment,
 } from "./local-real-experiment.server";
 
-/** Permanent notice shown above the experiment; it names both sources and the unreviewed status. */
-export const LOCAL_REAL_EXPERIMENT_NOTICE = "Local unreviewed experiment. Real rounds crawled automatically "
-  + "from GitHub Search and The Stack v2, ingested without human review, for localhost testing only. "
-  + "Not approved beta content.";
+/** The permanent notice's bold lead. */
+export const LOCAL_REAL_EXPERIMENT_NOTICE_LEAD = "Local unreviewed experiment.";
+/** The rest of the notice: every source a deck's rounds come from, localhost only, and not beta content. */
+export const LOCAL_REAL_EXPERIMENT_NOTICE_BODY = "Rounds from The Stack v2, GitHub, TheAlgorithms, Defects4J, and BugsInPy, "
+  + "for localhost only. Not approved beta content.";
+/** Permanent notice shown above the experiment; short enough to wrap to five lines on a 320 px screen. */
+export const LOCAL_REAL_EXPERIMENT_NOTICE = `${LOCAL_REAL_EXPERIMENT_NOTICE_LEAD} ${LOCAL_REAL_EXPERIMENT_NOTICE_BODY}`;
 
 /** Resolved against the game package directory, which every documented start command uses as its cwd. */
 export const ARTIFACT_RELATIVE_PATH = "src/demo/generated/local-real-rounds.json";
