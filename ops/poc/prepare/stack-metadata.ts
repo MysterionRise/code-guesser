@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 
 import { STACK_REVISION } from "../limits";
 import type { CapacityMeter } from "./capacity";
+import { JournalError } from "./journal";
 import { STACK_EXTENSIONS, STACK_LANGUAGES, type CrawlProfile, type StackLanguage } from "./profile";
 
 const RUNTIME_DIRECTORY = fileURLToPath(new URL("../stack/", import.meta.url)).replace(/\/$/u, "");
@@ -424,6 +425,8 @@ export const collectStackMetadata = async (
   try {
     result = await (options.runWorker ?? runLockedWorker)(request);
   } catch (error) {
+    // An offline journal that lacks this output is a replay gap, named as such rather than as a worker that never started.
+    if (error instanceof JournalError) throw error;
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return fail("UV_MISSING");
     return fail("WORKER_START_FAILED");
   }

@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { CapacityMeter } from "./capacity";
+import { JournalError } from "./journal";
 import {
   parseWorkerCounters,
   runLockedWorker,
@@ -151,6 +152,8 @@ export const fetchSelectedBlob = async (options: FetchSelectedBlobOptions): Prom
   try {
     result = await (options.runWorker ?? runLockedWorker)(request);
   } catch (error) {
+    // An offline journal that lacks this output is a replay gap, which must fail the run, not reject the row.
+    if (error instanceof JournalError) throw error;
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return fail("UV_MISSING");
     return fail("WORKER_START_FAILED");
   }

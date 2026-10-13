@@ -429,6 +429,20 @@ describe("Stack candidate GitHub revalidation", () => {
   });
 
   it.each([
+    ["x@example.org"],
+    ["Ada Example <ada@example.org>"],
+  ])("rejects an author recorded as %s, which is contact data, before reading the tree", async (name: string) => {
+    for (const login of [true, false]) {
+      const values = responses();
+      values.get(`${api}/commits/${commit}`).commit.author.name = name;
+      if (!login) values.get(`${api}/commits/${commit}`).author = null;
+      const requests: string[] = [];
+      await expect(invoke(values, row(), selected(), requests)).rejects.toMatchObject({ code: "REVALIDATION_AUTHOR_CONTACT" });
+      expect(requests).toEqual([api, `${api}/commits/${commit}`]);
+    }
+  });
+
+  it.each([
     ["repository licence", (values: Map<string, any>) => { values.get(api).license.spdx_id = "GPL-3.0"; }],
     ["Stack licence", (_values: Map<string, any>, metadata: any) => { metadata.detectedLicenses = ["Apache-2.0"]; }],
     ["licence metadata", (values: Map<string, any>) => {

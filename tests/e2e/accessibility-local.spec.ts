@@ -5,12 +5,15 @@ import { expect, test } from "@playwright/test";
 const deckIds = (JSON.parse(readFileSync(resolve(process.cwd(), "apps/game/src/demo/generated/local-real-rounds.json"), "utf8")) as
   { decks: { id: string }[] }).decks.map(({ id }) => id);
 
-test.use({ viewport: { width: 320, height: 568 }, reducedMotion: "reduce" });
+// reducedMotion is a browser-context option, not a Playwright test option, so it goes under contextOptions.
+test.use({ viewport: { width: 320, height: 568 }, contextOptions: { reducedMotion: "reduce" } });
 
 const noHorizontalScroll = () => document.documentElement.scrollWidth <= document.documentElement.clientWidth;
+const prefersReducedMotion = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 test("the deck chooser and every deck fit the minimum viewport", async ({ page }) => {
   await page.goto("/");
+  expect(await page.evaluate(prefersReducedMotion)).toBe(true);
   await expect(page.getByRole("main")).toBeVisible();
   await expect(page.getByRole("heading", { level: 1, name: "Pick a deck" })).toBeVisible();
   expect(await page.evaluate(noHorizontalScroll)).toBe(true);
@@ -41,6 +44,7 @@ test("the permanent notice names every round source and wraps to at most five li
 
 test("the deck chooser is keyboard operable with named links", async ({ page }) => {
   await page.goto("/");
+  expect(await page.evaluate(prefersReducedMotion)).toBe(true);
   const links = page.getByRole("list").getByRole("link");
   await expect(links).toHaveCount(deckIds.length);
   await page.keyboard.press("Tab");

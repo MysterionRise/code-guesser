@@ -8,9 +8,12 @@ on:
 permissions:
   contents: read
 
+# A newer push supersedes a pull request's run, but every merge to main gets a full run:
+# main pushes are grouped by commit, because a shared group keeps only one pending run
+# and cancels the rest even without cancel-in-progress.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CI: "1"

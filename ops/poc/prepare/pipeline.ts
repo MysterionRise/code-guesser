@@ -4,7 +4,7 @@ import type { ComposedExperiment } from "./compose";
 import { defaultDependencies } from "./dependencies";
 import {
   createDeckAttempts, createRunState, failureDiagnostic, failureSite, noteRejection, PreparationError, rejectionSummary,
-  uncodedDiagnostic, type DeckOutcome, type FailureStage, type RunState,
+  reportedFailure, uncodedDiagnostic, type DeckOutcome, type FailureStage, type RunState,
 } from "./diagnostics";
 import type { GitHubQueryClassification } from "./github-search";
 import { artifactFixtures, DECK_IDS, type DeckId } from "./model";
@@ -119,6 +119,9 @@ const publishedDecks = (deps: PreparationDependencies, state: RunState, outcomes
   return published;
 };
 
+/** Stages that run once candidates are being selected: a failure in one logs the selection counts and rejection aggregates. */
+const COUNTED_STAGES: ReadonlySet<FailureStage> = new Set(["ADMISSION", "BLOB_RETRIEVAL", "CURATED_FILES", "SELECTION", "GENERATION", "REPORT"]);
+
 /** Request spend per stage, logged as counts only on success and on failure. */
 const createStageTracker = () => {
   let stage = "PREFLIGHT" as FailureStage;
@@ -217,6 +220,7 @@ export const prepareLocalExperiment = async (deps: PreparationDependencies = def
       ...(output ? { output } : {}), ...(fix ? { fix } : {}),
     };
     const published = publishedDecks(deps, state, outcomes);
+    tracker.enter("GENERATION");
     const crawlSnapshotId = provisionalSnapshot(profileHash, hashes);
     const projectSelections: readonly ProjectSelection[] = stack.project.candidates ?? [];
     const languageSelections = stack.language.candidates ?? [];
@@ -257,6 +261,7 @@ export const prepareLocalExperiment = async (deps: PreparationDependencies = def
     const composed = deps.compose({ profile: loaded.profile, canonicalProfileBytes: loaded.canonicalProfileBytes,
       acceptedResponseHashes: Object.freeze(hashes), decks });
     if (composed.artifact.crawlSnapshot.id !== crawlSnapshotId) throw new PreparationError();
+    tracker.enter("REPORT");
     const report = deps.createReport(reportInput(context, composed, deps.uuid(), deps.now().toISOString(), state, classifications));
     tracker.enter("PUBLICATION");
     const publication = await publishWithReport(deps, composed, report);
@@ -268,12 +273,14 @@ export const prepareLocalExperiment = async (deps: PreparationDependencies = def
     return Object.freeze({ artifactHash: composed.artifactHash, crawlSnapshotId, publication });
   } catch (error) {
     const stage = tracker.current();
-    const diagnostic = failureDiagnostic(error) ?? uncodedDiagnostic(error);
+    // A retry wrapper is reported as the failure it wrapped: a revoked token is UNSUPPORTED_STATUS 4xx.
+    const failure = reportedFailure(error);
+    const diagnostic = failureDiagnostic(failure) ?? uncodedDiagnostic(failure);
     deps.log(`PREPARATION_STAGE_FAILED ${stage} ${diagnostic.code} ${diagnostic.statusClass}`);
-    const site = failureSite(error);
+    const site = failureSite(failure);
     if (site) deps.log(`PREPARATION_FAILURE_SITE ${site}`);
     logSpend();
-    if (stage === "ADMISSION" || stage === "BLOB_RETRIEVAL" || stage === "SELECTION") {
+    if (COUNTED_STAGES.has(stage)) {
       // Counts and stable rejection codes only: the same aggregates a successful run report carries.
       deps.log(`PREPARATION_COUNTS discovered=${state.discovered} admitted=${state.repositoriesAdmitted} duplicates=${state.duplicatesRejected}`);
       const rejections = rejectionSummary(state);
