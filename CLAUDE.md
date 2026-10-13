@@ -45,9 +45,8 @@ gate: changing queries, retries, ceilings, deck rules, or running
 
 ## Current state
 
-- Branches and PRs, stacked: `claude/demoable-poc` (#7, Phase 0),
-  `claude/phase-1-pipeline` (#8, Phase 1), `claude/phase-2-decks` (#9,
-  Phase 2), `claude/phase-3-stack` (Phase 3a).
+- Phases 0 to 3a are merged into `main` (#7 Phase 0, #8 Phase 1, #9 Phase 2,
+  #10 Phase 3a, merged 2026-10-13). Start new work from `main`.
 - The game plays profile `ops/poc/profiles/local-real-rounds.v4.json` and
   artifact schema `local-experiment-artifact.v3` from the root-route deck
   chooser (`/?deck=project|language|before-after`). A page load deals five
