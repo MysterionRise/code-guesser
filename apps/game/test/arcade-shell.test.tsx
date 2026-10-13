@@ -43,6 +43,28 @@ const modeInput = (): PublicModeContractInput => ({
 });
 
 describe("static arcade shell", () => {
+  it("numbers a fix round's lines, shows each option's line of code, and keeps the code's own whitespace", () => {
+    const input = modeInput();
+    const pane = "    if (x <= 1) {\n        return x;\n    }\n    return total + step;";
+    const mode = createPublicModeContract({ ...input, rounds: input.rounds.map((round) => ({ ...round,
+      content: { ...round.content, panes: [{ label: null, text: pane }] },
+      mode: { ...round.mode, kind: "fix" as const, prompt: "Which line did the fix change?",
+        candidates: [1, 2, 4].map((line) => ({ candidateId: `line-${line}`, label: `Line ${line}`, detail: null })) } })) });
+    expect(mode.rounds[0]!.content.panes[0]!.text).toBe(pane);
+    const html = renderToStaticMarkup(createElement(ArcadeShell, {
+      mode,
+      authorizeRevealAction: async () => { throw new Error("not called during render"); },
+    }));
+    expect(html).toContain('aria-label="Code excerpt with numbered lines"');
+    expect((html.match(/<span class="line-number" aria-hidden="true">/gu) ?? []).length).toBe(4);
+    expect(html).toContain('data-line="4"><span class="line-number" aria-hidden="true">4</span>    return total + step;</span>');
+    // Each option carries its line's code, which describes the radio for screen readers too.
+    expect(html).toMatch(/aria-label="Line 1" aria-describedby="detail-round-1-line-1"/u);
+    expect(html).toContain('<span class="candidate-detail code-detail" id="detail-round-1-line-1">if (x &lt;= 1) {</span>');
+    expect(html).toContain("Lines are numbered; each option names one.");
+    expect(html).not.toContain("highlighted");
+  });
+
   it("renders a mode-neutral five-round accessible starting journey", () => {
     const mode = createPublicModeContract(modeInput());
     const html = renderToStaticMarkup(createElement(ArcadeShell, {

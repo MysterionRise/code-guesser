@@ -119,9 +119,15 @@ Three new decks, one pull request each, from
    at the parent, and a human author. `fix-window.ts` offers every window;
    `balancedChoice` in `round-helpers.ts` picks one per round so the answers
    balance by position and centrality, and within ten points by length. Its
-   go-live section is in `curated-section.json`. The game still needs the
-   line-number gutter.
-5. Game UX for six decks, then the go-live run on profile v5.
+   go-live section is in `curated-section.json`.
+5. Done: game UX for six decks. The chooser shows two columns from 640px
+   and tags each deck "Recognise" or "Reason". Fix rounds number their lines,
+   show each option's line of code (its accessible description too), and
+   highlight the focused, chosen, or revealed line. Panes keep their own
+   whitespace.
+6. Next: go live. Profile v5 with the curated section from
+   `curated-section.json`, artifact schema v4, a live `--resume` run, every
+   round read, the recorder's scenes for the three new decks, and the media.
 
 Keep the committed profile and artifact unchanged until the go-live pull
 request. Test each deck with in-test profiles and recorded fixtures. Ask
