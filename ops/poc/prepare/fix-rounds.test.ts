@@ -1,6 +1,8 @@
 import { composeExperimentArtifact } from "./compose";
 import { generateFixRounds } from "./fix-rounds";
-import { ExperimentRecordError, FIX_CHANGE_HINTS, fixCandidateId, fixRanks, parseExperimentArtifact } from "./model";
+import {
+  ExperimentRecordError, FIX_CHANGE_HINTS, fixCandidateId, fixExtremeLimits, fixExtremeScores, fixRanks, pairLongerScore, parseExperimentArtifact,
+} from "./model";
 import { balancedChoice } from "./round-helpers";
 import { composeInput, fixCandidates, loadCuratedProfile, sha256, snapshotIdFor } from "./testdata/deck-builders";
 import { parseArtifactDecks } from "../../../packages/artifact/src/index";
@@ -42,6 +44,11 @@ describe("fix rounds", () => {
     expect(balancedChoice([[[0, 0]], [[0, 1]], [[2, 2]], [[3, 3]]], 4)).toBeUndefined();
     expect(balancedChoice([[[0, 0]], [[1, 0]], [[2, 2]], [[3, 3]]], 4, [0, 1])).toEqual([0, 0, 0, 0]);
     expect(balancedChoice([[undefined, [0]], [[1]], [[2]]], 4)).toBeUndefined();
+    // A budget caps what the chosen rounds score in total: the cheaper of two equal-ranked choices, or none at all.
+    const budgetRounds = [[[0], [0]], [[1]], [[2]], [[3]]];
+    const costs = [[[1], [0.5]], [[0.5]], [[0]], [[0]]];
+    expect(balancedChoice(budgetRounds, 4, [], { costs, limits: [1] })).toEqual([1, 0, 0, 0]);
+    expect(balancedChoice(budgetRounds, 4, [], { costs, limits: [0.9] })).toBeUndefined();
     // A pool whose answers all sit at one position is refused, and so is a fourth round from one repository.
     const moved = candidates.map((candidate) => {
       const [first, ...rest] = [...candidate.decoys, candidate.answer].sort((left, right) => left - right);
@@ -65,6 +72,35 @@ describe("fix rounds", () => {
       (fixture: typeof fixtures[number], label: string) => -paneOf(fixture)[lineOf(label) - 1]!.trim().length,
     ];
     for (const solver of solvers) expect(accuracy(fixtures, solver)).toBeLessThanOrEqual(limit);
+  });
+
+  it("caps every line-feature extreme and pairs the second hint so the longer line is the answer in half the pool", () => {
+    const { fixtures } = generateFixRounds({ profile, candidates: pool() });
+    const lineOf = (label: string) => Number(label.slice("Line ".length));
+    const totals = fixExtremeLimits(fixtures.length).map(() => 0);
+    let longer = 0;
+    for (const fixture of fixtures) {
+      const lines = fixture.candidates.map(({ label }) => lineOf(label));
+      const answer = lines[fixture.candidates.findIndex(({ id }) => id === fixture.correctCandidateId)]!;
+      const pane = fixture.panes[0]!.text.split("\n");
+      fixExtremeScores(answer, lines, pane).forEach((score, index) => { totals[index]! += score; });
+      const partner = /line (\d+) or line (\d+)/u.exec(fixture.clues[1]!)!.slice(1).map(Number).find((line) => line !== answer)!;
+      longer += pairLongerScore(answer, partner, pane);
+    }
+    totals.forEach((total, index) => expect(total).toBeLessThanOrEqual(fixExtremeLimits(fixtures.length)[index]!));
+    expect(longer).toBe(fixtures.length / 2);
+    // Pairing every answer with a shorter line instead is refused.
+    const shorterPairs = (value: any) => {
+      for (const fixture of value.decks.find(({ id }: any) => id === "fix").fixtures) {
+        const pane = fixture.panes[0].text.split("\n");
+        const answer = lineOf(fixture.candidates.find(({ id }: any) => id === fixture.correctCandidateId).label);
+        const shorter = fixture.candidates.map(({ label }: any) => lineOf(label)).find((line: number) => line !== answer && pairLongerScore(answer, line, pane) === 1);
+        if (shorter !== undefined) fixture.clues[1] = `It is line ${Math.min(answer, shorter)} or line ${Math.max(answer, shorter)}.`;
+      }
+    };
+    const changed: any = structuredClone(composeExperimentArtifact(composeInput(profile)).artifact);
+    shorterPairs(changed);
+    expect(() => parseExperimentArtifact(changed)).toThrow(ExperimentRecordError);
   });
 
   it("parses only options on code lines, the line the fix changed, honest hints, a pinned dataset, and no address for an author", () => {

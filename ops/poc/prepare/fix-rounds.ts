@@ -2,7 +2,8 @@ import { canonicalHash } from "./canonical";
 import type { ChangeKind } from "./fix-window";
 import { deepFreeze } from "./model-validation";
 import {
-  FIX_CHANGE_HINTS, FIX_ORDERS, FIX_SOURCE_KEYS, fixCandidateId, fixLineLabel, fixPairHint, fixRanks, fixSlack, type ExperimentFixture,
+  FIX_CHANGE_HINTS, FIX_ORDERS, FIX_SOURCE_KEYS, SCORE_TOLERANCE, fixCandidateId, fixExtremeLimits, fixExtremeScores, fixLineLabel,
+  fixPairHint, fixRanks, fixSlack, pairLongerScore, pairSlack, type ExperimentFixture,
 } from "./model";
 import { FIX_OPTIONS, type CrawlProfile, type FixDataset, type StackLanguage } from "./profile";
 import { attributionFor, fill, orderedPool, roundIdFor, sha256, shuffled, type GeneratedRounds } from "./round-helpers";
@@ -70,17 +71,40 @@ const sourceFor = (candidate: FixCandidate, profile: CrawlProfile): Readonly<Rec
   return deepFreeze(source);
 };
 
-const fixtureFor = (candidate: FixCandidate, profile: CrawlProfile): ExperimentFixture => {
+/**
+ * The decoy each round's second hint pairs with its answer, by index into the candidates. Each round's decoys are
+ * taken in that round's own shuffled order; a round whose decoys are all shorter (or all longer) than its answer
+ * keeps its first, and the rest are steered so the answer is the longer of its pair in about half the pool, which
+ * leaves picking the longer line of the pair no better than a coin.
+ */
+const pairedDecoys = (candidates: readonly FixCandidate[], profile: CrawlProfile): readonly number[] => {
+  const scored = candidates.map((candidate) => {
+    const pane = candidate.excerpt.split("\n");
+    return shuffled(roundIdFor("fix", sourceFor(candidate, profile)), candidate.decoys, String)
+      .map((line) => Object.freeze({ line, score: pairLongerScore(candidate.answer, line, pane) }));
+  });
+  const fixed = (decoys: typeof scored[number]): boolean => decoys.every(({ score }) => score === decoys[0]!.score);
+  let longer = scored.reduce((sum, decoys) => sum + (fixed(decoys) ? decoys[0]!.score : 0), 0);
+  return scored.map((decoys) => {
+    if (fixed(decoys)) return decoys[0]!.line;
+    const scores = decoys.map(({ score }) => score);
+    const wanted = longer + 1 <= candidates.length / 2 ? Math.max(...scores) : Math.min(...scores);
+    const pick = decoys.find(({ score }) => score === wanted)!;
+    longer += pick.score;
+    return pick.line;
+  });
+};
+
+const fixtureFor = (candidate: FixCandidate, paired: number, profile: CrawlProfile): ExperimentFixture => {
   const template = profile.curated!.fix!.templates;
   const lines = candidate.excerpt.split("\n");
   const options = [candidate.answer, ...candidate.decoys].sort((left, right) => left - right);
   if (sha256(candidate.excerpt) !== candidate.excerptHash || candidate.decoys.length !== FIX_OPTIONS - 1
     || new Set(options).size !== FIX_OPTIONS || options.some((line) => !Number.isInteger(line) || line < 1 || line > lines.length)
     || candidate.changedLine - candidate.windowStart + 1 !== candidate.answer
-    || lines[candidate.answer - 1]!.trim() !== candidate.buggyLine.trim()) fail();
+    || lines[candidate.answer - 1]!.trim() !== candidate.buggyLine.trim() || !candidate.decoys.includes(paired)) fail();
   const source = sourceFor(candidate, profile);
   const roundId = roundIdFor("fix", source);
-  const paired = shuffled(roundId, candidate.decoys, String)[0]!;
   const clues = Object.freeze([FIX_CHANGE_HINTS[candidate.changeKind], fixPairHint(candidate.answer, paired)]);
   const candidates = Object.freeze(options.map((line) => Object.freeze({ id: fixCandidateId(line), label: fixLineLabel(line), detail: null })));
   const panes = Object.freeze([Object.freeze({ label: null, text: candidate.excerpt })]);
@@ -106,8 +130,10 @@ const fixtureFor = (candidate: FixCandidate, profile: CrawlProfile): ExperimentF
 
 /**
  * One fix round per candidate. Each round offers four lines of its window in line order, and the pool's answers
- * take every rank equally often by position and by distance from the pane's middle, and nearly so by length, so
- * no position, centrality, or line length is a better guess than chance.
+ * take every rank equally often by position and by distance from the pane's middle, and nearly so by length and by
+ * complexity; picking the line with the most or least length, operators, indentation, or rare words, ties split,
+ * does little better than chance; and the second hint's pair holds the longer line as the answer in about half the
+ * pool. So no position, centrality, line feature, or longer half of a pair is a better guess than chance.
  */
 export const generateFixRounds = (options: Readonly<{ profile: CrawlProfile; candidates: readonly unknown[] }>): GeneratedRounds => {
   const { profile } = options;
@@ -115,17 +141,26 @@ export const generateFixRounds = (options: Readonly<{ profile: CrawlProfile; can
   const candidates = options.candidates as readonly FixCandidate[];
   if (candidates.length !== deck.rounds || new Set(candidates.map(({ crawlSnapshotId }) => crawlSnapshotId)).size !== 1) fail();
   const counts = FIX_ORDERS.map(() => Array.from({ length: FIX_OPTIONS }, () => 0));
-  for (const candidate of candidates) {
-    fixRanks(candidate.answer, [candidate.answer, ...candidate.decoys], candidate.excerpt.split("\n"))
-      .forEach((rank, order) => { counts[order]![rank]! += 1; });
-  }
+  const limits = fixExtremeLimits(candidates.length);
+  const extremes = limits.map(() => 0);
+  const paired = pairedDecoys(candidates, profile);
+  let longer = 0;
+  candidates.forEach((candidate, index) => {
+    const lines = [candidate.answer, ...candidate.decoys];
+    const pane = candidate.excerpt.split("\n");
+    fixRanks(candidate.answer, lines, pane).forEach((rank, order) => { counts[order]![rank]! += 1; });
+    fixExtremeScores(candidate.answer, lines, pane).forEach((score, measure) => { extremes[measure]! += score; });
+    longer += pairLongerScore(candidate.answer, paired[index]!, pane);
+  });
   const slack = fixSlack(candidates.length);
-  if (counts.some((ranks, order) => Math.max(...ranks) > Math.ceil(candidates.length / FIX_OPTIONS) + slack[order]!)) fail("FIX_RANK_UNBALANCED");
+  if (counts.some((ranks, order) => Math.max(...ranks) > Math.ceil(candidates.length / FIX_OPTIONS) + slack[order]!)
+    || extremes.some((score, measure) => score > limits[measure]! + SCORE_TOLERANCE)
+    || Math.abs(longer - candidates.length / 2) > pairSlack(candidates.length)) fail("FIX_RANK_UNBALANCED");
   for (const repository of new Set(candidates.map((candidate) => candidate.repository))) {
     if (candidates.filter((candidate) => candidate.repository === repository).length > deck.perRepository) fail("FIX_REPOSITORY_REPEATED");
   }
   for (const key of ["bugId", "commit", "fixCommit", "excerptHash"] as const) {
     if (new Set(candidates.map((candidate) => candidate[key])).size !== candidates.length) fail();
   }
-  return orderedPool(candidates.map((candidate) => fixtureFor(candidate, profile)));
+  return orderedPool(candidates.map((candidate, index) => fixtureFor(candidate, paired[index]!, profile)));
 };

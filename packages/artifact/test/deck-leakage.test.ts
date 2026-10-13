@@ -4,13 +4,15 @@ import { describe, expect, it } from "vitest";
 
 import { BEFORE_AFTER_CANDIDATE_IDS, LANGUAGE_PAIRS, parseArtifactDecks, type ParsedDeck, type ParsedFixture } from "../src/index";
 import {
-  TOLERANCE, accuracy, alphabeticalSolver, answerOf, chance, frequencySolver, raritySolver, sameOptionsSolver,
+  LINE_FEATURES, TOLERANCE, accuracy, alphabeticalSolver, answerOf, chance, frequencySolver, labelWordSolver, lineFeatureSolver,
+  pairLengthSolver, paneLines, paneOverlapSolver, proseLines, raritySolver, sameOptionsSolver, transformsArguments,
 } from "./solvers";
 
 /**
- * Leakage: solvers that never read the code must do no better than chance plus ten points. Each solver sees
- * only what a player sees before answering (the options and their details); none of them looks at the panes.
- * Accuracy is the expected share of rounds answered correctly, with ties split evenly.
+ * Leakage: solvers that never read the code as code must do no better than chance plus ten points. Each sees what
+ * a player sees before answering (the options, their details, and the hints) and at most skims the pane for words,
+ * lengths, or symbols. Accuracy is the expected share of rounds answered correctly, with ties split evenly. A known
+ * leak that needs new source data is kept as an expected failure that names its issue.
  */
 const committed = (): readonly ParsedDeck[] =>
   parseArtifactDecks(JSON.parse(readFileSync(new URL("../../../apps/game/src/demo/generated/local-real-rounds.json", import.meta.url), "utf8")));
@@ -46,12 +48,26 @@ describe("deck leakage", () => {
       .toBeLessThanOrEqual(limit);
   });
 
+  // #77: three panes still echo their own option's name or description (`Aws::SQS`, `Utility`, `React.Component`);
+  // replacing them needs files the journal does not hold.
+  it.runIf(deck("project") !== undefined).fails("project panes share no telling words with any option (#77)", () => {
+    const { fixtures } = deck("project")!;
+    expect(accuracy(fixtures, paneOverlapSolver)).toBeLessThanOrEqual(chance(fixtures[0]!) + TOLERANCE);
+  });
+
   it.runIf(deck("algorithm") !== undefined)("algorithm options are whole families, each member the answer once", () => {
     const { fixtures } = deck("algorithm")!;
     const limit = chance(fixtures[0]!) + TOLERANCE;
     for (const solver of [sameOptionsSolver(fixtures), frequencySolver(fixtures), raritySolver(fixtures), alphabeticalSolver]) {
       expect(accuracy(fixtures, solver)).toBeLessThanOrEqual(limit);
     }
+  });
+
+  it.runIf(deck("algorithm") !== undefined)("algorithm code shows no option's label word or stem, so neither finding nor missing one helps", () => {
+    const { fixtures } = deck("algorithm")!;
+    const limit = chance(fixtures[0]!) + TOLERANCE;
+    for (const direction of [1, -1] as const) expect(accuracy(fixtures, labelWordSolver(direction))).toBeLessThanOrEqual(limit);
+    expect(fixtures.every((fixture) => fixture.candidates.every(({ label }) => labelWordSolver(1)(fixture, label) === 0))).toBe(true);
   });
 
   it.runIf(deck("output") !== undefined)("output answers fill every rank in shown and text order, so no fixed position or extreme finds them", () => {
@@ -67,6 +83,13 @@ describe("deck leakage", () => {
     }
   });
 
+  // #78: two functions (`xor_swap`, `reverse_letters`) return a rearrangement of their input whichever call a round
+  // shows; replacing them needs files the journal does not hold.
+  it.runIf(deck("output") !== undefined).fails("an output that rearranges the call's own arguments is no better a guess (#78)", () => {
+    const fixtures = deck("output")!.fixtures.filter((fixture) => !fixture.candidates.every(({ label }) => Number.isFinite(Number(label))));
+    expect(accuracy(fixtures, (fixture, label) => transformsArguments(fixture, label) ? 1 : 0)).toBeLessThanOrEqual(chance(fixtures[0]!) + TOLERANCE);
+  });
+
   it.runIf(deck("fix") !== undefined)("fix answers take every position, centrality, and nearly every length rank equally", () => {
     const { fixtures } = deck("fix")!;
     const limit = chance(fixtures[0]!) + TOLERANCE;
@@ -80,6 +103,21 @@ describe("deck leakage", () => {
       (fixture: ParsedFixture, label: string) => -paneOf(fixture)[lineOf(label) - 1]!.trim().length,
     ];
     for (const solver of solvers) expect(accuracy(fixtures, solver)).toBeLessThanOrEqual(limit);
+  });
+
+  it.runIf(deck("fix") !== undefined)("fix answers are no extreme of any line feature, no option is prose, and the hint's pair hides the longer line", () => {
+    const { fixtures } = deck("fix")!;
+    const limit = chance(fixtures[0]!) + TOLERANCE;
+    // The busiest line (most operators and brackets), the longest, the most indented, the one with most words used
+    // once, and the reverse of each, ties split.
+    for (const feature of Object.keys(LINE_FEATURES)) {
+      for (const direction of [1, -1] as const) expect(accuracy(fixtures, lineFeatureSolver(feature, direction))).toBeLessThanOrEqual(limit);
+    }
+    // No option is a comment or docstring line a player could rule out, judged from the pane alone.
+    expect(fixtures.flatMap((fixture) => fixture.candidates.filter(({ label }) => proseLines(paneLines(fixture)).has(Number(label.slice("Line ".length))))))
+      .toEqual([]);
+    // After the second hint two options are left: picking the longer or the shorter is a coin toss.
+    for (const direction of [1, -1] as const) expect(accuracy(fixtures, pairLengthSolver(direction))).toBeLessThanOrEqual(0.5 + TOLERANCE);
   });
 
   it.runIf(deck("before-after") !== undefined)("the later version is not found by always picking one pane", () => {

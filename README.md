@@ -66,11 +66,20 @@ it.
 `/?deck=algorithm`, `/?deck=output`, and `/?deck=fix` open a deck directly.
 
 A leakage test (`packages/artifact/test/deck-leakage.test.ts`) checks that
-solvers which never read the code stay within chance plus ten points:
+solvers which never read the code, or only skim it, stay within chance plus
+ten points:
 - option frequency;
 - position;
 - the largest, smallest, longest, or shortest option;
-- the line nearest the middle.
+- the line nearest the middle;
+- an option's label words or stems found in the algorithm code;
+- the fix line with the most or least length, operators and brackets,
+  indentation, or words used once, a line of prose, and the longer line of
+  the second hint's pair.
+
+Two known leaks wait for new source data and run as expected failures: words
+a project pane shares with an option (#77), and an output that rearranges its
+call's arguments (#78).
 
 The real-data PoC is localhost-only, automatically prepared, unreviewed, and
 not meant for public players.

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 
 import { canonicalHash } from "./canonical";
-import type { ExperimentFixture } from "./model";
+import { SCORE_TOLERANCE, type ExperimentFixture } from "./model";
 
 /** A deck's pool of fixtures, in round-identity order so pool order says nothing about answers. */
 export interface GeneratedRounds {
@@ -58,43 +58,69 @@ export const sourceRecord = (candidate: Readonly<Record<string, unknown>>, omit:
 const BALANCE_SEARCH_LIMIT = 500_000;
 
 /**
+ * Scores each choice adds, such as what a solver wins on that round (`costs[round][choice][score]`), and the most
+ * each kind of score may add up to over the chosen rounds (`limits[score]`).
+ */
+export interface ChoiceBudget {
+  readonly costs: readonly (readonly (readonly number[])[])[];
+  readonly limits: readonly number[];
+}
+
+/**
  * One choice per round, where each choice gives the answer's rank in every order a code-blind solver might rank
  * options by, such that in each order no rank is taken more than `rounds.length / ranks` times, plus that order's
- * `slack` (none by default, which makes every rank equally often). An undefined choice is not allowed. Choices with
- * the same ranks are interchangeable, so each round keeps its first of each; rounds with the fewest options are
- * placed first, and each round first tries the rank next in turn. Deterministic; undefined when no choice exists.
+ * `slack` (none by default, which makes every rank equally often), and each kind of score in a `budget`, if given,
+ * adds up to no more than its limit. An undefined choice is not allowed. Choices with the same ranks and scores are
+ * interchangeable, so each round keeps its first of each and tries the lowest-scoring first; rounds with the fewest
+ * options are placed first, and each round first tries the rank next in turn. Deterministic; undefined when no
+ * choice exists.
  */
 export const balancedChoice = (
   rounds: readonly (readonly (readonly number[] | undefined)[])[],
   ranks: number,
   slack: readonly number[] = [],
+  budget?: ChoiceBudget,
 ): readonly number[] | undefined => {
   if (rounds.length % ranks !== 0) return undefined;
   const quota = rounds.length / ranks;
-  const distinct = rounds.map((choices) => {
-    const seen = new Map<string, Readonly<{ choice: number; vector: readonly number[] }>>();
+  const limits = budget?.limits ?? [];
+  const costOf = (round: number, choice: number): readonly number[] => limits.map((_, score) => budget!.costs[round]![choice]![score]!);
+  const total = (costs: readonly number[]): number => costs.reduce((sum, cost) => sum + cost, 0);
+  const distinct = rounds.map((choices, round) => {
+    const seen = new Map<string, Readonly<{ choice: number; vector: readonly number[]; costs: readonly number[] }>>();
     choices.forEach((vector, choice) => {
-      if (vector && !seen.has(vector.join(","))) seen.set(vector.join(","), Object.freeze({ choice, vector }));
+      if (!vector) return;
+      const costs = costOf(round, choice);
+      const key = `${vector.join(",")}:${costs.join(",")}`;
+      if (!seen.has(key)) seen.set(key, Object.freeze({ choice, vector, costs }));
     });
-    return [...seen.values()];
+    return [...seen.values()].sort((left, right) => total(left.costs) - total(right.costs));
   });
   const orders = distinct.flatMap((options) => options.map(({ vector }) => vector.length))[0] ?? 0;
   if (distinct.some((options) => options.some(({ vector }) => vector.length !== orders))) return undefined;
   const sequence = distinct.map((_, index) => index).sort((left, right) => distinct[left]!.length - distinct[right]!.length || left - right);
+  // The least each score can still add from each position on, so a search that cannot stay in budget stops early.
+  const floors = sequence.map((_, position) => limits.map((_limit, score) => sequence.slice(position)
+    .reduce((sum, round) => sum + Math.min(...distinct[round]!.map(({ costs }) => costs[score]!)), 0)));
+  const overBudget = (spent: readonly number[]): boolean => spent.some((sum, score) => sum > limits[score]! + SCORE_TOLERANCE);
   const counts = Array.from({ length: orders }, () => Array.from({ length: ranks }, () => 0));
+  const spent = limits.map(() => 0);
   const picked = new Map<number, number>();
   let tries = 0;
   const visit = (position: number): boolean => {
     if (position === sequence.length) return true;
+    if (overBudget(spent.map((sum, score) => sum + floors[position]![score]!))) return false;
     const round = sequence[position]!;
     for (let step = 0; step < ranks; step += 1) {
-      for (const { choice, vector } of distinct[round]!) {
-        if (vector[0] !== (position + step) % ranks) continue;
+      for (const { choice, vector, costs } of distinct[round]!) {
+        if (vector[0] !== (position + step) % ranks || overBudget(spent.map((sum, score) => sum + costs[score]!))) continue;
         if (vector.some((rank, order) => counts[order]![rank]! >= quota + (slack[order] ?? 0)) || (tries += 1) > BALANCE_SEARCH_LIMIT) continue;
         vector.forEach((rank, order) => { counts[order]![rank]! += 1; });
+        costs.forEach((cost, score) => { spent[score]! += cost; });
         picked.set(round, choice);
         if (visit(position + 1)) return true;
         vector.forEach((rank, order) => { counts[order]![rank]! -= 1; });
+        costs.forEach((cost, score) => { spent[score]! -= cost; });
         picked.delete(round);
       }
     }

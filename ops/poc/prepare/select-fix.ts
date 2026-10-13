@@ -5,7 +5,7 @@ import { DECK_SHORT, noteRejection, rejectCandidate, type DeckAttempts, type Dec
 import { looksGenerated } from "./excerpt-window";
 import { bugsInPyRevisions, defects4jRevisions, oneLineFix, type BugRevisions } from "./fix-patch";
 import type { FixCandidate } from "./fix-rounds";
-import { fixSlack } from "./model";
+import { fixExtremeLimits, fixSlack } from "./model";
 import { changeKind, fixWindows, type FixWindow } from "./fix-window";
 import type { DatasetBug, FixPointer } from "./github-fixes";
 import { FIX_OPTIONS } from "./profile";
@@ -115,7 +115,7 @@ export const selectFix = async (
     try {
       const screened = screenBlob({ path: bound.fix.path, bytes: bound.bytes }, seen);
       if (looksGenerated(screened.text, profile.screening.generatedScanLines)) fail("GENERATED_CONTENT");
-      const windows = fixWindows(screened.text, bound.changedLine, `${bug.dataset}:${bug.bug}`, FIX_WINDOW_LINES)
+      const windows = fixWindows(screened.text, bound.changedLine, `${bug.dataset}:${bug.bug}`, FIX_WINDOW_LINES, project.language)
         .filter(({ excerpt }) => Buffer.byteLength(excerpt) <= profile.screening.excerptBytes);
       if (windows.length === 0) fail("FIX_WINDOW");
       const pending: PendingFix = Object.freeze({
@@ -144,7 +144,8 @@ export const selectFix = async (
     }
   }
   if (rounds.length < deck.rounds) return { skipped: DECK_SHORT };
-  const choices = balancedChoice(rounds.map(({ windows }) => windows.map(({ ranks }) => ranks)), FIX_OPTIONS, fixSlack(rounds.length));
+  const choices = balancedChoice(rounds.map(({ windows }) => windows.map(({ ranks }) => ranks)), FIX_OPTIONS, fixSlack(rounds.length),
+    { costs: rounds.map(({ windows }) => windows.map(({ extremes }) => extremes)), limits: fixExtremeLimits(rounds.length) });
   if (!choices) {
     noteRejection(state, "SELECTION", new Error("FIX_RANKS_UNBALANCED"));
     return { skipped: DECK_SHORT };
