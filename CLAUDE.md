@@ -53,11 +53,10 @@ gate: changing queries, retries, ceilings, deck rules, or running
 
 ## Current state
 
-- Phases 0 to 3a are merged into `main` (#7 Phase 0, #8 Phase 1, #9 Phase 2,
-  #10 Phase 3a). Phase 3b is a stack of pull requests, each on the one before:
-  #12 curated sources, #13 algorithm, #14 output, #15 fix, #16 game UX, and the
-  go-live pull request. Merge them in that order, then start new work from
-  `main`.
+- Phases 0 to 3b are merged into `main`, so start new work from `main`:
+  - #7 Phase 0, #8 Phase 1, #9 Phase 2, #10 Phase 3a;
+  - Phase 3b on 2026-10-13: #12 curated sources, #13 algorithm, #14 output,
+    #15 fix, #16 game UX, #17 go-live, #18 the vertical `demo.gif`.
 - The game plays profile `ops/poc/profiles/local-real-rounds.v5.json` and
   artifact schema `local-experiment-artifact.v4` from the root-route deck
   chooser (`/?deck=project|language|before-after|algorithm|output|fix`). A
@@ -120,11 +119,10 @@ gate: changing queries, retries, ceilings, deck rules, or running
 
 ## Next steps
 
-1. Merge the Phase 3b stack (#12 → #16, then go-live).
-2. Phase 3c, in `docs/review/2026-10-13-next-sources-plan.md`: other forges
+1. Phase 3c, in `docs/review/2026-10-13-next-sources-plan.md`: other forges
    (GitLab, Software Heritage) and the "Which era?" deck. It has open decisions
    (licence allowlist, accounts) to settle with the user first.
-3. The research note's backlog: guess the commit message (the user said "not
+2. The research note's backlog: guess the commit message (the user said "not
    now"), name the function, which exercise, which framework, vulnerable or
    fixed.
 
