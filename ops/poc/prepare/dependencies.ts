@@ -4,6 +4,7 @@ import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { generateAlgorithmRounds } from "./algorithm-rounds";
+import { generateOutputRounds } from "./output-rounds";
 import { generateBeforeAfterRounds } from "./before-after-rounds";
 import { publishArtifact } from "./artifact-store";
 import { fetchSelectedBlob } from "./blob-worker";
@@ -12,7 +13,7 @@ import { createCapacityMeter } from "./capacity";
 import { composeExperimentArtifact } from "./compose";
 import { PreparationError } from "./diagnostics";
 import { admitGitHubCandidates, describeGitHubRepository, screenGitHubRepository } from "./github-admission";
-import { bindGitHubFile } from "./github-files";
+import { bindGitHubFile, listGitHubDirectory, readGitHubFile } from "./github-files";
 import { bindGitHubLineage, type GitHubLineageCandidate } from "./github-lineage";
 import { crawlGitHubCommitSearch } from "./github-search";
 import { generateLanguageRounds, validateLanguageCandidate } from "./language-rounds";
@@ -171,6 +172,14 @@ export const defaultDependencies = (options: DependencyOptions = { journal: "fre
     return stage(runtime, () => bindGitHubFile({ profile: options.profile, profileHash: options.profileHash,
       transport: runtime.transport, retry: runtime.retry }, options));
   },
+  listCuratedDirectory: (options) => {
+    const runtime = runtimeOf(options);
+    return stage(runtime, () => listGitHubDirectory({ profile: options.profile, transport: runtime.transport, retry: runtime.retry }, options));
+  },
+  readCuratedFile: (options) => {
+    const runtime = runtimeOf(options);
+    return stage(runtime, () => readGitHubFile({ profile: options.profile, transport: runtime.transport, retry: runtime.retry }, options));
+  },
   finalizeBindings: async (options) => {
     const runtime = runtimeOf(options);
     runtime.beginReplay();
@@ -190,6 +199,7 @@ export const defaultDependencies = (options: DependencyOptions = { journal: "fre
   generateLanguage: (options) => generateLanguageRounds(options as Parameters<typeof generateLanguageRounds>[0]),
   generateBeforeAfter: (options) => generateBeforeAfterRounds(options as Parameters<typeof generateBeforeAfterRounds>[0]),
   generateAlgorithm: (options) => generateAlgorithmRounds(options),
+  generateOutput: (options) => generateOutputRounds(options),
   compose: composeExperimentArtifact,
   createReport: createRunReport,
   stageReport,

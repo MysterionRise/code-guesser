@@ -168,7 +168,8 @@ const makeGitHubDependencies = (
 
 const makeStackDependencies = (
   state: HarnessState,
-): Pick<PreparationDependencies, "collectStackMetadata" | "fetchStackBlob" | "revalidateStackCandidate" | "validateLanguageCandidate" | "bindCuratedFile"> => ({
+): Pick<PreparationDependencies, "collectStackMetadata" | "fetchStackBlob" | "revalidateStackCandidate" | "validateLanguageCandidate"
+  | "bindCuratedFile" | "listCuratedDirectory" | "readCuratedFile"> => ({
   collectStackMetadata: async ({ configuration, capacity }) => {
     state.calls.push(`metadata:${configuration}`);
     state.dependencyMeters.push(capacity);
@@ -195,10 +196,24 @@ const makeStackDependencies = (
     state.dependencyMeters.push(capacity);
     const bytes = new TextEncoder().encode(state.curatedFiles.get(`${repository}:${path}`) ?? "");
     if (bytes.byteLength === 0) throw new Error("FILE_PATH");
-    return accepted({ repository, commit, path, mode: "100644", blob: createHash("sha1").update(path).digest("hex"), bytes,
+    return accepted({ repository, commit, path, mode: "100644", blob: createHash("sha1").update(bytes).digest("hex"), bytes,
       rawContentHash: createHash("sha256").update(bytes).digest("hex"), licenseName: "MIT License", licenseSpdx: "MIT",
       licenseFileUrl: `https://github.com/${repository}/blob/${commit}/LICENSE`,
       author: { name: "Curated Author", login: "curated-author", commit: "c".repeat(40) } } as any, "6");
+  },
+  // The served files of one repository directory, as verified trees would list them.
+  listCuratedDirectory: async ({ repository, path, capacity }) => {
+    state.calls.push(`list:${repository}:${path}`);
+    state.dependencyMeters.push(capacity);
+    return accepted([...state.curatedFiles.keys()].filter((key) => key.startsWith(`${repository}:${path}/`))
+      .map((key) => key.slice(repository.length + 1)).filter((file) => !file.slice(path.length + 1).includes("/")).sort(), "7");
+  },
+  readCuratedFile: async ({ repository, path, capacity }) => {
+    state.calls.push(`read:${repository}:${path}`);
+    state.dependencyMeters.push(capacity);
+    const bytes = new TextEncoder().encode(state.curatedFiles.get(`${repository}:${path}`) ?? "");
+    if (bytes.byteLength === 0) throw new Error("FILE_PATH");
+    return accepted({ blob: createHash("sha1").update(bytes).digest("hex"), bytes }, "7");
   },
 });
 
@@ -206,7 +221,7 @@ const stubDeck = (kind: string, size: number) => ({ fixtures: Array.from({ lengt
 
 const makeArtifactDependencies = (
   state: HarnessState,
-): Pick<PreparationDependencies, "generateProject" | "generateLanguage" | "generateBeforeAfter" | "generateAlgorithm" | "compose"> => ({
+): Pick<PreparationDependencies, "generateProject" | "generateLanguage" | "generateBeforeAfter" | "generateAlgorithm" | "generateOutput" | "compose"> => ({
   generateProject: ({ profile, rounds }) => {
     state.calls.push(`project:${rounds.length}:${rounds.map((round) => round.distractors.length).join(",")}`);
     return stubDeck("PROJECT", poolSizes(profile).project);
@@ -223,9 +238,13 @@ const makeArtifactDependencies = (
     state.calls.push(`algorithm:${selected.length}`);
     return stubDeck("ALGORITHM", poolSizes(profile).algorithm);
   },
+  generateOutput: ({ profile, candidates: selected }) => {
+    state.calls.push(`output:${selected.length}`);
+    return stubDeck("OUTPUT", poolSizes(profile).output);
+  },
   compose: (options) => {
-    const sizes = (["project", "language", "before-after", ...(options.decks.algorithm ? ["algorithm"] as const : [])] as const)
-      .map((id) => options.decks[id]?.fixtures.length ?? 0);
+    const sizes = (["project", "language", "before-after", ...(options.decks.algorithm ? ["algorithm"] as const : []),
+      ...(options.decks.output ? ["output"] as const : [])] as const).map((id) => options.decks[id]?.fixtures.length ?? 0);
     state.calls.push(`compose:${sizes.join("/")}`);
     const crawlSnapshotId = canonicalHash({ profileHash: canonicalHash(options.profile),
       acceptedResponseHashes: options.acceptedResponseHashes });
@@ -235,7 +254,7 @@ const makeArtifactDependencies = (
       return { ...(fixture as object), source: { repository: `owner/repo-${index}`, commit: String(index % 10).repeat(40), path: `src/file-${index}.ts` } };
     }) });
     return { artifact: { crawlSnapshot: { id: crawlSnapshotId },
-      decks: (["project", "language", "before-after", "algorithm"] as const).filter((id) => options.decks[id] !== undefined).map((id) => deck(id, options.decks[id]!)) },
+      decks: (["project", "language", "before-after", "algorithm", "output"] as const).filter((id) => options.decks[id] !== undefined).map((id) => deck(id, options.decks[id]!)) },
       artifactHash: hash("9"), artifactBytes: new Uint8Array([1]) } as any;
   },
 });

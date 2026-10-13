@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 
 import { CAPACITY_CEILINGS, CrawlProfileError, parseCrawlProfile, poolSizes } from "./profile";
+import { CURATED_REPOSITORIES, OUTPUT_SECTION } from "./testdata/deck-builders";
 
 const profilePath = new URL("../profiles/local-real-rounds.v4.json", import.meta.url);
 const testModuleName: string = "vitest";
@@ -35,16 +36,18 @@ describe("local crawl profile v4", () => {
       beforeAfterPool: 10, minimumStarEvents: 1000, popularRepositories: 24, filesPerRepository: 3, ordinaryRows: 200,
     });
     // The v4 profile reads no curated repositories, so it configures no algorithm deck.
-    expect(poolSizes(profile)).toEqual({ project: 24, language: 24, "before-after": 10, algorithm: 0 });
+    expect(poolSizes(profile)).toEqual({ project: 24, language: 24, "before-after": 10, algorithm: 0, output: 0 });
     expect(profile.curated).toBeUndefined();
   });
 
-  it("accepts the curated algorithm table the go-live profile will carry, and rejects a hint that names its family", async () => {
-    const curated = JSON.parse(await readFile(new URL("./testdata/curated-algorithms.json", import.meta.url), "utf8"));
+  it("accepts the curated section the go-live profile will carry, and rejects a hint that names its family", async () => {
+    const curated = JSON.parse(await readFile(new URL("./testdata/curated-section.json", import.meta.url), "utf8"));
     const profile = parseCrawlProfile({ ...(await validProfile()), curated });
     expect(profile.curated!.repositories.map(({ language }) => language)).toEqual(["Python", "Go", "Java"]);
     expect(profile.curated!.algorithm!.families).toHaveLength(8);
     expect(poolSizes(profile).algorithm).toBe(24);
+    expect(poolSizes(profile).output).toBe(24);
+    expect(profile.curated!.output!.directories).toHaveLength(6);
     for (const mutate of [
       (value: any) => { value.algorithm.families[0].algorithms[0].idea = "Unlike insertion sort, it swaps neighbours."; },
       (value: any) => { value.algorithm.families[1].note = "Quicksort and its friends."; },
@@ -57,6 +60,21 @@ describe("local crawl profile v4", () => {
       const changed = structuredClone(curated);
       mutate(changed);
       rejects({ ...(await validProfile()), curated: changed });
+    }
+  });
+
+  it("accepts an output deck over a curated Python pin, and rejects one it could not fill fairly", async () => {
+    const curated = { repositories: CURATED_REPOSITORIES, output: OUTPUT_SECTION };
+    const profile = parseCrawlProfile({ ...(await validProfile()), curated });
+    expect(profile.curated!.output!.directories).toEqual(["maths", "strings"]);
+    expect(poolSizes(profile).output).toBe(8);
+    expect(poolSizes(profile).algorithm).toBe(0);
+    for (const change of [
+      { rounds: 10 }, { rounds: 4 }, { repository: "algos/go" }, { repository: "other/python" }, { directories: ["maths/sub"] },
+      { directories: ["maths", "maths"] }, { fileReads: 7 }, { fileReads: 241 },
+      { templates: { ...OUTPUT_SECTION.templates, evidence: "The docstring in {path} records {call}." } },
+    ]) {
+      rejects({ ...(await validProfile()), curated: { ...curated, output: { ...OUTPUT_SECTION, ...change } } });
     }
   });
 

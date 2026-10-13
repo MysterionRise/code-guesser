@@ -22,6 +22,7 @@ export const RULE_SEMANTICS: Readonly<Record<FixtureKind, string>> = Object.free
   LANGUAGE: "stack-recorded-language.v3",
   BEFORE_AFTER: "commit-parent-lineage.v3",
   ALGORITHM: "curated-algorithm-path.v3",
+  OUTPUT: "curated-doctest-output.v3",
 });
 
 export interface PrivateReveal {

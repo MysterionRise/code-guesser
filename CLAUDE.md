@@ -104,10 +104,14 @@ Three new decks, one pull request each, from
    `algorithm-rounds.ts`, and `function-windows.ts` (commentary stripped, the
    algorithm's names and label words masked as `mystery`). The real table
    (TheAlgorithms Python, Go, Java at pinned commits; eight families of four)
-   is `ops/poc/prepare/testdata/curated-algorithms.json`; the deck runs only
+   is in `ops/poc/prepare/testdata/curated-section.json`; the deck runs only
    when a profile carries a `curated` section, which v4 does not.
-3. Predict the output (`output`): TheAlgorithms/Python doctests, parsed
-   statically in TypeScript and never executed.
+3. Done, staged: Predict the output (`output`). `doctest-parse.ts` reads
+   TheAlgorithms/Python doctests statically and never runs them;
+   `select-output.ts` reads files in hash order and binds only usable ones;
+   `balancedAnswers` in `output-rounds.ts` picks answers so they fill every
+   rank in both shown and text order, and never repeat an argument. Its
+   go-live section is in the same `curated-section.json`.
 4. Spot the fix (`fix`): Defects4J and BugsInPy one-line fixes, with a
    line-number gutter in the game.
 5. Game UX for six decks, then the go-live run on profile v5.
@@ -199,6 +203,12 @@ Selection diagnostics are expected screening outcomes, not faults:
   look-alike.
 - `LANGUAGE_ROUNDS_REJECTED`
 - `SOURCE_IDENTITY_UNREPORTABLE`
+- `ALGORITHM_WINDOW`, `ALGORITHM_NAME_IN_CODE`, `ALGORITHM_FAMILY_SHORT`: a
+  file with no masked window, code that still names an option, and a family
+  dropped whole because one of its algorithms found no file.
+- `OUTPUT_NO_DOCTEST`: a file with no function a round can ask about (most
+  files). `OUTPUT_RANKS_UNBALANCED`: no choice of answers fills every rank in
+  both orders, so the output deck is skipped.
 
 ## Commands
 

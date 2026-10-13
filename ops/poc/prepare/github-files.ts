@@ -111,3 +111,27 @@ export const bindGitHubFile = async (
     author,
   });
 };
+
+/** The files directly inside one directory of a curated repository at its pinned commit, from verified trees. */
+export const listGitHubDirectory = async (
+  options: GitReaderOptions,
+  target: Readonly<{ repository: string; commit: string; path: string }>,
+): Promise<readonly string[]> => {
+  const git = gitReader(options, target.repository, (check) => fail(`FILE_${check}`));
+  if (!/^[0-9a-f]{40}$/u.test(target.commit)) fail("FILE_SHAPE");
+  return git.listFiles((await git.commit(target.commit)).tree, target.path);
+};
+
+/**
+ * One file's verified bytes at a pinned commit, before any licence or author request: a deck that reads many files
+ * to find a few usable ones binds only those with `bindGitHubFile`, whose repeated reads the run's GET reuse answers.
+ */
+export const readGitHubFile = async (
+  options: GitReaderOptions,
+  target: Readonly<{ repository: string; commit: string; path: string }>,
+): Promise<Readonly<{ blob: string; bytes: Uint8Array }>> => {
+  const git = gitReader(options, target.repository, (check) => fail(`FILE_${check}`));
+  if (!/^[0-9a-f]{40}$/u.test(target.commit)) fail("FILE_SHAPE");
+  const file = await git.resolvePath((await git.commit(target.commit)).tree, target.path);
+  return Object.freeze({ blob: file.blob, bytes: await git.blob(file.blob) });
+};

@@ -4,9 +4,11 @@ import { canonicalHash } from "./canonical";
 import { CapacityError, createCapacityMeter } from "./capacity";
 import { GitHubSearchError } from "./github-search";
 import { HARNESS_CANDIDATES, accepted, classificationsFor, harnessRow, hash, loadProfile, makeHarness } from "./command-test-harness";
-import { curatedFiles, loadCuratedProfile } from "./testdata/deck-builders";
+import {
+  CURATED_REPOSITORIES, CURATED_SECTION, OUTPUT_SECTION, curatedFiles, loadCuratedProfile, outputFiles, sha256,
+} from "./testdata/deck-builders";
 import { LANGUAGE_SLUGS } from "../../../packages/artifact/src/index";
-import { STACK_LANGUAGES } from "./profile";
+import { STACK_LANGUAGES, parseCrawlProfile } from "./profile";
 import { RetryError } from "./retry";
 import { createRunReport } from "./run-report";
 import { StackMetadataError } from "./stack-metadata";
@@ -235,6 +237,40 @@ const logLines = (calls: readonly string[]): string[] =>
     expect(logLines(harness.calls)).toContain("log:PREPARATION_DECK_SKIPPED algorithm DECK_SHORT");
     expect(logLines(harness.calls)).toContain("log:PREPARATION_DECKS project,language,before-after");
     expect((harness.reports[0] as any).diagnostics).toContainEqual({ stage: "SELECTION", reasonCode: "ALGORITHM_FAMILY_SHORT", count: 1 });
+  });
+
+  it("selects a configured output deck last, reading files in hash order and binding only the usable ones", async () => {
+    const profile = loadCuratedProfile({ beforeAfterPool: 5 }, { algorithm: true, output: true });
+    const harness = await makeHarness({}, { profile, curatedFiles: new Map([...curatedFiles(), ...outputFiles()]) });
+    await prepareLocalExperiment(harness.dependencies);
+    const lists = harness.calls.filter((call) => call.startsWith("list:"));
+    expect(lists).toEqual(["list:algos/python:maths", "list:algos/python:strings"]);
+    expect(harness.calls.indexOf(lists[0]!)).toBeGreaterThan(harness.calls.findIndex((call) => call === "curated:algos/python:algorithms/jump_search.py"));
+    const reads = harness.calls.filter((call) => call.startsWith("read:")).map((call) => call.slice("read:algos/python:".length));
+    const usable = [...outputFiles().keys()].map((key) => key.slice("algos/python:".length)).filter((path) => !path.includes("/test_"));
+    expect(reads).toEqual(usable.sort((left, right) => sha256(`algos/python:${left}`) < sha256(`algos/python:${right}`) ? -1 : 1).slice(0, reads.length));
+    // Only files with a usable function are bound, so the module without doctests never costs an author request.
+    const bound = harness.calls.filter((call) => call.startsWith("curated:algos/python:maths/") || call.startsWith("curated:algos/python:strings/"));
+    expect(bound).toHaveLength(8);
+    expect(bound).not.toContain("curated:algos/python:maths/notes.py");
+    expect(harness.calls).toContain("output:8");
+    expect(harness.calls).toContain(`compose:${STACK_POOL}/${STACK_POOL}/5/8/8`);
+    expect(logLines(harness.calls)).toContain("log:PREPARATION_DECKS project,language,before-after,algorithm,output");
+  });
+
+  it("skips files another deck shows, and skips the output deck alone when its reads run out", async () => {
+    const files = new Map([...curatedFiles(), ...outputFiles()]);
+    const raw = JSON.parse(await readFile(new URL("../profiles/local-real-rounds.v4.json", import.meta.url), "utf8"));
+    const wide = parseCrawlProfile({ ...raw, selection: { ...raw.selection, beforeAfterPool: 5 }, curated: {
+      repositories: CURATED_REPOSITORIES, algorithm: CURATED_SECTION.algorithm,
+      output: { ...OUTPUT_SECTION, directories: ["algorithms", "maths", "strings"], fileReads: 8 } } });
+    const harness = await makeHarness({}, { profile: wide, curatedFiles: files });
+    await prepareLocalExperiment(harness.dependencies);
+    expect(harness.calls.some((call) => call.startsWith("read:algos/python:algorithms/"))).toBe(false);
+    expect(harness.calls.filter((call) => call.startsWith("read:"))).toHaveLength(8);
+    expect(logLines(harness.calls)).toContain("log:PREPARATION_DECK_SKIPPED output DECK_SHORT");
+    expect(logLines(harness.calls)).toContain("log:PREPARATION_DECKS project,language,before-after,algorithm");
+    expect((harness.reports[0] as any).diagnostics).toContainEqual({ stage: "SCREENING", reasonCode: "OUTPUT_NO_DOCTEST", count: 1 });
   });
 
   it("attempts no algorithm deck when the profile configures none", async () => {

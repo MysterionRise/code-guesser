@@ -1,4 +1,4 @@
-import { bindGitHubFile, fileAuthor, GitHubFileError } from "./github-files";
+import { bindGitHubFile, fileAuthor, GitHubFileError, listGitHubDirectory, readGitHubFile } from "./github-files";
 import { GitHubAdmissionError } from "./github-admission";
 import { blobResponse, gitBlob, licenseResponse, repositoryResponse, treeId, treeResponse, type TreeEntry } from "./testdata/captured-responses";
 import { loadDeckProfile } from "./testdata/deck-builders";
@@ -97,5 +97,20 @@ describe("curated GitHub files", () => {
     const spoofed = fakeGitHub(new Map([[historyUrl, [{ ...historyItem("4".repeat(40), "Ada", person("ada")), html_url: "https://example.test/x" }]]]));
     await expect(fileAuthor(spoofed.options, { repository, commit: pin, path })).rejects.toBeInstanceOf(GitHubAdmissionError);
     expect(new GitHubFileError("FILE_PATH").message).toBe("GITHUB_FILE_REJECTED");
+  });
+
+  it("lists a directory's files from verified trees, and reads one file without its licence or author", async () => {
+    const github = fakeGitHub();
+    expect(await listGitHubDirectory(github.options, { repository, commit: pin, path: "sorts" })).toEqual(["sorts/quick_sort.py"]);
+    const read = await readGitHubFile(github.options, { repository, commit: pin, path });
+    expect(read.blob).toBe(gitBlob(code));
+    expect(Buffer.from(read.bytes).equals(code)).toBe(true);
+    // Neither the repository, the licence, nor the history is asked for until a file is bound.
+    expect(github.requests.some((url) => url === api || url.includes("/license") || url.includes("/commits?"))).toBe(false);
+    expect(await codeOf(listGitHubDirectory(github.options, { repository, commit: pin, path: "sorts/quick_sort.py" }))).toBe("FILE_PATH");
+    expect(await codeOf(listGitHubDirectory(github.options, { repository, commit: pin, path: "../sorts" }))).toBe("FILE_PATH");
+    expect(await codeOf(readGitHubFile(github.options, { repository, commit: "main", path }))).toBe("FILE_SHAPE");
+    const tampered = fakeGitHub(new Map([[`${api}/git/blobs/${gitBlob(code)}`, blobResponse(api, gitBlob(code), Buffer.from("print('other')\n"))]]));
+    expect(await codeOf(readGitHubFile(tampered.options, { repository, commit: pin, path }))).toBe("FILE_BLOB");
   });
 });

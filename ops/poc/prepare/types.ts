@@ -45,6 +45,10 @@ export interface PreparationDependencies {
   validateLanguageCandidate(options: Context & Readonly<{ candidate: unknown }>): unknown;
   /** One file of a curated repository at its pinned commit, with its licence and last human author bound. */
   bindCuratedFile(options: Context & Readonly<{ repository: string; commit: string; path: string }>): Promise<StageResult<CuratedFile>>;
+  /** The files directly inside one directory of a curated repository at its pinned commit. */
+  listCuratedDirectory(options: Context & Readonly<{ repository: string; commit: string; path: string }>): Promise<StageResult<readonly string[]>>;
+  /** One curated file's verified bytes, read before its licence and author are bound. */
+  readCuratedFile(options: Context & Readonly<{ repository: string; commit: string; path: string }>): Promise<StageResult<Readonly<{ blob: string; bytes: Uint8Array }>>>;
   /** Rebinds every selected source to the final crawl snapshot, from responses the run already accepted. */
   finalizeBindings?(options: Context & Readonly<{
     crawlSnapshotId: string;
@@ -60,6 +64,7 @@ export interface PreparationDependencies {
   generateLanguage(options: Readonly<{ profile: CrawlProfile; candidates: readonly unknown[] }>): GeneratedRounds;
   generateBeforeAfter(options: Readonly<{ profile: CrawlProfile; candidates: readonly unknown[] }>): GeneratedRounds;
   generateAlgorithm(options: Readonly<{ profile: CrawlProfile; candidates: readonly unknown[] }>): GeneratedRounds;
+  generateOutput(options: Readonly<{ profile: CrawlProfile; candidates: readonly unknown[] }>): GeneratedRounds;
   compose(options: Parameters<typeof composeExperimentArtifact>[0]): ComposedExperiment;
   createReport(input: Readonly<Record<string, unknown>>): unknown;
   stageReport(report: unknown): Promise<StagedRunReport>;

@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 
 import { generateAlgorithmRounds, type AlgorithmCandidate } from "../algorithm-rounds";
+import { doctestFunctions, roundExamples } from "../doctest-parse";
+import { balancedAnswers, generateOutputRounds, outputPane, type OutputCandidate } from "../output-rounds";
 import { generateBeforeAfterRounds } from "../before-after-rounds";
 import { algorithmWindow, labelWords } from "../function-windows";
 import { canonicalBytes, canonicalHash } from "../canonical";
@@ -235,8 +237,9 @@ export const composeInput = (
       project: generateProjectRounds({ profile, rounds: candidates.project }),
       language: generateLanguageRounds({ profile, candidates: candidates.language }),
       "before-after": generateBeforeAfterRounds({ profile, candidates: candidates.beforeAfter }),
-      // A profile with a curated section adds its algorithm deck.
+      // A profile with a curated section adds the decks it configures.
       ...(profile.curated?.algorithm ? { algorithm: generateAlgorithmRounds({ profile, candidates: algorithmCandidates(profile, snapshotId) }) } : {}),
+      ...(profile.curated?.output ? { output: generateOutputRounds({ profile, candidates: outputCandidates(profile, snapshotId) }) } : {}),
     },
     candidates,
   };
@@ -281,9 +284,69 @@ export const CURATED_SECTION = Object.freeze({
 });
 
 /** The deck profile with the curated section: it configures an eight-round algorithm deck. */
-export const loadCuratedProfile = (selection: Readonly<Record<string, number>> = {}): CrawlProfile => {
+export const loadCuratedProfile = (
+  selection: Readonly<Record<string, number>> = {},
+  decks: Readonly<{ algorithm?: boolean; output?: boolean }> = { algorithm: true },
+): CrawlProfile => {
   const raw = JSON.parse(readFileSync(new URL("../../profiles/local-real-rounds.v4.json", import.meta.url), "utf8"));
-  return parseCrawlProfile({ ...raw, selection: { ...raw.selection, ...selection }, curated: structuredClone(CURATED_SECTION) });
+  const curated = { repositories: CURATED_REPOSITORIES, ...(decks.algorithm ? { algorithm: CURATED_SECTION.algorithm } : {}),
+    ...(decks.output ? { output: OUTPUT_SECTION } : {}) };
+  return parseCrawlProfile({ ...raw, selection: { ...raw.selection, ...selection }, curated: structuredClone(curated) });
+};
+
+/** An eight-round output deck over the curated Python pin's `maths` and `strings` directories. */
+export const OUTPUT_SECTION = Object.freeze({
+  rounds: 8,
+  repository: "algos/python",
+  directories: ["maths", "strings"],
+  fileReads: 14,
+  templates: {
+    title: "Predict the output",
+    description: "Read a short Python function and predict what one call of it returns.",
+    prompt: "What does the last line show?",
+    evidence: "The docstring in {path} of {repository} records {call} as {output}.",
+    explanation: "The answer is the output the function's own doctest records.",
+  },
+});
+
+const doctested = (name: string, parameter: string, body: string, examples: readonly (readonly [string, string])[]): string =>
+  `"""A small module."""\n\n\ndef ${name}(${parameter}):\n    """Example.\n\n${examples.map(([argument, output]) =>
+    `    >>> ${name}(${argument})\n    ${output}\n`).join("")}    """\n    # Work it out.\n${body}\n`;
+/**
+ * Files an output deck can read: six number modules and four string modules with four doctests each, a module
+ * without doctests, and a test module, under `algos/python`'s `maths` and `strings` directories.
+ */
+export const outputFiles = (): ReadonlyMap<string, string> => new Map([
+  ...[10, 20, 30, 40, 50, 60].map((step) => [`algos/python:maths/add_${step}.py`, doctested(`add_${step}`, "value: int",
+    `    total = value\n    total += ${step}\n    return total`, [1, 2, 3, 4].map((value) => [String(value), String(value + step)] as const))] as const),
+  ...[2, 3, 4, 5].map((times) => [`algos/python:strings/repeat_${times}.py`, doctested(`repeat_${times}`, "text: str",
+    `    copies = [text] * ${times}\n    return "".join(copies)`, ["a", "b", "c", "d"].map((letter) => [`"${letter}"`, `'${letter.repeat(times)}'`] as const))] as const),
+  ["algos/python:maths/notes.py", `"""No doctests."""\n\n\ndef half(value):\n    return value // 2\n`],
+  ["algos/python:maths/test_add.py", doctested("add_9", "value", "    return value + 9", [1, 2, 3, 4].map((value) => [String(value), String(value + 9)] as const))],
+]);
+
+/** Bound output candidates for the small profile: the first eight usable files in hash order, answers balanced over every rank. */
+export const outputCandidates = (profile: CrawlProfile, snapshotId: string): readonly OutputCandidate[] => {
+  const files = [...outputFiles()].filter(([key]) => !key.includes("/test_") && !key.endsWith("notes.py"))
+    .sort(([left], [right]) => sha256(left) < sha256(right) ? -1 : 1).slice(0, profile.curated!.output!.rounds)
+    .map(([key, text]) => {
+      const found = doctestFunctions(text, { maxLines: profile.screening.excerptLines })[0]!;
+      return { key, text, found, examples: roundExamples(found.examples)! };
+    });
+  const answers = balancedAnswers(files.map(({ examples }) => examples))!;
+  return files.map(({ key, text, found, examples }, index) => {
+    const path = key.slice("algos/python:".length);
+    const answer = examples[answers[index]!]!;
+    const excerpt = outputPane(found.code, answer.call);
+    return Object.freeze({
+      repository: "algos/python", commit: CURATED_REPOSITORIES[0].commit, path, blob: sha1(`output-blob-${path}`),
+      rawContentHash: sha256(text), licenseName: "MIT License", licenseSpdx: "MIT",
+      licenseFileUrl: `https://github.com/algos/python/blob/${CURATED_REPOSITORIES[0].commit}/LICENSE`,
+      authorName: "Curated Author", authorLogin: "curated-author", authorCommit: sha1(`author-${path}`),
+      functionName: found.name, code: found.code, answer, decoys: examples.filter((example) => example !== answer),
+      excerpt, excerptHash: sha256(excerpt), crawlSnapshotId: snapshotId,
+    });
+  });
 };
 
 /** A body for each algorithm, long enough for a window and naming no other algorithm of its family. */

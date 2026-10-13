@@ -887,5 +887,25 @@
         ]
       }
     ]
+  },
+  "output": {
+    "rounds": 24,
+    "repository": "TheAlgorithms/Python",
+    "directories": [
+      "maths",
+      "strings",
+      "conversions",
+      "bit_manipulation",
+      "dynamic_programming",
+      "searches"
+    ],
+    "fileReads": 200,
+    "templates": {
+      "title": "Predict the output",
+      "description": "Read a short Python function and predict what one call of it returns.",
+      "prompt": "What does the last line show?",
+      "evidence": "The docstring in {path} of {repository} records {call} as {output}; the repository's tests run every docstring example.",
+      "explanation": "The answer is the result the function's own doctest records, which the repository's CI checks. The code is the function as it stands at the pinned commit, without its docstring and comments; nothing here ran it."
+    }
   }
 }
