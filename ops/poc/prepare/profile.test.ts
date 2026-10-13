@@ -1,8 +1,8 @@
 import { readFile } from "node:fs/promises";
 
-import { CAPACITY_CEILINGS, CrawlProfileError, parseCrawlProfile } from "./profile";
+import { CAPACITY_CEILINGS, CrawlProfileError, parseCrawlProfile, poolSizes } from "./profile";
 
-const profilePath = new URL("../profiles/local-real-rounds.v3.json", import.meta.url);
+const profilePath = new URL("../profiles/local-real-rounds.v4.json", import.meta.url);
 const testModuleName: string = "vitest";
 const { describe, expect, it } = await import(testModuleName) as any;
 
@@ -12,19 +12,29 @@ const rejects = (value: unknown): void => {
   expect(() => parseCrawlProfile(value)).toThrow(CrawlProfileError);
 };
 
-describe("local crawl profile v3", () => {
-  it("loads the profile with the pinned dataset and the five language configurations", async () => {
+describe("local crawl profile v4", () => {
+  it("loads the profile with the pinned dataset and twelve languages in look-alike pairs", async () => {
     const profile = parseCrawlProfile(await validProfile());
-    expect(profile.profileVersion).toBe("local-real-rounds.v3");
+    expect(profile.profileVersion).toBe("local-real-rounds.v4");
     expect(profile.stack.revision).toBe("e565caa3a78c2423bd374333a472b049eb090e47");
     expect(profile.stack.configurations).toEqual([
       { language: "Python", configuration: "Python", extensions: [".py"] },
+      { language: "Ruby", configuration: "Ruby", extensions: [".rb"] },
       { language: "TypeScript", configuration: "TypeScript", extensions: [".ts", ".tsx"] },
+      { language: "JavaScript", configuration: "JavaScript", extensions: [".js"] },
       { language: "Go", configuration: "Go", extensions: [".go"] },
       { language: "Rust", configuration: "Rust", extensions: [".rs"] },
-      { language: "Ruby", configuration: "Ruby", extensions: [".rb"] },
+      { language: "Java", configuration: "Java", extensions: [".java"] },
+      { language: "C#", configuration: "C#", extensions: [".cs"] },
+      { language: "Kotlin", configuration: "Kotlin", extensions: [".kt"] },
+      { language: "Swift", configuration: "Swift", extensions: [".swift"] },
+      { language: "C", configuration: "C", extensions: [".c"] },
+      { language: "C++", configuration: "C++", extensions: [".cpp", ".cc", ".cxx", ".hpp"] },
     ]);
-    expect(profile.selection).toEqual({ projectPool: 10, languagePool: 10, beforeAfterPool: 10, minimumStarEvents: 1000 });
+    expect(profile.selection).toEqual({
+      beforeAfterPool: 10, minimumStarEvents: 1000, popularRepositories: 24, filesPerRepository: 3, ordinaryRows: 200,
+    });
+    expect(poolSizes(profile)).toEqual({ project: 24, language: 24, "before-after": 10 });
   });
 
   it("accepts any distinct commit searches and rejects a repeated or malformed one", async () => {
@@ -58,9 +68,13 @@ describe("local crawl profile v3", () => {
   it("bounds every pool to one to eight sessions and keeps screening limits consistent", async () => {
     const base = await validProfile();
     for (const mutate of [
-      (value: any) => { value.selection.languagePool = 4; },
-      (value: any) => { value.selection.projectPool = 41; },
+      (value: any) => { value.selection.beforeAfterPool = 4; },
+      (value: any) => { value.selection.beforeAfterPool = 41; },
+      (value: any) => { value.selection.projectPool = 10; },
       (value: any) => { value.selection.minimumStarEvents = 0; },
+      (value: any) => { value.selection.popularRepositories = 101; },
+      (value: any) => { value.selection.filesPerRepository = 11; },
+      (value: any) => { value.selection.ordinaryRows = 1001; },
       (value: any) => { value.screening.minimumExcerptBytes = value.screening.excerptBytes; },
       (value: any) => { value.screening.maxChangedLines = value.screening.changeWindowLines; },
     ]) {
@@ -77,7 +91,7 @@ describe("local crawl profile v3", () => {
       (value: any) => { value.templates.language.syntaxClue = "Look for {syntax} and {syntax}."; },
       (value: any) => { value.templates.beforeAfter.linesClue = "Removed {removed}."; },
       (value: any) => { value.templates.beforeAfter.description = "Spot the human-written version."; },
-      (value: any) => { value.templates.language.explanation = "Our detector says so."; },
+      (value: any) => { value.templates.language.explanation = "Our AI detector says so."; },
     ]) {
       const changed = structuredClone(base);
       mutate(changed);

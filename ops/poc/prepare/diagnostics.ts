@@ -105,8 +105,25 @@ const spentBudget = (error: unknown): string | undefined => {
   return undefined;
 };
 
-/** Records one rejected candidate, or ends the run when the rejection is a spent run-wide budget. */
+/** Codes that say the offline replay is incomplete, which no candidate can fix. */
+const REPLAY_GAPS = new Set(["JOURNAL_MISS", "OFFLINE_NETWORK_REFUSED"]);
+
+const replayGap = (error: unknown): Error | undefined => {
+  let current: unknown = error;
+  for (let depth = 0; depth < FAILURE_CAUSE_DEPTH && current instanceof Error; depth += 1) {
+    if (REPLAY_GAPS.has(String((current as { code?: unknown }).code))) return current;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return undefined;
+};
+
+/**
+ * Records one rejected candidate. A spent run-wide budget ends this deck and every later one; a response
+ * the offline journal lacks ends the run, so a replay can never publish fewer decks than the run it replays.
+ */
 export const rejectCandidate = (state: RunState, stage: DiagnosticStage, error: unknown): void => {
+  const gap = replayGap(error);
+  if (gap !== undefined) throw gap;
   const budget = spentBudget(error);
   if (budget !== undefined) throw new BudgetExhaustedError(`BUDGET_EXHAUSTED_${budget}`, error);
   noteRejection(state, stage, error);

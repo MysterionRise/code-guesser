@@ -33,8 +33,18 @@ export const workerJournalKey = (request: WorkerRequest, codeHash: string = curr
 
 const sha256 = (bytes: Uint8Array): string => createHash("sha256").update(bytes).digest("hex");
 
+const WORKER_REASON = /^[A-Z][A-Z0-9_]{0,63}$/u;
+/** The one stable reason code a failed worker wrote to stderr, if that is all it wrote. */
+const workerReason = (stderr: Uint8Array): string | undefined => {
+  let text: string;
+  try { text = new TextDecoder("utf-8", { fatal: true }).decode(stderr); } catch { return undefined; }
+  const reason = text.endsWith("\n") ? text.slice(0, -1) : text;
+  return WORKER_REASON.test(reason) ? reason : undefined;
+};
+
 /**
- * Replays a recorded successful worker output, or runs the worker and records a successful one.
+ * Replays a recorded worker output, or runs the worker and records it. A successful output replays on resume
+ * and offline; a failure with a reason code replays only offline, so a resumed run tries the worker again.
  * Node still validates and meters the replayed output exactly as a live one.
  */
 export const journaledWorker = (
@@ -44,8 +54,17 @@ export const journaledWorker = (
 ) => async (request: WorkerRequest): Promise<WorkerResult> => {
   const key = workerJournalKey(request, codeHash);
   const recorded = journal.take(key, "fixed");
+  if (recorded?.encoding === "failure") {
+    const { exitCode, reason } = recorded.body as { exitCode: number; reason: string };
+    return { exitCode, stdout: new Uint8Array(), stderr: new TextEncoder().encode(`${reason}\n`) };
+  }
   if (recorded) return { exitCode: 0, stdout: new TextEncoder().encode(String(recorded.body)), stderr: new Uint8Array() };
   const result = await run(request);
+  const reason = result.exitCode !== 0 ? workerReason(result.stderr) : undefined;
+  if (reason !== undefined) {
+    const body = { exitCode: result.exitCode, reason };
+    journal.record({ key, policy: "offline", sha256: sha256(canonicalBytes(body)), byteLength: 0, encoding: "failure", body });
+  }
   if (result.exitCode === 0 && result.stderr.byteLength === 0 && result.stdout.byteLength <= request.stdoutByteLimit) {
     let text: string | undefined;
     try { text = new TextDecoder("utf-8", { fatal: true }).decode(result.stdout); } catch { text = undefined; }

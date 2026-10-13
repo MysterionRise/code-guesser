@@ -52,8 +52,8 @@ describe("server-only local real experiment authority v3", () => {
   it("lists each deck with its pool size and keeps every reveal private", () => {
     const experiment = create();
     expect(experiment.kind).toBe("LOCAL_UNREVIEWED_EXPERIMENT");
-    expect(experiment.decks.map((deck: any) => `${deck.id}:${deck.poolSize}`)).toEqual(["project:10", "language:10", "before-after:10"]);
-    expect(Object.keys(experiment.privateReveals)).toHaveLength(30);
+    expect(experiment.decks.map((deck: any) => `${deck.id}:${deck.poolSize}`)).toEqual(["project:24", "language:24", "before-after:10"]);
+    expect(Object.keys(experiment.privateReveals)).toHaveLength(58);
     expect(Object.isFrozen(experiment)).toBe(true);
     expect(Object.isFrozen(experiment.privateReveals)).toBe(true);
   });
@@ -154,7 +154,7 @@ describe("server-only local real experiment authority v3", () => {
   it("rejects authorship or detection claims and candidate names in public text", () => {
     for (const mutate of [
       (value: any) => { fixtureOf(value, 2).evidence = "The later version is human-written."; },
-      (value: any) => { fixtureOf(value, 2).explanation = "A detector agrees."; },
+      (value: any) => { fixtureOf(value, 2).explanation = "An AI detector agrees."; },
       (value: any) => { const fixture = fixtureOf(value, 0); fixture.clues[0] = `Compare it with ${fixture.candidates[1].label}.`; },
       (value: any) => { const fixture = fixtureOf(value, 1); fixture.clues[1] = `Unlike ${fixture.candidates.find(({ id }: any) => id !== fixture.correctCandidateId).label}, it is typed.`; },
       (value: any) => { fixtureOf(value, 2).clues[0] = `The commit message begins: “${fixtureOf(value, 2).source.authorName}”`; },

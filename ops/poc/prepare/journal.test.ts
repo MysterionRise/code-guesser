@@ -139,7 +139,7 @@ describe("run journal", () => {
     expect(offline.summary.replayed).toBe(3);
   });
 
-  it("replays a deterministic not-found answer as the same error and metering, but never a rate limit", async () => {
+  it("replays a not-found answer on resume, and any other failure only offline, as the same error and metering", async () => {
     const profile = await loadProfile();
     const path = journalPath();
     const statusFetch = (status: number) => (async () => new Response("{}", { status,
@@ -153,14 +153,41 @@ describe("run journal", () => {
       return { summary: journal.finish(), requests: capacity.snapshot().requestCount };
     };
     expect(await record(404, "a")).toEqual({ summary: { mode: "fresh", replayed: 0, live: 1 }, requests: 1 });
-    expect((await record(403, "b")).summary).toEqual({ mode: "resume", replayed: 0, live: 0 });
+    // A refusal is recorded for offline replay, and a resumed run asks again instead of replaying it.
+    expect((await record(403, "b")).summary).toEqual({ mode: "resume", replayed: 0, live: 1 });
+    expect((await record(403, "b")).summary).toEqual({ mode: "resume", replayed: 0, live: 1 });
 
     const capacity = capacityFor(profile);
     const runtime = createPreparationRuntime(profile, { PATH: "/bin" }, capacity, refusingFetch, openJournal({ mode: "offline", path }));
     await expect(runtime.transport.requestJson(commitRequest(profile, "a") as any))
       .rejects.toMatchObject({ code: "UNSUPPORTED_STATUS", status: 404, diagnostic: { statusClass: "4xx" } });
-    await expect(runtime.transport.requestJson(commitRequest(profile, "b") as any)).rejects.toMatchObject({ code: "JOURNAL_MISS" });
-    expect(capacity.snapshot().requestCount).toBe(1);
+    await expect(runtime.transport.requestJson(commitRequest(profile, "b") as any))
+      .rejects.toMatchObject({ code: "UNSUPPORTED_STATUS", status: 403, diagnostic: { statusClass: "4xx" } });
+    await expect(runtime.transport.requestJson(commitRequest(profile, "c") as any)).rejects.toMatchObject({ code: "JOURNAL_MISS" });
+    expect(capacity.snapshot().requestCount).toBe(2);
+  });
+
+  it("prefers a recorded answer to a failure kept for offline replay, and replays a timeout as a timeout", async () => {
+    const profile = await loadProfile();
+    const path = journalPath();
+    let calls = 0;
+    // The first and third requests drop on the network; the second, a retry of the first, succeeds.
+    const flaky = (async () => {
+      calls += 1;
+      if (calls !== 2) throw new TypeError("fetch failed");
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "content-type": "application/json" } });
+    }) as typeof fetch;
+    const journal = openJournal({ mode: "fresh", path });
+    const runtime = createPreparationRuntime(profile, { PATH: "/bin" }, capacityFor(profile), flaky, journal);
+    const causeOf = (error: { cause?: { code?: unknown } }) => error.cause?.code;
+    expect(await runtime.transport.requestJson(commitRequest(profile, "d") as any).catch(causeOf)).toBe("NETWORK");
+    expect(await runtime.transport.requestJson(commitRequest(profile, "d") as any)).toEqual({ ok: true });
+    expect(await runtime.transport.requestJson(commitRequest(profile, "e") as any).catch(causeOf)).toBe("NETWORK");
+    journal.finish();
+
+    const offline = createPreparationRuntime(profile, { PATH: "/bin" }, capacityFor(profile), refusingFetch, openJournal({ mode: "offline", path }));
+    expect(await offline.transport.requestJson(commitRequest(profile, "d") as any)).toEqual({ ok: true });
+    await expect(offline.transport.requestJson(commitRequest(profile, "e") as any)).rejects.toMatchObject({ code: "NETWORK" });
   });
 
   it("fails closed on a missing, altered, or truncated journal", async () => {
@@ -175,7 +202,7 @@ describe("run journal", () => {
     expect(() => openJournal({ mode: "offline", path })).toThrow("JOURNAL_CORRUPT");
   });
 
-  it("records only successful worker outputs, keyed without budgets, and replays them verbatim", async () => {
+  it("records worker outputs keyed without budgets, replays successes verbatim, and coded failures only offline", async () => {
     const path = journalPath();
     const request = (stdin: Record<string, unknown>): WorkerRequest => ({ command: "uv", args: ["run", "/x/stream_metadata.py"], cwd: "/x",
       environment: {}, stdin: `${JSON.stringify(stdin)}\n`, stdoutByteLimit: 1000, stderrByteLimit: 10 });
@@ -194,7 +221,23 @@ describe("run journal", () => {
     const journal = openJournal({ mode: "fresh", path });
     expect((await journaledWorker(journal, run, "code")(first)).exitCode).toBe(1);
     expect((await journaledWorker(journal, run, "code")(first)).exitCode).toBe(0);
-    expect(journal.finish()).toEqual({ mode: "fresh", replayed: 0, live: 1 });
+    const failing = request({ ...asked, configuration: "Ruby" });
+    const failed = { exitCode: 1, stdout: new Uint8Array(), stderr: new TextEncoder().encode("SHARD_LISTING_REJECTED\n") };
+    expect((await journaledWorker(journal, async () => failed, "code")(failing)).exitCode).toBe(1);
+    const unexplained = request({ ...asked, configuration: "Go" });
+    await journaledWorker(journal, async () => ({ ...failed, stderr: new TextEncoder().encode("Traceback: secret\n") }), "code")(unexplained);
+    expect(journal.finish()).toEqual({ mode: "fresh", replayed: 0, live: 3 });
+
+    // Offline, the coded failure replays as the same exit; an unexplained one was never recorded.
+    const replay = openJournal({ mode: "offline", path });
+    const spawned = async (): Promise<WorkerResult> => { throw new Error("WORKER_SPAWNED"); };
+    const again = await journaledWorker(replay, spawned, "code")(failing);
+    expect({ exitCode: again.exitCode, stderr: new TextDecoder().decode(again.stderr) }).toEqual({ exitCode: 1, stderr: "SHARD_LISTING_REJECTED\n" });
+    await expect(journaledWorker(replay, spawned, "code")(unexplained)).rejects.toMatchObject({ code: "JOURNAL_MISS" });
+    // A resumed run runs the failed worker again.
+    let reruns = 0;
+    await journaledWorker(openJournal({ mode: "resume", path }), async () => { reruns += 1; return failed; }, "code")(failing);
+    expect(reruns).toBe(1);
 
     const offline = openJournal({ mode: "offline", path });
     const replayed = await journaledWorker(offline, async () => { throw new Error("WORKER_SPAWNED"); }, "code")(later);

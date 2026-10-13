@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { canonicalArtifactBytes, canonicalArtifactHash } from "./canonical";
 import { composeExperimentArtifact } from "./compose";
-import { composeInput } from "./testdata/v3-builders";
+import { composeInput } from "./testdata/deck-builders";
 import {
   ArtifactStoreError,
   publishArtifact,

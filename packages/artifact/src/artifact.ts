@@ -7,6 +7,7 @@ import {
   DECK_DEDUPLICATION_KEYS,
   DECK_IDS,
   DECK_KINDS,
+  LANGUAGE_PAIRS,
   LANGUAGE_SLUGS,
   MAXIMUM_POOL_SIZE,
   PANE_LABELS,
@@ -49,7 +50,11 @@ const FIXTURE_KEYS = [
 ] as const;
 const DECK_KEYS = ["id", "title", "description", "roundsPerSession", "fixtures"] as const;
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u;
-const CLAIM = /\b(?:human[- ]written|written by (?:a |an )?human|a human wrote|human-only|ai[- ]generated|detector|detection|code style (?:shows|proves|indicates))\b/iu;
+/**
+ * Public text may not claim to tell who or what wrote code. A repository description about object detection
+ * says nothing about authorship, so only detection of AI or authorship counts.
+ */
+export const AUTHORSHIP_CLAIM = /\b(?:human[- ]written|written by (?:a |an )?human|a human wrote|human-only|ai[- ]generated|code style (?:shows|proves|indicates)|(?:ai|authorship|gpt|llm|chatgpt)[- ](?:code |content |text |writing )?detect(?:or|ors|ion))\b/iu;
 
 const escape = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 /** Case-insensitive whole-word owner, name, or `owner/name`. */
@@ -115,9 +120,15 @@ const validateProject = ({ panes, prompt, candidates, clues, correctCandidateId,
   }
 };
 
-/** The answer is the recorded language; every option is a language the deck can hold, and no text names one. */
+/**
+ * The answer is the recorded language; the options are two whole look-alike pairs, the answer's among them,
+ * so no option stands out by missing its look-alike; and no pre-answer text names one.
+ */
 const validateLanguage = ({ panes, prompt, candidates, clues, correctCandidateId, source }: Semantics): void => {
   if (candidates.some(({ id, label }) => !(STACK_LANGUAGES as readonly string[]).includes(label) || id !== languageCandidateId(label))) fail();
+  const labels: readonly string[] = candidates.map(({ label }) => label);
+  const pairs = LANGUAGE_PAIRS.filter((pair) => pair.some((member) => labels.includes(member)));
+  if (pairs.length !== 2 || pairs.some((pair) => pair.some((member) => !labels.includes(member)))) fail();
   const correct = candidates.find(({ id }) => id === correctCandidateId) ?? fail();
   if (correct.label !== source.configuration || source.excerptHash !== rawHash(panes[0]!.text)) fail();
   for (const part of [panes[0]!.text, prompt, ...clues]) {
@@ -164,7 +175,7 @@ const parseFixture = (value: unknown, kind: FixtureKind, snapshot: Snapshot): Pa
   const misleadingSignals = texts(fixture.misleadingSignals);
   const claimText = [prompt, ...candidates.flatMap(({ label, detail }) => [label, detail ?? ""]), ...clues, evidence, explanation,
     ...helpfulSignals, ...misleadingSignals].join("\n");
-  if (CLAIM.test(claimText)) fail();
+  if (AUTHORSHIP_CLAIM.test(claimText)) fail();
   return deepFreeze({
     kind,
     roundId: text(fixture.roundId),

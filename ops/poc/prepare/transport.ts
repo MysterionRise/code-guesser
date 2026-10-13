@@ -108,6 +108,10 @@ const reject = (request: RequestInput, code: TransportErrorCode, status?: number
 export const statusError = (request: RequestInput, status: number): TransportError =>
   new TransportError("UNSUPPORTED_STATUS", diagnostic(request, "UNSUPPORTED_STATUS", status), status);
 
+/** Rebuilds a failure that had no HTTP answer (a timeout, a network error), for a replayed journal entry. */
+export const codeError = (request: RequestInput, code: TransportErrorCode): TransportError =>
+  new TransportError(code, diagnostic(request, code));
+
 const readMetered = async (
   request: RequestInput,
   response: Response,

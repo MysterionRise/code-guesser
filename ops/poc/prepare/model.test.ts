@@ -1,6 +1,6 @@
 import { composeExperimentArtifact } from "./compose";
-import { BEFORE_AFTER_CANDIDATE_IDS, ExperimentRecordError, artifactFixtures, parseExperimentArtifact } from "./model";
-import { composeInput, sha1, sha256 } from "./testdata/v3-builders";
+import { BEFORE_AFTER_CANDIDATE_IDS, ExperimentRecordError, artifactFixtures, languageCandidateId, parseExperimentArtifact } from "./model";
+import { composeInput, sha1, sha256 } from "./testdata/deck-builders";
 
 const testModuleName: string = "vitest";
 const { describe, expect, it } = await import(testModuleName) as any;
@@ -19,11 +19,11 @@ const mutations = (cases: readonly ((value: any) => void)[]): void => {
 };
 
 describe("local experiment artifact v3", () => {
-  it("parses three pools of ten with the exact kinds and thirty unique rounds", () => {
+  it("parses the three pools with the exact kinds and fifty-eight unique rounds", () => {
     const parsed = parseExperimentArtifact(artifact());
     expect(parsed.decks.map(({ id, fixtures }) => `${id}:${new Set(fixtures.map(({ kind }) => kind)).size}:${fixtures.length}`))
-      .toEqual(["project:1:10", "language:1:10", "before-after:1:10"]);
-    expect(new Set(artifactFixtures(parsed).map(({ roundId }) => roundId)).size).toBe(30);
+      .toEqual(["project:1:24", "language:1:24", "before-after:1:10"]);
+    expect(new Set(artifactFixtures(parsed).map(({ roundId }) => roundId)).size).toBe(58);
     expect(Object.isFrozen(parsed.decks[0]!.fixtures[0]!.source)).toBe(true);
   });
 
@@ -53,7 +53,16 @@ describe("local experiment artifact v3", () => {
     mutations([
       (value) => { fixtureOf(value, 0).candidates.pop(); },
       (value) => { fixtureOf(value, 0).correctCandidateId = fixtureOf(value, 0).candidates.find(({ id }: any) => id !== fixtureOf(value, 0).correctCandidateId).id; },
-      (value) => { fixtureOf(value, 1).candidates[0] = { id: "local-experiment.language.java.v3", label: "Java", detail: null }; },
+      (value) => { fixtureOf(value, 1).candidates[0] = { id: "local-experiment.language.php.v3", label: "PHP", detail: null }; },
+      // Swapping one option for a language outside its pairs leaves a look-alike missing.
+      (value) => {
+        const fixture = fixtureOf(value, 1);
+        const labels = fixture.candidates.map(({ label }: any) => label);
+        const outside = ["Python", "Ruby", "TypeScript", "JavaScript", "Go", "Rust", "Java", "C#", "Kotlin", "Swift", "C", "C++"]
+          .find((label) => !labels.includes(label))!;
+        const index = fixture.candidates.findIndex(({ id }: any) => id !== fixture.correctCandidateId);
+        fixture.candidates[index] = { id: languageCandidateId(outside), label: outside, detail: null };
+      },
       (value) => { fixtureOf(value, 1).candidates[0].detail = "A note"; },
       (value) => { fixtureOf(value, 2).candidates.reverse(); },
       (value) => {
@@ -116,6 +125,11 @@ describe("local experiment artifact v3", () => {
     mutations([
       (value) => { fixtureOf(value, 2).explanation = "The later version is AI-generated."; },
       (value) => { fixtureOf(value, 0).candidates[0].detail = "A human-written toolkit."; },
+      (value) => { fixtureOf(value, 0).candidates[0].detail = "An AI code detector for pull requests."; },
     ]);
+    // A repository about detecting objects in images claims nothing about who wrote code.
+    const vision = artifact();
+    fixtureOf(vision, 0).candidates[0].detail = "Real-time object detection and face detection models.";
+    expect(() => parseExperimentArtifact(vision)).not.toThrow();
   });
 });

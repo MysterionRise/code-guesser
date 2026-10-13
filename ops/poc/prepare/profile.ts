@@ -1,5 +1,7 @@
 import { CAPACITY_CEILINGS, STACK_RELEASE, STACK_REVISION, type CeilingKey } from "../limits";
-import { PROFILE_VERSION, STACK_LANGUAGES, type StackLanguage } from "../../../packages/artifact/src/index";
+import {
+  AUTHORSHIP_CLAIM, PROFILE_VERSION, ROUNDS_PER_LANGUAGE, STACK_LANGUAGES, type DeckId, type StackLanguage,
+} from "../../../packages/artifact/src/index";
 
 /** The hard ceilings from `ops/poc/limits.json`; a profile may lower any of them, never raise one. */
 export { CAPACITY_CEILINGS, PROFILE_VERSION, STACK_LANGUAGES, type StackLanguage };
@@ -13,8 +15,10 @@ export interface ProfileQuery {
   readonly order: "desc";
 }
 
-const STACK_EXTENSIONS: Readonly<Record<StackLanguage, readonly string[]>> = Object.freeze({
-  Python: [".py"], TypeScript: [".ts", ".tsx"], Go: [".go"], Rust: [".rs"], Ruby: [".rb"],
+/** Each language's exact file extensions. C keeps to `.c` because a `.h` header may be C or C++. */
+export const STACK_EXTENSIONS: Readonly<Record<StackLanguage, readonly string[]>> = Object.freeze({
+  Python: [".py"], Ruby: [".rb"], TypeScript: [".ts", ".tsx"], JavaScript: [".js"], Go: [".go"], Rust: [".rs"],
+  Java: [".java"], "C#": [".cs"], Kotlin: [".kt"], Swift: [".swift"], C: [".c"], "C++": [".cpp", ".cc", ".cxx", ".hpp"],
 });
 
 export interface CrawlProfile {
@@ -51,12 +55,24 @@ export interface CrawlProfile {
     subjectMaxLength: number; changeWindowLines: number; changeContextLines: number; maxChangedLines: number;
   }>;
   readonly selection: Readonly<{
-    /** Rounds in each deck's pool; a session deals five of them. */
-    projectPool: number; languagePool: number; beforeAfterPool: number;
+    /** Rounds in the before-or-after pool; the Stack decks hold two rounds per language. */
+    beforeAfterPool: number;
     /** A project round's repositories, answer and distractors, all have at least this many star events. */
     minimumStarEvents: number;
+    /** What the metadata worker returns per language: the most-starred repositories, a few files of each, */
+    popularRepositories: number;
+    filesPerRepository: number;
+    /** and one file from each of this many other repositories, for the language deck. */
+    ordinaryRows: number;
   }>;
 }
+
+/** Rounds in each deck's pool; a session deals five of them. */
+export const poolSizes = (profile: CrawlProfile): Readonly<Record<DeckId, number>> => Object.freeze({
+  project: ROUNDS_PER_LANGUAGE * profile.stack.configurations.length,
+  language: ROUNDS_PER_LANGUAGE * profile.stack.configurations.length,
+  "before-after": profile.selection.beforeAfterPool,
+});
 
 export class CrawlProfileError extends Error {
   public constructor() {
@@ -145,7 +161,6 @@ const placeholderText = (value: unknown, placeholders: readonly string[]): strin
   return parsed;
 };
 
-const AUTHORSHIP_CLAIM = /\b(?:human[- ]written|written by (?:a |an )?human|a human wrote|human-only|ai[- ]generated|detector|detection|code style (?:shows|proves|indicates))\b/iu;
 
 const parseQueries = (value: unknown): readonly ProfileQuery[] => {
   if (!Array.isArray(value) || value.length === 0) return fail();
@@ -224,11 +239,16 @@ const parseScreening = (value: unknown): CrawlProfile["screening"] => {
   return Object.freeze(parsed);
 };
 
+/** The metadata worker's own bounds on what one language may return. */
+export const SAMPLE_MAXIMA = Object.freeze({ popularRepositories: 100, filesPerRepository: 10, ordinaryRows: 1000 });
+
 const parseSelection = (value: unknown): CrawlProfile["selection"] => {
-  const selection = exactRecord(value, ["projectPool", "languagePool", "beforeAfterPool", "minimumStarEvents"]);
+  const selection = exactRecord(value, ["beforeAfterPool", "minimumStarEvents", "popularRepositories", "filesPerRepository", "ordinaryRows"]);
   const parsed = Object.fromEntries(Object.entries(selection).map(([key, entry]) => [key, integer(entry)])) as CrawlProfile["selection"];
   // A pool holds at least one five-round session and at most forty rounds.
-  if ([parsed.projectPool, parsed.languagePool, parsed.beforeAfterPool].some((pool) => pool < 5 || pool > 40)) fail();
+  if (parsed.beforeAfterPool < 5 || parsed.beforeAfterPool > 40) fail();
+  if (parsed.popularRepositories > SAMPLE_MAXIMA.popularRepositories || parsed.filesPerRepository > SAMPLE_MAXIMA.filesPerRepository
+    || parsed.ordinaryRows > SAMPLE_MAXIMA.ordinaryRows) fail();
   return Object.freeze(parsed);
 };
 

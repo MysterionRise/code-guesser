@@ -6,6 +6,7 @@ import { canonicalBytes, canonicalHash } from "../canonical";
 import type { ComposeOptions } from "../compose";
 import type { GitHubAdmissionCandidate } from "../github-admission";
 import { generateLanguageRounds } from "../language-rounds";
+import { LANGUAGE_SLUGS } from "../../../../packages/artifact/src/index";
 import { STACK_LANGUAGES, parseCrawlProfile, type CrawlProfile, type StackLanguage } from "../profile";
 import { generateProjectRounds, type ProjectRoundInput, type RepositoryOption } from "../project-rounds";
 import type { RevalidatedStackCandidate } from "../stack-revalidation";
@@ -13,8 +14,8 @@ import type { RevalidatedStackCandidate } from "../stack-revalidation";
 export const sha1 = (seed: string): string => createHash("sha1").update(seed).digest("hex");
 export const sha256 = (value: string): string => createHash("sha256").update(value).digest("hex");
 
-export const loadV3Profile = (): CrawlProfile => parseCrawlProfile(JSON.parse(
-  readFileSync(new URL("../../profiles/local-real-rounds.v3.json", import.meta.url), "utf8"),
+export const loadDeckProfile = (): CrawlProfile => parseCrawlProfile(JSON.parse(
+  readFileSync(new URL("../../profiles/local-real-rounds.v4.json", import.meta.url), "utf8"),
 ));
 
 export const RESPONSE_HASHES = Object.freeze([sha256("response-a"), sha256("response-b"), sha256("response-c")]);
@@ -72,15 +73,26 @@ export const commitCandidate = (input: CommitCandidateInput): GitHubAdmissionCan
   return { admissionDecision: "AUTOMATED_POC_ADMISSION_ONLY", lineage, source } as unknown as GitHubAdmissionCandidate;
 };
 
-/** Two code shapes per language, each long enough for a round and free of any language's name. */
+/**
+ * Two code shapes per language, each long enough for a round, free of any language's name, and showing syntax
+ * that sets the language apart from its look-alike.
+ */
 const LANGUAGE_FIXTURES: Readonly<Record<StackLanguage, readonly Readonly<{ path: string; excerpt: string }>[]>> = Object.freeze({
   Python: [
     { path: "pkg/compute.py", excerpt: "def compute(value):\n    total = value * 2\n    if total > 10:\n        return total - 1\n    elif total < 0:\n        return 0\n    return total + 1" },
     { path: "pkg/ledger.py", excerpt: "class Ledger:\n    def __init__(self):\n        self.entries = []\n\n    def add(self, amount):\n        self.entries.append(amount)\n        return sum(self.entries)" },
   ],
+  Ruby: [
+    { path: "lib/compute.rb", excerpt: "def compute(value)\n  total = value * 2\n  return total - 1 if total > 10\n  total + 1\nend\n\ndef half(value)\n  value / 2\nend" },
+    { path: "lib/ledger.rb", excerpt: "class Ledger\n  attr_reader :entries\n\n  def add(amount)\n    @entries ||= []\n    @entries << amount\n    @entries.sum\n  end\nend" },
+  ],
   TypeScript: [
     { path: "src/compute.ts", excerpt: "export function compute(value: number): number {\n  const total = value * 2;\n  return total > 10 ? total - 1 : total + 1;\n}\n\nexport const half = (value: number): number => value / 2;" },
     { path: "src/ledger.ts", excerpt: "interface Entry {\n  readonly amount: number;\n  readonly note: string;\n}\n\nexport function sumEntries(entries: readonly Entry[]): number {\n  return entries.reduce((total, entry) => total + entry.amount, 0);\n}" },
+  ],
+  JavaScript: [
+    { path: "src/compute.js", excerpt: "function compute(value, limit) {\n  var total = value * 2;\n  if (total > limit) {\n    return total - 1;\n  }\n  return total + 1;\n}\n\nmodule.exports = { compute: compute };" },
+    { path: "lib/ledger.js", excerpt: "function Ledger() {\n  this.entries = [];\n}\n\nLedger.prototype.add = function (amount) {\n  this.entries.push(amount);\n  return this.entries.length;\n};\n\nexports.Ledger = Ledger;" },
   ],
   Go: [
     { path: "cmd/compute.go", excerpt: "func compute(value int) int {\n\ttotal := value * 2\n\tif total > 10 {\n\t\treturn total - 1\n\t}\n\treturn total + 1\n}\n\nfunc half(value int) int {\n\treturn value / 2\n}" },
@@ -90,19 +102,46 @@ const LANGUAGE_FIXTURES: Readonly<Record<StackLanguage, readonly Readonly<{ path
     { path: "src/compute.rs", excerpt: "fn compute(value: i64) -> i64 {\n    let total = value * 2;\n    if total > 10 { total - 1 } else { total + 1 }\n}\n\nfn half(value: i64) -> i64 {\n    value / 2\n}" },
     { path: "src/ledger.rs", excerpt: "pub struct Ledger {\n    entries: Vec<i64>,\n}\n\nimpl Ledger {\n    pub fn add(&mut self, amount: i64) -> usize {\n        let mut count = self.entries.len();\n        self.entries.push(amount);\n        count += 1;\n        count\n    }\n}" },
   ],
-  Ruby: [
-    { path: "lib/compute.rb", excerpt: "def compute(value)\n  total = value * 2\n  return total - 1 if total > 10\n  total + 1\nend\n\ndef half(value)\n  value / 2\nend" },
-    { path: "lib/ledger.rb", excerpt: "class Ledger\n  attr_reader :entries\n\n  def add(amount)\n    @entries ||= []\n    @entries << amount\n    @entries.sum\n  end\nend" },
+  Java: [
+    { path: "src/main/demo/Ledger.java", excerpt: "public class Ledger {\n    private final List<Integer> entries = new ArrayList<>();\n\n    public int add(int amount) {\n        entries.add(amount);\n        return entries.size();\n    }\n\n    public boolean isEmpty() {\n        return entries.isEmpty();\n    }\n}" },
+    { path: "src/main/demo/Compute.java", excerpt: "public final class Compute {\n    @Override\n    public String toString() {\n        return \"compute\";\n    }\n\n    static int compute(int value) {\n        int total = value * 2;\n        return total > 10 ? total - 1 : total + 1;\n    }\n}" },
+  ],
+  "C#": [
+    { path: "src/Demo/Ledger.cs", excerpt: "public class Ledger\n{\n    private readonly List<int> _entries = new List<int>();\n\n    public int Size => _entries.Count;\n\n    public int Add(int amount)\n    {\n        _entries.Add(amount);\n        return _entries.Count;\n    }\n}" },
+    { path: "src/Demo/Compute.cs", excerpt: "public static class Compute\n{\n    public static bool IsLarge(int value) => value * 2 > 10;\n\n    public static string Describe(int value)\n    {\n        foreach (var digit in value.ToString())\n        {\n            Console.WriteLine(digit);\n        }\n        return $\"value {value}\";\n    }\n}" },
+  ],
+  Kotlin: [
+    { path: "src/main/demo/Ledger.kt", excerpt: "class Ledger {\n    private val entries = mutableListOf<Int>()\n\n    fun add(amount: Int): Int {\n        entries.add(amount)\n        return entries.size\n    }\n\n    fun describe() = when (entries.size) {\n        0 -> \"empty\"\n        else -> \"${entries.size} entries\"\n    }\n}" },
+    { path: "src/main/demo/Compute.kt", excerpt: "data class Point(val x: Int, val y: Int)\n\nfun compute(value: Int?): Int {\n    val total = (value ?: 0) * 2\n    return if (total > 10) total - 1 else total + 1\n}\n\nobject Limits {\n    const val MAX = 10\n}" },
+  ],
+  Swift: [
+    { path: "Sources/Demo/Ledger.swift", excerpt: "struct Ledger {\n    private(set) var entries: [Int] = []\n\n    mutating func add(_ amount: Int) -> Int {\n        entries.append(amount)\n        return entries.count\n    }\n}" },
+    { path: "Sources/Demo/Compute.swift", excerpt: "func compute(_ value: Int?) -> Int {\n    guard let value = value else {\n        return 0\n    }\n    let total = value * 2\n    return total > 10 ? total - 1 : total + 1\n}" },
+  ],
+  C: [
+    { path: "src/ledger.c", excerpt: "struct ledger *ledger_new(size_t capacity)\n{\n    struct ledger *ledger = malloc(sizeof *ledger);\n    if (ledger == NULL) {\n        return NULL;\n    }\n    ledger->count = 0;\n    ledger->capacity = capacity;\n    return ledger;\n}" },
+    { path: "src/compute.c", excerpt: "static int compute(int value)\n{\n    int total = value * 2;\n    if (total > 10) {\n        return total - 1;\n    }\n    printf(\"%d\\n\", total);\n    return total + 1;\n}" },
+  ],
+  "C++": [
+    { path: "src/ledger.cpp", excerpt: "class Ledger {\npublic:\n    int add(int amount) {\n        entries_.push_back(amount);\n        return static_cast<int>(entries_.size());\n    }\n\nprivate:\n    std::vector<int> entries_;\n};" },
+    { path: "src/compute.cc", excerpt: "namespace demo {\n\nauto compute(int value) -> int {\n    const auto total = value * 2;\n    return total > 10 ? total - 1 : total + 1;\n}\n\n}  // namespace demo" },
   ],
 });
 
 /** A closing line that makes every variant's code distinct. */
 const VARIANT_LINE: Readonly<Record<StackLanguage, (variant: number) => string>> = Object.freeze({
-  Python: (variant) => `LIMIT_${variant} = ${variant}`,
-  TypeScript: (variant) => `export const LIMIT_${variant} = ${variant};`,
-  Go: (variant) => `const limit${variant} = ${variant}`,
-  Rust: (variant) => `const LIMIT_${variant}: i64 = ${variant};`,
-  Ruby: (variant) => `LIMIT_${variant} = ${variant}`,
+  Python: (variant: number) => `LIMIT_${variant} = ${variant}`,
+  Ruby: (variant: number) => `LIMIT_${variant} = ${variant}`,
+  TypeScript: (variant: number) => `export const LIMIT_${variant} = ${variant};`,
+  JavaScript: (variant: number) => `var LIMIT_${variant} = ${variant};`,
+  Go: (variant: number) => `const limit${variant} = ${variant}`,
+  Rust: (variant: number) => `const LIMIT_${variant}: i64 = ${variant};`,
+  Java: (variant: number) => `final int limit${variant} = ${variant};`,
+  "C#": (variant: number) => `const int Limit${variant} = ${variant};`,
+  Kotlin: (variant: number) => `const val LIMIT_${variant} = ${variant}`,
+  Swift: (variant: number) => `let limit${variant} = ${variant}`,
+  C: (variant: number) => `static const int limit${variant} = ${variant};`,
+  "C++": (variant: number) => `constexpr int kLimit${variant} = ${variant};`,
 });
 
 /** One revalidated Stack candidate, as revalidation produces it. */
@@ -113,7 +152,7 @@ export const stackCandidate = (
   variant: number,
   overrides: Readonly<Record<string, unknown>> = {},
 ): RevalidatedStackCandidate => {
-  const repository = (overrides.repository as string | undefined) ?? `stackorg${variant}/${language.toLowerCase()}-tools`;
+  const repository = (overrides.repository as string | undefined) ?? `stackorg${variant}/${LANGUAGE_SLUGS[language]}-tools`;
   const root = `https://github.com/${repository}`;
   const commit = sha1(`stack-commit-${repository}-${language}-${variant}`);
   const blob = sha1(`stack-blob-${repository}-${language}-${variant}`);
@@ -141,10 +180,17 @@ export const stackCandidate = (
 /** Popular repositories per language; each language's rounds offer its two answers and two decoys. */
 const PROJECT_OPTIONS: Readonly<Record<StackLanguage, readonly string[]>> = Object.freeze({
   Python: ["orbitlabs/quasar", "orbitlabs/nimbus", "fernworks/tundra", "fernworks/lagoon"],
+  Ruby: ["garnet/tram", "garnet/ferry", "opal-works/kiln", "opal-works/loom"],
   TypeScript: ["helix-dev/prism", "helix-dev/vortex", "sablecraft/ember", "sablecraft/zenith"],
+  JavaScript: ["cobalt-js/meadow", "cobalt-js/harp", "quill/marina", "quill/sable"],
   Go: ["kestrel-io/harbor", "kestrel-io/quarry", "mantle/drift", "mantle/sprocket"],
   Rust: ["corvid/anvil", "corvid/forge", "lattice-rs/marrow", "lattice-rs/pylon"],
-  Ruby: ["garnet/tram", "garnet/ferry", "opal-works/kiln", "opal-works/loom"],
+  Java: ["birch-io/canyon", "birch-io/glacier", "tessel/orchard", "tessel/beacon"],
+  "C#": ["pinewood/atlas", "pinewood/comet", "veldt/horizon", "veldt/summit"],
+  Kotlin: ["moss-labs/pebble", "moss-labs/willow", "ridge/falcon", "ridge/heron"],
+  Swift: ["coral/badger", "coral/otter", "dune-kit/raven", "dune-kit/finch"],
+  C: ["granite/spindle", "granite/lathe", "ochre/kettle", "ochre/bellows"],
+  "C++": ["umber/cascade", "umber/delta", "slate-dev/prairie", "slate-dev/fjord"],
 });
 
 export const projectRoundInputs = (profile: CrawlProfile, snapshotId: string): readonly ProjectRoundInput[] =>
@@ -166,7 +212,7 @@ export interface DeckCandidates {
   readonly beforeAfter: readonly GitHubAdmissionCandidate[];
 }
 
-/** Ten rounds per deck for one snapshot: two project and two language rounds per language, ten commits. */
+/** A full pool per deck for one snapshot: two project and two language rounds per language, ten commits. */
 export const deckCandidates = (profile: CrawlProfile, snapshotId: string): DeckCandidates => ({
   project: projectRoundInputs(profile, snapshotId),
   language: STACK_LANGUAGES.flatMap((language) => [0, 1].map((variant) => stackCandidate(profile, snapshotId, language, variant))),
@@ -174,7 +220,7 @@ export const deckCandidates = (profile: CrawlProfile, snapshotId: string): DeckC
 });
 
 export const composeInput = (
-  profile: CrawlProfile = loadV3Profile(),
+  profile: CrawlProfile = loadDeckProfile(),
   hashes: readonly string[] = RESPONSE_HASHES,
 ): ComposeOptions & Readonly<{ candidates: DeckCandidates }> => {
   const snapshotId = snapshotIdFor(profile, hashes);

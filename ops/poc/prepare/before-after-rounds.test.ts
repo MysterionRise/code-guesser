@@ -1,12 +1,12 @@
 import { beforeAfterSubject, BeforeAfterRoundsError, generateBeforeAfterRounds } from "./before-after-rounds";
 import { BEFORE_AFTER_CANDIDATE_IDS } from "./model";
 import { sha256 } from "./round-helpers";
-import { commitCandidate, deckCandidates, loadV3Profile, snapshotIdFor } from "./testdata/v3-builders";
+import { commitCandidate, deckCandidates, loadDeckProfile, snapshotIdFor } from "./testdata/deck-builders";
 
 const testModuleName: string = "vitest";
 const { describe, expect, it } = await import(testModuleName) as any;
 
-const profile = loadV3Profile();
+const profile = loadDeckProfile();
 const snapshotId = snapshotIdFor(profile);
 const pool = () => deckCandidates(profile, snapshotId).beforeAfter;
 

@@ -1,5 +1,5 @@
 {
-  "profileVersion": "local-real-rounds.v3",
+  "profileVersion": "local-real-rounds.v4",
   "github": {
     "apiVersion": "2022-11-28",
     "queries": [
@@ -64,10 +64,22 @@
         ]
       },
       {
+        "language": "Ruby",
+        "extensions": [
+          ".rb"
+        ]
+      },
+      {
         "language": "TypeScript",
         "extensions": [
           ".ts",
           ".tsx"
+        ]
+      },
+      {
+        "language": "JavaScript",
+        "extensions": [
+          ".js"
         ]
       },
       {
@@ -83,9 +95,42 @@
         ]
       },
       {
-        "language": "Ruby",
+        "language": "Java",
         "extensions": [
-          ".rb"
+          ".java"
+        ]
+      },
+      {
+        "language": "C#",
+        "extensions": [
+          ".cs"
+        ]
+      },
+      {
+        "language": "Kotlin",
+        "extensions": [
+          ".kt"
+        ]
+      },
+      {
+        "language": "Swift",
+        "extensions": [
+          ".swift"
+        ]
+      },
+      {
+        "language": "C",
+        "extensions": [
+          ".c"
+        ]
+      },
+      {
+        "language": "C++",
+        "extensions": [
+          ".cpp",
+          ".cc",
+          ".cxx",
+          ".hpp"
         ]
       }
     ]
@@ -136,14 +181,14 @@
   "capacity": {
     "githubPages": 3,
     "githubResults": 300,
-    "stackRowsPerLanguage": 10000,
-    "stackMetadataBytes": 100663296,
-    "blobAttempts": 120,
-    "successfulBlobs": 60,
+    "stackRowsPerLanguage": 100000,
+    "stackMetadataBytes": 268435456,
+    "blobAttempts": 240,
+    "successfulBlobs": 120,
     "perBlobBytes": 262144,
     "totalBlobBytes": 16777216,
     "concurrentRequests": 4,
-    "requestCount": 1500,
+    "requestCount": 3000,
     "responseBytes": 8388608,
     "waitMilliseconds": 15000,
     "totalWaitMilliseconds": 30000,
@@ -160,9 +205,10 @@
     "maxChangedLines": 12
   },
   "selection": {
-    "projectPool": 10,
-    "languagePool": 10,
     "beforeAfterPool": 10,
-    "minimumStarEvents": 1000
+    "minimumStarEvents": 1000,
+    "popularRepositories": 24,
+    "filesPerRepository": 3,
+    "ordinaryRows": 200
   }
 }

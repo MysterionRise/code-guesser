@@ -2,7 +2,7 @@ import { canonicalHash } from "./canonical";
 import { exactStackBindings } from "./language-rounds";
 import { deepFreeze } from "./model-validation";
 import { mentionsRepository, projectCandidateId, type ExperimentFixture } from "./model";
-import type { CrawlProfile } from "./profile";
+import { poolSizes, type CrawlProfile } from "./profile";
 import { approximately, attributionFor, fill, orderedPool, roundIdFor, shuffled, sourceRecord, type GeneratedRounds } from "./round-helpers";
 import type { RevalidatedStackCandidate } from "./stack-revalidation";
 
@@ -47,15 +47,34 @@ export const optionDetail = (description: string | null): string | null => {
 const fileName = (path: string): string => path.split("/").at(-1) ?? fail();
 
 const folded = (value: string): string => value.toLocaleLowerCase("en-US").replace(/[-_.]/gu, "");
+/** Parts of a repository name too common to give a project away: languages and words many names share. */
+const COMMON_NAME_PARTS: ReadonlySet<string> = new Set([
+  "python", "ruby", "java", "javascript", "typescript", "golang", "rust", "kotlin", "swift", "csharp", "android",
+  "core", "docs", "tools", "utils", "examples", "example", "framework", "project", "projects", "server", "client",
+  "library", "plugin", "plugins", "awesome", "sample", "samples", "official",
+]);
 /**
- * Whether code names a repository: its owner, name, or `owner/name` as a whole word, or (for an owner or name
- * of four characters or more) anywhere inside an identifier, so `deno_exe` names deno and `rustlings_run`
- * names rustlings. Short names such as `go` count only as whole words.
+ * Whether code names a repository: its owner, name, or `owner/name` as a whole word; an owner or name of four
+ * characters or more anywhere inside an identifier, so `deno_exe` names deno and `rustlings_run` names
+ * rustlings; or a distinctive part of a hyphenated name, so `module GraphQL` names graphql-ruby. Short names
+ * such as `go`, and common parts such as `ruby`, count only as whole names.
  */
 export const namesRepository = (text: string, repository: string): boolean => {
   if (mentionsRepository(text, repository)) return true;
   const haystack = folded(text);
-  return repository.split("/").map(folded).some((part) => part.length >= 4 && haystack.includes(part));
+  const names = repository.split("/");
+  const parts = names.flatMap((name) => name.toLocaleLowerCase("en-US").split(/[-_.]/u))
+    .filter((part) => part.length >= 4 && !COMMON_NAME_PARTS.has(part));
+  return names.map(folded).some((name) => name.length >= 4 && haystack.includes(name)) || parts.some((part) => haystack.includes(part));
+};
+
+/**
+ * Whether the deck's own wording names a repository: its prompt and hint templates, placeholders left out.
+ * The popularity hint says "GitHub star events", so a repository owned by `github` could never be offered.
+ */
+export const namedByTemplates = (profile: CrawlProfile, repository: string): boolean => {
+  const { prompt, fileClue, popularityClue } = profile.templates.project;
+  return namesRepository([prompt, fileClue, popularityClue].join("\n").replace(/\{[a-z]+\}/gu, " "), repository);
 };
 
 /**
@@ -74,7 +93,8 @@ const fixtureFor = (input: ProjectRoundInput, profile: CrawlProfile): Experiment
   const options = [{ repository, description: input.description }, ...input.distractors];
   if (input.distractors.length !== DISTRACTORS || options.some((option) => !REPOSITORY.test(option.repository))
     || new Set(options.map((option) => option.repository.toLocaleLowerCase("en-US"))).size !== options.length
-    || !projectRoundAllowed(candidate.excerpt, path, options.map((option) => option.repository))) fail();
+    || !projectRoundAllowed(candidate.excerpt, path, options.map((option) => option.repository))
+    || options.some((option) => namedByTemplates(profile, option.repository))) fail();
   const template = profile.templates.project;
   const source = deepFreeze(sourceRecord(candidate, ["excerpt"]));
   const roundId = roundIdFor("project", source);
@@ -107,7 +127,7 @@ const fixtureFor = (input: ProjectRoundInput, profile: CrawlProfile): Experiment
 
 export const generateProjectRounds = (options: ProjectRoundsOptions): GeneratedRounds => {
   const { profile } = options;
-  if (options.rounds.length !== profile.selection.projectPool) fail();
+  if (options.rounds.length !== poolSizes(profile).project) fail();
   const fixtures = options.rounds.map((round) => fixtureFor(round, profile));
   if (new Set(fixtures.map(({ source }) => source.crawlSnapshotId)).size !== 1) fail();
   for (const key of profile.deduplication) {

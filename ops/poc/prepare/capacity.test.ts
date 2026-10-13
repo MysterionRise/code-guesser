@@ -48,11 +48,12 @@ describe("preparation capacity", () => {
 
   it("meters exact per-language rows and total Stack metadata bytes", () => {
     const capacity = meter();
-    capacity.recordStackRows("Python", 10_000, 96 * 1024 * 1024);
+    const { stackRowsPerLanguage: rows, stackMetadataBytes: bytes } = CAPACITY_CEILINGS;
+    capacity.recordStackRows("Python", rows, bytes);
     const exact = capacity.snapshot();
 
-    expect(exact.stackRows).toEqual({ Python: 10_000, TypeScript: 0, Go: 0, Rust: 0, Ruby: 0 });
-    expect(exact.stackMetadataBytes).toBe(96 * 1024 * 1024);
+    expect(exact.stackRows).toEqual({ ...Object.fromEntries(STACK_LANGUAGES.map((language) => [language, 0])), Python: rows });
+    expect(exact.stackMetadataBytes).toBe(bytes);
     expect(() => capacity.recordStackRows("Python", 1, 0)).toThrow(CapacityError);
     expect(() => capacity.recordStackRows("TypeScript", 0, 1)).toThrow(CapacityError);
     expect(capacity.snapshot()).toEqual(exact);

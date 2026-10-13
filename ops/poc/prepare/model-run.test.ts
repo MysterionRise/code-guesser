@@ -1,4 +1,5 @@
 import { CAPACITY_CEILINGS } from "../limits";
+import { STACK_LANGUAGES } from "./profile";
 import { ExperimentRecordError, parseRunRecord } from "./model";
 
 const testModuleName: string = "vitest";
@@ -11,7 +12,7 @@ const runRecord = () => ({
   schemaVersion: "local-experiment-run.v3",
   executionId: "11111111-1111-4111-8111-111111111111",
   observedAt: "2026-07-31T12:00:00.000Z",
-  profileVersion: "local-real-rounds.v3",
+  profileVersion: "local-real-rounds.v4",
   githubApiVersion: "2022-11-28",
   stackRelease: "v2.2.0",
   stackRevision: "e565caa3a78c2423bd374333a472b049eb090e47",
@@ -20,19 +21,14 @@ const runRecord = () => ({
     sort: "committer-date", order: "desc", pageCeiling: 3, resultCeiling: 300,
     completeness: "COMPLETE",
   }],
-  stackConfigurations: [
-    { language: "Python", configuration: "Python", rowCeiling: 10_000, completeness: "COMPLETE" },
-    { language: "TypeScript", configuration: "TypeScript", rowCeiling: 10_000, completeness: "COMPLETE" },
-    { language: "Go", configuration: "Go", rowCeiling: 10_000, completeness: "COMPLETE" },
-    { language: "Rust", configuration: "Rust", rowCeiling: 10_000, completeness: "COMPLETE" },
-    { language: "Ruby", configuration: "Ruby", rowCeiling: 10_000, completeness: "COMPLETE" },
-  ],
+  stackConfigurations: STACK_LANGUAGES.map((language) =>
+    ({ language, configuration: language, rowCeiling: 10_000, completeness: "COMPLETE" })),
   counts: {
     requests: 18,
     githubPages: 3,
     githubResults: 12,
     repositoriesAdmitted: 15,
-    stackRows: { Python: 10, TypeScript: 10, Go: 10, Rust: 10, Ruby: 10 },
+    stackRows: Object.fromEntries(STACK_LANGUAGES.map((language) => [language, 10])),
     blobAttempts: 8,
     blobsRetrieved: 5,
     githubRevalidations: 5,
@@ -138,12 +134,12 @@ describe("operational run records", () => {
       (candidate) => { candidate.observedAt = "yesterday"; },
       (candidate) => { candidate.githubQueries[0]!.pageCeiling = 4; },
       (candidate) => { candidate.githubQueries[0]!.resultCeiling = 301; },
-      (candidate) => { candidate.stackConfigurations[0]!.rowCeiling = 10_001; },
+      (candidate) => { candidate.stackConfigurations[0]!.rowCeiling = CAPACITY_CEILINGS.stackRowsPerLanguage + 1; },
       (candidate) => { candidate.counts.githubPages = 4; },
       (candidate) => { candidate.counts.stackRows.Python = 10_001; },
       (candidate) => { candidate.counts.blobAttempts = CAPACITY_CEILINGS.blobAttempts + 1; },
       (candidate) => { candidate.counts.blobsRetrieved = 9; },
-      (candidate) => { candidate.bytes.stackMetadata = 96 * 1024 * 1024 + 1; },
+      (candidate) => { candidate.bytes.stackMetadata = CAPACITY_CEILINGS.stackMetadataBytes + 1; },
       (candidate) => { candidate.bytes.stackBlobs = 16 * 1024 * 1024 + 1; },
       (candidate) => { candidate.waits.retries = 6; },
       (candidate) => { candidate.waits.milliseconds = 30_001; },
@@ -159,7 +155,7 @@ describe("operational run records", () => {
   });
 
   it("bounds operational outcomes by the recorded source capacities and screening relationships", () => {
-    const sourceCapacity = 300 + 5 * 10_000;
+    const sourceCapacity = 300 + STACK_LANGUAGES.length * 10_000;
     const mutations: Array<(candidate: ReturnType<typeof runRecord>) => void> = [
       (candidate) => { candidate.counts.repositoriesAdmitted = sourceCapacity + 1; },
       (candidate) => { candidate.counts.screened = sourceCapacity + 1; },
@@ -167,8 +163,8 @@ describe("operational run records", () => {
       (candidate) => { candidate.counts.screened = candidate.counts.selected - 1; },
       (candidate) => { candidate.diagnostics[0]!.count = sourceCapacity + 1; },
       (candidate) => {
-        candidate.diagnostics[0]!.count = 25_200;
-        candidate.diagnostics.push({ stage: "ADMISSION", reasonCode: "NOT_ELIGIBLE", count: 25_101 });
+        candidate.diagnostics[0]!.count = Math.floor(sourceCapacity / 2);
+        candidate.diagnostics.push({ stage: "ADMISSION", reasonCode: "NOT_ELIGIBLE", count: sourceCapacity - Math.floor(sourceCapacity / 2) + 1 });
       },
     ];
 
