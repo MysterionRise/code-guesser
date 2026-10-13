@@ -101,6 +101,8 @@ app holds port 3000, pick another port with `PORT`, such as
 pinned hash in `apps/game/src/demo/local-real-experiment.pin.server.ts`, and
 makes no network requests while you play. If the artifact is missing, has the
 wrong hash, or is from an older format, the page says so and offers no rounds.
+After preparing, rebuild and restart the game: the build compiles in the pin,
+and a running server keeps the artifact it first read.
 
 For a production-mode local run:
 

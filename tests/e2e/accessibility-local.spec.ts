@@ -25,6 +25,23 @@ test("the deck chooser and every deck fit the minimum viewport", async ({ page }
   }
 });
 
+test("the permanent notice names every round source and wraps to at most five lines", async ({ page }) => {
+  const lines = (element: HTMLElement) => {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    return new Set([...range.getClientRects()].map((rect) => Math.round(rect.top))).size;
+  };
+  for (const path of ["/", `/?deck=${deckIds[0]}`]) {
+    await page.goto(path);
+    const notice = page.locator(".demo-notice");
+    await expect(notice).toContainText(/^Local unreviewed experiment\./u);
+    for (const source of ["The Stack v2", "GitHub", "TheAlgorithms", "Defects4J", "BugsInPy", "localhost", "Not approved beta content"]) {
+      await expect(notice).toContainText(source);
+    }
+    expect(await notice.evaluate(lines), path).toBeLessThanOrEqual(5);
+  }
+});
+
 test("the deck chooser is keyboard operable with named links", async ({ page }) => {
   await page.goto("/");
   expect(await page.evaluate(prefersReducedMotion)).toBe(true);

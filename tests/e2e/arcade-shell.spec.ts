@@ -16,20 +16,30 @@ const titlePattern = (title: string) => new RegExp(`^${title.replace(/[.*+?^${}(
 const points = (value: number): string => value.toLocaleString("en-US");
 
 const currentRound = async (page: Page): Promise<string> => (await page.locator(".game-card").getAttribute("data-round-id"))!;
+/** The header score; its "Score: " prefix is visually hidden text, so it names the score for screen readers. */
+const score = (page: Page) => page.locator(".arcade-header .score");
 
-const answerRounds = async (page: Page, firstRoundHint: boolean) => {
+/** Answers all five rounds right, checks each reveal states its points, and returns the dealt round ids in play order. */
+const answerRounds = async (page: Page, full: number, firstRoundHint: boolean): Promise<string[]> => {
+  const dealt: string[] = [];
   for (let index = 0; index < 5; index += 1) {
     if (index > 0) await page.getByRole("button", { name: "Next round" }).click();
     await expect(page.getByText(`Round ${index + 1} of 5`)).toBeVisible();
     await expect(page.locator(".reveal small")).toHaveCount(0);
-    if (index === 0 && firstRoundHint) await page.getByRole("button", { name: "Reveal hint 1" }).click();
-    const answer = answers.get(await currentRound(page))!;
+    const hinted = index === 0 && firstRoundHint;
+    if (hinted) await page.getByRole("button", { name: "Reveal hint 1" }).click();
+    const roundId = await currentRound(page);
+    dealt.push(roundId);
+    const answer = answers.get(roundId)!;
     await page.getByLabel(answer, { exact: true }).check();
     await page.getByRole("button", { name: "Lock in answer" }).click();
     await expect(page.getByRole("heading", { name: "Nice read." })).toBeVisible();
+    await expect(page.locator(".reveal .round-points"))
+      .toHaveText(hinted ? `+${points(full * 0.8)} points (1 hint)` : `+${points(full)} points (no hints)`);
     await expect(page.locator(".candidate.correct")).toContainText(answer);
     await expect(page.locator(".reveal small")).toBeVisible();
   }
+  return dealt;
 };
 
 test("the root route offers every deck under the permanent notice", async ({ page }) => {
@@ -37,6 +47,8 @@ test("the root route offers every deck under the permanent notice", async ({ pag
   await expect(page.getByText(/Local unreviewed experiment/)).toBeVisible();
   await expect(page.getByRole("heading", { level: 1, name: "Pick a deck" })).toBeVisible();
   expect(artifact.decks.map(({ id }) => id)).toEqual(["project", "language", "before-after", "algorithm", "output", "fix"]);
+  // The chooser, not the notice, counts the decks this artifact published.
+  await expect(page.locator(".deck-intro")).toContainText(/^Six decks to choose from\. Each game deals five real rounds/u);
   for (const deck of artifact.decks) {
     const link = page.getByRole("link", { name: titlePattern(deck.title) });
     await expect(link).toBeVisible();
@@ -47,7 +59,7 @@ test("the root route offers every deck under the permanent notice", async ({ pag
 });
 
 for (const deck of artifact.decks) {
-  test(`plays the ${deck.id} deck through hints, scoring, replay, a new deal, and choosing another deck`, async ({ page }) => {
+  test(`plays the ${deck.id} deck through hints, scoring, a fresh deal, and choosing another deck`, async ({ page }) => {
     const full = fullPoints(deck);
     await page.goto("/");
     await page.getByRole("link", { name: titlePattern(deck.title) }).click();
@@ -55,18 +67,25 @@ for (const deck of artifact.decks) {
     await expect(page.getByText(/Local unreviewed experiment/)).toBeVisible();
     if (deck.id === "before-after") await expect(page.locator("figcaption")).toHaveText(["Version A", "Version B"]);
 
-    await answerRounds(page, true);
+    const first = await answerRounds(page, full, true);
     const hinted = full * 0.8 + 4 * full;
-    await expect(page.getByLabel(/Score/)).toHaveText(`${points(hinted)} pts`);
+    await expect(score(page)).toHaveText(`Score: ${points(hinted)} pts`);
     await expect(page.getByText(new RegExp(`Run complete — ${points(hinted)} points`, "u"))).toBeVisible();
 
-    await page.getByRole("button", { name: "Play again" }).click();
+    // A finished run offers a fresh deal and another deck, never a replay of the rounds it just revealed.
+    await expect(page.getByRole("button", { name: "Play again" })).toHaveCount(0);
+    const deal = page.getByRole("link", { name: "Deal new rounds" });
+    await expect(deal).toHaveAttribute("href", `/?deck=${deck.id}`);
+    await expect(deal).toHaveClass(/primary-action/u);
+    await deal.click();
     await expect(page.getByText("Round 1 of 5")).toBeVisible();
-    await expect(page.getByLabel(/Score/)).toHaveText("0 pts");
-    await answerRounds(page, false);
+    await expect(score(page)).toHaveText("Score: 0 pts");
+    await expect(page.getByRole("heading", { name: /Nice read\.|Not this time\./u })).toHaveCount(0);
+    const second = await answerRounds(page, full, false);
+    // Five rounds dealt in the same order again is at most a one-in-30,240 chance, even from the ten-round pool.
+    expect(second).not.toEqual(first);
     await expect(page.getByText(new RegExp(`Run complete — ${points(5 * full)} points`, "u"))).toBeVisible();
 
-    await expect(page.getByRole("link", { name: "Deal new rounds" })).toHaveAttribute("href", `/?deck=${deck.id}`);
     await page.getByRole("link", { name: "Choose another deck" }).click();
     await expect(page.getByRole("heading", { level: 1, name: "Pick a deck" })).toBeVisible();
   });
@@ -79,7 +98,8 @@ test("a deck query parameter preselects the deck, and a wrong answer scores zero
   await page.getByLabel(wrongAnswers.get(round)!, { exact: true }).check();
   await page.getByRole("button", { name: "Lock in answer" }).click();
   await expect(page.getByRole("heading", { name: "Not this time." })).toBeVisible();
-  await expect(page.getByLabel(/Score/)).toHaveText("0 pts");
+  await expect(page.locator(".reveal .round-points")).toHaveText("0 points (no hints)");
+  await expect(score(page)).toHaveText("Score: 0 pts");
   await expect(page.locator(".candidate.missed")).toContainText(wrongAnswers.get(round)!);
   await expect(page.locator(".candidate.correct")).toContainText(answers.get(round)!);
   await expect(page.getByText(`The answer: ${answers.get(round)!}`)).toBeVisible();
@@ -109,4 +129,79 @@ test("a fix round numbers its lines, shows each option's code, and highlights th
   await option.locator("input").check();
   await expect(pane.locator(`[data-line="${line}"]`)).toHaveClass(/highlighted/u);
   await expect(pane.locator(".code-line.highlighted")).toHaveCount(1);
+});
+
+test("revealing a hint keeps keyboard focus, and a failed check returns it to Lock in answer", async ({ page }) => {
+  await page.goto("/?deck=project");
+  await expect(page.getByText("Round 1 of 5")).toBeVisible();
+  const hints = page.locator(".hints");
+  await expect(hints).toHaveAttribute("aria-live", "polite");
+  const focusedTag = () => page.evaluate(() => document.activeElement?.tagName ?? "");
+
+  await page.getByRole("button", { name: "Reveal hint 1" }).focus();
+  await page.keyboard.press("Enter");
+  await expect(hints.locator(".hint")).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "Reveal hint 2" })).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(hints.locator(".hint")).toHaveCount(2);
+  await expect(hints.locator(".hint").nth(1)).toBeFocused();
+  expect(await focusedTag()).not.toBe("BODY");
+
+  // Every POST is the reveal's server action; failing it shows the alert with focus back on the button.
+  await page.getByLabel(answers.get(await currentRound(page))!, { exact: true }).check();
+  await page.route("**/*", (route) => route.request().method() === "POST" ? route.abort() : route.continue());
+  const lockIn = page.getByRole("button", { name: "Lock in answer" });
+  await lockIn.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("main").getByRole("alert")).toHaveText("Couldn’t check that answer. Try again.");
+  await expect(lockIn).toBeFocused();
+
+  await page.unrouteAll();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("heading", { name: "Nice read." })).toBeFocused();
+  await expect(page.locator(".reveal .round-points")).toHaveText("+500 points (2 hints)");
+  await expect(page.getByRole("main").getByRole("alert")).toHaveCount(0);
+});
+
+test.describe("in a de-DE browser", () => {
+  test.use({ locale: "de-DE" });
+
+  test("the header and round track name the score and the current round, with en-US numbers", async ({ page }) => {
+    await page.goto("/?deck=project");
+    await expect(page.getByText("Round 1 of 5")).toBeVisible();
+    expect(await page.evaluate(() => navigator.language)).toBe("de-DE");
+    await expect(page.locator(".arcade-header")).toMatchAriaSnapshot(`
+      - link "CODEGUESSR"
+      - text: "Score: 0 pts"
+    `);
+    await expect(page.getByRole("list", { name: "Round progress" })).toMatchAriaSnapshot(`
+      - list "Round progress":
+        - listitem: Round 1, current
+        - listitem: Round 2
+        - listitem: Round 3
+        - listitem: Round 4
+        - listitem: Round 5
+    `);
+    await expect(page.locator('.round-track [aria-current="step"]')).toHaveAttribute("data-round-nav", "1");
+    await expect(page.getByRole("group", { name: "Hints" })).toBeVisible();
+
+    await page.getByLabel(answers.get(await currentRound(page))!, { exact: true }).check();
+    await page.getByRole("button", { name: "Lock in answer" }).click();
+    await expect(page.locator(".reveal .round-points")).toHaveText("+1,000 points (no hints)");
+    await expect(score(page)).toHaveText("Score: 1,000 pts");
+    await expect(page.locator(".arcade-header")).toMatchAriaSnapshot(`
+      - link "CODEGUESSR"
+      - text: "Score: 1,000 pts"
+    `);
+    await page.getByRole("button", { name: "Next round" }).click();
+    await expect(page.getByRole("list", { name: "Round progress" })).toMatchAriaSnapshot(`
+      - list "Round progress":
+        - listitem: Round 1, correct
+        - listitem: Round 2, current
+        - listitem: Round 3
+        - listitem: Round 4
+        - listitem: Round 5
+    `);
+    await expect(page.locator('.round-track [aria-current="step"]')).toHaveAttribute("data-round-nav", "2");
+  });
 });

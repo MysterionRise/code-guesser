@@ -43,6 +43,8 @@ export interface ArcadeSession {
   readonly score: number;
   readonly completedRounds: number;
   readonly correctRounds: number;
+  /** Whether each answered round was right, in play order. */
+  readonly outcomes: readonly boolean[];
   readonly result: EntertainmentResultProjection | null;
   readonly status: "playing" | "complete";
 }
@@ -51,13 +53,12 @@ export type ArcadeSessionAction =
   | { type: "reveal-hint" }
   | { type: "lock-answer"; candidateId: string }
   | { type: "accept-reveal"; reveal: AuthorizedReveal }
-  | { type: "next-round" }
-  | { type: "restart" };
+  | { type: "next-round" };
 
 
 export function createArcadeSession(_mode: PublicModeContract): ArcadeSession {
   return Object.freeze({ roundIndex: 0, visibleHintCount: 0, lockedCandidateId: null,
-    reveal: null, score: 0, completedRounds: 0, correctRounds: 0, result: null, status: "playing" });
+    reveal: null, score: 0, completedRounds: 0, correctRounds: 0, outcomes: Object.freeze([]), result: null, status: "playing" });
 }
 
 export function projectDisplayReveal(value: unknown): AuthorizedReveal {
@@ -108,7 +109,6 @@ export function transitionArcadeSession(
   session: ArcadeSession,
   action: ArcadeSessionAction,
 ): ArcadeSession {
-  if (action.type === "restart") return createArcadeSession(mode);
   if (session.status === "complete") throw new ArcadeShellRuleError("the run is already complete");
   const round = mode.rounds[session.roundIndex]!;
   if (action.type === "reveal-hint") {
@@ -142,8 +142,11 @@ export function transitionArcadeSession(
     }
     return Object.freeze({ ...session, reveal, result: reveal.result,
       score: reveal.result.score, completedRounds, correctRounds: session.correctRounds + (reveal.correct ? 1 : 0),
+      outcomes: Object.freeze([...session.outcomes, reveal.correct]),
       status: completedRounds === mode.rounds.length ? "complete" : "playing" });
   }
+  // A finished run is never replayed: a new game is a fresh deal from the server, so revealed rounds stay spent.
+  if (action.type !== "next-round") throw new ArcadeShellRuleError("unsupported session action");
   if (session.reveal === null) throw new ArcadeShellRuleError("the current round must reveal before navigation");
   if (session.roundIndex >= mode.rounds.length - 1) throw new ArcadeShellRuleError("there is no next round");
   return Object.freeze({ ...session, roundIndex: session.roundIndex + 1, visibleHintCount: 0,
@@ -172,6 +175,14 @@ export function formatCompletionResult(result: EntertainmentResultProjection, co
   const share = projectSpoilerFreeShare(result, correctRounds, deckTitle);
   return `Run complete — ${points(result.score)} points, ${correctRounds} of ${result.completedRounds} correct. Share: ${share.text}.`;
 }
+
+/** What one round earned and the hints it took, as its reveal states it: "+800 points (1 hint)" or "0 points (no hints)". */
+export const roundPointsNote = (score: number, hintsUsed: number): string =>
+  `${score > 0 ? "+" : ""}${points(score)} points (${hintsUsed === 0 ? "no hints" : hintsUsed === 1 ? "1 hint" : `${hintsUsed} hints`})`;
+
+/** How the round track names one round to assistive technology: "Round 2, current" or "Round 1, correct". */
+export const roundStatusText = (round: number, current: boolean, correct: boolean | undefined): string =>
+  [`Round ${round}`, ...(current ? ["current"] : []), ...(correct === undefined ? [] : [correct ? "correct" : "missed"])].join(", ");
 
 /** The round's own points after zero, one, and two hints. */
 export const hintCostNote = (values: readonly number[]): string =>
@@ -220,6 +231,9 @@ export function ArcadeShell({ mode, authorizeRevealAction, chooseAnotherDeckHref
     : undefined;
   const roundTitle = React.useRef<HTMLHeadingElement>(null);
   const revealHeading = React.useRef<HTMLHeadingElement>(null);
+  const hintButton = React.useRef<HTMLButtonElement>(null);
+  const latestHint = React.useRef<HTMLParagraphElement>(null);
+  const answerButton = React.useRef<HTMLButtonElement>(null);
   const settled = React.useRef(false);
 
   // Keyboard and screen-reader users land on the verdict after answering and on the next prompt after
@@ -228,6 +242,18 @@ export function ArcadeShell({ mode, authorizeRevealAction, chooseAnotherDeckHref
     if (!settled.current) { settled.current = true; return; }
     (session.reveal ? revealHeading : roundTitle).current?.focus();
   }, [session.reveal, session.roundIndex]);
+
+  // A revealed hint replaces the button that asked for it, so focus moves on to the next hint button, or to the
+  // hint itself once none is left, instead of falling to the page; the hints region announces the hint.
+  React.useEffect(() => {
+    if (session.visibleHintCount === 0) return;
+    (hintButton.current ?? latestHint.current)?.focus();
+  }, [session.visibleHintCount]);
+
+  // "Lock in answer" disables while it checks; when the check fails, focus returns to it beside the alert.
+  React.useEffect(() => {
+    if (error !== null && !busy) answerButton.current?.focus();
+  }, [error, busy]);
 
   const copyResult = async () => {
     if (!session.result) return;
@@ -268,31 +294,30 @@ export function ArcadeShell({ mode, authorizeRevealAction, chooseAnotherDeckHref
     setError(null);
   };
 
-  const restart = () => {
-    setSession((current) => transitionArcadeSession(mode, current, { type: "restart" }));
-    setSelection("");
-    setError(null);
-    setCopied(false);
-  };
-
   return (
     <main className="arcade-shell" data-round-count={mode.rounds.length}>
       <noscript>This game needs JavaScript for answers and progressive evidence.</noscript>
       <header className="arcade-header">
         <a className="brand" href="/">CODEGUESSR</a>
-        <span className="score" aria-label={`Score ${session.score}`}>{session.score.toLocaleString()} pts</span>
+        <span className="score"><span className="visually-hidden">Score: </span>{points(session.score)} pts</span>
       </header>
 
-      <nav className="round-track" aria-label="Round progress">
-        {mode.rounds.map((item, index) => (
-          <span
-            className={index === session.roundIndex ? "round-dot current" : index < session.roundIndex ? "round-dot done" : "round-dot"}
-            data-round-nav={index + 1}
-            key={item.roundId}
-            aria-label={`Round ${index + 1}${index === session.roundIndex ? ", current" : ""}`}
-          >{index + 1}</span>
-        ))}
-      </nav>
+      <ol className="round-track" aria-label="Round progress">
+        {mode.rounds.map((item, index) => {
+          const current = index === session.roundIndex;
+          return (
+            <li
+              className={current ? "round-dot current" : index < session.roundIndex ? "round-dot done" : "round-dot"}
+              data-round-nav={index + 1}
+              key={item.roundId}
+              aria-current={current ? "step" : undefined}
+            >
+              <span aria-hidden="true">{index + 1}</span>
+              <span className="visually-hidden">{roundStatusText(index + 1, current, session.outcomes[index])}</span>
+            </li>
+          );
+        })}
+      </ol>
 
       <section className="game-card" aria-labelledby="round-title" data-round-id={round.roundId}>
         <p className="eyebrow">Round {session.roundIndex + 1} of {mode.rounds.length}</p>
@@ -303,24 +328,25 @@ export function ArcadeShell({ mode, authorizeRevealAction, chooseAnotherDeckHref
               {pane.label ? <figcaption>Version {pane.label}</figcaption>
                 : PANE_CAPTIONS[round.mode.kind] && <figcaption className="pane-note">{PANE_CAPTIONS[round.mode.kind]}</figcaption>}
               {numbered
-                ? <pre className="code-window numbered" tabIndex={0} aria-label="Code excerpt with numbered lines"><code>
+                ? <pre className="code-window numbered" role="region" tabIndex={0} aria-label="Code excerpt with numbered lines"><code>
                     {paneLines.map((line, lineIndex) => (
                       <span className={lineIndex + 1 === highlighted ? "code-line highlighted" : "code-line"} data-line={lineIndex + 1} key={lineIndex}>
                         <span className="line-number" aria-hidden="true">{lineIndex + 1}</span>{line}
                       </span>
                     ))}
                   </code></pre>
-                : <pre className="code-window" tabIndex={0} aria-label={pane.label ? `Code, version ${pane.label}` : "Code excerpt"}><code>{pane.text}</code></pre>}
+                : <pre className="code-window" role="region" tabIndex={0} aria-label={pane.label ? `Code, version ${pane.label}` : "Code excerpt"}><code>{pane.text}</code></pre>}
             </figure>
           ))}
         </div>
 
         <p className="hint-cost" id={`hint-cost-${round.roundId}`}>{hintCostNote(round.points)}</p>
-        <div className="hints" aria-label="Hints">
+        {/* Keyed by round, so a new round's hints arrive in a fresh live region instead of being announced. */}
+        <div className="hints" role="group" aria-label="Hints" aria-live="polite" key={round.roundId}>
           {round.mode.clues.map((clue, index) => index < session.visibleHintCount
-            ? <p className="hint" key={clue.order}>{clue.label}</p>
+            ? <p className="hint" key={clue.order} tabIndex={-1} ref={index === session.visibleHintCount - 1 ? latestHint : undefined}>{clue.label}</p>
             : index === session.visibleHintCount
-              ? <button className="hint-button" type="button" key={clue.order} aria-describedby={`hint-cost-${round.roundId}`} disabled={busy || session.lockedCandidateId !== null} onClick={() => setSession((current) => transitionArcadeSession(mode, current, { type: "reveal-hint" }))}>
+              ? <button className="hint-button" type="button" key={clue.order} ref={hintButton} aria-describedby={`hint-cost-${round.roundId}`} disabled={busy || session.lockedCandidateId !== null} onClick={() => setSession((current) => transitionArcadeSession(mode, current, { type: "reveal-hint" }))}>
                   Reveal hint {clue.order}
                 </button>
               : null)}
@@ -360,7 +386,7 @@ export function ArcadeShell({ mode, authorizeRevealAction, chooseAnotherDeckHref
           </div>
         </fieldset>
 
-        <button className="answer-button" type="button" disabled={selection === "" || session.reveal !== null || busy} onClick={submit}>
+        <button className="answer-button" type="button" ref={answerButton} disabled={selection === "" || session.reveal !== null || busy} onClick={submit}>
           {busy ? "Checking…" : "Lock in answer"}
         </button>
         {error && <p className="demo-error" role="alert">{error}</p>}
@@ -369,6 +395,7 @@ export function ArcadeShell({ mode, authorizeRevealAction, chooseAnotherDeckHref
           {session.reveal && (
             <>
               <h2 ref={revealHeading} tabIndex={-1}>{session.reveal.correct ? "Nice read." : "Not this time."}</h2>
+              <p className="round-points">{roundPointsNote(session.reveal.score, session.visibleHintCount)}</p>
               <p className="answer-line">The answer: <strong>{round.mode.candidates.find(({ candidateId }) => candidateId === session.reveal!.answerCandidateId)?.label}</strong></p>
               <p>{session.reveal.evidence}</p>
               <p>{session.reveal.explanation}</p>
@@ -379,10 +406,11 @@ export function ArcadeShell({ mode, authorizeRevealAction, chooseAnotherDeckHref
                 ? <button type="button" onClick={next}>Next round</button>
                 : <>
                     <p>{formatCompletionResult(session.result!, session.correctRounds, deckTitle)}</p>
-                    <button type="button" onClick={copyResult}>{copied ? "Copied" : "Copy result"}</button>
-                    <button type="button" onClick={restart}>Play again</button>
-                    {newGameHref && <a className="deck-link" href={newGameHref}>Deal new rounds</a>}
-                    {chooseAnotherDeckHref && <a className="deck-link" href={chooseAnotherDeckHref}>Choose another deck</a>}
+                    <div className="completion-actions">
+                      {newGameHref && <a className="primary-action" href={newGameHref}>Deal new rounds</a>}
+                      <button className="secondary-action" type="button" onClick={copyResult}>{copied ? "Copied" : "Copy result"}</button>
+                      {chooseAnotherDeckHref && <a className="deck-link" href={chooseAnotherDeckHref}>Choose another deck</a>}
+                    </div>
                   </>}
             </>
           )}
