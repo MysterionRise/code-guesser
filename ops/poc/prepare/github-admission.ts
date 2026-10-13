@@ -11,7 +11,7 @@ type BoundLineageKey =
   | "path" | "blob" | "queryId" | "childCommit" | "childTree"
   | "parentCommit" | "parentTree" | "parentPath" | "childPath"
   | "parentMode" | "childMode" | "parentBlob" | "childBlob"
-  | "parentRawContentHash" | "childRawContentHash" | "changedLineHash";
+  | "parentRawContentHash" | "childRawContentHash" | "parentExcerptHash" | "linesRemoved" | "linesAdded";
 export class GitHubAdmissionError extends Error {
   /** `code` names the check that rejected the candidate; the message stays the stable stage code. */
   public constructor(public readonly code: string = "GITHUB_ADMISSION_REJECTED") {
@@ -199,7 +199,8 @@ const sourceRecord = (
   parentMode: candidate.parentMode, childMode: candidate.childMode,
   parentBlob: candidate.parentBlob, childBlob: candidate.childBlob,
   parentRawContentHash: candidate.parentRawContentHash,
-  childRawContentHash: candidate.childRawContentHash, changedLineHash: candidate.changedLineHash,
+  childRawContentHash: candidate.childRawContentHash, parentExcerptHash: candidate.parentExcerptHash,
+  linesRemoved: candidate.linesRemoved, linesAdded: candidate.linesAdded,
 });
 
 const admitCandidate = async (
@@ -234,6 +235,25 @@ export const screenGitHubRepository = async (
   const api = `https://api.github.com/repos/${repository}`;
   admitRepository(await requestJson(options as GitHubAdmissionOptions, api), repository, api,
     `https://github.com/${repository}`, options.profile.licenses);
+};
+
+/**
+ * A repository as a project round's option shows it: its public description (null when it has none),
+ * and whether it is a fork or archived, which keeps it out of the options. The same GET the repository
+ * screen makes, so a screened repository costs no second request.
+ */
+export const describeGitHubRepository = async (
+  options: Pick<GitHubAdmissionOptions, "profile" | "transport" | "retry">,
+  repository: string,
+): Promise<Readonly<{ description: string | null; fork: boolean; archived: boolean }>> => {
+  const api = `https://api.github.com/repos/${repository}`;
+  const response = record(await requestJson(options as GitHubAdmissionOptions, api));
+  if (response.full_name !== repository || response.url !== api || response.html_url !== `https://github.com/${repository}`
+    || response.private !== false || typeof response.fork !== "boolean" || typeof response.archived !== "boolean"
+    || (response.description !== null && typeof response.description !== "string")) fail("ADMISSION_REPOSITORY");
+  const description = typeof response.description === "string" && response.description.trim().length > 0
+    ? response.description.trim() : null;
+  return Object.freeze({ description, fork: response.fork as boolean, archived: response.archived as boolean });
 };
 
 export const admitGitHubCandidates = async (

@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { canonicalHash } from "./canonical";
 import { CapacityError, createCapacityMeter } from "./capacity";
 import { GitHubSearchError } from "./github-search";
-import { HARNESS_CANDIDATES, HARNESS_CREDIT, accepted, classificationsFor, hash, loadProfile, makeHarness } from "./command-test-harness";
+import { HARNESS_CANDIDATES, accepted, classificationsFor, harnessRow, hash, loadProfile, makeHarness } from "./command-test-harness";
 import { STACK_LANGUAGES } from "./profile";
 import { RetryError } from "./retry";
 import { createRunReport } from "./run-report";
@@ -30,9 +30,20 @@ const admittedWith = (candidate: any, source: Record<string, unknown> = {}) => a
     excerptHash: String(candidate.id).padStart(64, "e"), queryId: candidate.queryId, ...source,
   },
 }, "4");
+/** Each language's four popular rows (the project deck's) followed by the given ordinary rows (the language deck's). */
+const popularRows = (language: string) => [0, 1, 2, 3].map((rank) =>
+  harnessRow(language, `${language.toLowerCase()}-pop-${rank}`, { starEventsCount: 9000 - rank * 1000 }));
 const stackRowsWith = (python: readonly object[], others: Partial<Record<string, readonly object[]>> = {}) =>
-  Object.fromEntries(STACK_LANGUAGES.map((language) => [language, language === "Python" ? python
-    : others[language] ?? [{ id: language.toLowerCase(), detectedLanguage: language }]])) as Record<string, readonly object[]>;
+  Object.fromEntries(STACK_LANGUAGES.map((language) => [language, [...popularRows(language), ...(language === "Python" ? python
+    : others[language] ?? [harnessRow(language, language.toLowerCase())])]])) as Record<string, readonly object[]>;
+/** Captures the commit ids the before-or-after deck is generated from. */
+const beforeAfterIds = (): Readonly<{ ids: unknown[]; generate: PreparationDependencies["generateBeforeAfter"] }> => {
+  const ids: unknown[] = [];
+  return { ids, generate: ({ profile, candidates }) => {
+    ids.push(...candidates.map((candidate: any) => candidate.lineage.id));
+    return { fixtures: Array(profile.selection.beforeAfterPool).fill({ kind: "BEFORE_AFTER" }) } as any;
+  } };
+};
 const metadataFrom = (rows: Record<string, readonly object[]>): PreparationDependencies["collectStackMetadata"] =>
   async ({ configuration, capacity }) => {
     capacity.recordStackRows(configuration, rows[configuration]!.length, 100);
@@ -56,16 +67,16 @@ const logLines = (calls: readonly string[]): string[] =>
     expect(manifest.scripts["prepare:poc"]).toBe("node --import tsx ops/poc/prepare/index.ts");
   });
 
-  it("runs preflight first, both mandatory lanes, the exact 5/5/5 deck composition, report, then publication", async () => {
+  it("runs preflight, Stack metadata, discovery, all three decks, the report, then publication", async () => {
     const harness = await makeHarness();
     const result = await prepareLocalExperiment(harness.dependencies) as PreparationResult;
 
-    expect(harness.calls.indexOf("preflight")).toBeLessThan(harness.calls.indexOf("search"));
     expect(harness.calls.indexOf("preflight")).toBeLessThan(harness.calls.indexOf("metadata:Python"));
+    expect(harness.calls.indexOf("metadata:Ruby")).toBeLessThan(harness.calls.indexOf("search"));
     expect(harness.calls.filter((call) => call.startsWith("metadata:"))).toEqual(STACK_LANGUAGES.map((language) => `metadata:${language}`));
-    expect(harness.calls).toContain("project:5:8");
+    expect(harness.calls).toContain("project:5:3,3,3,3,3");
     expect(harness.calls).toContain("language:5");
-    expect(harness.calls).toContain("ai:5");
+    expect(harness.calls).toContain("before-after:5");
     expect(harness.calls).toContain("compose:5/5/5");
     expect(harness.calls.indexOf("report:stage")).toBeLessThan(harness.calls.indexOf("publish"));
     expect(harness.calls.indexOf("publish")).toBeLessThan(harness.calls.indexOf("report:commit"));
@@ -77,61 +88,56 @@ const logLines = (calls: readonly string[]): string[] =>
     expect(harness.reports).toHaveLength(1);
   });
 
-  it("checks language-round eligibility before lease acceptance and continues with frozen limits", async () => {
+  it("checks round eligibility before lease acceptance and continues with frozen limits", async () => {
     const harness = await makeHarness();
     await prepareLocalExperiment(harness.dependencies);
 
     expect(new Set(harness.dependencyMeters).size).toBe(1);
-    expect(harness.calls.filter((call) => call.startsWith("fetch:"))).toEqual([
-      "fetch:py-reject:50:16777216", "fetch:py:49:16777136", "fetch:typescript:48:16777056",
-      "fetch:go:47:16776976", "fetch:rust:46:16776896", "fetch:ruby:45:16776816",
-    ]);
+    // One popular file per language for the project deck, then the language deck's rows in stable order.
+    const fetched = ["python-pop-0", "typescript-pop-0", "go-pop-0", "rust-pop-0", "ruby-pop-0",
+      "py-reject", "py", "typescript", "go", "rust", "ruby"];
+    expect(harness.calls.filter((call) => call.startsWith("fetch:"))).toEqual(
+      fetched.map((id, index) => `fetch:${id}:${120 - index}:${16_777_216 - 80 * index}`));
     expect(harness.calls.filter((call) => call.startsWith("eligible:"))).toEqual([
       "eligible:py-reject", "eligible:py", "eligible:typescript", "eligible:go", "eligible:rust", "eligible:ruby",
     ]);
     expect(harness.leases).toEqual([
+      ...Array(5).fill({ accepted: true, released: false, bytes: 80 }),
       { accepted: false, released: true, bytes: 80 },
       ...Array(5).fill({ accepted: true, released: false, bytes: 80 }),
     ]);
   });
 
-  it("continues past rejected admissions until the project deck has five repositories, then fills the AI deck", async () => {
+  it("continues past rejected admissions until the before-or-after pool is full", async () => {
     const rejected: number[] = [];
-    let projectIds: unknown[] = []; let aiIds: unknown[] = [];
+    const captured = beforeAfterIds();
     const harness = await makeHarness({
       admitGitHubCandidate: async ({ candidate }) => {
         const id = (candidate as any).id as number;
         if (id === 1) { rejected.push(id); throw new Error("REPOSITORY_REJECTED"); }
         return admittedWith(candidate);
       },
-      generateProject: ({ candidates }) => { projectIds = candidates.map((candidate: any) => candidate.lineage.id); return { fixtures: Array(5).fill({ kind: "PROJECT" }) } as any; },
-      generateAi: ({ candidates }) => { aiIds = candidates.map((candidate: any) => candidate.lineage.id); return { fixtures: Array(5).fill({ kind: "AI_CREDIT" }) } as any; },
+      generateBeforeAfter: captured.generate,
     });
 
     await prepareLocalExperiment(harness.dependencies);
     expect(rejected).toEqual([1]);
-    expect(projectIds).toEqual([0, 2, 3, 4, 5]);
-    expect(aiIds).toEqual([20, 21, 22, 6, 7]);
+    expect(captured.ids).toEqual([0, 2, 3, 4, 5]);
   });
 
   it("skips a search candidate whose repository the deck already holds before spending any lineage request", async () => {
     const profile = await loadProfile();
     // More skipped repeats than screened candidates: skips are diagnostics, not screened duplicates.
-    const repeats = Array.from({ length: 30 }, (_, index) => ({ id: 100 + index, queryId: "ordinary-facebook", repository: "same/repo" }));
+    const repeats = Array.from({ length: 30 }, (_, index) => ({ id: 100 + index, queryId: "refactor-facebook", repository: "same/repo", subject: "Refactor the same helper" }));
     const candidates = [
-      { id: 0, queryId: "ordinary-facebook", repository: "same/repo" },
+      { id: 0, queryId: "refactor-facebook", repository: "same/repo", subject: "Refactor the first helper" },
       ...repeats,
-      ...[3, 4, 5, 6, 7, 8].map((id) => ({ id, queryId: "ordinary-facebook", repository: `org${id}/repo-${id}` })),
-      { id: 20, queryId: "ai-copilot-github", repository: "ai/repo" },
-      { id: 21, queryId: "ai-copilot-github", repository: "ai/repo" },
-      { id: 22, queryId: "ai-copilot-github", repository: "org22/repo-22" },
-      { id: 23, queryId: "ai-copilot-github", repository: "org23/repo-23" },
+      ...[3, 4, 5, 6, 7, 8].map((id) => ({ id, queryId: "refactor-facebook", repository: `org${id}/repo-${id}`, subject: `Refactor helper ${id}` })),
     ];
-    let projectIds: unknown[] = []; let aiIds: unknown[] = [];
+    const captured = beforeAfterIds();
     const harness = await makeHarness({
       searchGitHub: async () => accepted({ candidates, queryClassifications: classificationsFor(profile) }, "2"),
-      generateProject: ({ candidates: selected }) => { projectIds = selected.map((candidate: any) => candidate.lineage.id); return { fixtures: Array(5).fill({ kind: "PROJECT" }) } as any; },
-      generateAi: ({ candidates: selected }) => { aiIds = selected.map((candidate: any) => candidate.lineage.id); return { fixtures: Array(5).fill({ kind: "AI_CREDIT" }) } as any; },
+      generateBeforeAfter: captured.generate,
       createReport: (input) => {
         const report = createRunReport(input) as any;
         expect(report.counts.duplicatesRejected).toBeLessThanOrEqual(report.counts.screened);
@@ -140,158 +146,142 @@ const logLines = (calls: readonly string[]): string[] =>
     });
 
     await prepareLocalExperiment(harness.dependencies);
-    expect(harness.calls.filter((call) => call.startsWith("lineage:"))).toEqual(
-      [0, 3, 4, 5, 6, 20, 22, 23, 7, 8].map((id) => `lineage:${id}`),
-    );
-    expect(projectIds).toEqual([0, 3, 4, 5, 6]);
-    expect(aiIds).toEqual([20, 22, 23, 7, 8]);
+    expect(harness.calls.filter((call) => call.startsWith("lineage:"))).toEqual([0, 3, 4, 5, 6].map((id) => `lineage:${id}`));
+    expect(captured.ids).toEqual([0, 3, 4, 5, 6]);
     const report = harness.reports[0] as any;
-    expect(report.diagnostics).toContainEqual({ stage: "DEDUPLICATION", reasonCode: "REPOSITORY_REPEATED", count: 31 });
+    expect(report.diagnostics).toContainEqual({ stage: "DEDUPLICATION", reasonCode: "REPOSITORY_REPEATED", count: 30 });
     expect(report.counts.duplicatesRejected).toBe(0);
   });
 
-  it("stops spending project requests on a repository whose excerpt already named its own project", async () => {
+  it("skips a commit whose subject no hint could quote before spending any request on it", async () => {
     const profile = await loadProfile();
-    const candidates = [
-      { id: 0, queryId: "ordinary-facebook", repository: "widgets/gizmo" },
-      { id: 1, queryId: "ordinary-facebook", repository: "widgets/gizmo" },
-      ...[2, 3, 4, 5, 6, 7, 8].map((id) => ({ id, queryId: "ordinary-facebook", repository: `org${id}/repo-${id}` })),
-      ...[20, 21, 22].map((id) => ({ id, queryId: "ai-copilot-github", repository: `org${id}/repo-${id}` })),
+    const candidates = HARNESS_CANDIDATES.map((candidate) => candidate.id === 1 ? { ...candidate, subject: "Fix" } : candidate);
+    const harness = await makeHarness({ searchGitHub: async () => accepted({ candidates, queryClassifications: classificationsFor(profile) }, "2") });
+    await prepareLocalExperiment(harness.dependencies);
+    expect(harness.calls).not.toContain("screen:org1/repo-1");
+    expect(harness.calls).not.toContain("lineage:1");
+    expect((harness.reports[0] as any).diagnostics).toContainEqual({ stage: "SCREENING", reasonCode: "SUBJECT_UNUSABLE", count: 1 });
+  });
+
+  it("keeps a popular file out of the project deck when its code names its own project, and tries the repository's next file", async () => {
+    const python = [
+      harnessRow("Python", "python-pop-0", { starEventsCount: 9000, excerpt: "import python_pop_0\npython-pop-0.run()" }),
+      harnessRow("Python", "python-pop-0b", { repository: "python-org/python-pop-0", starEventsCount: 9000 }),
+      ...popularRows("Python").slice(1),
     ];
-    let projectIds: unknown[] = [];
-    const harness = await makeHarness({
-      searchGitHub: async () => accepted({ candidates, queryClassifications: classificationsFor(profile) }, "2"),
-      bindGitHubLineage: async ({ candidate }: any) => {
-        harness.calls.push(`lineage:${candidate.id}`);
-        return accepted({ ...candidate, excerpt: candidate.id === 0 ? "const gizmo = load(1000);" : `value_${candidate.id} = compute(${candidate.id}) + 1000`,
-          commitMessage: candidate.id >= 20 ? `Fix\n\n${HARNESS_CREDIT}` : "ordinary refactor" }, "3");
-      },
-      generateProject: ({ candidates: selected }) => { projectIds = selected.map((candidate: any) => candidate.lineage.id); return { fixtures: Array(5).fill({ kind: "PROJECT" }) } as any; },
-    });
+    const rows = stackRowsWith([harnessRow("Python", "py")]);
+    rows.Python = [...python, harnessRow("Python", "py")];
+    const harness = await makeHarness({ collectStackMetadata: metadataFrom(rows) });
 
     await prepareLocalExperiment(harness.dependencies);
-    expect(harness.calls).not.toContain("lineage:1");
-    expect(projectIds).toEqual([2, 3, 4, 5, 6]);
-    const diagnostics = (harness.reports[0] as any).diagnostics;
-    expect(diagnostics).toContainEqual({ stage: "SCREENING", reasonCode: "PROJECT_NAME_IN_EXCERPT", count: 1 });
-    expect(diagnostics).toContainEqual({ stage: "SCREENING", reasonCode: "PROJECT_REPOSITORY_SKIPPED", count: 1 });
+    expect(harness.calls.filter((call) => call.startsWith("fetch:python-pop-0"))).toHaveLength(2);
+    expect(harness.calls).toContain("project:5:3,3,3,3,3");
+    expect((harness.reports[0] as any).diagnostics).toContainEqual({ stage: "SCREENING", reasonCode: "PROJECT_NAME_IN_EXCERPT", count: 1 });
   });
 
   it("screens out a source whose identity the run report could not record, before it can fail publication", async () => {
-    let projectIds: unknown[] = [];
+    const captured = beforeAfterIds();
     const harness = await makeHarness({
       admitGitHubCandidate: async ({ candidate }) => admittedWith(candidate,
         (candidate as any).id === 1 ? { path: "src/c#/file-1.ts" } : {}),
       collectStackMetadata: metadataFrom(stackRowsWith([
-        { id: "py-hash", detectedLanguage: "Python" }, { id: "py-reject", detectedLanguage: "Python" }, { id: "py", detectedLanguage: "Python" },
+        harnessRow("Python", "py-hash", { stableRowId: "0" }), harnessRow("Python", "py", { stableRowId: "1" }),
       ])),
-      revalidateStackCandidate: async ({ row }: any) => accepted({ ...row, repository: `stack/${row.id}`,
+      revalidateStackCandidate: async ({ row }: any) => accepted({ ...row,
         commit: String(Object.keys(stackRowsWith([])).indexOf(row.detectedLanguage) * 10 + row.id.length).padStart(40, "d"),
-        path: row.id === "py-hash" ? "pkg/a?b.py" : `pkg/${row.id}.py` }, "7"),
-      generateProject: ({ candidates }) => { projectIds = candidates.map((candidate: any) => candidate.lineage.id); return { fixtures: Array(5).fill({ kind: "PROJECT" }) } as any; },
+        path: row.id === "py-hash" ? "pkg/a?b.py" : row.path }, "7"),
+      generateBeforeAfter: captured.generate,
     });
 
     await prepareLocalExperiment(harness.dependencies);
-    expect(projectIds).not.toContain(1);
+    expect(captured.ids).not.toContain(1);
     expect((harness.reports[0] as any).diagnostics).toContainEqual({ stage: "SCREENING", reasonCode: "SOURCE_IDENTITY_UNREPORTABLE", count: 2 });
-  });
-
-  it("keeps at least two credited and two uncredited AI rounds, filling from ordinary commits", async () => {
-    let aiIds: unknown[] = [];
-    const lineageFor = (uncredited: number) => async ({ candidate }: any) => {
-      const id = candidate.id as number;
-      return accepted({ ...candidate, excerpt: `value_${id} = compute(${id}) + 1000`,
-        commitMessage: id >= 20 && id !== uncredited ? `Fix\n\n${HARNESS_CREDIT}` : "ordinary refactor" }, "3");
-    };
-    const harness = await makeHarness({
-      bindGitHubLineage: lineageFor(21),
-      generateAi: ({ candidates }) => { aiIds = candidates.map((candidate: any) => candidate.lineage.id); return { fixtures: Array(5).fill({ kind: "AI_CREDIT" }) } as any; },
-    });
-    await prepareLocalExperiment(harness.dependencies);
-    expect(aiIds).toEqual([20, 22, 5, 6, 7]);
-    expect((harness.reports[0] as any).diagnostics).toContainEqual({ stage: "SCREENING", reasonCode: "AI_CREDIT_ABSENT", count: 1 });
-
-    const scarce = await makeHarness({ bindGitHubLineage: async ({ candidate }: any) => accepted({ ...candidate,
-      excerpt: `value_${candidate.id} = compute(${candidate.id}) + 1000`,
-      commitMessage: candidate.id === 20 ? `Fix\n\n${HARNESS_CREDIT}` : "ordinary refactor" }, "3") });
-    await prepareLocalExperiment(scarce.dependencies);
-    expect(scarce.calls).toContain("log:PREPARATION_DECK_SKIPPED ai DECK_SHORT");
-    expect(scarce.calls).toContain("log:PREPARATION_DECKS project,language");
-    expect(scarce.calls).toContain("compose:5/5/0");
-    expect((scarce.reports[0] as any).diagnostics).toContainEqual({ stage: "SELECTION", reasonCode: "AI_DECK_SKIPPED", count: 1 });
   });
 
   it("publishes the decks that filled and skips each other deck with its reason", async () => {
     const harness = await makeHarness({ collectStackMetadata: async () => accepted([], "5") });
     const result = await prepareLocalExperiment(harness.dependencies);
     expect(result.artifactHash).toMatch(/^[0-9a-f]{64}$/u);
-    expect(harness.calls).toContain("compose:5/0/5");
+    expect(harness.calls).toContain("compose:0/0/5");
     expect(harness.calls.some((call) => call.startsWith("fetch:"))).toBe(false);
     expect(logLines(harness.calls)).toEqual([
+      "log:PREPARATION_DECK_SKIPPED project DECK_SHORT",
       "log:PREPARATION_DECK_SKIPPED language DECK_SHORT",
-      "log:PREPARATION_DECKS project,ai",
+      "log:PREPARATION_DECKS before-after",
       "log:PREPARATION_COMPLETE",
     ]);
-    expect((harness.reports[0] as any).counts.selected).toBe(10);
+    expect((harness.reports[0] as any).counts.selected).toBe(5);
+    expect((harness.reports[0] as any).diagnostics).toContainEqual({ stage: "SELECTION", reasonCode: "PROJECT_DECK_SKIPPED", count: 1 });
   });
 
-  it("rejects a duplicate within the project deck and across decks, then continues to unique replacements", async () => {
-    let projectIds: unknown[] = []; let aiIds: unknown[] = [];
+  it("skips a short before-or-after pool and still publishes the Stack decks", async () => {
+    const profile = await loadProfile();
+    const harness = await makeHarness({
+      searchGitHub: async () => accepted({ candidates: HARNESS_CANDIDATES.slice(0, 3), queryClassifications: classificationsFor(profile) }, "2"),
+    });
+    await prepareLocalExperiment(harness.dependencies);
+    expect(harness.calls).toContain("compose:5/5/0");
+    expect(harness.calls).toContain("log:PREPARATION_DECK_SKIPPED before-after DECK_SHORT");
+    expect((harness.reports[0] as any).diagnostics).toContainEqual({ stage: "SELECTION", reasonCode: "BEFORE_AFTER_DECK_SKIPPED", count: 1 });
+  });
+
+  it("rejects a duplicate within a deck and across decks, then continues to unique replacements", async () => {
+    const captured = beforeAfterIds();
     const duplicateHash = hash("d");
     const harness = await makeHarness({
       admitGitHubCandidate: async ({ candidate }) => admittedWith(candidate,
         (candidate as any).id < 2 ? { rawContentHash: duplicateHash } : {}),
-      generateProject: ({ candidates }) => { projectIds = candidates.map((candidate: any) => candidate.lineage.id); return { fixtures: Array(5).fill({ kind: "PROJECT" }) } as any; },
-      generateAi: ({ candidates }) => { aiIds = candidates.map((candidate: any) => candidate.lineage.id); return { fixtures: Array(5).fill({ kind: "AI_CREDIT" }) } as any; },
+      revalidateStackCandidate: async ({ row }: any) => accepted({ ...row,
+        ...(row.id === "py" ? { rawContentHash: duplicateHash } : {}) }, "8"),
+      generateBeforeAfter: captured.generate,
     });
 
     await prepareLocalExperiment(harness.dependencies);
-    expect(projectIds).toEqual([0, 2, 3, 4, 5]);
-    expect(aiIds).toEqual([20, 21, 22, 6, 7]);
-    expect((harness.reports[0] as any).diagnostics).toContainEqual(
-      { stage: "DEDUPLICATION", reasonCode: "SOURCE_DUPLICATE", count: 2 },
-    );
+    expect(captured.ids).toEqual([0, 2, 3, 4, 5]);
+    // One commit repeats the first commit's content; the Python file repeats it across decks.
+    expect((harness.reports[0] as any).diagnostics).toContainEqual({ stage: "DEDUPLICATION", reasonCode: "SOURCE_DUPLICATE", count: 2 });
+    // The language deck moves past the repeated Python file to the next eligible row.
+    expect(harness.calls).toContain("language:5");
   });
 
-  it("orders Stack candidates by the profile keys and continues after cross-source deduplication", async () => {
+  it("orders the language deck's rows by the profile keys and continues after cross-source deduplication", async () => {
     const collisionHash = hash("c");
     const stackRows = stackRowsWith([
-      { id: "late", detectedLanguage: "Python", stableRowId: hash("2"), repository: "stack/late",
-        swhRevisionId: "2".repeat(40), path: "late.py", swhContentId: "2".repeat(40), rawContentHash: hash("d") },
-      { id: "collision", detectedLanguage: "Python", stableRowId: hash("1"), repository: "stack/collision",
-        swhRevisionId: "1".repeat(40), path: "collision.py", swhContentId: "1".repeat(40), rawContentHash: collisionHash },
+      harnessRow("Python", "late", { stableRowId: hash("2") }),
+      harnessRow("Python", "collision", { stableRowId: hash("1") }),
     ]);
     const harness = await makeHarness({
       admitGitHubCandidate: async ({ candidate }) => admittedWith(candidate,
         (candidate as any).id === 0 ? { rawContentHash: collisionHash } : {}),
+      revalidateStackCandidate: async ({ row }: any) => accepted({ ...row,
+        ...(row.id === "collision" ? { rawContentHash: collisionHash } : {}) }, "8"),
       collectStackMetadata: metadataFrom(stackRows),
     });
 
     await prepareLocalExperiment(harness.dependencies);
-    expect(harness.calls.filter((call) => call.startsWith("fetch:")).slice(0, 3)).toEqual([
-      "fetch:collision:50:16777216", "fetch:late:49:16777136", "fetch:typescript:48:16777056",
-    ]);
-    expect(harness.leases[0]).toMatchObject({ accepted: false, released: true });
+    const languageFetches = harness.calls.filter((call) => call.startsWith("fetch:") && !call.includes("-pop-"));
+    expect(languageFetches.slice(0, 3).map((call) => call.split(":")[1])).toEqual(["collision", "late", "typescript"]);
+    expect(harness.leases[5]).toMatchObject({ accepted: false, released: true });
   });
 
-  it("continues after an independently duplicated Stack language candidate", async () => {
+  it("continues after a language row that repeats another round's content", async () => {
     const duplicateHash = hash("d");
-    const rows = stackRowsWith([{ id: "py", detectedLanguage: "Python", stableRowId: hash("1"), repository: "stack/py",
-      swhRevisionId: "1".repeat(40), path: "round.py", swhContentId: "1".repeat(40), rawContentHash: duplicateHash }], {
+    const rows = stackRowsWith([harnessRow("Python", "py", { stableRowId: hash("1") })], {
       TypeScript: [
-        { id: "ts-late", detectedLanguage: "TypeScript", stableRowId: hash("3"), repository: "stack/late",
-          swhRevisionId: "3".repeat(40), path: "late.ts", swhContentId: "3".repeat(40), rawContentHash: hash("e") },
-        { id: "ts-duplicate", detectedLanguage: "TypeScript", stableRowId: hash("2"), repository: "stack/duplicate",
-          swhRevisionId: "2".repeat(40), path: "duplicate.ts", swhContentId: "2".repeat(40), rawContentHash: duplicateHash },
+        harnessRow("TypeScript", "ts-late", { stableRowId: hash("3") }),
+        harnessRow("TypeScript", "ts-duplicate", { stableRowId: hash("2") }),
       ],
     });
-    const harness = await makeHarness({ collectStackMetadata: metadataFrom(rows) });
+    const harness = await makeHarness({
+      collectStackMetadata: metadataFrom(rows),
+      revalidateStackCandidate: async ({ row }: any) => accepted({ ...row,
+        ...(row.id === "py" || row.id === "ts-duplicate" ? { rawContentHash: duplicateHash } : {}) }, "8"),
+    });
 
     await prepareLocalExperiment(harness.dependencies);
-    expect(harness.calls.filter((call) => call.startsWith("fetch:")).slice(0, 3)).toEqual([
-      "fetch:py:50:16777216", "fetch:ts-duplicate:49:16777136", "fetch:ts-late:48:16777056",
-    ]);
-    expect(harness.leases[1]).toMatchObject({ accepted: false, released: true });
+    const languageFetches = harness.calls.filter((call) => call.startsWith("fetch:") && !call.includes("-pop-"));
+    expect(languageFetches.slice(0, 3).map((call) => call.split(":")[1])).toEqual(["py", "ts-duplicate", "ts-late"]);
+    expect((harness.reports[0] as any).diagnostics).toContainEqual({ stage: "DEDUPLICATION", reasonCode: "SOURCE_DUPLICATE", count: 1 });
   });
 
   it("never publishes on insufficient selection, composition, or report failure", async () => {
@@ -315,8 +305,8 @@ const logLines = (calls: readonly string[]): string[] =>
     const report = harness.reports[0] as any;
 
     expect(report.counts).toMatchObject({
-      repositoriesAdmitted: 10, blobAttempts: 6, blobsRetrieved: 5,
-      githubRevalidations: 6, screened: 16, duplicatesRejected: 0, selected: 15,
+      repositoriesAdmitted: 5, blobAttempts: 11, blobsRetrieved: 10,
+      githubRevalidations: 11, screened: 16, duplicatesRejected: 0, selected: 15,
     });
     expect(report.diagnostics).toEqual([
       { stage: "SCREENING", reasonCode: "LANGUAGE_ROUNDS_REJECTED", count: 1 },
@@ -359,7 +349,7 @@ const logLines = (calls: readonly string[]): string[] =>
 
     expect(logLines(harness.calls)).toEqual([
       "log:GITHUB_SEARCH_INCOMPLETE",
-      "log:PREPARATION_DECKS project,language,ai",
+      "log:PREPARATION_DECKS project,language,before-after",
       "log:PREPARATION_COMPLETE",
     ]);
     expect(harness.calls.indexOf("report:stage")).toBeLessThan(harness.calls.indexOf("publish"));
@@ -373,7 +363,7 @@ const logLines = (calls: readonly string[]): string[] =>
     await prepareLocalExperiment(harness.dependencies);
 
     expect(logLines(harness.calls)).toEqual([
-      "log:PREPARATION_DECKS project,language,ai",
+      "log:PREPARATION_DECKS project,language,before-after",
       "log:PREPARATION_COMPLETE",
     ]);
   });
@@ -613,10 +603,9 @@ const logLines = (calls: readonly string[]): string[] =>
 
   it("rejects replay-finalized source bindings that do not use the captured snapshot", async () => {
     const harness = await makeHarness({
-      finalizeBindings: async ({ projectCandidates, aiCandidates, languageSelections }) => ({
-        projectCandidates: projectCandidates.map((candidate: any) => ({ ...candidate,
-          source: { ...(candidate.source ?? {}), crawlSnapshotId: hash("e") } })),
-        aiCandidates,
+      finalizeBindings: async ({ beforeAfterCandidates, projectSelections, languageSelections }) => ({
+        beforeAfterCandidates,
+        projectCandidates: projectSelections.map(({ candidate }: any) => ({ ...candidate, crawlSnapshotId: hash("e") })),
         languageCandidates: languageSelections.map(({ candidate }: any) => ({ ...candidate, crawlSnapshotId: hash("e") })),
       }),
     });
@@ -628,18 +617,17 @@ const logLines = (calls: readonly string[]): string[] =>
   it("binds replayed sources, composition, report, publication, and result to one captured snapshot", async () => {
     let finalizedId = "";
     const harness = await makeHarness({
-      finalizeBindings: async ({ crawlSnapshotId, projectCandidates, aiCandidates, languageSelections }) => {
+      finalizeBindings: async ({ crawlSnapshotId, beforeAfterCandidates, projectSelections, languageSelections }) => {
         finalizedId = crawlSnapshotId;
-        const bind = (candidates: readonly unknown[]) => candidates.map((candidate: any) => ({ ...candidate,
-          source: { ...(candidate.source ?? {}), crawlSnapshotId } }));
         return {
-          projectCandidates: bind(projectCandidates), aiCandidates: bind(aiCandidates),
+          beforeAfterCandidates: beforeAfterCandidates.map((candidate: any) => ({ ...candidate, source: { ...(candidate.source ?? {}), crawlSnapshotId } })),
+          projectCandidates: projectSelections.map(({ candidate }: any) => ({ ...candidate, crawlSnapshotId })),
           languageCandidates: languageSelections.map(({ candidate }: any) => ({ ...candidate, crawlSnapshotId })),
         };
       },
     });
     const profile = await loadProfile();
-    // Preflight, then the five Stack metadata configurations, then search, lineage, and admission.
+    // Preflight, the five Stack metadata configurations, then search, lineage, and admission.
     const acceptedResponseHashes = ["1", "5", "6", "7", "8", "9", "2", "3", "4"].map(hash);
     const expected = canonicalHash({ profileHash: canonicalHash(profile), acceptedResponseHashes });
 
@@ -712,26 +700,25 @@ const logLines = (calls: readonly string[]): string[] =>
     expect(logLines(harness.calls).slice(0, 4)).toEqual([
       "log:PREPARATION_DECK_SKIPPED project BUDGET_EXHAUSTED_REQUEST_COUNT",
       "log:PREPARATION_DECK_SKIPPED language BUDGET_EXHAUSTED_REQUEST_COUNT",
-      "log:PREPARATION_DECK_SKIPPED ai BUDGET_EXHAUSTED_REQUEST_COUNT",
+      "log:PREPARATION_DECK_SKIPPED before-after BUDGET_EXHAUSTED_REQUEST_COUNT",
       "log:PREPARATION_STAGE_FAILED SELECTION BUDGET_EXHAUSTED_REQUEST_COUNT none",
     ]);
   });
 
   it("publishes the decks filled before a run-wide budget ran out", async () => {
-    let lineageCalls = 0;
+    let fetches = 0;
     const harness = await makeHarness({
-      bindGitHubLineage: async ({ candidate }: any) => {
-        lineageCalls += 1;
-        if (lineageCalls > 5) throw new RetryError("RETRY_SIGNAL_MISSING", new CapacityError("REQUEST_COUNT"));
-        return accepted({ ...candidate, excerpt: `value_${candidate.id} = compute(${candidate.id}) + 1000` }, "3");
+      fetchStackBlob: async ({ row }: any) => {
+        fetches += 1;
+        if (fetches > 5) throw new RetryError("RETRY_SIGNAL_MISSING", new CapacityError("BLOB_ATTEMPTS"));
+        return accepted({ stableRowId: row.id, byteLength: 80 }, "7");
       },
     });
     await prepareLocalExperiment(harness.dependencies);
-    expect(lineageCalls).toBe(6);
+    expect(fetches).toBe(6);
     expect(logLines(harness.calls)).toEqual([
-      "log:PREPARATION_DECK_SKIPPED language BUDGET_EXHAUSTED_REQUEST_COUNT",
-      "log:PREPARATION_DECK_SKIPPED ai BUDGET_EXHAUSTED_REQUEST_COUNT",
-      "log:PREPARATION_DECKS project",
+      "log:PREPARATION_DECK_SKIPPED language BUDGET_EXHAUSTED_BLOB_ATTEMPTS",
+      "log:PREPARATION_DECKS project,before-after",
       "log:PREPARATION_COMPLETE",
     ]);
   });
@@ -816,11 +803,11 @@ const logLines = (calls: readonly string[]): string[] =>
     expect(logLines(harness.calls)).toEqual([
       "log:PREPARATION_DECK_SKIPPED project DECK_SHORT",
       "log:PREPARATION_DECK_SKIPPED language DECK_SHORT",
-      "log:PREPARATION_DECK_SKIPPED ai DECK_SHORT",
+      "log:PREPARATION_DECK_SKIPPED before-after DECK_SHORT",
       "log:PREPARATION_STAGE_FAILED SELECTION DECK_SHORT none",
-      "log:PREPARATION_COUNTS discovered=11 admitted=0 duplicates=0",
-      "log:PREPARATION_REJECTIONS ADMISSION:CANDIDATE_REJECTED=5 ADMISSION:LICENSE_REJECTED=6 "
-        + "SELECTION:AI_DECK_SKIPPED=1 SELECTION:LANGUAGE_DECK_SKIPPED=1 SELECTION:PROJECT_DECK_SKIPPED=1",
+      "log:PREPARATION_COUNTS discovered=8 admitted=0 duplicates=0",
+      "log:PREPARATION_REJECTIONS ADMISSION:CANDIDATE_REJECTED=4 ADMISSION:LICENSE_REJECTED=4 "
+        + "SELECTION:BEFORE_AFTER_DECK_SKIPPED=1 SELECTION:LANGUAGE_DECK_SKIPPED=1 SELECTION:PROJECT_DECK_SKIPPED=1",
       "log:PREPARATION_FAILED",
     ]);
     expect(harness.calls.join(" ")).not.toMatch(/owner\/repo|secret/u);
@@ -833,24 +820,25 @@ const logLines = (calls: readonly string[]): string[] =>
       bindGitHubLineage: async () => { throw new RetryError("RETRY_SIGNAL_MISSING", new TransportError("REQUEST_LIMIT", diagnostic)); },
     });
     await prepareLocalExperiment(harness.dependencies);
-    // Eight ordinary and three credited candidates, each rejected by its lineage request's transport cause.
-    expect((harness.reports[0] as any).diagnostics).toContainEqual({ stage: "DISCOVERY", reasonCode: "REQUEST_LIMIT", count: 11 });
+    // Every one of the eight commits is rejected by its lineage request's transport cause.
+    expect((harness.reports[0] as any).diagnostics).toContainEqual({ stage: "DISCOVERY", reasonCode: "REQUEST_LIMIT", count: 8 });
+    expect(harness.calls).toContain("log:PREPARATION_DECK_SKIPPED before-after DECK_SHORT");
   });
 
   it("screens Stack rows by the profile licence allowlist before any blob is fetched", async () => {
     const harness = await makeHarness({
       collectStackMetadata: metadataFrom(stackRowsWith([
-        { id: "py-gpl", detectedLanguage: "Python", detectedLicenses: ["GPL-3.0"] },
-        { id: "py-mixed", detectedLanguage: "Python", detectedLicenses: ["MIT", "GPL-3.0"] },
-        { id: "py-empty", detectedLanguage: "Python", detectedLicenses: [] },
-        { id: "py-reject", detectedLanguage: "Python", detectedLicenses: ["MIT"] },
-        { id: "py", detectedLanguage: "Python", detectedLicenses: ["Apache-2.0"] },
+        harnessRow("Python", "py-gpl", { stableRowId: "1", detectedLicenses: ["GPL-3.0"] }),
+        harnessRow("Python", "py-mixed", { stableRowId: "2", detectedLicenses: ["MIT", "GPL-3.0"] }),
+        harnessRow("Python", "py-empty", { stableRowId: "3", detectedLicenses: [] }),
+        harnessRow("Python", "py-reject", { stableRowId: "4", detectedLicenses: ["MIT"] }),
+        harnessRow("Python", "py", { stableRowId: "5", detectedLicenses: ["Apache-2.0"] }),
       ])),
     });
 
     await prepareLocalExperiment(harness.dependencies);
 
-    const fetched = harness.calls.filter((call) => call.startsWith("fetch:")).map((call) => call.split(":")[1]);
+    const fetched = harness.calls.filter((call) => call.startsWith("fetch:") && !call.includes("-pop-")).map((call) => call.split(":")[1]);
     expect(fetched).toEqual(["py-reject", "py", "typescript", "go", "rust", "ruby"]);
     expect((harness.reports[0] as any).diagnostics).toContainEqual({ stage: "SCREENING", reasonCode: "LICENSE_REJECTED", count: 3 });
   });
@@ -864,35 +852,27 @@ const logLines = (calls: readonly string[]): string[] =>
     expect(harness.calls.join(" ")).not.toMatch(/leaked|example\.test|token=|:\d+:\d+/u);
   });
 
-  it("skips candidates whose public excerpt would reveal a protected value and keeps selecting", async () => {
-    let projectIds: unknown[] = [];
+  it("skips candidates whose public code would reveal a protected value and keeps selecting", async () => {
+    const captured = beforeAfterIds();
     const harness = await makeHarness({
       admitGitHubCandidate: async ({ candidate }) => {
         const id = (candidate as any).id;
-        const lineage = { ...(candidate as object), excerpt: id === 1 ? "// Licensed under the MIT License\nexport const x = 1;" : `export const value${id} = ${id};` };
+        const lineage = { ...(candidate as object), afterExcerpt: id === 1 ? "// Licensed under the MIT License\nexport const x = 1;" : `export const value${id} = ${id};` };
         return admittedWith(lineage, { licenseSpdx: "MIT" });
       },
-      generateProject: ({ candidates }) => {
-        projectIds = candidates.map((candidate: any) => candidate.lineage.id);
-        return { fixtures: Array(5).fill({ kind: "PROJECT" }) } as any;
-      },
+      generateBeforeAfter: captured.generate,
       collectStackMetadata: metadataFrom(stackRowsWith([
-        { id: "py-leak", detectedLanguage: "Python" }, { id: "py-reject", detectedLanguage: "Python" }, { id: "py", detectedLanguage: "Python" },
+        harnessRow("Python", "py-leak", { stableRowId: "1" }), harnessRow("Python", "py", { stableRowId: "2" }),
       ])),
-      revalidateStackCandidate: async ({ row }) => {
-        const id = (row as any).id;
-        return { value: { ...(row as object), path: `src/${id}.py`, repository: `owner/${id}`, excerpt: id === "py-leak" ? `# see src/${id}.py\nprint(1)` : "print(1)" },
-          acceptedResponseHashes: ["8".repeat(64)] };
-      },
+      revalidateStackCandidate: async ({ row }: any) => accepted({ ...row,
+        excerpt: row.id === "py-leak" ? `# see ${row.path}\nprint(1)` : "print(1)" }, "8"),
     });
 
     await prepareLocalExperiment(harness.dependencies);
-
-    expect(projectIds).not.toContain(1);
-    expect(projectIds).toHaveLength(5);
+    expect(captured.ids).not.toContain(1);
+    expect(captured.ids).toHaveLength(5);
     expect(harness.calls).toContain("eligible:py");
-    // The leaky GitHub candidate is screened once for the project deck and once for the AI deck; the Stack row once.
-    expect((harness.reports[0] as any).diagnostics).toContainEqual({ stage: "SCREENING", reasonCode: "PUBLIC_CONTAINMENT_REJECTED", count: 3 });
+    expect((harness.reports[0] as any).diagnostics).toContainEqual({ stage: "SCREENING", reasonCode: "PUBLIC_CONTAINMENT_REJECTED", count: 2 });
   });
 
   it("keeps game and browser code out of the command and redacts top-level failures", async () => {

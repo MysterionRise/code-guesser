@@ -14,7 +14,7 @@ const crawlGitHubCommitSearch = typeof searchModule.crawlGitHubCommitSearch === 
   ? searchModule.crawlGitHubCommitSearch as (...args: any[]) => Promise<any>
   : async (): Promise<never> => { throw new Error("GITHUB_SEARCH_NOT_IMPLEMENTED"); };
 
-const profilePath = new URL("../profiles/local-real-rounds.v2.json", import.meta.url);
+const profilePath = new URL("../profiles/local-real-rounds.v3.json", import.meta.url);
 const shaFor = (value: number): string => value.toString(16).padStart(40, "0");
 const searchItem = (
   commit: string,
@@ -137,10 +137,10 @@ describe("GitHub commit search adapter", () => {
       queryId: profile.github.queries[0]!.id, queryIndex: 0,
       committerDate: "2026-07-30T10:00:00.000Z",
       repository: "example/project", repositoryUrl: "https://github.com/example/project", commit: sha,
-      commitUrl: `https://github.com/example/project/commit/${sha}`,
+      commitUrl: `https://github.com/example/project/commit/${sha}`, subject: "Captured provider response",
     }]);
     expect(Object.keys(pool.candidates[0])).toEqual([
-      "queryId", "queryIndex", "committerDate", "repository", "repositoryUrl", "commit", "commitUrl",
+      "queryId", "queryIndex", "committerDate", "repository", "repositoryUrl", "commit", "commitUrl", "subject",
     ]);
     expect(pool.acceptedResponseHashes).toEqual([canonicalHash(response)]);
   });
@@ -257,19 +257,19 @@ describe("GitHub commit search adapter", () => {
           queryId: profile.github.queries[0]!.id, queryIndex: 0,
           committerDate: "2026-07-30T10:00:00.001Z",
           repository: "example/beta", repositoryUrl: "https://github.com/example/beta", commit: shaFor(2),
-          commitUrl: `https://github.com/example/beta/commit/${shaFor(2)}`,
+          commitUrl: `https://github.com/example/beta/commit/${shaFor(2)}`, subject: "",
         },
         {
           queryId: profile.github.queries[0]!.id, queryIndex: 0,
           committerDate: "2026-07-30T10:00:00.000Z",
           repository: "example/alpha", repositoryUrl: "https://github.com/example/alpha", commit: shaFor(1),
-          commitUrl: `https://github.com/example/alpha/commit/${shaFor(1)}`,
+          commitUrl: `https://github.com/example/alpha/commit/${shaFor(1)}`, subject: "",
         },
         {
           queryId: profile.github.queries[0]!.id, queryIndex: 0,
           committerDate: "2026-07-29T10:00:00.000Z",
           repository: "example/zeta", repositoryUrl: "https://github.com/example/zeta", commit: shaFor(3),
-          commitUrl: `https://github.com/example/zeta/commit/${shaFor(3)}`,
+          commitUrl: `https://github.com/example/zeta/commit/${shaFor(3)}`, subject: "",
         },
       ],
       acceptedResponseHashes: [canonicalHash(response)],

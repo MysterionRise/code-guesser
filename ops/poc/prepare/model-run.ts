@@ -14,9 +14,9 @@ import {
 import { CAPACITY_CEILINGS, STACK_LANGUAGES } from "./profile";
 import { RUN_RETRY_LIMIT } from "./retry";
 
-/** One to three decks of five fixtures. */
-const EXPERIMENT_ROUND_COUNT = 15;
-const ROUNDS_PER_DECK = 5;
+/** One to three decks, each a pool of five to forty rounds. */
+const MINIMUM_SELECTED = 5;
+const MAXIMUM_SELECTED = 120;
 const RUN_COUNT_KEYS = [
   "requests", "githubPages", "githubResults", "repositoriesAdmitted", "stackRows",
   "blobAttempts", "blobsRetrieved", "githubRevalidations", "screened",
@@ -64,10 +64,9 @@ const parseRunQueries = (value: unknown): readonly RecordValue[] => {
   if (!Array.isArray(value) || value.length === 0) return fail();
   const queries = value.map((entry) => {
     const query = record(entry, [
-      "id", "role", "query", "sort", "order", "pageCeiling", "resultCeiling", "completeness",
+      "id", "query", "sort", "order", "pageCeiling", "resultCeiling", "completeness",
     ]);
     text(query.id);
-    if (query.role !== "ai-credit" && query.role !== "ordinary") fail();
     text(query.query);
     exact(query.sort, "committer-date");
     exact(query.order, "desc");
@@ -114,7 +113,7 @@ const validateRunUsage = (
   if (retrieved > attempts || count(counts.githubRevalidations) > attempts) fail();
   const screened = boundedCount(counts.screened, sourceCapacity);
   boundedCount(counts.duplicatesRejected, screened);
-  boundedCount(counts.selected, Math.min(EXPERIMENT_ROUND_COUNT, screened));
+  boundedCount(counts.selected, Math.min(MAXIMUM_SELECTED, screened));
   const bytes = record(run.bytes, ["githubResponses", "stackMetadata", "stackBlobs"]);
   boundedCount(bytes.githubResponses, requests * CAPACITY_CEILINGS.responseBytes);
   boundedCount(bytes.stackMetadata, CAPACITY_CEILINGS.stackMetadataBytes);
@@ -131,7 +130,7 @@ const validateRunResult = (run: RecordValue, queries: readonly RecordValue[], co
       || configurations.some(({ completeness }) => completeness !== "COMPLETE")) fail();
     const counts = run.counts as RecordValue;
     const selected = count(counts.selected);
-    if (selected === 0 || selected > EXPERIMENT_ROUND_COUNT || selected % ROUNDS_PER_DECK !== 0) fail();
+    if (selected < MINIMUM_SELECTED || selected > MAXIMUM_SELECTED) fail();
     const result = record(run.result, ["artifactHash", "crawlSnapshotId", "sourceIdentities"]);
     sha256(result.artifactHash);
     sha256(result.crawlSnapshotId);
@@ -162,7 +161,7 @@ export const parseRunRecord = (value: unknown): RunRecord => {
     "stackRelease", "stackRevision", "githubQueries", "stackConfigurations", "counts",
     "bytes", "waits", "diagnostics", "outcome", "result",
   ]);
-  exact(run.schemaVersion, "local-experiment-run.v2");
+  exact(run.schemaVersion, "local-experiment-run.v3");
   validateExecutionIdentity(run.executionId);
   validateObservationTime(run.observedAt);
   for (const key of ["profileVersion", "githubApiVersion"]) text(run[key]);

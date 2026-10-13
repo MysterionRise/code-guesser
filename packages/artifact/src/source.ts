@@ -1,9 +1,8 @@
 import {
-  AI_SOURCE_KEYS,
-  LANGUAGE_SOURCE_KEYS,
+  LINEAGE_SOURCE_KEYS,
   PROFILE_VERSION,
-  PROJECT_SOURCE_KEYS,
   STACK_LANGUAGES,
+  STACK_SOURCE_KEYS,
   type ParsedSource,
 } from "./domain";
 import { fail } from "./errors";
@@ -21,7 +20,7 @@ import {
   type JsonRecord,
 } from "./validation";
 
-/** The Stack v2 release and revision the crawl snapshot names; every language source must match it. */
+/** The Stack v2 release and revision the crawl snapshot names; every Stack source must match it. */
 export interface StackIdentity {
   readonly release: string;
   readonly revision: string;
@@ -62,63 +61,38 @@ const validateBaseSource = (source: JsonRecord, snapshotId: string): void => {
   validateGitHubBinding(source);
 };
 
-const validateLineage = (source: JsonRecord, queryRoles: ReadonlyMap<string, string>): string => {
-  if (source.discoverySource !== "GITHUB_COMMIT_SEARCH") fail();
-  const role = queryRoles.get(text(source.queryId)) ?? fail();
-  for (const key of [
-    "childCommit", "childTree", "parentCommit", "parentTree", "parentBlob", "childBlob",
-  ]) gitId(source[key]);
-  for (const key of [
-    "parentRawContentHash", "childRawContentHash", "changedLineHash",
-  ]) sha256(source[key]);
+/** A commit from GitHub search and one file's parent and child versions; the round shows both. */
+export const validateLineageSource = (
+  value: unknown,
+  snapshotId: string,
+  queryIds: ReadonlySet<string>,
+): ParsedSource => {
+  const source = record(value, LINEAGE_SOURCE_KEYS);
+  validateBaseSource(source, snapshotId);
+  if (source.discoverySource !== "GITHUB_COMMIT_SEARCH" || !queryIds.has(text(source.queryId))) fail();
+  for (const key of ["childCommit", "childTree", "parentCommit", "parentTree", "parentBlob", "childBlob"]) gitId(source[key]);
+  for (const key of ["parentRawContentHash", "childRawContentHash", "parentExcerptHash"]) sha256(source[key]);
   for (const key of ["parentPath", "childPath"]) text(source[key]);
   gitMode(source.parentMode);
   gitMode(source.childMode);
-  if (source.commit !== source.childCommit || source.blob !== source.childBlob
+  const removed = count(source.linesRemoved);
+  const added = count(source.linesAdded);
+  if (removed + added === 0
+    || source.commit !== source.childCommit || source.blob !== source.childBlob
     || source.path !== source.parentPath || source.path !== source.childPath
     || source.rawContentHash !== source.childRawContentHash
-    || source.parentCommit === source.childCommit || source.parentBlob === source.childBlob) fail();
-  return role;
-};
-
-/** FR-032: a project round comes from an `ordinary` query commit. */
-export const validateProjectSource = (
-  value: unknown,
-  snapshotId: string,
-  queryRoles: ReadonlyMap<string, string>,
-): ParsedSource => {
-  const source = record(value, PROJECT_SOURCE_KEYS);
-  validateBaseSource(source, snapshotId);
-  if (validateLineage(source, queryRoles) !== "ordinary") fail();
+    || source.parentCommit === source.childCommit || source.parentBlob === source.childBlob
+    || source.parentExcerptHash === source.excerptHash) fail();
   return source as ParsedSource;
 };
 
-/** FR-020 roles: a credited commit comes from an `ai-credit` query and an uncredited one from `ordinary`. */
-export const validateAiSource = (
-  value: unknown,
-  snapshotId: string,
-  queryRoles: ReadonlyMap<string, string>,
-): ParsedSource => {
-  const source = record(value, AI_SOURCE_KEYS);
-  validateBaseSource(source, snapshotId);
-  const role = validateLineage(source, queryRoles);
-  const recorded = bool(source.aiCreditRecorded);
-  if (recorded) text(source.aiAssistant);
-  else if (source.aiAssistant !== null) fail();
-  if (recorded !== (role === "ai-credit")) fail();
-  positiveInteger(source.changedFileCount);
-  count(source.commitAdditions);
-  count(source.commitDeletions);
-  return source as ParsedSource;
-};
-
-/** A Stack v2 row revalidated against GitHub: the Stack identities are the revalidated blob and commit. */
-export const validateLanguageSource = (
+/** A Stack v2 file revalidated against GitHub: the Stack identities are the revalidated blob and commit. */
+export const validateStackSource = (
   value: unknown,
   snapshotId: string,
   stack: StackIdentity,
 ): ParsedSource => {
-  const source = record(value, LANGUAGE_SOURCE_KEYS);
+  const source = record(value, STACK_SOURCE_KEYS);
   validateBaseSource(source, snapshotId);
   if (source.discoverySource !== "STACK_V2" || source.stackRelease !== stack.release
     || source.stackRevision !== stack.revision
@@ -132,6 +106,8 @@ export const validateLanguageSource = (
   for (const key of ["stackRepository", "stackPath", "detectedLanguage"]) text(source[key]);
   const licences = texts(source.detectedLicenses);
   positiveInteger(source.byteLength);
+  count(source.starEventsCount);
+  count(source.forkEventsCount);
   for (const key of ["visitDate", "revisionDate", "committerDate"]) utcTimestamp(source[key]);
   if (source.repository !== source.stackRepository || source.path !== source.stackPath
     || source.commit !== source.swhRevisionId || source.blob !== source.swhContentId

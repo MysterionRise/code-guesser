@@ -4,7 +4,8 @@ import type { ComposedExperiment, composeExperimentArtifact } from "./compose";
 import type { GitHubQueryClassification } from "./github-search";
 import type { CrawlProfile, StackLanguage } from "./profile";
 import type { StagedRunReport } from "./report-store";
-import type { GeneratedRounds } from "./round-projection";
+import type { ProjectRoundInput } from "./project-rounds";
+import type { GeneratedRounds } from "./round-helpers";
 
 export type Environment = Readonly<Record<string, string | undefined>>;
 /** A stage's value plus the hashes of every provider response it accepted, in order. */
@@ -19,6 +20,7 @@ export type Context = Readonly<{
 }>;
 export type StackSelection = Readonly<{ row: unknown; blob: unknown; candidate: unknown }>;
 export type BlobLimits = BlobWorkerLimits;
+export type RepositoryDescription = Readonly<{ description: string | null; fork: boolean; archived: boolean }>;
 
 /** Every effect the preparation command performs; tests replace any of them. */
 export interface PreparationDependencies {
@@ -32,25 +34,28 @@ export interface PreparationDependencies {
     queryClassifications: readonly GitHubQueryClassification[];
   }>>>;
   screenGitHubRepository(options: Context & Readonly<{ repository: string }>): Promise<StageResult<unknown>>;
+  /** A repository's public description and whether it is a fork or archived, for a project round's options. */
+  describeRepository(options: Context & Readonly<{ repository: string }>): Promise<StageResult<RepositoryDescription>>;
   bindGitHubLineage(options: Context & Readonly<{ candidate: unknown }>): Promise<StageResult<unknown>>;
   admitGitHubCandidate(options: Context & Readonly<{ candidate: unknown; crawlSnapshotId: string }>): Promise<StageResult<unknown>>;
   collectStackMetadata(options: Context & Readonly<{ configuration: StackLanguage }>): Promise<StageResult<readonly unknown[]>>;
   fetchStackBlob(options: Context & Readonly<{ row: unknown; limits: BlobLimits }>): Promise<StageResult<Readonly<{ byteLength: number }>>>;
   revalidateStackCandidate(options: Context & Readonly<{ row: unknown; blob: unknown; crawlSnapshotId: string }>): Promise<StageResult<unknown>>;
   validateLanguageCandidate(options: Context & Readonly<{ candidate: unknown }>): unknown;
+  /** Rebinds every selected source to the final crawl snapshot, from responses the run already accepted. */
   finalizeBindings?(options: Context & Readonly<{
     crawlSnapshotId: string;
-    projectCandidates: readonly unknown[];
-    aiCandidates: readonly unknown[];
+    beforeAfterCandidates: readonly unknown[];
+    projectSelections: readonly StackSelection[];
     languageSelections: readonly StackSelection[];
   }>): Promise<Readonly<{
+    beforeAfterCandidates: readonly unknown[];
     projectCandidates: readonly unknown[];
-    aiCandidates: readonly unknown[];
     languageCandidates: readonly unknown[];
   }>>;
-  generateProject(options: Readonly<{ profile: CrawlProfile; candidates: readonly unknown[]; distractorPool: readonly string[] }>): GeneratedRounds;
+  generateProject(options: Readonly<{ profile: CrawlProfile; rounds: readonly ProjectRoundInput[] }>): GeneratedRounds;
   generateLanguage(options: Readonly<{ profile: CrawlProfile; candidates: readonly unknown[] }>): GeneratedRounds;
-  generateAi(options: Readonly<{ profile: CrawlProfile; candidates: readonly unknown[] }>): GeneratedRounds;
+  generateBeforeAfter(options: Readonly<{ profile: CrawlProfile; candidates: readonly unknown[] }>): GeneratedRounds;
   compose(options: Parameters<typeof composeExperimentArtifact>[0]): ComposedExperiment;
   createReport(input: Readonly<Record<string, unknown>>): unknown;
   stageReport(report: unknown): Promise<StagedRunReport>;

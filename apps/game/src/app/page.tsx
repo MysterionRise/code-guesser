@@ -8,7 +8,7 @@ import type { LocalRealDeck } from "../demo/local-real-experiment.server";
 
 const DECK_COUNT_WORDS = ["No decks", "One deck", "Two decks", "Three decks"] as const;
 /** A run publishes every deck it could fill, so the notice counts what this artifact holds. */
-const deckSummary = (count: number): string => `${DECK_COUNT_WORDS[count] ?? `${count} decks`} of five rounds.`;
+const deckSummary = (count: number): string => `${DECK_COUNT_WORDS[count] ?? `${count} decks`}; each game deals five rounds.`;
 
 interface PageProps {
   readonly searchParams: Promise<Readonly<Record<string, string | string[] | undefined>>>;
@@ -18,18 +18,30 @@ function DeckChooser({ decks }: { readonly decks: readonly LocalRealDeck[] }) {
   return (
     <main className="deck-chooser" aria-labelledby="deck-chooser-title">
       <h1 id="deck-chooser-title">Pick a deck</h1>
-      <p className="deck-intro">Each deck is five real rounds. Read the code, take up to two hints, and lock in your guess.</p>
+      <p className="deck-intro">Each game deals five real rounds from the deck. Read the code, take up to two hints, and lock in your guess.</p>
       <ul className="deck-list">
         {decks.map((deck) => (
           <li key={deck.id}>
             <a className="deck-card" href={`/?deck=${deck.id}`}>
               <span className="deck-title">{deck.title}</span>{" "}
-              <span className="deck-description">{deck.description}</span>
+              <span className="deck-description">{deck.description}</span>{" "}
+              <span className="deck-size">{deck.poolSize} rounds in the deck</span>
             </a>
           </li>
         ))}
       </ul>
     </main>
+  );
+}
+
+/** A fresh five-round session from the deck's pool, dealt on every visit. */
+function DealtSession({ deck }: { readonly deck: LocalRealDeck }) {
+  const loaded = activeLocalRealExperiment();
+  if (!loaded.ok) return null;
+  const mode = loaded.experiment.dealSession(deck.id);
+  return (
+    <DemoArcade key={mode.sessionContractVersionId} mode={mode} deckTitle={deck.title}
+      authorizeRevealAction={authorizeLocalExperimentReveal} chooseAnotherDeckHref="/" newGameHref={`/?deck=${deck.id}`} />
   );
 }
 
@@ -44,7 +56,6 @@ export default async function Page({ searchParams }: PageProps) {
       <p className="demo-notice">
         <strong>{LOCAL_REAL_EXPERIMENT_NOTICE}</strong> {loaded.ok ? deckSummary(loaded.experiment.decks.length) : "No rounds are available."}
       </p>
-      {deck?.notice && <p className="demo-notice deck-notice">{deck.notice}</p>}
       <noscript><p className="demo-notice">CodeGuessr needs JavaScript to accept answers and reveal progressive evidence.</p></noscript>
       {!loaded.ok
         ? (
@@ -61,7 +72,7 @@ export default async function Page({ searchParams }: PageProps) {
           ? (
             <>
               <nav className="deck-nav" aria-label="Decks"><a href="/">All decks</a></nav>
-              <DemoArcade key={deck.id} mode={deck.mode} deckTitle={deck.title} authorizeRevealAction={authorizeLocalExperimentReveal} chooseAnotherDeckHref="/" />
+              <DealtSession deck={deck} />
             </>
           )
           : <DeckChooser decks={loaded.experiment.decks} />}

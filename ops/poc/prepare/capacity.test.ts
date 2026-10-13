@@ -60,9 +60,9 @@ describe("preparation capacity", () => {
 
   it("meters blob attempts, successes, per-blob bytes, and total bytes independently", () => {
     const attempts = meter();
-    for (let index = 0; index < 50; index += 1) attempts.beginBlob().release();
+    for (let index = 0; index < CAPACITY_CEILINGS.blobAttempts; index += 1) attempts.beginBlob().release();
     const attemptSnapshot = attempts.snapshot();
-    expect(attemptSnapshot.blobAttempts).toBe(50);
+    expect(attemptSnapshot.blobAttempts).toBe(CAPACITY_CEILINGS.blobAttempts);
     expect(() => attempts.beginBlob()).toThrow(CapacityError);
     expect(attempts.snapshot()).toEqual(attemptSnapshot);
 
@@ -104,8 +104,8 @@ describe("preparation capacity", () => {
     expect(concurrent.snapshot().responseBytes).toBe(beforeRejection.responseBytes);
 
     const requests = meter();
-    for (let index = 0; index < 600; index += 1) requests.beginRequest().release();
-    expect(requests.snapshot().requestCount).toBe(600);
+    for (let index = 0; index < CAPACITY_CEILINGS.requestCount; index += 1) requests.beginRequest().release();
+    expect(requests.snapshot().requestCount).toBe(CAPACITY_CEILINGS.requestCount);
     expect(() => requests.beginRequest()).toThrow(CapacityError);
   });
 
@@ -164,15 +164,15 @@ describe("preparation capacity", () => {
   it("meters worker-reported requests against the shared request ceiling", () => {
     const capacity = meter();
     capacity.recordWorkerRequests(0);
-    capacity.recordWorkerRequests(599);
-    expect(capacity.snapshot().requestCount).toBe(599);
+    capacity.recordWorkerRequests(CAPACITY_CEILINGS.requestCount - 1);
+    expect(capacity.snapshot().requestCount).toBe(CAPACITY_CEILINGS.requestCount - 1);
     capacity.beginRequest().release();
-    expect(capacity.snapshot().requestCount).toBe(600);
+    expect(capacity.snapshot().requestCount).toBe(CAPACITY_CEILINGS.requestCount);
     expect(() => capacity.recordWorkerRequests(1)).toThrow(CapacityError);
     expect(() => capacity.recordWorkerRequests(1)).toThrow("REQUEST_COUNT");
     expect(() => capacity.recordWorkerRequests(-1)).toThrow(CapacityError);
     expect(() => capacity.recordWorkerRequests(1.5)).toThrow(CapacityError);
-    expect(capacity.snapshot().requestCount).toBe(600);
+    expect(capacity.snapshot().requestCount).toBe(CAPACITY_CEILINGS.requestCount);
     expect(() => capacity.beginRequest()).toThrow(CapacityError);
   });
 });

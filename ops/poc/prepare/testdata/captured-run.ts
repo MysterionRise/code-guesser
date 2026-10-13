@@ -41,11 +41,12 @@ interface HarnessOptions {
   readonly providerIncompleteQueryId?: string;
 }
 
-const PROFILE_URL = new URL("../../profiles/local-real-rounds.v2.json", import.meta.url);
+const PROFILE_URL = new URL("../../profiles/local-real-rounds.v3.json", import.meta.url);
 const REVISION = "e565caa3a78c2423bd374333a472b049eb090e47";
 
 const loadProfile = async (failure?: CapturedFailure): Promise<CrawlProfile> => {
   const raw = JSON.parse(await readFile(PROFILE_URL, "utf8")) as Record<string, any>;
+  raw.selection = { ...raw.selection, projectPool: 5, languagePool: 5, beforeAfterPool: 5 };
   if (failure === "capacity") raw.capacity.blobAttempts = 1;
   return parseCrawlProfile(raw);
 };

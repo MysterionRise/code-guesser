@@ -61,7 +61,7 @@ const playRound = (round: number, hints: number): Step[] => [
 
 /** One deck's teaser: open it through the deck parameter, take a hint, and lock in an answer. */
 const deckScene = (
-  deck: "project" | "language" | "ai",
+  deck: "project" | "language" | "before-after",
   captions: Readonly<{ opening: string; hint: string; answer: string }>,
   answerIndex: number,
   gif: Partial<GifOptions> = {},
@@ -96,27 +96,27 @@ export const SCENES: readonly Scene[] = Object.freeze([
   deckScene("project", {
     opening: "Which project is this from?",
     hint: "Hints cost points.",
-    answer: "Four real repos. Pick one.",
-  }, ANSWER_CHOREOGRAPHY[0] ?? 0, { width: 360, maximumColors: 96 }),
+    answer: "Four popular repos. Pick one.",
+  }, ANSWER_CHOREOGRAPHY[0] ?? 0, { width: 340, maximumColors: 64 }),
   deckScene("language", {
     opening: "Name the language.",
     hint: "Stuck? Take a hint.",
     answer: "Lock in your call.",
   }, ANSWER_CHOREOGRAPHY[1] ?? 0, { width: 360, maximumColors: 96 }),
-  deckScene("ai", {
-    opening: "Is this AI-generated?",
-    hint: "Answers come from AI credits in the commit.",
-    answer: "Credited, or not?",
+  deckScene("before-after", {
+    opening: "Before or after the refactor?",
+    hint: "The hint quotes the commit.",
+    answer: "Which version is newer?",
   }, Math.min(ANSWER_CHOREOGRAPHY[3] ?? 1, 1), { width: 360, maximumColors: 96 }),
   {
     id: "full-run",
-    gif: { speed: 2, framesPerSecond: 10, width: 360, maximumColors: 80 },
+    gif: { speed: 2, framesPerSecond: 8, width: 340, maximumColors: 64 },
     mp4: "codeguessr-demo",
     steps: [
       goto("/"),
       { kind: "expectHeading", pattern: "^Pick a deck$" },
       wait(500),
-      caption("Three decks. Five real rounds each."),
+      caption("Three decks of real code. Five rounds a game."),
       wait(1800),
       link("Which project?"),
       { kind: "expectText", pattern: "Round 1 of 5" },

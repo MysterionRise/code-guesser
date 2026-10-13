@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 import fetch_blob
 import stream_metadata
+from limits import CEILINGS
 
 
 class WorkerMainTests(unittest.TestCase):
@@ -40,10 +41,10 @@ class WorkerMainTests(unittest.TestCase):
     def test_metadata_worker_checks_a_request_without_streaming(self):
         valid = json.dumps({
             "configuration": "Rust", "revision": stream_metadata.PINNED_REVISION, "rowLimit": 10_000,
-            "perBlobByteLimit": 262_144, "requestLimit": 600, "networkByteLimit": 96 * 1024 * 1024,
+            "perBlobByteLimit": 262_144, "requestLimit": CEILINGS["requestCount"], "networkByteLimit": 96 * 1024 * 1024,
             "temporaryDiskBytes": 32 * 1024 * 1024,
         })
-        for request, code, expected in [(valid, 0, ""), (valid.replace("600", "601"), 1, "REQUEST_LIMIT_REJECTED\n")]:
+        for request, code, expected in [(valid, 0, ""), (valid.replace(f'"requestLimit": {CEILINGS["requestCount"]}', f'"requestLimit": {CEILINGS["requestCount"] + 1}'), 1, "REQUEST_LIMIT_REJECTED\n")]:
             stderr = io.StringIO()
             with patch.object(stream_metadata, "stream_metadata", side_effect=AssertionError("must not stream")), \
                     patch.object(sys, "stdin", io.StringIO(request)), patch.object(sys, "stdout", io.StringIO()) as stdout, \
@@ -65,8 +66,8 @@ class WorkerMainTests(unittest.TestCase):
         row = {"stableRowId": "a" * 64, "swhBlobId": "b" * 40, "swhContentId": "c" * 40,
                "sourceEncoding": "UTF-8", "byteLength": 128}
         limits = {"blobAttempts": 50, "successfulBlobs": 50, "perBlobBytes": 262_144, "totalBlobBytes": 16 * 1024 * 1024,
-                  "temporaryDiskBytes": 32 * 1024 * 1024, "requestLimit": 600, "networkByteLimit": 262_144}
-        for value, code, expected in [(limits, 0, ""), ({**limits, "requestLimit": 601}, 1, "LIMIT_RAISED\n")]:
+                  "temporaryDiskBytes": 32 * 1024 * 1024, "requestLimit": CEILINGS["requestCount"], "networkByteLimit": 262_144}
+        for value, code, expected in [(limits, 0, ""), ({**limits, "requestLimit": CEILINGS["requestCount"] + 1}, 1, "LIMIT_RAISED\n")]:
             stdout, stderr = io.StringIO(), io.StringIO()
             with patch.object(fetch_blob, "fetch_selected_blobs_with_counters", side_effect=AssertionError("must not fetch")):
                 self.assertEqual(fetch_blob._main(

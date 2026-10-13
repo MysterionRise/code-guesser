@@ -6,6 +6,7 @@ import unittest
 
 from bounded_http import NetworkBudget
 from stream_metadata import MetadataStreamError, stream_metadata
+from limits import CEILINGS
 
 
 REVISION = "e565caa3a78c2423bd374333a472b049eb090e47"
@@ -52,7 +53,7 @@ def request(**overrides):
         "revision": REVISION,
         "rowLimit": 1,
         "perBlobByteLimit": 262_144,
-        "requestLimit": 600,
+        "requestLimit": CEILINGS["requestCount"],
         "networkByteLimit": 96 * 1024 * 1024,
         "temporaryDiskBytes": 32 * 1024 * 1024,
     }
@@ -160,8 +161,9 @@ class StreamMetadataTests(unittest.TestCase):
             "swhSnapshotId", "swhRevisionId", "repository", "path",
             "detectedLicenses", "detectedLanguage", "generated", "vendor",
             "sourceEncoding", "byteLength", "visitDate", "revisionDate",
-            "committerDate",
+            "committerDate", "starEventsCount", "forkEventsCount",
         ])
+        self.assertEqual((emitted[0]["starEventsCount"], emitted[0]["forkEventsCount"]), (4, 2))
         self.assertRegex(emitted[0]["stableRowId"], r"^[0-9a-f]{64}$")
         self.assertNotIn("firstCrawlDate", emitted[0])
         self.assertNotIn("lastCrawlDate", emitted[0])
@@ -185,7 +187,7 @@ class StreamMetadataTests(unittest.TestCase):
             ("REQUEST_MALFORMED", {key: value for key, value in request().items() if key != "requestLimit"},
              "external-token"),
             ("REQUEST_LIMIT_REJECTED", request(requestLimit=0), "external-token"),
-            ("REQUEST_LIMIT_REJECTED", request(requestLimit=601), "external-token"),
+            ("REQUEST_LIMIT_REJECTED", request(requestLimit=CEILINGS["requestCount"] + 1), "external-token"),
             ("NETWORK_LIMIT_REJECTED", request(networkByteLimit=96 * 1024 * 1024 + 1), "external-token"),
             ("DISK_LIMIT_REJECTED", request(temporaryDiskBytes=32 * 1024 * 1024 + 1), "external-token"),
             ("TOKEN_MISSING", request(), ""),

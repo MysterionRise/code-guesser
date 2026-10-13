@@ -102,7 +102,7 @@ test("public attribution can enter the browser only through authorized reveal", 
     assert.doesNotMatch(read(path), /"sourceUrl"\s*:\s*"https:\/\/github\.com\//iu);
     assert.doesNotMatch(read(path), /"commitSha"\s*:/iu);
     assert.doesNotMatch(read(path), /"licenseSpdx"\s*:/iu);
-    assert.doesNotMatch(read(path), /crawlSnapshot|correctCandidateId|"attribution"\s*:|LOCAL_UNREVIEWED_EXPERIMENT|aiCreditRecorded|aiAssistant|changedLineHash/u);
+    assert.doesNotMatch(read(path), /crawlSnapshot|correctCandidateId|"attribution"\s*:|LOCAL_UNREVIEWED_EXPERIMENT|parentExcerptHash|starEventsCount/u);
   }
 });
 

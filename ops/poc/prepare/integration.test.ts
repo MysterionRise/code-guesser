@@ -15,13 +15,11 @@ const createCapturedHarness = captureModule.createCapturedHarness as (options: R
 }>) => Promise<any>;
 const failureMatrix = [
   ["malformed", "github-search:GITHUB_SEARCH_REJECTED"],
-  ["capacity", "capacity:BLOB_ATTEMPTS"],
   ["freshness", "preflight:REVISION_MISMATCH"],
   ["credential", "stack-metadata-Python:ENVIRONMENT_REJECTED"],
   ["redirect", "preflight:ACCESS_UNAVAILABLE"],
   ["retry", "github-search:LOGICAL_RETRY_LIMIT"],
   ["cleanup", "stack-metadata-Python:WORKER_EXIT"],
-  ["insufficient", "github-search:candidates-7"],
 ] as const;
 const rejectLiveNetwork = async (operation: (attempts: string[]) => Promise<void>): Promise<void> => {
   const attempts: string[] = [];
@@ -90,7 +88,7 @@ describe("captured two-source preparation", () => {
         expect(first.reports[0]).not.toEqual(second.reports[0]);
         for (const logs of [first.logs, second.logs]) {
           expect(logs).toHaveLength(3);
-          expect(logs[0]).toBe("PREPARATION_DECKS project,language,ai");
+          expect(logs[0]).toBe("PREPARATION_DECKS project,language,before-after");
           expect(logs[1]).toMatch(/^PREPARATION_SPEND (?:[A-Z_]+=\d+ )*total=\d+$/u);
           expect(logs[2]).toBe("PREPARATION_COMPLETE");
         }
@@ -98,7 +96,7 @@ describe("captured two-source preparation", () => {
         expect(artifact.decks.map(({ id, fixtures }: any) => `${id}:${fixtures.map(({ kind }: any) => kind).join(",")}`)).toEqual([
           "project:PROJECT,PROJECT,PROJECT,PROJECT,PROJECT",
           "language:LANGUAGE,LANGUAGE,LANGUAGE,LANGUAGE,LANGUAGE",
-          "ai:AI_CREDIT,AI_CREDIT,AI_CREDIT,AI_CREDIT,AI_CREDIT",
+          "before-after:BEFORE_AFTER,BEFORE_AFTER,BEFORE_AFTER,BEFORE_AFTER,BEFORE_AFTER",
         ]);
         const outputText = [firstArtifact, ...first.reports, ...second.reports]
           .map((bytes) => new TextDecoder().decode(bytes)).join("\n");
@@ -109,7 +107,8 @@ describe("captured two-source preparation", () => {
         for (const canary of first.sensitiveCanaries) expect(outputText).not.toContain(canary);
         expect(liveAttempts).toEqual([]);
         expect(first.metadataConfigurations).toEqual(["Python", "TypeScript", "Go", "Rust", "Ruby"]);
-        expect(first.selectedBlobRows).toHaveLength(5);
+        // One popular file per language for the project deck and one ordinary file per language for the language deck.
+        expect(first.selectedBlobRows).toHaveLength(10);
         expect(first.requests.some((url: string) => url.includes("/search/commits"))).toBe(true);
         expect(first.requests.some((url: string) => url.includes("/git/trees/"))).toBe(true);
         expect(first.requests.some((url: string) => url.includes("/license?ref="))).toBe(true);
@@ -122,8 +121,8 @@ describe("captured two-source preparation", () => {
 });
 
 describe("captured provider-incomplete preparation", () => {
-  it("fails closed on a provider-incomplete page because revision 12 authorizes no incomplete query", async () => {
-    const [first] = await createCapturedPair("ai-copilot-github");
+  it("fails closed on a provider-incomplete page that a fresh pass does not repair", async () => {
+    const [first] = await createCapturedPair("refactor-facebook");
     try {
       await rejectLiveNetwork(async (liveAttempts) => {
         const before = await first.readArtifact();
@@ -136,6 +135,30 @@ describe("captured provider-incomplete preparation", () => {
       });
     } finally {
       await first.dispose();
+    }
+  });
+});
+
+describe("captured partial preparation", () => {
+  it.each([
+    ["capacity", "PREPARATION_DECK_SKIPPED project BUDGET_EXHAUSTED_BLOB_ATTEMPTS", "PREPARATION_DECKS before-after"],
+    ["insufficient", "PREPARATION_DECK_SKIPPED before-after DECK_SHORT", "PREPARATION_DECKS project,language"],
+  ] as const)("publishes the decks that filled when %s input leaves one short", async (failure: CapturedFailure, skipped: string, published: string) => {
+    const harness = await createCapturedHarness({
+      observedAt: "2026-07-31T12:00:00.000Z",
+      executionId: "44444444-4444-4444-8444-444444444444",
+      failure,
+    });
+    try {
+      await rejectLiveNetwork(async (liveAttempts) => {
+        await prepareLocalExperiment(harness.dependencies);
+        expect(harness.logs).toContain(skipped);
+        expect(harness.logs).toContain(published);
+        expect(harness.reports).toHaveLength(1);
+        expect(liveAttempts).toEqual([]);
+      });
+    } finally {
+      await harness.dispose();
     }
   });
 });

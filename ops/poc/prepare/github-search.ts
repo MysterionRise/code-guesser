@@ -55,6 +55,8 @@ export interface GitHubSearchCandidate {
   readonly repositoryUrl: string;
   readonly commit: string;
   readonly commitUrl: string;
+  /** The first line of the commit message, as the search result reports it; empty when there is none. */
+  readonly subject: string;
 }
 
 export interface GitHubSearchPool {
@@ -168,6 +170,7 @@ const parseCandidate = (
     || repository.html_url !== repositoryUrl
     || item.url !== apiCommitUrl
     || item.html_url !== commitUrl) fail("GITHUB_SEARCH_IDENTITY");
+  const message = typeof commitRecord.message === "string" ? commitRecord.message : "";
   return Object.freeze({
     queryId,
     queryIndex,
@@ -176,6 +179,7 @@ const parseCandidate = (
     repositoryUrl,
     commit,
     commitUrl,
+    subject: (message.split(/\r?\n/u)[0] ?? "").trim(),
   });
 };
 

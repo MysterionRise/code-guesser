@@ -1,15 +1,10 @@
 import { canonicalHash } from "./canonical";
-import type { GitHubAdmissionCandidate } from "./github-admission";
-import { PROJECT_SOURCE_KEYS, type ExperimentFixture } from "./model";
+import { exactStackBindings } from "./language-rounds";
+import { deepFreeze } from "./model-validation";
+import { mentionsRepository, projectCandidateId, type ExperimentFixture } from "./model";
 import type { CrawlProfile } from "./profile";
-import {
-  attributionFor,
-  fill,
-  generatedDeck,
-  sha256,
-  shuffled,
-  type GeneratedRounds,
-} from "./round-projection";
+import { approximately, attributionFor, fill, orderedPool, roundIdFor, shuffled, sourceRecord, type GeneratedRounds } from "./round-helpers";
+import type { RevalidatedStackCandidate } from "./stack-revalidation";
 
 export class ProjectRoundsError extends Error {
   public constructor() {
@@ -18,106 +13,106 @@ export class ProjectRoundsError extends Error {
   }
 }
 
+/** A repository offered as an option, with its public description when it has one. */
+export interface RepositoryOption {
+  readonly repository: string;
+  readonly description: string | null;
+}
+
+/** One project round: a file from a popular repository, that repository's description, and three distractors. */
+export interface ProjectRoundInput {
+  readonly candidate: RevalidatedStackCandidate;
+  readonly description: string | null;
+  readonly distractors: readonly RepositoryOption[];
+}
+
 export interface ProjectRoundsOptions {
   readonly profile: CrawlProfile;
-  readonly candidates: readonly GitHubAdmissionCandidate[];
-  /** Repositories returned by the run's `ordinary` queries, in discovery order. */
-  readonly distractorPool: readonly string[];
+  readonly rounds: readonly ProjectRoundInput[];
 }
 
 const fail = (): never => { throw new ProjectRoundsError(); };
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u;
-const escape = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+const DISTRACTORS = 3;
+const MAXIMUM_DETAIL_LENGTH = 160;
 
-/** Case-insensitive whole-word mention of a repository's owner or name, or the full `owner/name`. */
-export const mentionsRepository = (haystack: string, repository: string): boolean => {
-  const [owner, name] = repository.split("/") as [string, string];
-  return [repository, owner, name].some((value) =>
-    new RegExp(`(^|[^A-Za-z0-9_])${escape(value)}([^A-Za-z0-9_]|$)`, "iu").test(haystack));
+/** A description as a candidate shows it: one line, trimmed, and short. */
+export const optionDetail = (description: string | null): string | null => {
+  if (description === null) return null;
+  const line = description.replace(/\s+/gu, " ").trim();
+  if (line.length === 0) return null;
+  return line.length <= MAXIMUM_DETAIL_LENGTH ? line : `${line.slice(0, MAXIMUM_DETAIL_LENGTH - 1).trimEnd()}…`;
 };
 
-const extensionOf = (path: string): string => {
-  const base = path.split("/").at(-1) ?? fail();
-  const dot = base.lastIndexOf(".");
-  if (dot <= 0 || dot === base.length - 1) fail();
-  return base.slice(dot);
-};
+const fileName = (path: string): string => path.split("/").at(-1) ?? fail();
 
-export const projectCandidateId = (repository: string): string =>
-  `local-experiment.project.${sha256(repository).slice(0, 16)}.v2`;
+const folded = (value: string): string => value.toLocaleLowerCase("en-US").replace(/[-_.]/gu, "");
+/**
+ * Whether code names a repository: its owner, name, or `owner/name` as a whole word, or (for an owner or name
+ * of four characters or more) anywhere inside an identifier, so `deno_exe` names deno and `rustlings_run`
+ * names rustlings. Short names such as `go` count only as whole words.
+ */
+export const namesRepository = (text: string, repository: string): boolean => {
+  if (mentionsRepository(text, repository)) return true;
+  const haystack = folded(text);
+  return repository.split("/").map(folded).some((part) => part.length >= 4 && haystack.includes(part));
+};
 
 /**
- * FR-032: an excerpt is usable for a project round only when it mentions none of the round's
- * candidates. The answer's own owner and name are checked first by the orchestrator.
+ * A project round may be offered with these options only when neither its code nor its file name names any
+ * of them; the selection stage checks this before it spends a request on a distractor.
  */
-export const projectExcerptAllowed = (excerpt: string, repository: string): boolean =>
-  !mentionsRepository(excerpt, repository);
+export const projectRoundAllowed = (excerpt: string, path: string, repositories: readonly string[]): boolean =>
+  // A file at the repository root would make its name, the first hint, its whole protected path.
+  path.includes("/") && repositories.every((repository) => !namesRepository(excerpt, repository) && !namesRepository(fileName(path), repository));
 
-const distractorsFor = (
-  roundId: string,
-  answer: string,
-  excerpt: string,
-  pool: readonly string[],
-  count: number,
-): readonly string[] => {
-  const eligible = [...new Set(pool)].filter((repository) =>
-    repository !== answer && REPOSITORY.test(repository) && !mentionsRepository(excerpt, repository));
-  const chosen = shuffled(roundId, eligible, (repository) => repository).slice(0, count);
-  if (chosen.length !== count) fail();
-  return chosen;
-};
-
-const fixtureFor = (
-  candidate: GitHubAdmissionCandidate,
-  profile: CrawlProfile,
-  pool: readonly string[],
-): ExperimentFixture => {
-  if (candidate.admissionDecision !== "AUTOMATED_POC_ADMISSION_ONLY") fail();
-  const source = candidate.source as unknown as Readonly<Record<string, unknown>>;
-  const keys = Object.keys(source).sort();
-  if (keys.join("|") !== [...PROJECT_SOURCE_KEYS].sort().join("|")) fail();
-  const repository = String(source.repository);
-  const excerpt = candidate.lineage.excerpt;
-  if (!REPOSITORY.test(repository) || sha256(excerpt) !== source.excerptHash) fail();
-  if (!projectExcerptAllowed(excerpt, repository)) fail();
-  const query = profile.github.queries.find(({ id }) => id === source.queryId) ?? fail();
-  if (query.role !== "ordinary") fail();
+const fixtureFor = (input: ProjectRoundInput, profile: CrawlProfile): ExperimentFixture => {
+  const candidate = input.candidate as RevalidatedStackCandidate & Readonly<Record<string, unknown>>;
+  exactStackBindings(profile, candidate);
+  const repository = String(candidate.repository);
+  const path = String(candidate.path);
+  const options = [{ repository, description: input.description }, ...input.distractors];
+  if (input.distractors.length !== DISTRACTORS || options.some((option) => !REPOSITORY.test(option.repository))
+    || new Set(options.map((option) => option.repository.toLocaleLowerCase("en-US"))).size !== options.length
+    || !projectRoundAllowed(candidate.excerpt, path, options.map((option) => option.repository))) fail();
   const template = profile.templates.project;
-  const roundId = `local-project-${canonicalHash({
-    kind: "project", repository, commit: source.commit, path: source.path, blob: source.blob,
-  }).slice(0, 24)}`;
-  const distractors = distractorsFor(roundId, repository, excerpt, pool, profile.selection.projectCandidates - 1);
-  const candidates = shuffled(roundId, [repository, ...distractors], (value) => value)
-    .map((label) => Object.freeze({ id: projectCandidateId(label), label }));
-  const owner = repository.split("/")[0]!;
-  const extensionClue = fill(template.extensionClue, { extension: extensionOf(String(source.path)) });
-  const ownerClue = fill(template.ownerClue, { owner });
-  if ([template.prompt, extensionClue].some((value) =>
-    candidates.some(({ label }) => mentionsRepository(value, label)))) fail();
-  const evidence = fill(template.evidence, { repository });
-  const roundVersion = canonicalHash({ source, excerpt, template, candidates });
+  const source = deepFreeze(sourceRecord(candidate, ["excerpt"]));
+  const roundId = roundIdFor("project", source);
+  const candidates = shuffled(roundId, options, (option) => option.repository).map((option) => Object.freeze({
+    id: projectCandidateId(option.repository), label: option.repository, detail: optionDetail(option.description),
+  }));
+  const panes = Object.freeze([Object.freeze({ label: null, text: candidate.excerpt })]);
+  const clues = Object.freeze([
+    fill(template.fileClue, { file: fileName(path) }),
+    fill(template.popularityClue, { stars: approximately(Number(candidate.starEventsCount)) }),
+  ]);
+  const language = String(candidate.configuration);
   return Object.freeze({
     kind: "PROJECT",
     roundId,
-    roundVersion,
-    excerpt,
+    roundVersion: canonicalHash({ source, panes, candidates, clues, prompt: template.prompt }),
+    panes,
     prompt: template.prompt,
     candidates: Object.freeze(candidates),
-    clues: Object.freeze([extensionClue, ownerClue]),
+    clues,
     correctCandidateId: projectCandidateId(repository),
-    evidence,
+    evidence: fill(template.evidence, { path, repository }),
     explanation: template.explanation,
     attribution: attributionFor(source),
-    helpfulSignals: Object.freeze([ownerClue]),
-    misleadingSignals: Object.freeze([extensionClue]),
+    helpfulSignals: Object.freeze([`The folders on the way to ${fileName(path)} show where ${repository} keeps this code.`]),
+    misleadingSignals: Object.freeze([`All four options are popular ${language} projects.`]),
     source,
   });
 };
 
 export const generateProjectRounds = (options: ProjectRoundsOptions): GeneratedRounds => {
-  if (options.candidates.length !== options.profile.selection.projectRounds) fail();
-  const repositories = options.candidates.map(({ source }) => source.repository);
-  if (new Set(repositories).size !== repositories.length) fail();
-  const fixtures = options.candidates.map((candidate) => fixtureFor(candidate, options.profile, options.distractorPool));
-  return generatedDeck(fixtures, options.profile, { deck: "project", candidates: options.profile.selection.projectCandidates });
+  const { profile } = options;
+  if (options.rounds.length !== profile.selection.projectPool) fail();
+  const fixtures = options.rounds.map((round) => fixtureFor(round, profile));
+  if (new Set(fixtures.map(({ source }) => source.crawlSnapshotId)).size !== 1) fail();
+  for (const key of profile.deduplication) {
+    const values = fixtures.map(({ source }) => String(source[key]));
+    if (new Set(values).size !== values.length) fail();
+  }
+  return orderedPool(fixtures);
 };

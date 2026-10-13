@@ -16,6 +16,8 @@ export interface AuthorizedReveal {
   roundId: string;
   roundVersionId: string;
   correct: boolean;
+  /** The right option, shown once the answer is locked. */
+  answerCandidateId: string;
   score: number;
   evidence: string;
   explanation: string;
@@ -61,13 +63,14 @@ export function createArcadeSession(_mode: PublicModeContract): ArcadeSession {
 export function projectDisplayReveal(value: unknown): AuthorizedReveal {
   if (typeof value !== "object" || value === null) throw new ArcadeShellRuleError("invalid reveal projection");
   const source = value as Record<string, unknown>;
-  const allowed = ["attribution", "correct", "evidence", "explanation", "helpfulSignals", "misleadingSignals", "result", "roundId", "roundVersionId", "score", "versions"];
+  const allowed = ["attribution", "correct", "answerCandidateId", "evidence", "explanation", "helpfulSignals", "misleadingSignals", "result", "roundId", "roundVersionId", "score", "versions"];
   if (Object.keys(source).some((key) => !allowed.includes(key))) throw new ArcadeShellRuleError("reveal contains an unexpected field");
   const versions = source.versions as Record<string, unknown> | undefined;
   const result = source.result as Record<string, unknown> | undefined;
   const versionKeys = ["candidateSet", "content", "evidence", "reveal", "rules", "scoring"];
   if (typeof source.roundId !== "string" || typeof source.roundVersionId !== "string"
-    || typeof source.correct !== "boolean" || typeof source.score !== "number" || !Number.isFinite(source.score)
+    || typeof source.correct !== "boolean" || typeof source.answerCandidateId !== "string"
+    || typeof source.score !== "number" || !Number.isFinite(source.score)
     || typeof source.evidence !== "string" || typeof source.explanation !== "string"
     || typeof source.attribution !== "string" || !Array.isArray(source.helpfulSignals) || source.helpfulSignals.length === 0
     || source.helpfulSignals.some((signal) => typeof signal !== "string")
@@ -85,6 +88,7 @@ export function projectDisplayReveal(value: unknown): AuthorizedReveal {
   return Object.freeze({
     roundId: required(source.roundId, "reveal round id"), roundVersionId: required(source.roundVersionId, "reveal round version"),
     correct: source.correct,
+    answerCandidateId: required(source.answerCandidateId, "answer candidate"),
     score: source.score,
     evidence: required(source.evidence, "display evidence"),
     explanation: required(source.explanation, "display explanation"),
@@ -122,13 +126,17 @@ export function transitionArcadeSession(
     if (session.lockedCandidateId === null) throw new ArcadeShellRuleError("reveal requires a locked answer");
     if (session.reveal !== null) throw new ArcadeShellRuleError("reveal is already accepted for this round");
     const reveal = projectDisplayReveal(action.reveal);
-    if (reveal.roundId !== round.roundId || reveal.roundVersionId !== round.roundVersionId || reveal.versions.content !== round.excerpt.versionId
+    if (reveal.roundId !== round.roundId || reveal.roundVersionId !== round.roundVersionId || reveal.versions.content !== round.content.versionId
       || reveal.versions.candidateSet !== round.versions.candidateSet || reveal.versions.scoring !== round.versions.scoring || reveal.versions.rules !== round.versions.rules) {
       throw new ArcadeShellRuleError("reveal does not match the active round lineage");
     }
+    if (!round.mode.candidates.some(({ candidateId }) => candidateId === reveal.answerCandidateId)
+      || reveal.correct !== (session.lockedCandidateId === reveal.answerCandidateId)) {
+      throw new ArcadeShellRuleError("reveal does not match the locked answer");
+    }
     const completedRounds = session.completedRounds + 1;
     if (reveal.result.completedRounds !== completedRounds) throw new ArcadeShellRuleError("result does not match session progress");
-    const expectedRoundScore = reveal.correct ? [1000, 800, 500][session.visibleHintCount]! : 0;
+    const expectedRoundScore = reveal.correct ? round.points[session.visibleHintCount]! : 0;
     if (reveal.score !== expectedRoundScore || reveal.result.score !== session.score + expectedRoundScore) {
       throw new ArcadeShellRuleError("reveal score does not match accepted clue and session state");
     }
@@ -165,7 +173,9 @@ export function formatCompletionResult(result: EntertainmentResultProjection, co
   return `Run complete — ${points(result.score)} points, ${correctRounds} of ${result.completedRounds} correct. Share: ${share.text}.`;
 }
 
-const HINT_COST_NOTE = "Each hint lowers this round’s points: 1,000 → 800 → 500.";
+/** The round's own points after zero, one, and two hints. */
+export const hintCostNote = (values: readonly number[]): string =>
+  `Each hint lowers this round’s points: ${values.map(points).join(" → ")}.`;
 const SOURCE_LINK = /(https:\/\/\S+)/u;
 
 /** Renders the public attribution with its source address as a link; the text itself is unchanged. */
@@ -179,11 +189,13 @@ interface ArcadeShellProps {
   authorizeRevealAction: (request: RevealRequest) => Promise<AuthorizedReveal>;
   /** When set, completion also links back to the deck chooser. */
   chooseAnotherDeckHref?: string;
+  /** When set, completion links to a freshly dealt game from the same deck. */
+  newGameHref?: string;
   /** When set, the share line names the deck. */
   deckTitle?: string;
 }
 
-export function ArcadeShell({ mode, authorizeRevealAction, chooseAnotherDeckHref, deckTitle }: ArcadeShellProps) {
+export function ArcadeShell({ mode, authorizeRevealAction, chooseAnotherDeckHref, newGameHref, deckTitle }: ArcadeShellProps) {
   const [session, setSession] = React.useState(() => createArcadeSession(mode));
   const [selection, setSelection] = React.useState("");
   const [busy, setBusy] = React.useState(false);
@@ -265,12 +277,19 @@ export function ArcadeShell({ mode, authorizeRevealAction, chooseAnotherDeckHref
         ))}
       </nav>
 
-      <section className="game-card" aria-labelledby="round-title">
+      <section className="game-card" aria-labelledby="round-title" data-round-id={round.roundId}>
         <p className="eyebrow">Round {session.roundIndex + 1} of {mode.rounds.length}</p>
         <h1 id="round-title" ref={roundTitle} tabIndex={-1}>{round.mode.prompt}</h1>
-        <pre className="code-window" tabIndex={0} aria-label="Code excerpt"><code>{round.excerpt.text}</code></pre>
+        <div className={round.content.panes.length > 1 ? "code-panes compare" : "code-panes"}>
+          {round.content.panes.map((pane, index) => (
+            <figure className="code-pane" key={pane.label ?? index}>
+              {pane.label && <figcaption>Version {pane.label}</figcaption>}
+              <pre className="code-window" tabIndex={0} aria-label={pane.label ? `Code, version ${pane.label}` : "Code excerpt"}><code>{pane.text}</code></pre>
+            </figure>
+          ))}
+        </div>
 
-        <p className="hint-cost" id={`hint-cost-${round.roundId}`}>{HINT_COST_NOTE}</p>
+        <p className="hint-cost" id={`hint-cost-${round.roundId}`}>{hintCostNote(round.points)}</p>
         <div className="hints" aria-label="Hints">
           {round.mode.clues.map((clue, index) => index < session.visibleHintCount
             ? <p className="hint" key={clue.order}>{clue.label}</p>
@@ -284,18 +303,29 @@ export function ArcadeShell({ mode, authorizeRevealAction, chooseAnotherDeckHref
         <fieldset disabled={session.reveal !== null || busy}>
           <legend>Choose one answer</legend>
           <div className="candidate-grid">
-            {round.mode.candidates.map((candidate) => (
-              <label className={selection === candidate.candidateId ? "candidate selected" : "candidate"} key={candidate.candidateId}>
-                <input
-                  type="radio"
-                  name={`candidate-${round.roundId}`}
-                  value={candidate.candidateId}
-                  checked={selection === candidate.candidateId}
-                  onChange={() => setSelection(candidate.candidateId)}
-                />
-                {candidate.label}
-              </label>
-            ))}
+            {round.mode.candidates.map((candidate) => {
+              const verdict = session.reveal === null ? ""
+                : candidate.candidateId === session.reveal.answerCandidateId ? " correct"
+                  : candidate.candidateId === session.lockedCandidateId ? " missed" : "";
+              const detailId = `detail-${round.roundId}-${candidate.candidateId}`;
+              return (
+                <label className={`${selection === candidate.candidateId ? "candidate selected" : "candidate"}${verdict}`} key={candidate.candidateId}>
+                  <input
+                    type="radio"
+                    name={`candidate-${round.roundId}`}
+                    value={candidate.candidateId}
+                    aria-label={candidate.label}
+                    aria-describedby={candidate.detail ? detailId : undefined}
+                    checked={selection === candidate.candidateId}
+                    onChange={() => setSelection(candidate.candidateId)}
+                  />
+                  <span className="candidate-text">
+                    <span className="candidate-label">{candidate.label}</span>
+                    {candidate.detail && <span className="candidate-detail" id={detailId}>{candidate.detail}</span>}
+                  </span>
+                </label>
+              );
+            })}
           </div>
         </fieldset>
 
@@ -308,6 +338,7 @@ export function ArcadeShell({ mode, authorizeRevealAction, chooseAnotherDeckHref
           {session.reveal && (
             <>
               <h2 ref={revealHeading} tabIndex={-1}>{session.reveal.correct ? "Nice read." : "Not this time."}</h2>
+              <p className="answer-line">The answer: <strong>{round.mode.candidates.find(({ candidateId }) => candidateId === session.reveal!.answerCandidateId)?.label}</strong></p>
               <p>{session.reveal.evidence}</p>
               <p>{session.reveal.explanation}</p>
               <p>Helpful signals: {session.reveal.helpfulSignals.join(" · ")}</p>
@@ -319,6 +350,7 @@ export function ArcadeShell({ mode, authorizeRevealAction, chooseAnotherDeckHref
                     <p>{formatCompletionResult(session.result!, session.correctRounds, deckTitle)}</p>
                     <button type="button" onClick={copyResult}>{copied ? "Copied" : "Copy result"}</button>
                     <button type="button" onClick={restart}>Play again</button>
+                    {newGameHref && <a className="deck-link" href={newGameHref}>Deal new rounds</a>}
                     {chooseAnotherDeckHref && <a className="deck-link" href={chooseAnotherDeckHref}>Choose another deck</a>}
                   </>}
             </>

@@ -3,77 +3,96 @@ import { resolve } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 
 // The browser never learns the answers; the test runner reads the generated artifact on the Node side.
-interface ArtifactFixture { candidates: { id: string; label: string }[]; correctCandidateId: string }
-interface ArtifactDeck { id: string; title: string; description: string; notice: string | null; fixtures: ArtifactFixture[] }
+interface ArtifactFixture { roundId: string; candidates: { id: string; label: string }[]; correctCandidateId: string }
+interface ArtifactDeck { id: string; title: string; description: string; fixtures: ArtifactFixture[] }
 const artifact = JSON.parse(readFileSync(resolve(process.cwd(), "apps/game/src/demo/generated/local-real-rounds.json"), "utf8")) as { decks: ArtifactDeck[] };
-const decks = artifact.decks.map((deck) => ({
-  ...deck,
-  answers: deck.fixtures.map((fixture) => fixture.candidates.find(({ id }) => id === fixture.correctCandidateId)!.label),
-}));
-const AI_NOTICE = decks.find(({ id }) => id === "ai")!.notice!;
+const answers = new Map(artifact.decks.flatMap((deck) => deck.fixtures.map((fixture) =>
+  [fixture.roundId, fixture.candidates.find(({ id }) => id === fixture.correctCandidateId)!.label] as const)));
+const wrongAnswers = new Map(artifact.decks.flatMap((deck) => deck.fixtures.map((fixture) =>
+  [fixture.roundId, fixture.candidates.find(({ id }) => id !== fixture.correctCandidateId)!.label] as const)));
+/** Points for a correct answer with no hint: 1,000 for four options, 500 for two. */
+const fullPoints = (deck: ArtifactDeck): number => deck.fixtures[0]!.candidates.length * 250;
 const titlePattern = (title: string) => new RegExp(`^${title.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}`, "u");
+const points = (value: number): string => value.toLocaleString("en-US");
 
-const answerRounds = async (page: Page, answers: readonly string[], firstRoundHint: boolean) => {
-  for (const [index, answer] of answers.entries()) {
+const currentRound = async (page: Page): Promise<string> => (await page.locator(".game-card").getAttribute("data-round-id"))!;
+
+const answerRounds = async (page: Page, firstRoundHint: boolean) => {
+  for (let index = 0; index < 5; index += 1) {
     if (index > 0) await page.getByRole("button", { name: "Next round" }).click();
     await expect(page.getByText(`Round ${index + 1} of 5`)).toBeVisible();
     await expect(page.locator(".reveal small")).toHaveCount(0);
     if (index === 0 && firstRoundHint) await page.getByRole("button", { name: "Reveal hint 1" }).click();
+    const answer = answers.get(await currentRound(page))!;
     await page.getByLabel(answer, { exact: true }).check();
     await page.getByRole("button", { name: "Lock in answer" }).click();
     await expect(page.getByRole("heading", { name: "Nice read." })).toBeVisible();
+    await expect(page.locator(".candidate.correct")).toContainText(answer);
     await expect(page.locator(".reveal small")).toBeVisible();
   }
 };
 
-test("the root route offers the three decks under the permanent notice", async ({ page }) => {
+test("the root route offers every deck under the permanent notice", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByText(/Local unreviewed experiment/)).toBeVisible();
   await expect(page.getByRole("heading", { level: 1, name: "Pick a deck" })).toBeVisible();
-  expect(decks.map(({ id }) => id)).toEqual(["project", "language", "ai"]);
-  for (const deck of decks) {
+  expect(artifact.decks.map(({ id }) => id)).toEqual(["project", "language", "before-after"]);
+  for (const deck of artifact.decks) {
     const link = page.getByRole("link", { name: titlePattern(deck.title) });
     await expect(link).toBeVisible();
     await expect(link).toContainText(deck.description);
+    await expect(link).toContainText(`${deck.fixtures.length} rounds in the deck`);
   }
-  await expect(page.getByText(AI_NOTICE)).toHaveCount(0);
   await expect(page.getByRole("radio")).toHaveCount(0);
 });
 
-for (const deck of decks) {
-  test(`plays the ${deck.id} deck through clues, scoring, replay, and choosing another deck`, async ({ page }) => {
+for (const deck of artifact.decks) {
+  test(`plays the ${deck.id} deck through hints, scoring, replay, a new deal, and choosing another deck`, async ({ page }) => {
+    const full = fullPoints(deck);
     await page.goto("/");
     await page.getByRole("link", { name: titlePattern(deck.title) }).click();
     await expect(page).toHaveURL(new RegExp(`\\?deck=${deck.id}$`, "u"));
     await expect(page.getByText(/Local unreviewed experiment/)).toBeVisible();
-    await expect(page.getByText(AI_NOTICE)).toHaveCount(deck.id === "ai" ? 1 : 0);
+    if (deck.id === "before-after") await expect(page.locator("figcaption")).toHaveText(["Version A", "Version B"]);
 
-    await answerRounds(page, deck.answers, true);
-    await expect(page.getByLabel(/Score/)).toHaveText("4,800 pts");
-    await expect(page.getByText(/Run complete — 4,800 points/)).toBeVisible();
-    if (deck.id === "ai") await expect(page.getByText(AI_NOTICE)).toBeVisible();
+    await answerRounds(page, true);
+    const hinted = full * 0.8 + 4 * full;
+    await expect(page.getByLabel(/Score/)).toHaveText(`${points(hinted)} pts`);
+    await expect(page.getByText(new RegExp(`Run complete — ${points(hinted)} points`, "u"))).toBeVisible();
 
     await page.getByRole("button", { name: "Play again" }).click();
     await expect(page.getByText("Round 1 of 5")).toBeVisible();
     await expect(page.getByLabel(/Score/)).toHaveText("0 pts");
+    await answerRounds(page, false);
+    await expect(page.getByText(new RegExp(`Run complete — ${points(5 * full)} points`, "u"))).toBeVisible();
 
-    await answerRounds(page, deck.answers, false);
-    await expect(page.getByText(/Run complete — 5,000 points/)).toBeVisible();
+    await expect(page.getByRole("link", { name: "Deal new rounds" })).toHaveAttribute("href", `/?deck=${deck.id}`);
     await page.getByRole("link", { name: "Choose another deck" }).click();
     await expect(page.getByRole("heading", { level: 1, name: "Pick a deck" })).toBeVisible();
   });
 }
 
-test("a deck query parameter preselects the deck and a wrong answer scores zero", async ({ page }) => {
-  const ai = decks.find(({ id }) => id === "ai")!;
-  await page.goto("/?deck=ai");
-  await expect(page.getByText(AI_NOTICE)).toBeVisible();
+test("a deck query parameter preselects the deck, and a wrong answer scores zero and shows the right one", async ({ page }) => {
+  await page.goto("/?deck=before-after");
   await expect(page.getByText("Round 1 of 5")).toBeVisible();
-  const wrong = ai.fixtures[0]!.candidates.find(({ id }) => id !== ai.fixtures[0]!.correctCandidateId)!.label;
-  await page.getByLabel(wrong, { exact: true }).check();
+  const round = await currentRound(page);
+  await page.getByLabel(wrongAnswers.get(round)!, { exact: true }).check();
   await page.getByRole("button", { name: "Lock in answer" }).click();
   await expect(page.getByRole("heading", { name: "Not this time." })).toBeVisible();
   await expect(page.getByLabel(/Score/)).toHaveText("0 pts");
+  await expect(page.locator(".candidate.missed")).toContainText(wrongAnswers.get(round)!);
+  await expect(page.locator(".candidate.correct")).toContainText(answers.get(round)!);
+  await expect(page.getByText(`The answer: ${answers.get(round)!}`)).toBeVisible();
   await page.getByRole("link", { name: "All decks" }).click();
   await expect(page.getByRole("heading", { level: 1, name: "Pick a deck" })).toBeVisible();
+});
+
+test("each visit deals rounds from the deck's pool", async ({ page }) => {
+  const seen = new Set<string>();
+  for (let visit = 0; visit < 6; visit += 1) {
+    await page.goto("/?deck=language");
+    await expect(page.getByText("Round 1 of 5")).toBeVisible();
+    seen.add(await currentRound(page));
+  }
+  expect(seen.size).toBeGreaterThan(1);
 });

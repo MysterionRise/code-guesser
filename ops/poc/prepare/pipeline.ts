@@ -9,9 +9,11 @@ import {
 import type { GitHubQueryClassification } from "./github-search";
 import { artifactFixtures, DECK_IDS, type DeckId } from "./model";
 import { STACK_LANGUAGES, type CrawlProfile } from "./profile";
-import { selectGitHub } from "./select-github";
-import { selectStack } from "./select-stack";
-import { addHashes, provisionalSnapshot, queryRole, repositoryScreen, view } from "./selection";
+import { selectBeforeAfter } from "./select-github";
+import { selectStack, type ProjectSelection } from "./select-stack";
+import { addHashes, protectedValuesOf, provisionalSnapshot, repositoryScreen, safeDescription, view } from "./selection";
+import type { GeneratedRounds } from "./round-helpers";
+import type { RevalidatedStackCandidate } from "./stack-revalidation";
 import type { Context, FailureReport, PreparationDependencies, PreparationResult } from "./types";
 
 const QUERY_COMPLETENESS = new Set(["COMPLETE", "PROVIDER_REPORTED_INCOMPLETE"]);
@@ -35,7 +37,7 @@ const reportInput = (context: Context, composed: ComposedExperiment, executionId
   const fixtures = artifactFixtures(composed.artifact);
   const sources = fixtures.map(({ source }) => `${String(source.repository)}@${String(source.commit)}:${String(source.path)}`);
   return {
-    schemaVersion: "local-experiment-run.v2", executionId, observedAt, profileVersion: context.profile.profileVersion,
+    schemaVersion: "local-experiment-run.v3", executionId, observedAt, profileVersion: context.profile.profileVersion,
     githubApiVersion: context.profile.github.apiVersion, stackRelease: context.profile.stack.release, stackRevision: context.profile.stack.revision,
     githubQueries: context.profile.github.queries.map((query, index) => ({ ...query, pageCeiling: context.profile.capacity.githubPages,
       resultCeiling: context.profile.capacity.githubResults, completeness: classifications[index]!.completeness })),
@@ -102,7 +104,7 @@ const publishedDecks = (deps: PreparationDependencies, state: RunState, outcomes
   const skipped = DECK_IDS.filter((id) => outcomes[id].skipped !== undefined);
   for (const id of skipped) {
     deps.log(`PREPARATION_DECK_SKIPPED ${id} ${outcomes[id].skipped}`);
-    noteRejection(state, "SELECTION", new Error(`${id.toUpperCase()}_DECK_SKIPPED`));
+    noteRejection(state, "SELECTION", new Error(`${id.toUpperCase().replace("-", "_")}_DECK_SKIPPED`));
   }
   const published = DECK_IDS.filter((id) => outcomes[id].skipped === undefined);
   if (published.length === 0) {
@@ -182,38 +184,45 @@ export const prepareLocalExperiment = async (deps: PreparationDependencies = def
     tracker.enter("ADMISSION");
     const screenRepository = repositoryScreen(context, deps, hashes, state);
     const attempt = createDeckAttempts();
-    const github = await selectGitHub(context, deps, hashes, search.value.candidates, state, screenRepository, attempt);
-    const distractorPool = [...new Set(search.value.candidates.filter((candidate) => queryRole(loaded.profile, candidate) === "ordinary")
-      .map((candidate) => String(view(candidate).repository)))];
+    const beforeAfter = await selectBeforeAfter(context, deps, hashes, search.value.candidates, state, screenRepository, attempt, () => []);
     tracker.enter("BLOB_RETRIEVAL");
-    const githubCandidates = [...github.project.candidates ?? [], ...github.ai.candidates ?? []];
-    const language = await selectStack(context, deps, hashes, metadata, githubCandidates, state, screenRepository, attempt);
+    const stack = await selectStack(context, deps, hashes, metadata, state, screenRepository, attempt, () => beforeAfter.candidates ?? []);
     tracker.enter("SELECTION");
-    const outcomes: Readonly<Record<DeckId, DeckOutcome>> = { project: github.project, language, ai: github.ai };
+    const outcomes: Readonly<Record<DeckId, DeckOutcome>> = { project: stack.project, language: stack.language, "before-after": beforeAfter };
     const published = publishedDecks(deps, state, outcomes);
     const crawlSnapshotId = provisionalSnapshot(profileHash, hashes);
-    const languageSelections = language.candidates ?? [];
+    const projectSelections: readonly ProjectSelection[] = stack.project.candidates ?? [];
+    const languageSelections = stack.language.candidates ?? [];
     const finalized = deps.finalizeBindings
-      ? await deps.finalizeBindings({ ...context, crawlSnapshotId, projectCandidates: github.project.candidates ?? [],
-        aiCandidates: github.ai.candidates ?? [], languageSelections })
-      : { projectCandidates: github.project.candidates ?? [], aiCandidates: github.ai.candidates ?? [],
+      ? await deps.finalizeBindings({ ...context, crawlSnapshotId, beforeAfterCandidates: beforeAfter.candidates ?? [],
+        projectSelections, languageSelections })
+      : { beforeAfterCandidates: beforeAfter.candidates ?? [], projectCandidates: projectSelections.map(({ candidate }) => candidate),
         languageCandidates: languageSelections.map(({ candidate }) => candidate) };
-    if (deps.finalizeBindings && ([...finalized.projectCandidates, ...finalized.aiCandidates].some((candidate) => view(candidate).source?.crawlSnapshotId !== crawlSnapshotId)
-      || finalized.languageCandidates.some((candidate) => (candidate as { crawlSnapshotId?: unknown }).crawlSnapshotId !== crawlSnapshotId))) throw new PreparationError();
-    const { projectRounds, languageRounds, aiRounds } = loaded.profile.selection;
-    const generate = {
-      project: () => deps.generateProject({ profile: loaded.profile, candidates: finalized.projectCandidates, distractorPool }),
+    if (deps.finalizeBindings && (finalized.beforeAfterCandidates.some((candidate) => view(candidate).source?.crawlSnapshotId !== crawlSnapshotId)
+      || [...finalized.projectCandidates, ...finalized.languageCandidates]
+        .some((candidate) => (candidate as { crawlSnapshotId?: unknown }).crawlSnapshotId !== crawlSnapshotId))) throw new PreparationError();
+    const { projectPool, languagePool, beforeAfterPool } = loaded.profile.selection;
+    const generate: Readonly<Record<DeckId, () => GeneratedRounds>> = {
+      project: () => {
+        // Descriptions are public; one that names any selected source's protected value is left out.
+        const protectedValues = protectedValuesOf([...finalized.beforeAfterCandidates, ...finalized.projectCandidates, ...finalized.languageCandidates]);
+        return deps.generateProject({ profile: loaded.profile, rounds: projectSelections.map((selection, index) => ({
+          candidate: finalized.projectCandidates[index] as RevalidatedStackCandidate,
+          description: safeDescription(selection.description, protectedValues),
+          distractors: selection.distractors.map((option) => ({ ...option, description: safeDescription(option.description, protectedValues) })),
+        })) });
+      },
       language: () => deps.generateLanguage({ profile: loaded.profile, candidates: finalized.languageCandidates }),
-      ai: () => deps.generateAi({ profile: loaded.profile, candidates: finalized.aiCandidates }),
+      "before-after": () => deps.generateBeforeAfter({ profile: loaded.profile, candidates: finalized.beforeAfterCandidates }),
     };
-    const expected: Readonly<Record<DeckId, number>> = { project: projectRounds, language: languageRounds, ai: aiRounds };
-    const rounds = Object.fromEntries(published.map((id) => {
+    const expected: Readonly<Record<DeckId, number>> = { project: projectPool, language: languagePool, "before-after": beforeAfterPool };
+    const decks = Object.fromEntries(published.map((id) => {
       const generated = generate[id]();
       if (generated.fixtures.length !== expected[id]) throw new PreparationError();
       return [id, generated];
     }));
     const composed = deps.compose({ profile: loaded.profile, canonicalProfileBytes: loaded.canonicalProfileBytes,
-      acceptedResponseHashes: Object.freeze(hashes), ...rounds });
+      acceptedResponseHashes: Object.freeze(hashes), decks });
     if (composed.artifact.crawlSnapshot.id !== crawlSnapshotId) throw new PreparationError();
     const report = deps.createReport(reportInput(context, composed, deps.uuid(), deps.now().toISOString(), state, classifications));
     tracker.enter("PUBLICATION");

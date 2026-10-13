@@ -1,0 +1,168 @@
+{
+  "profileVersion": "local-real-rounds.v3",
+  "github": {
+    "apiVersion": "2022-11-28",
+    "queries": [
+      {
+        "id": "refactor-facebook",
+        "query": "refactor org:facebook committer-date:2026-07-01..2026-07-31 merge:false is:public",
+        "sort": "committer-date",
+        "order": "desc"
+      },
+      {
+        "id": "refactor-google",
+        "query": "refactor org:google committer-date:2026-09-01..2026-09-07 merge:false is:public",
+        "sort": "committer-date",
+        "order": "desc"
+      },
+      {
+        "id": "refactor-vercel",
+        "query": "refactor org:vercel committer-date:2026-08-01..2026-08-31 merge:false is:public",
+        "sort": "committer-date",
+        "order": "desc"
+      },
+      {
+        "id": "refactor-github",
+        "query": "refactor org:github committer-date:2026-08-01..2026-08-31 merge:false is:public",
+        "sort": "committer-date",
+        "order": "desc"
+      },
+      {
+        "id": "refactor-microsoft",
+        "query": "refactor org:microsoft committer-date:2026-09-08..2026-09-14 merge:false is:public",
+        "sort": "committer-date",
+        "order": "desc"
+      },
+      {
+        "id": "refactor-kubernetes",
+        "query": "refactor org:kubernetes committer-date:2026-08-01..2026-08-31 merge:false is:public",
+        "sort": "committer-date",
+        "order": "desc"
+      },
+      {
+        "id": "refactor-rust-lang",
+        "query": "refactor org:rust-lang committer-date:2026-08-01..2026-08-31 merge:false is:public",
+        "sort": "committer-date",
+        "order": "desc"
+      },
+      {
+        "id": "refactor-django",
+        "query": "refactor org:django committer-date:2026-06-01..2026-08-31 merge:false is:public",
+        "sort": "committer-date",
+        "order": "desc"
+      }
+    ]
+  },
+  "stack": {
+    "release": "v2.2.0",
+    "revision": "e565caa3a78c2423bd374333a472b049eb090e47",
+    "configurations": [
+      {
+        "language": "Python",
+        "extensions": [
+          ".py"
+        ]
+      },
+      {
+        "language": "TypeScript",
+        "extensions": [
+          ".ts",
+          ".tsx"
+        ]
+      },
+      {
+        "language": "Go",
+        "extensions": [
+          ".go"
+        ]
+      },
+      {
+        "language": "Rust",
+        "extensions": [
+          ".rs"
+        ]
+      },
+      {
+        "language": "Ruby",
+        "extensions": [
+          ".rb"
+        ]
+      }
+    ]
+  },
+  "licenses": [
+    "Apache-2.0",
+    "BSD-3-Clause",
+    "MIT"
+  ],
+  "templates": {
+    "project": {
+      "title": "Which project?",
+      "description": "Read code from a well-known open-source project and pick which one it is.",
+      "prompt": "Which project is this code from?",
+      "fileClue": "The file is named {file}.",
+      "popularityClue": "Its repository has about {stars} GitHub star events.",
+      "evidence": "This is {path} in {repository}.",
+      "explanation": "The answer is the repository The Stack v2 recorded for this file, confirmed against GitHub."
+    },
+    "language": {
+      "title": "Which language?",
+      "description": "Name the programming language from a short real excerpt.",
+      "prompt": "Which programming language is this?",
+      "syntaxClue": "Look for {syntax} in the code.",
+      "evidence": "The file is {path}; its extension and The Stack v2 both say {language}.",
+      "explanation": "The answer is the file's recorded language, confirmed by its extension."
+    },
+    "beforeAfter": {
+      "title": "Before or after?",
+      "description": "See one stretch of code before and after a real refactor, and pick the newer version.",
+      "prompt": "Which version came after the commit?",
+      "laterA": "A is the newer version",
+      "laterB": "B is the newer version",
+      "subjectClue": "The commit message begins: {subject}",
+      "linesClue": "The commit removed {removed} of these lines and added {added}.",
+      "evidence": "Commit {commit} changed version {earlier} into version {later}.",
+      "explanation": "The answer comes from the commit's recorded parent, not from which version reads better."
+    }
+  },
+  "deduplication": [
+    "repository",
+    "commit",
+    "path",
+    "blob",
+    "rawContentHash",
+    "excerptHash"
+  ],
+  "capacity": {
+    "githubPages": 3,
+    "githubResults": 300,
+    "stackRowsPerLanguage": 10000,
+    "stackMetadataBytes": 100663296,
+    "blobAttempts": 120,
+    "successfulBlobs": 60,
+    "perBlobBytes": 262144,
+    "totalBlobBytes": 16777216,
+    "concurrentRequests": 4,
+    "requestCount": 1500,
+    "responseBytes": 8388608,
+    "waitMilliseconds": 15000,
+    "totalWaitMilliseconds": 30000,
+    "temporaryDiskBytes": 33554432
+  },
+  "screening": {
+    "excerptLines": 18,
+    "excerptBytes": 4096,
+    "minimumExcerptBytes": 120,
+    "generatedScanLines": 30,
+    "subjectMaxLength": 90,
+    "changeWindowLines": 24,
+    "changeContextLines": 4,
+    "maxChangedLines": 12
+  },
+  "selection": {
+    "projectPool": 10,
+    "languagePool": 10,
+    "beforeAfterPool": 10,
+    "minimumStarEvents": 1000
+  }
+}

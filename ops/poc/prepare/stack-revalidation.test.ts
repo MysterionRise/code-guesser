@@ -24,6 +24,9 @@ const content = Buffer.from([
   "def format_value(value):",
   "    return f\"value={compute(value)}\"",
   "",
+  "def format_pair(left, right):",
+  "    return format_value(left) + format_value(right)",
+  "",
 ].join("\n"));
 const licenseBytes = Buffer.from("MIT License\n\nPermission is hereby granted.\n");
 const rawSha1 = (bytes: Uint8Array): string => createHash("sha1").update(bytes).digest("hex");
@@ -42,7 +45,7 @@ const treeIdentity = (entries: readonly { path: string; mode: string; type: stri
 const rootEntries = [{ path, mode: "100644", type: "blob", sha: blob }];
 const rootTree = treeIdentity(rootEntries);
 const profile = async () => parseCrawlProfile(JSON.parse(await readFile(
-  new URL("../profiles/local-real-rounds.v2.json", import.meta.url), "utf8",
+  new URL("../profiles/local-real-rounds.v3.json", import.meta.url), "utf8",
 )));
 
 const row = (overrides: Record<string, unknown> = {}) => {
@@ -63,6 +66,8 @@ const row = (overrides: Record<string, unknown> = {}) => {
     visitDate: "2023-09-06T10:44:38Z",
     revisionDate: "2023-09-05T09:30:00Z",
     committerDate: "2023-09-05T09:30:00Z",
+    starEventsCount: 4,
+    forkEventsCount: 2,
     ...overrides,
   };
   return {
@@ -248,7 +253,7 @@ describe("Stack candidate GitHub revalidation", () => {
       },
     })));
     expect(output).toMatchObject({
-      profileVersion: "local-real-rounds.v2",
+      profileVersion: "local-real-rounds.v3",
       crawlSnapshotId: "f".repeat(64),
       excerptHash: sha256(content.toString("utf8").replace(/\n+$/u, "")),
       stableRowId: row().stableRowId,

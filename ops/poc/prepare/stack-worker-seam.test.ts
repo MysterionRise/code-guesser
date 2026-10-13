@@ -10,7 +10,7 @@ import { metadataWorkerRequest, runLockedWorker, type WorkerRequest } from "./st
 const testModuleName: string = "vitest";
 const { describe, expect, it } = await import(testModuleName) as any;
 
-const profilePath = new URL("../profiles/local-real-rounds.v2.json", import.meta.url);
+const profilePath = new URL("../profiles/local-real-rounds.v3.json", import.meta.url);
 const hasUv = spawnSync("uv", ["--version"], { stdio: "ignore" }).status === 0;
 const SEAM_TIMEOUT_MILLISECONDS = 120_000;
 
