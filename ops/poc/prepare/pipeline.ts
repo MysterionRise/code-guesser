@@ -9,6 +9,7 @@ import {
 import type { GitHubQueryClassification } from "./github-search";
 import { artifactFixtures, DECK_IDS, type DeckId } from "./model";
 import { STACK_LANGUAGES, poolSizes, type CrawlProfile } from "./profile";
+import { selectAlgorithm, type AlgorithmSelection } from "./select-algorithm";
 import { selectBeforeAfter } from "./select-github";
 import { selectStack, type ProjectSelection } from "./select-stack";
 import { addHashes, protectedValuesOf, provisionalSnapshot, repositoryScreen, safeDescription, view } from "./selection";
@@ -100,15 +101,17 @@ export class DeckSelectionError extends Error {
  * The decks this run publishes: every deck that filled. Each skipped deck is logged with its reason and
  * counted in the rejection aggregates; a run that filled none fails with the shared reason, if any.
  */
-const publishedDecks = (deps: PreparationDependencies, state: RunState, outcomes: Readonly<Record<DeckId, DeckOutcome>>): readonly DeckId[] => {
-  const skipped = DECK_IDS.filter((id) => outcomes[id].skipped !== undefined);
+const publishedDecks = (deps: PreparationDependencies, state: RunState, outcomes: Readonly<Partial<Record<DeckId, DeckOutcome>>>): readonly DeckId[] => {
+  // A deck the profile does not configure has no outcome: it is neither published nor skipped.
+  const attempted = DECK_IDS.filter((id) => outcomes[id] !== undefined);
+  const skipped = attempted.filter((id) => outcomes[id]!.skipped !== undefined);
   for (const id of skipped) {
-    deps.log(`PREPARATION_DECK_SKIPPED ${id} ${outcomes[id].skipped}`);
+    deps.log(`PREPARATION_DECK_SKIPPED ${id} ${outcomes[id]!.skipped}`);
     noteRejection(state, "SELECTION", new Error(`${id.toUpperCase().replaceAll("-", "_")}_DECK_SKIPPED`));
   }
-  const published = DECK_IDS.filter((id) => outcomes[id].skipped === undefined);
+  const published = attempted.filter((id) => outcomes[id]!.skipped === undefined);
   if (published.length === 0) {
-    const reasons = new Set(skipped.map((id) => outcomes[id].skipped));
+    const reasons = new Set(skipped.map((id) => outcomes[id]!.skipped));
     throw new DeckSelectionError(reasons.size === 1 ? [...reasons][0]! : "NO_DECK_FILLED");
   }
   return published;
@@ -187,8 +190,17 @@ export const prepareLocalExperiment = async (deps: PreparationDependencies = def
     const beforeAfter = await selectBeforeAfter(context, deps, hashes, search.value.candidates, state, screenRepository, attempt, () => []);
     tracker.enter("BLOB_RETRIEVAL");
     const stack = await selectStack(context, deps, hashes, metadata, state, screenRepository, attempt, () => beforeAfter.candidates ?? []);
+    // Curated decks run last, so a run-wide budget they spend can skip only them.
+    let algorithm: DeckOutcome<AlgorithmSelection> | undefined;
+    if (loaded.profile.curated?.algorithm) {
+      tracker.enter("CURATED_FILES");
+      algorithm = await selectAlgorithm(context, deps, hashes, state, attempt, () => [...(beforeAfter.candidates ?? []),
+        ...[...(stack.project.candidates ?? []), ...(stack.language.candidates ?? [])].map(({ candidate }) => candidate)]);
+    }
     tracker.enter("SELECTION");
-    const outcomes: Readonly<Record<DeckId, DeckOutcome>> = { project: stack.project, language: stack.language, "before-after": beforeAfter };
+    const outcomes: Readonly<Partial<Record<DeckId, DeckOutcome>>> = {
+      project: stack.project, language: stack.language, "before-after": beforeAfter, ...(algorithm ? { algorithm } : {}),
+    };
     const published = publishedDecks(deps, state, outcomes);
     const crawlSnapshotId = provisionalSnapshot(profileHash, hashes);
     const projectSelections: readonly ProjectSelection[] = stack.project.candidates ?? [];
@@ -201,6 +213,8 @@ export const prepareLocalExperiment = async (deps: PreparationDependencies = def
     if (deps.finalizeBindings && (finalized.beforeAfterCandidates.some((candidate) => view(candidate).source?.crawlSnapshotId !== crawlSnapshotId)
       || [...finalized.projectCandidates, ...finalized.languageCandidates]
         .some((candidate) => (candidate as { crawlSnapshotId?: unknown }).crawlSnapshotId !== crawlSnapshotId))) throw new PreparationError();
+    // A curated file's source is built from the selection itself, so binding it to the final snapshot needs no request.
+    const algorithmCandidates = (algorithm?.candidates ?? []).map((selection) => Object.freeze({ ...selection, crawlSnapshotId }));
     const generate: Readonly<Record<DeckId, () => GeneratedRounds>> = {
       project: () => {
         // Descriptions are public; one that names any selected source's protected value is left out.
@@ -213,6 +227,7 @@ export const prepareLocalExperiment = async (deps: PreparationDependencies = def
       },
       language: () => deps.generateLanguage({ profile: loaded.profile, candidates: finalized.languageCandidates }),
       "before-after": () => deps.generateBeforeAfter({ profile: loaded.profile, candidates: finalized.beforeAfterCandidates }),
+      algorithm: () => deps.generateAlgorithm({ profile: loaded.profile, candidates: algorithmCandidates }),
     };
     const expected = poolSizes(loaded.profile);
     const decks = Object.fromEntries(published.map((id) => {

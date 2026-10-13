@@ -3,41 +3,19 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { BEFORE_AFTER_CANDIDATE_IDS, LANGUAGE_PAIRS, parseArtifactDecks, type ParsedDeck, type ParsedFixture } from "../src/index";
+import {
+  TOLERANCE, accuracy, alphabeticalSolver, answerOf, chance, frequencySolver, raritySolver, sameOptionsSolver,
+} from "./solvers";
 
 /**
  * Leakage: solvers that never read the code must do no better than chance plus ten points. Each solver sees
  * only what a player sees before answering (the options and their details); none of them looks at the panes.
  * Accuracy is the expected share of rounds answered correctly, with ties split evenly.
  */
-const TOLERANCE = 0.1;
 const committed = (): readonly ParsedDeck[] =>
   parseArtifactDecks(JSON.parse(readFileSync(new URL("../../../apps/game/src/demo/generated/local-real-rounds.json", import.meta.url), "utf8")));
 const decks = committed();
 const deck = (id: ParsedDeck["id"]) => decks.find((candidate) => candidate.id === id);
-
-const optionKey = (fixture: ParsedFixture): string => fixture.candidates.map(({ label }) => label).sort().join("|");
-const answerOf = (fixture: ParsedFixture): string => fixture.candidates.find(({ id }) => id === fixture.correctCandidateId)!.label;
-const chance = (fixture: ParsedFixture): number => 1 / fixture.candidates.length;
-
-/** Expected accuracy of a solver that scores each option and picks the best, splitting ties evenly. */
-const accuracy = (fixtures: readonly ParsedFixture[], score: (fixture: ParsedFixture, label: string, index: number) => number): number =>
-  fixtures.reduce((total, fixture, index) => {
-    const scores = fixture.candidates.map(({ label }) => score(fixture, label, index));
-    const best = Math.max(...scores);
-    const winners = fixture.candidates.filter((_, position) => scores[position] === best);
-    return total + (winners.some(({ label }) => label === answerOf(fixture)) ? 1 / winners.length : 0);
-  }, 0) / fixtures.length;
-
-/** Leave one out: how often each option was the answer in every other round showing the same options. */
-const sameOptionsSolver = (fixtures: readonly ParsedFixture[]) => (fixture: ParsedFixture, label: string, index: number): number =>
-  fixtures.filter((other, position) => position !== index && optionKey(other) === optionKey(fixture) && answerOf(other) === label).length;
-
-/** How often each option appears anywhere in the pool. */
-const frequencySolver = (fixtures: readonly ParsedFixture[]) => (_fixture: ParsedFixture, label: string): number =>
-  fixtures.filter((other) => other.candidates.some((candidate) => candidate.label === label)).length;
-/** The reverse: an option seen in many rounds may be a decoy the pool reuses. */
-const raritySolver = (fixtures: readonly ParsedFixture[]) => (fixture: ParsedFixture, label: string, index: number): number =>
-  -frequencySolver(fixtures)(fixture, label, index);
 
 describe("deck leakage", () => {
   it.runIf(deck("language") !== undefined)("language options do not give the answer away", () => {
@@ -66,6 +44,14 @@ describe("deck leakage", () => {
     // Having a description says nothing about being the answer.
     expect(accuracy(fixtures, (fixture, label) => fixture.candidates.find((candidate) => candidate.label === label)!.detail === null ? 0 : 1))
       .toBeLessThanOrEqual(limit);
+  });
+
+  it.runIf(deck("algorithm") !== undefined)("algorithm options are whole families, each member the answer once", () => {
+    const { fixtures } = deck("algorithm")!;
+    const limit = chance(fixtures[0]!) + TOLERANCE;
+    for (const solver of [sameOptionsSolver(fixtures), frequencySolver(fixtures), raritySolver(fixtures), alphabeticalSolver]) {
+      expect(accuracy(fixtures, solver)).toBeLessThanOrEqual(limit);
+    }
   });
 
   it.runIf(deck("before-after") !== undefined)("the later version is not found by always picking one pane", () => {

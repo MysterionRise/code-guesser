@@ -70,9 +70,17 @@ const sameIdentity = (keys: readonly string[], candidate: unknown, selected: rea
   const source = sourceOf(candidate);
   return keys.some((key) => selected.some((value) => typeof source[key] === "string" && source[key] === sourceOf(value)[key]));
 };
-/** FR-026 as amended: full deduplication within a deck; commit, blob, raw content, and excerpt across decks. */
-export const collidesWithSelected = (profile: CrawlProfile, candidate: unknown, sameDeck: readonly unknown[], otherDecks: readonly unknown[] = []): boolean =>
-  sameIdentity(profile.deduplication, candidate, sameDeck) || sameIdentity(CROSS_DECK_KEYS, candidate, otherDecks);
+/**
+ * FR-026 as amended: full deduplication within a deck; commit, blob, raw content, and excerpt across decks. A deck
+ * of curated files passes its kind's own keys, since its rounds share a repository and a pinned commit.
+ */
+export const collidesWithSelected = (
+  profile: CrawlProfile,
+  candidate: unknown,
+  sameDeck: readonly unknown[],
+  otherDecks: readonly unknown[] = [],
+  keys: Readonly<{ deck: readonly string[]; cross: readonly string[] }> = { deck: profile.deduplication, cross: CROSS_DECK_KEYS },
+): boolean => sameIdentity(keys.deck, candidate, sameDeck) || sameIdentity(keys.cross, candidate, otherDecks);
 
 /** A selected source must fit the run report's identity pattern, or publication would fail after every request was spent. */
 export const unreportable = (value: unknown): boolean => {

@@ -1,4 +1,5 @@
 import {
+  ALGORITHM_SOURCE_KEYS,
   ARTIFACT_SCHEMA_VERSION,
   BEFORE_AFTER_CANDIDATE_IDS,
   CANDIDATE_COUNTS,
@@ -10,6 +11,7 @@ import {
   DETAIL_KINDS,
   LANGUAGE_PAIRS,
   LANGUAGE_SLUGS,
+  MASKED_NAME,
   MAXIMUM_POOL_SIZE,
   PANE_LAYOUTS,
   PROFILE_VERSION,
@@ -28,7 +30,7 @@ import {
   type StackLanguage,
 } from "./domain";
 import { fail } from "./errors";
-import { pinKey, validateLineageSource, validateStackSource, type StackIdentity } from "./source";
+import { pinKey, validateCuratedSource, validateLineageSource, validateStackSource, type StackIdentity } from "./source";
 import {
   canonicalHash,
   codeText,
@@ -72,6 +74,25 @@ export const projectCandidateId = (repository: string): string =>
   `local-experiment.project.${rawHash(repository).slice(0, 16)}.v3`;
 export const languageCandidateId = (label: string): string =>
   `local-experiment.language.${LANGUAGE_SLUGS[label as StackLanguage] ?? fail()}.v3`;
+export const algorithmCandidateId = (id: string): string =>
+  /^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(id) ? `local-experiment.algorithm.${id}.v3` : fail();
+/** A name as code would spell it once case and separators are dropped: `Merge sort`, `merge_sort`, `MergeSort` all fold to `mergesort`. */
+export const foldName = (value: string): string => value.toLocaleLowerCase("en-US").replace(/[^a-z0-9]/gu, "");
+/** Whether text names an algorithm, inside an identifier or not: its label or any of its known spellings. */
+export const namesAlgorithm = (haystack: string, algorithm: Readonly<{ label: string; names: readonly string[] }>): boolean => {
+  const folded = foldName(haystack);
+  return [algorithm.label, ...algorithm.names].map(foldName).some((name) => name.length > 0 && folded.includes(name));
+};
+
+/** An algorithm a curated repository files code under, and the files that show it. */
+export interface CuratedAlgorithm {
+  readonly id: string;
+  readonly label: string;
+  readonly family: string;
+  readonly names: readonly string[];
+  /** `owner/name:path` for each file. */
+  readonly files: readonly string[];
+}
 
 const parseCandidates = (value: unknown, kind: FixtureKind): readonly CandidateRecord[] => {
   const expected = CANDIDATE_COUNTS[kind];
@@ -103,9 +124,12 @@ interface Snapshot {
   readonly stack: StackIdentity;
   /** The curated repositories' pinned commits, as `owner/name@commit`; empty when the run read none. */
   readonly pins: ReadonlySet<string>;
+  /** The algorithms an algorithm round may offer, by id. */
+  readonly algorithms: ReadonlyMap<string, CuratedAlgorithm>;
 }
 
 type Semantics = Readonly<{
+  snapshot: Snapshot;
   panes: readonly Pane[];
   prompt: string;
   candidates: readonly CandidateRecord[];
@@ -149,8 +173,32 @@ const validateBeforeAfter = ({ panes, candidates, correctCandidateId, source }: 
   if (rawHash(laterPane.text) !== source.excerptHash || rawHash(earlierPane.text) !== source.parentExcerptHash) fail();
 };
 
+/**
+ * The options are one whole family of algorithms; the answer is the algorithm whose files include this one; the code
+ * shows the masked name, and no option's name survives in it or in any text shown before the answer.
+ */
+const validateAlgorithm = ({ snapshot, panes, prompt, candidates, clues, correctCandidateId, source }: Semantics): void => {
+  const options = candidates.map(({ id, label }) => {
+    const algorithm = [...snapshot.algorithms.values()].find((known) => algorithmCandidateId(known.id) === id) ?? fail();
+    if (algorithm.label !== label) fail();
+    return algorithm;
+  });
+  const family = options[0]!.family;
+  const members = [...snapshot.algorithms.values()].filter((algorithm) => algorithm.family === family);
+  if (options.some((algorithm) => algorithm.family !== family) || members.length !== options.length) fail();
+  const answer = options.find(({ id }) => algorithmCandidateId(id) === correctCandidateId) ?? fail();
+  if (answer.id !== source.algorithmId || !answer.files.includes(`${source.repository}:${source.path}`)
+    || !(STACK_LANGUAGES as readonly unknown[]).includes(source.language)) fail();
+  const code = panes[0]!.text;
+  if (source.excerptHash !== rawHash(code) || !foldName(code).includes(MASKED_NAME)
+    || new RegExp(`(^|[^A-Za-z0-9_])${escape(String(source.functionName))}([^A-Za-z0-9_]|$)`, "u").test(code)) fail();
+  for (const part of [code, prompt, ...clues]) {
+    if (options.some((algorithm) => namesAlgorithm(part, algorithm))) fail();
+  }
+};
+
 const VALIDATORS: Readonly<Record<FixtureKind, (semantics: Semantics) => void>> = Object.freeze({
-  PROJECT: validateProject, LANGUAGE: validateLanguage, BEFORE_AFTER: validateBeforeAfter,
+  PROJECT: validateProject, LANGUAGE: validateLanguage, BEFORE_AFTER: validateBeforeAfter, ALGORITHM: validateAlgorithm,
 });
 
 /** Where each kind's source comes from, and the check that binds it to this snapshot. */
@@ -158,6 +206,7 @@ const SOURCE_VALIDATORS: Readonly<Record<FixtureKind, (value: unknown, snapshot:
   PROJECT: (value: unknown, snapshot: Snapshot) => validateStackSource(value, snapshot.id, snapshot.stack),
   LANGUAGE: (value: unknown, snapshot: Snapshot) => validateStackSource(value, snapshot.id, snapshot.stack),
   BEFORE_AFTER: (value: unknown, snapshot: Snapshot) => validateLineageSource(value, snapshot.id, snapshot.queryIds),
+  ALGORITHM: (value: unknown, snapshot: Snapshot) => validateCuratedSource(value, ALGORITHM_SOURCE_KEYS, snapshot.id, snapshot.pins),
 });
 
 /** Rules a whole deck must keep beyond its rounds' own. */
@@ -188,7 +237,7 @@ const parseFixture = (value: unknown, kind: FixtureKind, snapshot: Snapshot): Pa
   const evidence = text(fixture.evidence);
   const explanation = text(fixture.explanation);
   const source = SOURCE_VALIDATORS[kind](fixture.source, snapshot);
-  VALIDATORS[kind]({ panes, prompt, candidates, clues, correctCandidateId, source });
+  VALIDATORS[kind]({ snapshot, panes, prompt, candidates, clues, correctCandidateId, source });
   const helpfulSignals = texts(fixture.helpfulSignals);
   const misleadingSignals = texts(fixture.misleadingSignals);
   const claimText = [prompt, ...candidates.flatMap(({ label, detail }) => [label, detail ?? ""]), ...clues, evidence, explanation,
@@ -286,8 +335,7 @@ const validateResponseHashes = (value: unknown, snapshotId: string, profileHash:
 
 /** The curated section lists each pinned repository commit once, in order. */
 const parsePins = (value: unknown): ReadonlySet<string> => {
-  const curated = record(value, ["pins"]);
-  const pins = (Array.isArray(curated.pins) ? curated.pins : fail()).map((entry: unknown) => {
+  const pins = (Array.isArray(value) ? value : fail()).map((entry: unknown) => {
     const pin = record(entry, ["repository", "commit"]);
     const repository = text(pin.repository);
     if (!REPOSITORY.test(repository)) fail();
@@ -295,6 +343,29 @@ const parsePins = (value: unknown): ReadonlySet<string> => {
   });
   if (pins.length === 0 || pins.some((pin, index) => index > 0 && pin <= pins[index - 1]!)) fail();
   return new Set(pins);
+};
+
+/** The algorithms the run's algorithm rounds may offer, in id order, each file in a pinned repository. */
+const parseAlgorithms = (value: unknown, pins: ReadonlySet<string>): ReadonlyMap<string, CuratedAlgorithm> => {
+  const pinned = new Set([...pins].map((pin) => pin.split("@")[0]!));
+  const algorithms = (Array.isArray(value) ? value : fail()).map((entry: unknown): CuratedAlgorithm => {
+    const algorithm = record(entry, ["id", "label", "family", "names", "files"]);
+    const files = texts(algorithm.files);
+    if (files.some((file) => !pinned.has(file.split(":")[0]!) || file.split(":").length !== 2)) fail();
+    algorithmCandidateId(text(algorithm.id));
+    return Object.freeze({ id: text(algorithm.id), label: text(algorithm.label), family: text(algorithm.family),
+      names: texts(algorithm.names), files });
+  });
+  if (algorithms.length === 0 || algorithms.some(({ id }, index) => index > 0 && id <= algorithms[index - 1]!.id)
+    || new Set(algorithms.map(({ label }) => label)).size !== algorithms.length) fail();
+  return new Map(algorithms.map((algorithm) => [algorithm.id, algorithm]));
+};
+
+const parseCurated = (value: unknown): Pick<Snapshot, "pins" | "algorithms"> => {
+  const keys = typeof value === "object" && value !== null && Object.hasOwn(value, "algorithms") ? ["pins", "algorithms"] : ["pins"];
+  const curated = record(value, keys);
+  const pins = parsePins(curated.pins);
+  return Object.freeze({ pins, algorithms: keys.includes("algorithms") ? parseAlgorithms(curated.algorithms, pins) : new Map() });
 };
 
 const SNAPSHOT_KEYS = ["id", "profileVersion", "profileHash", "github", "stack", "acceptedResponseHashes"] as const;
@@ -313,7 +384,8 @@ const parseSnapshot = (value: unknown, profileHash: string): Snapshot => {
   if (!Array.isArray(stack.configurations)
     || stack.configurations.join("|") !== STACK_LANGUAGES.join("|")) fail();
   validateResponseHashes(snapshot.acceptedResponseHashes, id, profileHash);
-  return Object.freeze({ id, queryIds, stack: identity, pins: curated ? parsePins(snapshot.curated) : new Set<string>() });
+  return Object.freeze({ id, queryIds, stack: identity,
+    ...(curated ? parseCurated(snapshot.curated) : { pins: new Set<string>(), algorithms: new Map<string, CuratedAlgorithm>() }) });
 };
 
 export const ARTIFACT_KEYS = ["schemaVersion", "contentClass", "profileHash", "crawlSnapshot", "decks"] as const;

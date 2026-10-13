@@ -100,8 +100,12 @@ Three new decks, one pull request each, from
    reads one file of a curated repository at a pinned commit, with its
    licence and last human author. The artifact's deduplication, panes, and
    source validators are per kind.
-2. Which algorithm? (`algorithm`): TheAlgorithms Python, Java, and Go at
-   pinned commits. Families of four, the function name masked.
+2. Done, staged: Which algorithm? (`algorithm`). `select-algorithm.ts`,
+   `algorithm-rounds.ts`, and `function-windows.ts` (commentary stripped, the
+   algorithm's names and label words masked as `mystery`). The real table
+   (TheAlgorithms Python, Go, Java at pinned commits; eight families of four)
+   is `ops/poc/prepare/testdata/curated-algorithms.json`; the deck runs only
+   when a profile carries a `curated` section, which v4 does not.
 3. Predict the output (`output`): TheAlgorithms/Python doctests, parsed
    statically in TypeScript and never executed.
 4. Spot the fix (`fix`): Defects4J and BugsInPy one-line fixes, with a

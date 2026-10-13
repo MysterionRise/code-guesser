@@ -3,7 +3,8 @@ import { CapacityError } from "./capacity";
 /** Where a rejected candidate failed; rejection aggregates are keyed by stage and reason code. */
 export type DiagnosticStage = "DISCOVERY" | "ADMISSION" | "BLOB_RETRIEVAL" | "GITHUB_REVALIDATION" | "SCREENING" | "DEDUPLICATION" | "SELECTION";
 /** The stage a run was in when it failed, as named on the `PREPARATION_STAGE_FAILED` line. */
-export type FailureStage = "PREFLIGHT" | "DISCOVERY" | "ADMISSION" | "STACK_METADATA" | "BLOB_RETRIEVAL" | "SELECTION" | "PUBLICATION";
+export type FailureStage =
+  | "PREFLIGHT" | "DISCOVERY" | "ADMISSION" | "STACK_METADATA" | "BLOB_RETRIEVAL" | "CURATED_FILES" | "SELECTION" | "PUBLICATION";
 
 export interface RunState {
   readonly diagnostics: Map<string, number>;

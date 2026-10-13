@@ -1,8 +1,8 @@
 export interface Candidate { candidateId: string; label: string; detail: string | null }
 export interface PublicClue { order: 1 | 2; label: string }
 export interface Pane { label: string | null; text: string }
-export type RoundModeKind = "project" | "language" | "before-after";
-const ROUND_KINDS: readonly RoundModeKind[] = ["project", "language", "before-after"];
+export type RoundModeKind = "project" | "language" | "before-after" | "algorithm";
+const ROUND_KINDS: readonly RoundModeKind[] = ["project", "language", "before-after", "algorithm"];
 /** A session deals this many rounds from one deck. */
 export const SESSION_ROUNDS = 5;
 export interface RoundModeInput {
