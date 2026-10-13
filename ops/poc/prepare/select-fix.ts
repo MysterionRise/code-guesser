@@ -73,7 +73,8 @@ export const selectFix = async (
   const text = async (repository: string, blob: string): Promise<string> => {
     const result = await deps.readDatasetBlob({ ...context, repository, blob });
     addHashes(hashes, result.acceptedResponseHashes);
-    return decoder.decode(result.value);
+    // A dataset record that is not UTF-8 rejects its bug; the decoder's own TypeError would fail the whole run.
+    try { return decoder.decode(result.value); } catch { return fail("FIX_DATASET_ENCODING"); }
   };
   const tables = new Map<string, ReadonlyMap<string, BugRevisions>>();
   const perRepository = new Map<string, number>();

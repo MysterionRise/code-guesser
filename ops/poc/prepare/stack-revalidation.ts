@@ -147,6 +147,9 @@ const commitState = (value: unknown, commit: string, api: string, web: string) =
   const treeSha = gitId(tree.sha);
   if (tree.url !== `${api}/git/trees/${treeSha}`) fail("REVALIDATION_COMMIT");
   const name = text(record(details.author).name);
+  // Some imported histories record an email address as the author's name: contact data, never published,
+  // so the candidate is rejected here instead of failing the shared parser after the run's whole spend.
+  if (name.includes("@")) fail("REVALIDATION_AUTHOR_CONTACT");
   if (response.author === null) return Object.freeze({ treeSha, name, login: null });
   const author = record(response.author);
   const login = text(author.login);

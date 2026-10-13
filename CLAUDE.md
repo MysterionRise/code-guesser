@@ -165,76 +165,176 @@ Add `DEMO_PORT=3300` if another local app holds port 3100.
 
 ## Reading failures
 
-Read the `PREPARATION_STAGE_FAILED <stage> <code> <status-class>` line first;
-`ops/poc/stack/tmp/local-experiment-last-failure.json` holds the same codes
-with spend, capacity counts, and rejection aggregates.
+Read the `PREPARATION_STAGE_FAILED <stage> <code> <status-class>` line first.
+`PREPARATION_FAILURE_SITE <function>@<file>` names where the failure was
+thrown, and `ops/poc/stack/tmp/local-experiment-last-failure.json` holds the
+same codes with spend, capacity counts, and rejection aggregates.
 
-- `WORKER_EXIT_SAMPLE_REJECTED`, `SAMPLE_REJECTED`: the metadata worker's
-  sample request or output broke its bounds (a licence off the allowlist, too
-  many repositories or files, an ordinary repository twice).
-- `PREPARATION_DECK_SKIPPED <deck> <code>`: that deck did not fill (`DECK_SHORT`,
-  or the `BUDGET_EXHAUSTED_*` budget that ran out) and was left out; the others
-  still publish. `SELECTION DECK_SHORT` or `NO_DECK_FILLED` means none filled.
+The stages run in this order: `PREFLIGHT`, `STACK_METADATA`, `DISCOVERY`,
+`ADMISSION`, `BLOB_RETRIEVAL`, `CURATED_FILES`, `SELECTION`, `GENERATION`,
+`REPORT`, `PUBLICATION`. `GENERATION` binds the sources to the final snapshot,
+generates the rounds, and composes the artifact; `REPORT` validates the run
+report. A failure from `ADMISSION` to `REPORT` also logs `PREPARATION_COUNTS`
+and `PREPARATION_REJECTIONS`. `ops/poc/prepare/failure-codes.test.ts` fails
+when the preparer throws a code this section does not name.
+
+### Codes that fail the run
+
+- `COMMAND_ARGUMENTS_REJECTED`: `prepare:poc` got something other than no
+  flag, `--resume`, or `--offline`; it prints the usage line.
+- `INVARIANT_REJECTED`: an internal consistency check failed, such as a
+  revalidated Stack file whose language differs from its row.
+  `UNCODED_<CLASS>` (for example `UNCODED_TYPEERROR`) is an error with no
+  stable code. Both mean a bug and fail the run even inside one candidate;
+  the failure site says where.
 - `JOURNAL_MISS`, `JOURNAL_MISSING`, `JOURNAL_CORRUPT`: `--offline` needed a
-  response the journal lacks, there is no journal, or a journal entry failed its
-  hash check. Run without `--offline` (or with `--resume`). A miss fails the
-  whole run, even inside one candidate, so a replay never publishes fewer decks
-  than the run it replays.
-
-- `RETRY_SIGNAL_MISSING 4xx`: a 403/429 without a usable retry instruction.
-- `WAIT_LIMIT`: a retry instruction longer than the fifteen-second wait.
-- `BUDGET_EXHAUSTED_<BUDGET>`: a run-wide budget (requests, blob attempts or
-  bytes, metadata bytes, retries, waits, temporary disk) ran out; the deck
-  being filled and every later deck are skipped instead of rejecting every
-  later candidate. `PREPARATION_SPEND` shows the requests each stage used.
-- `LOGICAL_RETRY_LIMIT`, `RUN_RETRY_LIMIT`, `WAIT_LIMIT`: a GitHub 5xx, network
-  error, timeout, or rate limit was retried once and failed again, or the
-  run's five retries or 30 s of waiting were spent.
-- `WORKER_EXIT_<CODE>`: a Python worker exited non-zero with its own stable
-  code (`WORKER_UNEXPECTED` for an unmapped exception). A bare `WORKER_EXIT`
-  means its stderr was not a code.
-- `PUBLIC_CONTAINMENT_*`: names the protected key and public field that
-  collided.
+  response or worker output the journal lacks, there is no journal, or a
+  journal entry failed its hash check. Run without `--offline` (or with
+  `--resume`). A miss fails the whole run, even inside one candidate, so a
+  replay never publishes fewer decks than the run it replays.
+  `OFFLINE_NETWORK_REFUSED` is the offline transport's guard against any
+  request the journal did not answer. `FINALIZE_REPLAY_MISS`: `GENERATION`
+  needed a response the run never accepted.
+- Preflight: `ACKNOWLEDGEMENT_MISSING`, `ACKNOWLEDGEMENT_MISMATCH` (the
+  acknowledged revision is unset or not the pinned one); `REVISION_MISMATCH`,
+  `RELEASE_MISMATCH`, `TERMS_CHANGED`, `PROFILE_MISMATCH` (The Stack v2 moved
+  from what the profile pins); `ACCESS_*`, `CARD_*` (access is no longer
+  granted, or the access check or dataset card could not be fetched or read).
+  Preflight reports every transport failure, an offline journal miss
+  included, as `ACCESS_UNAVAILABLE` or `CARD_UNAVAILABLE`.
+- Stack metadata worker:
+  - `WORKER_EXIT_<CODE>`: the worker exited non-zero with its own stable code
+    (`WORKER_UNEXPECTED` for an unmapped exception). A bare `WORKER_EXIT`
+    means its stderr was not a code.
+  - `WORKER_EXIT_SAMPLE_REJECTED`, `SAMPLE_REJECTED`: its sample request or
+    output broke its bounds (a licence off the allowlist, too many
+    repositories or files, an ordinary repository twice).
+  - `ROW_*`, `OUTPUT_MALFORMED`, `OUTPUT_NONCANONICAL`, `COUNTERS_REJECTED`,
+    `WORKER_STDERR`: output that broke its contract. `METADATA_BYTES`,
+    `METADATA_CAPACITY`, `TEMPORARY_DISK`: its budgets.
+  - `UV_MISSING`, `WORKER_START_FAILED`, `RUNTIME_MISSING`, `PYTHON_MISMATCH`,
+    `LOCK_MISMATCH`: the locked Python runtime could not start.
 - `GITHUB_SEARCH_*`: the discovery check that rejected a search response.
   `INCOMPLETE`, `TOTAL_CHANGED`, `ITEM_COUNT`, and `DUPLICATE` are provider
-  inconsistencies; `SHAPE`, `IDENTITY`, and `DATE` are record drift.
+  inconsistencies; `SHAPE`, `IDENTITY`, and `DATE` are record drift;
+  `RESULT_CEILING` and `PAGE_CEILING` mean a query outgrew its ceilings.
+- `PREPARATION_DECK_SKIPPED <deck> <code>`: that deck did not fill
+  (`DECK_SHORT`, or the `BUDGET_EXHAUSTED_*` budget that ran out) and was left
+  out; the others still publish, and the aggregates count it as
+  `<DECK>_DECK_SKIPPED`. `SELECTION DECK_SHORT` or `NO_DECK_FILLED` means none
+  filled.
+- `BUDGET_EXHAUSTED_<BUDGET>`: a run-wide budget ran out (`REQUEST_COUNT`,
+  `BLOB_ATTEMPTS`, `SUCCESSFUL_BLOBS`, or `TOTAL_BLOB_BYTES`). The deck being
+  filled and every later deck are skipped instead of rejecting every later
+  candidate. `PREPARATION_SPEND` shows the requests each stage used. Retries
+  and waiting are bounded by the retry codes below, and Stack metadata bytes
+  and temporary disk by the metadata worker's own codes.
+- Generation and report:
+  - `EXPERIMENT_RECORD_REJECTED`: the shared parser rejected a round, the
+    artifact, or the run report. `RUN_REPORT_REJECTED`: the report's own
+    check.
+  - `EXPERIMENT_COMPOSITION_REJECTED`, `DECK_SIZE_<DECK>`, `NO_DECK`: the
+    composed artifact is inconsistent, a deck has the wrong size, or no deck
+    is left.
+  - `PUBLIC_CONTAINMENT_<KEY>_IN_<FIELD>` (or
+    `PUBLIC_CONTAINMENT_CANDIDATE_IN_<FIELD>`): names the protected value and
+    the public field that collided.
+  - A round generator's own check: `*_ROUNDS_REJECTED`,
+    `ALGORITHM_NAME_SHOWN`, `ALGORITHM_FAMILY_UNBALANCED`,
+    `OUTPUT_ANSWER_ECHOED`, `OUTPUT_RANK_UNBALANCED`, `FIX_RANK_UNBALANCED`,
+    `FIX_REPOSITORY_REPEATED`, `TEMPLATE_PLACEHOLDER_REJECTED`.
+- Publication: `HASH_MISMATCH`, `INVALID_ARTIFACT`, `INVALID_HASH`, and
+  `REPORT_*_FAILED` (staging, committing, rolling back, or finalizing the
+  report). The previous artifact and pin stay.
+- Internal checks mean an edited profile or limits file, or a bug:
+  `CRAWL_PROFILE_REJECTED`, `LIMIT_*`, `*_DIMENSIONS`, `UNKNOWN_*`,
+  `*_RELEASED`, `EMPTY_BLOB`, `WAIT_VALUE`, `CANONICAL_VALUE_REJECTED`,
+  `CONFIGURATION_REJECTED`, `ENVIRONMENT_REJECTED`, `JOURNAL_OFFLINE_RECORD`,
+  `INVALID_TARGET`, `INVALID_TEMP_ID`, `INVALID_RETRY_LIMITS`,
+  `INVALID_TRANSPORT_LIMITS`.
 
-Curated files fail with `FILE_*` codes (`FILE_TREE`, `FILE_PATH`, `FILE_BLOB`,
-`FILE_AUTHOR`; `FILE_AUTHOR_AUTOMATED` means the file's last ten changes all
-came from bots) or with the admission codes.
+### Provider, transport, and retry codes
 
-Rejection aggregates name the failing check: `LINEAGE_*` (`LINEAGE_CHANGE_WINDOW`
-is a commit whose change does not fit one before-and-after window),
-`ADMISSION_*` (`ADMISSION_REPOSITORY_LICENSE` is a repository licence outside
-the allowlist), and `REVALIDATION_*` (`REVALIDATION_WINDOW` is a file with no
-code window past its preamble). `REPOSITORY_SCREENED_OUT` counts later
-candidates of a repository already rejected once.
+These fail the run in `DISCOVERY`, and reject one candidate while candidates
+are being selected.
 
-Selection diagnostics are expected screening outcomes, not faults:
+- `UNSUPPORTED_STATUS 4xx`: a status the preparer does not accept (a 401
+  from a revoked token, a 404, or a 403/429 without a usable retry
+  instruction). The retry controller's `RETRY_SIGNAL_MISSING` wrapper is
+  reported as the failure it wraps.
+- `TIMEOUT`, `NETWORK`, `MALFORMED_BODY`, `RESPONSE_LIMIT`, `REQUEST_LIMIT`,
+  `PAGE_LIMIT`, `CONCURRENCY_LIMIT`, `POLICY`: the bounded transport's own
+  checks. The capacity meter's `BLOB_BYTES`, `RESPONSE_BYTES`, and
+  `CONCURRENCY` reject the one request or blob that broke them;
+  `GITHUB_PAGES` and `GITHUB_RESULTS` fail discovery.
+- `LOGICAL_RETRY_LIMIT`: a GitHub 5xx, network error, timeout, or rate limit
+  was retried once and failed again. `RUN_RETRY_LIMIT`, `TOTAL_WAIT_LIMIT`:
+  the run's five retries or 30 s of waiting were spent. `WAIT_LIMIT`: a retry
+  instruction longer than the fifteen-second wait. `RETRY_SIGNAL_MALFORMED`:
+  a retry instruction that was not a positive wait.
 
-- `REPOSITORY_REPEATED`
+### Rejection aggregates
+
+Rejections are counted as `STAGE:CODE=count`, where the stage is the check's
+own (`GITHUB_REVALIDATION`, `SCREENING`, `DEDUPLICATION`, and so on). They are
+expected screening outcomes, not faults; a deck is skipped only when too many
+add up.
+
+- `LINEAGE_*`, `ADMISSION_*`, `REVALIDATION_*`, `FILE_*`, and `FIX_*` name the
+  failing check of a commit, a repository, a Stack file, a curated file, or a
+  fix. For example:
+  - `LINEAGE_CHANGE_WINDOW`: a commit whose change does not fit one
+    before-and-after window.
+  - `ADMISSION_REPOSITORY_LICENSE`: a repository licence outside the
+    allowlist.
+  - `REVALIDATION_WINDOW`: a file with no code window past its preamble.
+  - `FILE_AUTHOR_AUTOMATED`: a curated file whose last ten changes all came
+    from bots.
+- `ADMISSION_AUTHOR_CONTACT`, `REVALIDATION_AUTHOR_CONTACT`: an author
+  recorded under an email address, which is never published.
+- `LICENSE_REJECTED`: a Stack row's licence is off the allowlist, before any
+  download.
+- The blob screen:
+  - Content: `PERSONAL_DATA` (an email address in the file), `SECRET_LIKE`,
+    `GENERATED_CONTENT`, `MINIFIED_CONTENT`, `BLOB_SIZE_LIMIT`,
+    `BINARY_CONTENT`, `INVALID_UTF8`, `DECEPTIVE_CONTROL`,
+    `DUPLICATE_CONTENT`.
+  - Path: `INVALID_PATH`, `UNSUPPORTED_EXTENSION`, `EXCLUDED_PATH` (docs,
+    vendor, and generated directories, lock files, minified files).
+- The blob worker: `WORKER_EXIT_<CODE>`, `BLOB_IDENTITY_REJECTED`,
+  `BLOB_CAPACITY`, `NETWORK_BYTES`, `REDIRECT_REJECTED`.
+- `REPOSITORY_SCREENED_OUT` counts later candidates of a repository already
+  rejected once. `REPOSITORY_REPEATED`: a repository the deck already holds.
+- `SOURCE_DUPLICATE`, `PUBLIC_CONTAINMENT_REJECTED`,
+  `SOURCE_IDENTITY_UNREPORTABLE`: a source another round already shows, a
+  pane that would reveal a protected value, and a source the run report could
+  not record.
 - `SUBJECT_UNUSABLE`: a commit subject no hint can quote.
 - `PROJECT_NAME_IN_EXCERPT`: code or a file name names an option, including
   a distinctive part of a name, such as `graphql` for graphql-ruby.
-- `PROJECT_NAMED_BY_TEMPLATE`: the deck's own wording names the repository.
+  `PROJECT_NAMED_BY_TEMPLATE`: the deck's own wording names the repository.
 - `LANGUAGE_PAIR_AMBIGUOUS`: the code does not tell its language from the
-  look-alike.
-- `LANGUAGE_ROUNDS_REJECTED`
-- `SOURCE_IDENTITY_UNREPORTABLE`
+  look-alike. `LANGUAGE_ROUNDS_REJECTED`: another language-round check.
 - `ALGORITHM_WINDOW`, `ALGORITHM_NAME_IN_CODE`, `ALGORITHM_FAMILY_SHORT`: a
   file with no masked window, code that still names an option, and a family
   dropped whole because one of its algorithms found no file.
+  `ALGORITHM_SCREEN`: screened bytes that differ from the bound file's.
 - `OUTPUT_NO_DOCTEST`: a file with no function a round can ask about (most
-  files). `OUTPUT_RANKS_UNBALANCED`: no choice of answers fills every rank in
-  both orders, so the output deck is skipped.
+  files). `OUTPUT_PANE_SIZE`: a pane over the byte limit.
+  `OUTPUT_FILE_CHANGED`: the file bound differs from the file read.
+  `OUTPUT_RANKS_UNBALANCED`: no choice of answers fills every rank in both
+  orders, so the output deck is skipped.
 - `FIX_PATCH_WIDE`: a dataset patch that changes more than one line (most).
-  `FIX_CHANGE`, `FIX_DIFF`, `FIX_PARENT`: the upstream fix commit changes
-  more of the file, differs from the dataset's line, or is a merge.
-  `ADMISSION_LICENSE_SHAPE` here is usually an old commit whose licence file
-  GitHub cannot identify. `FIX_RANKS_UNBALANCED`: no choice of windows
-  balances the deck.
-- `ADMISSION_AUTHOR_CONTACT`: an author recorded under an email address,
-  which is never published.
+  - `FIX_CHANGE`, `FIX_DIFF`, `FIX_PARENT`: the upstream fix commit changes
+    more of the file, differs from the dataset's line, or is a merge.
+  - `FIX_WINDOW`: no window gives four comparable option lines.
+    `FIX_CONTENT`, `FIX_ENCODING`: the upstream file could not be read as
+    checked text.
+  - `FIX_DATASET_*`, `FIX_RECORD_*`: a dataset's tree, patch, or bug record
+    is malformed or missing (`FIX_DATASET_ENCODING`: not UTF-8).
+  - `ADMISSION_LICENSE_SHAPE` here is usually an old commit whose licence
+    file GitHub cannot identify.
+  - `FIX_RANKS_UNBALANCED`: no choice of windows balances the deck.
 
 ## Commands
 

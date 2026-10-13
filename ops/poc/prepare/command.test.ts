@@ -1,18 +1,25 @@
+import { mkdtempSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
+import { fetchSelectedBlob } from "./blob-worker";
 import { canonicalHash } from "./canonical";
 import { CapacityError, createCapacityMeter } from "./capacity";
 import { GitHubSearchError } from "./github-search";
+import { JournalError, openJournal } from "./journal";
 import { HARNESS_CANDIDATES, accepted, classificationsFor, harnessRow, hash, loadProfile, makeHarness } from "./command-test-harness";
 import {
   CURATED_REPOSITORIES, CURATED_SECTION, FIX_SECTION, OUTPUT_SECTION, curatedFiles, fixHarnessData, loadCuratedProfile, outputFiles, sha256,
 } from "./testdata/deck-builders";
 import { LANGUAGE_SLUGS } from "../../../packages/artifact/src/index";
 import { STACK_LANGUAGES, parseCrawlProfile } from "./profile";
-import { RetryError } from "./retry";
+import { createRetryController, RetryError } from "./retry";
 import { createRunReport } from "./run-report";
-import { StackMetadataError } from "./stack-metadata";
+import { workerStage } from "./runtime";
+import { collectStackMetadata, StackMetadataError, type StackMetadataRow } from "./stack-metadata";
 import { TransportError } from "./transport";
+import { journaledWorker } from "./worker-journal";
 import {
   prepareLocalExperiment,
   projectPreparationEnvironment,
@@ -66,6 +73,12 @@ const searchWith = (queryClassifications: unknown): PreparationDependencies["sea
   candidates: HARNESS_CANDIDATES,
   queryClassifications,
 } as any, "2");
+/** An offline journal that holds nothing, so every worker output the run asks it for is a miss. */
+const emptyOfflineJournal = () => {
+  const path = join(mkdtempSync(join(tmpdir(), "codeguessr-offline-")), "run.jsonl");
+  openJournal({ mode: "fresh", path }).finish();
+  return openJournal({ mode: "offline", path });
+};
 
 describe("local experiment preparation command", () => {
 /** Marker lines only; the failure-site line is asserted separately. */
@@ -292,6 +305,17 @@ const logLines = (calls: readonly string[]): string[] =>
     expect(harness.calls).toContain("fix-deck:8");
     expect(harness.calls).toContain(`compose:${STACK_POOL}/${STACK_POOL}/5/8`);
     expect(logLines(harness.calls)).toContain("log:PREPARATION_DECKS project,language,before-after,fix");
+  });
+
+  it("rejects one bug whose dataset record is not UTF-8 and keeps selecting fixes", async () => {
+    const profile = loadCuratedProfile({ beforeAfterPool: 5 }, { fix: true });
+    const harness = await makeHarness({}, { profile, fix: fixHarnessData() });
+    const read = harness.dependencies.readDatasetBlob;
+    let reads = 0;
+    harness.dependencies.readDatasetBlob = async (options) => (reads += 1) === 1 ? accepted(new Uint8Array([0xc3, 0x28]), "8") : read(options);
+    await prepareLocalExperiment(harness.dependencies);
+    expect((harness.reports[0] as any).diagnostics).toContainEqual({ stage: "ADMISSION", reasonCode: "FIX_DATASET_ENCODING", count: 1 });
+    expect(reads).toBeGreaterThan(1);
   });
 
   it("skips the fix deck alone when its patch reads run out", async () => {
@@ -787,7 +811,18 @@ const logLines = (calls: readonly string[]): string[] =>
       STACK_V2_ACKNOWLEDGED_USABLE_REVISION: "7".repeat(40),
     });
     process.argv.splice(0, process.argv.length, "node", "index.ts", "https://example.test/?token=secret");
-    await expect(runPreparationCli()).rejects.toThrow("COMMAND_ARGUMENTS_REJECTED");
+    const logged: string[] = [];
+    await expect(runPreparationCli((message) => { logged.push(message); })).rejects.toThrow("COMMAND_ARGUMENTS_REJECTED");
+    expect(logged.join(" ")).not.toMatch(/example\.test|token|secret/u);
+  });
+
+  it("prints the stable code and the accepted flags when it gets a mistyped flag, then exits non-zero", async () => {
+    for (const argv of [["--ofline"], ["--resume", "--offline"], ["offline"]]) {
+      process.argv.splice(0, process.argv.length, "node", "index.ts", ...argv);
+      const logged: string[] = [];
+      await expect(runPreparationCli((message) => { logged.push(message); })).rejects.toThrow("COMMAND_ARGUMENTS_REJECTED");
+      expect(logged).toEqual(["COMMAND_ARGUMENTS_REJECTED", "usage: pnpm prepare:poc [--resume | --offline]"]);
+    }
   });
 
   it("projects only AWS and provider-store values into the selected-blob worker", async () => {
@@ -843,15 +878,35 @@ const logLines = (calls: readonly string[]): string[] =>
     ]);
   });
 
-  it("fails the run, publishing nothing, when an offline replay lacks a candidate's response", async () => {
+  it("fails the run, publishing nothing, when an offline replay lacks a selected blob's worker output", async () => {
+    // The real worker bridge over a real offline journal: the miss is the journal's own error, not a faked chain.
+    const offline = emptyOfflineJournal();
+    const spawned: unknown[] = [];
     const harness = await makeHarness({
-      fetchStackBlob: async () => {
-        throw new RetryError("RETRY_SIGNAL_MISSING", Object.assign(new Error("JOURNAL_MISS"), { code: "JOURNAL_MISS" }));
-      },
+      fetchStackBlob: ({ row, limits, capacity }) => workerStage(() => fetchSelectedBlob({ row: row as StackMetadataRow, limits,
+        environment: { PATH: "/bin" }, capacity, runWorker: journaledWorker(offline, async (request) => { spawned.push(request); throw new Error("WORKER_SPAWNED"); }, "code") })),
     });
     await expect(prepareLocalExperiment(harness.dependencies)).rejects.toThrow("PREPARATION_FAILED");
+    expect(spawned).toEqual([]);
     expect(harness.published).toEqual([]);
+    // The first miss ends the run: no later row is tried, so a replay can never publish a different Stack deck.
+    expect(harness.calls.filter((call) => call.startsWith("revalidate:"))).toEqual([]);
     expect(logLines(harness.calls)[0]).toBe("log:PREPARATION_STAGE_FAILED BLOB_RETRIEVAL JOURNAL_MISS none");
+  });
+
+  it("fails the run at Stack metadata, naming the miss, when an offline replay lacks the metadata worker's output", async () => {
+    const offline = emptyOfflineJournal();
+    const harness = await makeHarness({
+      collectStackMetadata: (options) => workerStage(() => collectStackMetadata({ profile: options.profile, capacity: options.capacity,
+        configuration: options.configuration, rowLimit: options.profile.capacity.stackRowsPerLanguage, environment: options.environment,
+        blobAccess: async () => undefined, runWorker: journaledWorker(offline, async () => { throw new Error("WORKER_SPAWNED"); }, "code") })),
+    });
+    await expect(prepareLocalExperiment(harness.dependencies)).rejects.toThrow("PREPARATION_FAILED");
+    expect(harness.calls).not.toContain("search");
+    expect(logLines(harness.calls)).toEqual([
+      "log:PREPARATION_STAGE_FAILED STACK_METADATA JOURNAL_MISS none",
+      "log:PREPARATION_FAILED",
+    ]);
   });
 
   it("publishes the decks filled before a run-wide budget ran out", async () => {
@@ -892,14 +947,16 @@ const logLines = (calls: readonly string[]): string[] =>
       "log:PREPARATION_FAILED",
     ]);
 
+    // A revoked token: the search answers 401, which asks for no retry, so the retry controller wraps it.
     const diagnostic = { provider: "github", hostClass: "github", method: "GET", pathTemplate: "/search/commits",
       statusClass: "4xx", reasonCode: "UNSUPPORTED_STATUS" } as const;
+    const retry = createRetryController({ maxRunRetries: 1, maxWaitMilliseconds: 1, maxTotalWaitMilliseconds: 1, sleep: async () => undefined });
     const search = await makeHarness({
-      searchGitHub: async () => { throw new RetryError("RETRY_SIGNAL_MISSING", new TransportError("UNSUPPORTED_STATUS", diagnostic)); },
+      searchGitHub: () => retry.execute(async () => { throw new TransportError("UNSUPPORTED_STATUS", diagnostic, 401); }),
     });
     await expect(prepareLocalExperiment(search.dependencies)).rejects.toThrow("PREPARATION_FAILED");
     expect(logLines(search.calls)).toEqual([
-      "log:PREPARATION_STAGE_FAILED DISCOVERY RETRY_SIGNAL_MISSING 4xx",
+      "log:PREPARATION_STAGE_FAILED DISCOVERY UNSUPPORTED_STATUS 4xx",
       "log:PREPARATION_FAILED",
     ]);
 
@@ -941,10 +998,37 @@ const logLines = (calls: readonly string[]): string[] =>
     ]);
   });
 
+  it("names the generation, report, and curated-file stages when they fail, with the selection counts", async () => {
+    const counts = "log:PREPARATION_COUNTS discovered=8 admitted=5 duplicates=0";
+    const rejections = "log:PREPARATION_REJECTIONS SCREENING:LANGUAGE_ROUNDS_REJECTED=1";
+    const composing = await makeHarness({ compose: () => { throw Object.assign(new Error("EXPERIMENT_COMPOSITION_REJECTED"), { code: "DECK_SIZE_PROJECT" }); } });
+    await expect(prepareLocalExperiment(composing.dependencies)).rejects.toThrow("PREPARATION_FAILED");
+    expect(logLines(composing.calls)).toEqual([
+      "log:PREPARATION_STAGE_FAILED GENERATION DECK_SIZE_PROJECT none", counts, rejections, "log:PREPARATION_FAILED",
+    ]);
+
+    // The real run-report parser, given a selected count above its bound (v5 run 1's failure).
+    const reporting = await makeHarness({ createReport: (input: any) => createRunReport({ ...input, counts: { ...input.counts, selected: 10_000 } }) });
+    await expect(prepareLocalExperiment(reporting.dependencies)).rejects.toThrow("PREPARATION_FAILED");
+    expect(logLines(reporting.calls)).toEqual([
+      "log:PREPARATION_STAGE_FAILED REPORT EXPERIMENT_RECORD_REJECTED none", counts, rejections, "log:PREPARATION_FAILED",
+    ]);
+    expect(reporting.calls).not.toContain("report:stage");
+
+    const curated = await makeHarness({ bindCuratedFile: async () => { throw new JournalError("JOURNAL_MISS"); } },
+      { profile: loadCuratedProfile({ beforeAfterPool: 5 }), curatedFiles: curatedFiles() });
+    await expect(prepareLocalExperiment(curated.dependencies)).rejects.toThrow("PREPARATION_FAILED");
+    expect(logLines(curated.calls)).toEqual([
+      "log:PREPARATION_STAGE_FAILED CURATED_FILES JOURNAL_MISS none", counts, rejections, "log:PREPARATION_FAILED",
+    ]);
+  });
+
   it("logs pool counts and per-stage rejection codes when selection fails, never candidate detail", async () => {
     const harness = await makeHarness({
       admitGitHubCandidate: async ({ candidate }) => {
-        throw new Error((candidate as any).id % 2 === 0 ? "LICENSE_REJECTED" : "https://github.com/owner/repo secret");
+        // A coded rejection whose message carries candidate detail: only its code may reach the log.
+        throw (candidate as any).id % 2 === 0 ? new Error("LICENSE_REJECTED")
+          : Object.assign(new Error("https://github.com/owner/repo secret"), { code: "ADMISSION_REPOSITORY" });
       },
       collectStackMetadata: async () => accepted([], "5"),
     });
@@ -955,11 +1039,46 @@ const logLines = (calls: readonly string[]): string[] =>
       "log:PREPARATION_DECK_SKIPPED before-after DECK_SHORT",
       "log:PREPARATION_STAGE_FAILED SELECTION DECK_SHORT none",
       "log:PREPARATION_COUNTS discovered=8 admitted=0 duplicates=0",
-      "log:PREPARATION_REJECTIONS ADMISSION:CANDIDATE_REJECTED=4 ADMISSION:LICENSE_REJECTED=4 "
+      "log:PREPARATION_REJECTIONS ADMISSION:ADMISSION_REPOSITORY=4 ADMISSION:LICENSE_REJECTED=4 "
         + "SELECTION:BEFORE_AFTER_DECK_SKIPPED=1 SELECTION:LANGUAGE_DECK_SKIPPED=1 SELECTION:PROJECT_DECK_SKIPPED=1",
       "log:PREPARATION_FAILED",
     ]);
     expect(harness.calls.join(" ")).not.toMatch(/owner\/repo|secret/u);
+  });
+
+  it("fails the run on a programming error inside one candidate instead of rejecting every candidate", async () => {
+    let revalidations = 0;
+    function misreadRevalidation(): never { revalidations += 1; throw new TypeError("Cannot read properties of undefined (reading 'sha') https://example.test/x"); }
+    const harness = await makeHarness({ revalidateStackCandidate: async () => misreadRevalidation() });
+    await expect(prepareLocalExperiment(harness.dependencies)).rejects.toThrow("PREPARATION_FAILED");
+    expect(revalidations).toBe(1);
+    expect(harness.published).toEqual([]);
+    expect(logLines(harness.calls)[0]).toBe("log:PREPARATION_STAGE_FAILED BLOB_RETRIEVAL UNCODED_TYPEERROR none");
+    expect(harness.calls).toContain("log:PREPARATION_FAILURE_SITE misreadRevalidation@command.test.ts");
+    expect(harness.calls.join(" ")).not.toMatch(/example\.test|Cannot read/u);
+
+    // The same holds when the retry controller wrapped it, and for an error with no stable code at all.
+    let lineages = 0;
+    const wrapped = await makeHarness({ bindGitHubLineage: async () => {
+      lineages += 1;
+      throw new RetryError("RETRY_SIGNAL_MISSING", new RangeError("Invalid count value: -1"));
+    } });
+    await expect(prepareLocalExperiment(wrapped.dependencies)).rejects.toThrow("PREPARATION_FAILED");
+    expect(logLines(wrapped.calls)[0]).toBe("log:PREPARATION_STAGE_FAILED ADMISSION UNCODED_RANGEERROR none");
+    expect(lineages).toBe(1);
+
+    const uncoded = await makeHarness({ admitGitHubCandidate: async () => { throw new Error("https://github.com/owner/repo secret"); } });
+    await expect(prepareLocalExperiment(uncoded.dependencies)).rejects.toThrow("PREPARATION_FAILED");
+    expect(logLines(uncoded.calls)[0]).toBe("log:PREPARATION_STAGE_FAILED ADMISSION UNCODED_ERROR none");
+    expect(uncoded.calls.filter((call) => call.startsWith("admit:") || call.startsWith("lineage:"))).toEqual(["lineage:0"]);
+    expect(uncoded.calls.join(" ")).not.toMatch(/owner\/repo|secret/u);
+  });
+
+  it("fails the run with INVARIANT_REJECTED when a revalidated Stack file's language differs from its row's", async () => {
+    const harness = await makeHarness({ revalidateStackCandidate: async ({ row }: any) => accepted({ ...row, detectedLanguage: "Cobol" }, "8") });
+    await expect(prepareLocalExperiment(harness.dependencies)).rejects.toThrow("PREPARATION_FAILED");
+    expect(harness.calls.filter((call) => call.startsWith("fetch:"))).toHaveLength(1);
+    expect(logLines(harness.calls)[0]).toBe("log:PREPARATION_STAGE_FAILED BLOB_RETRIEVAL INVARIANT_REJECTED none");
   });
 
   it("reports the transport cause behind a wrapped retry failure as the rejection code", async () => {
