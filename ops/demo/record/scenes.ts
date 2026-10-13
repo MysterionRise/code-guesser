@@ -1,8 +1,12 @@
 import type { GifOptions } from "./encode";
+import type { CaptionStyle } from "./overlay";
 
 /** One scripted interaction with the running game. */
 export type Step =
   | Readonly<{ kind: "goto"; path: string }>
+  // Checks the current round's right answer. The recorder reads it from the artifact on the Node side, as the
+  // browser tests do; the page itself never learns it.
+  | Readonly<{ kind: "answer" }>
   | Readonly<{ kind: "caption"; text: string }>
   | Readonly<{ kind: "click"; name: string }>
   | Readonly<{ kind: "link"; name: string }>
@@ -10,6 +14,8 @@ export type Step =
   | Readonly<{ kind: "expectText"; pattern: string }>
   | Readonly<{ kind: "expectHeading"; pattern: string }>
   | Readonly<{ kind: "scrollTo"; selector: string }>
+  // Jumps without animation, for a hard cut: `start` puts the element at the top, `center` in the middle.
+  | Readonly<{ kind: "jumpTo"; selector: string; block: "start" | "center" }>
   | Readonly<{ kind: "wait"; milliseconds: number }>;
 
 export interface Scene {
@@ -18,6 +24,11 @@ export interface Scene {
   readonly gif: Partial<GifOptions>;
   /** When set, the same screencast is also encoded to this MP4 basename. */
   readonly mp4?: string;
+  /** The page size in CSS pixels; a phone viewport (390x844) unless set. */
+  readonly viewport?: Readonly<{ width: number; height: number }>;
+  readonly captionStyle?: CaptionStyle;
+  /** The page's motion preference; the game animates unless it is `reduce`. */
+  readonly reducedMotion?: "reduce" | "no-preference";
   readonly steps: readonly Step[];
 }
 
@@ -28,11 +39,70 @@ const goto = (path: string): Step => ({ kind: "goto", path });
 const choose = (index: number): Step => ({ kind: "choose", index });
 const wait = (milliseconds: number): Step => ({ kind: "wait", milliseconds });
 const verdict: Step = { kind: "expectHeading", pattern: "^(?:Nice read\\.|Not this time\\.)$" };
+const answer: Step = { kind: "answer" };
+
+const jumpTo = (selector: string, block: "start" | "center" = "center"): Step => ({ kind: "jumpTo", selector, block });
 
 /**
- * Answer index per round. The recorder never reads private round data, so the
- * indexes are a fixed choreography rather than known-correct answers; a wrong
- * pick shows the "Not this time." branch, which is part of the demo.
+ * One hard cut of the vertical demo: open a deck under a title sticker, read the question and the code, lock in
+ * the right answer (after a hint, or with the chosen line highlighted, where asked), and pop the points.
+ */
+const demoCut = (deck: string, title: string, points: string, extras: Readonly<{ hint?: boolean; highlight?: boolean }> = {}): Step[] => [
+  goto(`/?deck=${deck}`),
+  { kind: "expectText", pattern: "Round 1 of 5" },
+  caption(title),
+  wait(850),
+  caption(""),
+  jumpTo("#round-title", "start"),
+  wait(1500),
+  ...(extras.hint ? [jumpTo(".hints"), wait(250), click("Reveal hint 1"), wait(1000)] : []),
+  jumpTo("fieldset"),
+  wait(350),
+  answer,
+  wait(400),
+  ...(extras.highlight ? [jumpTo(".code-line.highlighted"), wait(950), jumpTo("fieldset"), wait(250)] : []),
+  click("Lock in answer"),
+  { kind: "expectHeading", pattern: "^Nice read\\.$" },
+  jumpTo(".reveal h2"),
+  caption(points),
+  wait(1150),
+];
+
+/** The README's headline clip: a vertical, captioned tour of all six decks, each round answered right. */
+export const DEMO_SCENE: Scene = Object.freeze({
+  id: "demo",
+  viewport: Object.freeze({ width: 360, height: 640 }),
+  captionStyle: "sticker" as const,
+  // Hard cuts only: the game's arrival animation would spend frames on every page load.
+  reducedMotion: "reduce" as const,
+  // The headline clip gets a larger budget than the per-deck clips (under 10 MB): native width, smooth pops.
+  gif: { width: 360, framesPerSecond: 15, maximumColors: 128, speed: 1.2 },
+  steps: Object.freeze<Step[]>([
+    goto("/"),
+    { kind: "expectHeading", pattern: "^Pick a deck$" },
+    caption("Can you read code like a detective?"),
+    wait(1500),
+    jumpTo(".deck-list", "start"),
+    caption("6 decks. Real open-source code."),
+    wait(1400),
+    ...demoCut("algorithm", "1/6 · Which algorithm?", "Named it. +1,000"),
+    ...demoCut("fix", "2/6 · Spot the bug fix", "With a hint. +800", { hint: true, highlight: true }),
+    ...demoCut("output", "3/6 · Predict the output", "Traced it. +1,000"),
+    ...demoCut("language", "4/6 · Which language?", "Nailed it. +1,000"),
+    ...demoCut("before-after", "5/6 · Before or after?", "Newer one. +500"),
+    ...demoCut("project", "6/6 · Which project?", "Right repo. +1,000"),
+    goto("/"),
+    { kind: "expectHeading", pattern: "^Pick a deck$" },
+    jumpTo(".deck-list", "start"),
+    caption("Your turn. Pick a deck."),
+    wait(1900),
+  ]),
+});
+
+/**
+ * Answer index per round in the per-deck and full-run scenes: a fixed choreography rather than known-correct
+ * answers, so a wrong pick shows the "Not this time." branch. The vertical demo instead answers every round right
+ * (`answer` steps).
  */
 export const DEFAULT_ANSWER_CHOREOGRAPHY: readonly number[] = Object.freeze([0, 0, 0, 1, 0]);
 
@@ -93,6 +163,7 @@ const deckScene = (
 });
 
 export const SCENES: readonly Scene[] = Object.freeze([
+  DEMO_SCENE,
   deckScene("project", {
     opening: "Which project is this from?",
     hint: "Hints cost points.",

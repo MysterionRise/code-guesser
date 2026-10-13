@@ -152,8 +152,11 @@ token (it fails with `JOURNAL_MISS` on anything unrecorded). The journal is
 After a success the artifact and its pin are already written together. Check
 the `PREPARATION_DECKS` line for which decks published, read a few rounds of
 each deck, run the full verification matrix (the leakage test runs against the
-committed artifact), and re-record the media with `pnpm demo:record` (each GIF
-under 4 MB).
+committed artifact), and re-record the media with `pnpm demo:record`:
+- `demo.gif`, the vertical headline clip, under 10 MB;
+- every other GIF under 4 MB.
+
+Add `DEMO_PORT=3300` if another local app holds port 3100.
 
 ## Reading failures
 

@@ -8,6 +8,13 @@ open-source code, reveal clues if you need them, and guess.
 ## See it in action
 
 <p align="center">
+  <img src="docs/media/demo.gif" width="320" alt="A vertical, captioned tour of CodeGuessr: one round from each of the six decks, each answered correctly, from the deck chooser and back" />
+</p>
+
+The demo plays one round of each deck, and every answer is right. Below is one
+clip per deck.
+
+<p align="center">
   <img src="docs/media/deck-project.gif" width="30%" alt="The Which project? deck: code from a popular repository, one hint, and four repositories with their descriptions" />
   <img src="docs/media/deck-language.gif" width="30%" alt="The Which language? deck: a real file excerpt, one hint, and a locked-in language guess" />
   <img src="docs/media/deck-before-after.gif" width="30%" alt="The Before or after? deck: the same code before and after a refactor commit, side by side" />
@@ -93,12 +100,20 @@ pnpm --filter @codeguessr/game start
 ### Recording the demo
 
 `pnpm demo:record` starts a dev server on port 3100, plays scripted scenes in
-headless Chromium at a 390x844 viewport with caption overlays, and encodes one
-GIF per deck, a full-run GIF, and an MP4 into `docs/media/`.
+headless Chromium with caption overlays, and writes into `docs/media/`:
+
+- `demo.gif`: a vertical 360x640 headline clip (under 10 MB). It plays one
+  round of each deck. Its answers are read from the artifact on the Node side,
+  as the browser tests do; the page never learns them.
+- One GIF per deck and a full-run GIF, at 390x844, each under 4 MB.
+- An MP4.
+
+The recorder refuses to record a server that is not CodeGuessr.
 
 | Variable | Effect |
 | --- | --- |
 | `DEMO_BASE_URL` | Record a server that is already running |
+| `DEMO_PORT` | Start the dev server on this port instead of 3100, when another app holds it |
 | `DEMO_SCENES` | Comma-separated scene ids to record a subset |
 | `DEMO_ANSWERS` | Five comma-separated radio indexes for the full run |
 

@@ -1,13 +1,16 @@
 /**
- * Records the local CodeGuessr game at a phone viewport and encodes one short
- * captioned GIF per deck, a full-run GIF, and one MP4 into docs/media.
+ * Records the local CodeGuessr game at a phone viewport and encodes the vertical
+ * demo, one short captioned GIF per deck, a full-run GIF, and one MP4 into
+ * docs/media.
  * Run with `pnpm demo:record` after a verified preparation run.
  *
  * Set DEMO_BASE_URL to record an already running server; otherwise a Next dev
- * server is started on 127.0.0.1:3100 for the duration of the run.
+ * server is started on 127.0.0.1:3100 (or DEMO_PORT) for the duration of the run.
+ * The recorder only records a server that serves CodeGuessr.
  * Set DEMO_SCENES to a comma-separated list of scene ids to record a subset.
  */
 import { spawn, type ChildProcess } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { mkdir, rename, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,19 +18,35 @@ import { fileURLToPath } from "node:url";
 import { chromium, type Page } from "@playwright/test";
 
 import { DEFAULT_GIF_OPTIONS, gifArguments, mp4Arguments } from "./encode";
-import { setCaption } from "./overlay";
+import { hideDevIndicator, setCaption, type CaptionStyle } from "./overlay";
 import { SCENES, type Scene, type Step } from "./scenes";
 
 const ROOT = fileURLToPath(new URL("../../../", import.meta.url));
 const GAME_DIRECTORY = join(ROOT, "apps", "game");
 const MEDIA_DIRECTORY = join(ROOT, "docs", "media");
 const WORK_DIRECTORY = join(MEDIA_DIRECTORY, ".work");
-const LOCAL_PORT = 3100;
+const LOCAL_PORT = Number(process.env.DEMO_PORT ?? 3100);
 const VIEWPORT = Object.freeze({ width: 390, height: 844 });
 const DEVICE_SCALE_FACTOR = 2;
 const SERVER_TIMEOUT_MILLISECONDS = 180_000;
 const STEP_TIMEOUT_MILLISECONDS = 20_000;
 const FFMPEG = process.env.FFMPEG ?? "ffmpeg";
+const ARTIFACT = join(ROOT, "apps", "game", "src", "demo", "generated", "local-real-rounds.json");
+
+interface ArtifactFixture { roundId: string; candidates: { id: string; label: string }[]; correctCandidateId: string }
+/** Each round's right answer, read on the Node side from the artifact the game plays, as the browser tests do. */
+const loadAnswers = (): ReadonlyMap<string, string> => {
+  const artifact = JSON.parse(readFileSync(ARTIFACT, "utf8")) as { decks: { fixtures: ArtifactFixture[] }[] };
+  return new Map(artifact.decks.flatMap(({ fixtures }) => fixtures.map((fixture) =>
+    [fixture.roundId, fixture.candidates.find(({ id }) => id === fixture.correctCandidateId)!.label] as const)));
+};
+
+/** What a step needs besides the page: the server, the scene's caption style, and the answers. */
+interface StepContext {
+  readonly baseUrl: string;
+  readonly captionStyle: CaptionStyle;
+  readonly answers: ReadonlyMap<string, string>;
+}
 
 const log = (message: string): void => { process.stdout.write(`${message}\n`); };
 
@@ -37,14 +56,22 @@ const run = (command: string, args: readonly string[], cwd = ROOT): Promise<void
   child.once("exit", (code) => code === 0 ? resolve() : reject(new Error(`${command} exited with ${code ?? "signal"}`)));
 });
 
+/** Another local app may already hold the port; recording it would publish the wrong thing. */
+const GAME_MARKER = "CodeGuessr";
+
 const waitForServer = async (baseUrl: string): Promise<void> => {
   const deadline = Date.now() + SERVER_TIMEOUT_MILLISECONDS;
   while (Date.now() < deadline) {
+    let body: string | undefined;
     try {
       const response = await fetch(baseUrl, { redirect: "manual" });
-      if (response.ok) return;
+      if (response.ok) body = await response.text();
     } catch {
       // The server is still starting.
+    }
+    if (body !== undefined) {
+      if (body.includes(GAME_MARKER)) return;
+      throw new Error(`${baseUrl} serves something other than CodeGuessr; set DEMO_PORT to a free port or DEMO_BASE_URL to the game`);
     }
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
@@ -72,13 +99,21 @@ const smoothScroll = async (page: Page, selector: string): Promise<void> => {
   await page.waitForTimeout(650);
 };
 
-const performStep = async (page: Page, baseUrl: string, step: Step): Promise<void> => {
+const performStep = async (page: Page, context: StepContext, step: Step): Promise<void> => {
   switch (step.kind) {
     case "goto":
-      await page.goto(`${baseUrl}${step.path}`, { waitUntil: "networkidle" });
+      await page.goto(`${context.baseUrl}${step.path}`, { waitUntil: "networkidle" });
       return;
+    case "answer": {
+      const roundId = await page.locator(".game-card").getAttribute("data-round-id", { timeout: STEP_TIMEOUT_MILLISECONDS });
+      const label = roundId === null ? undefined : context.answers.get(roundId);
+      if (label === undefined) throw new Error("the current round is not in the artifact");
+      await page.getByRole("group", { name: "Choose one answer" }).getByLabel(label, { exact: true })
+        .check({ timeout: STEP_TIMEOUT_MILLISECONDS });
+      return;
+    }
     case "caption":
-      await setCaption(page, step.text);
+      await setCaption(page, step.text, context.captionStyle);
       return;
     case "click":
       await page.getByRole("button", { name: step.name, exact: true }).click({ timeout: STEP_TIMEOUT_MILLISECONDS });
@@ -100,6 +135,12 @@ const performStep = async (page: Page, baseUrl: string, step: Step): Promise<voi
     case "scrollTo":
       await smoothScroll(page, step.selector);
       return;
+    case "jumpTo":
+      await page.locator(step.selector).first().waitFor({ state: "visible", timeout: STEP_TIMEOUT_MILLISECONDS });
+      await page.locator(step.selector).first().evaluate((element, block) => {
+        element.scrollIntoView({ behavior: "instant", block });
+      }, step.block);
+      return;
     case "wait":
       await page.waitForTimeout(step.milliseconds);
       return;
@@ -108,21 +149,24 @@ const performStep = async (page: Page, baseUrl: string, step: Step): Promise<voi
 
 const megabytes = async (path: string): Promise<string> => `${((await stat(path)).size / 1_048_576).toFixed(2)} MB`;
 
-const recordScene = async (scene: Scene, baseUrl: string): Promise<void> => {
+const recordScene = async (scene: Scene, baseUrl: string, answers: ReadonlyMap<string, string>): Promise<void> => {
   log(`recording ${scene.id}`);
   const browser = await chromium.launch();
+  const viewport = scene.viewport ?? VIEWPORT;
+  const stepContext: StepContext = { baseUrl, captionStyle: scene.captionStyle ?? "banner", answers };
   let videoPath: string | undefined;
   try {
     const context = await browser.newContext({
-      viewport: VIEWPORT,
+      viewport,
       deviceScaleFactor: DEVICE_SCALE_FACTOR,
       colorScheme: "dark",
-      reducedMotion: "no-preference",
+      reducedMotion: scene.reducedMotion ?? "no-preference",
       // The screencast is captured at viewport (CSS pixel) size; a larger size only adds padding.
-      recordVideo: { dir: WORK_DIRECTORY, size: VIEWPORT },
+      recordVideo: { dir: WORK_DIRECTORY, size: viewport },
     });
+    await hideDevIndicator(context);
     const page = await context.newPage();
-    for (const step of scene.steps) await performStep(page, baseUrl, step);
+    for (const step of scene.steps) await performStep(page, stepContext, step);
     const video = page.video();
     await context.close();
     videoPath = await video?.path();
@@ -159,7 +203,8 @@ const main = async (): Promise<void> => {
   try {
     log(`waiting for ${baseUrl}`);
     await waitForServer(baseUrl);
-    for (const scene of selectedScenes()) await recordScene(scene, baseUrl);
+    const answers = loadAnswers();
+    for (const scene of selectedScenes()) await recordScene(scene, baseUrl, answers);
     log("done");
   } finally {
     server?.stop();
