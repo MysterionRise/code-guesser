@@ -99,9 +99,15 @@ export const noteRejection = (state: RunState, stage: DiagnosticStage, error: un
 export const rejectionSummary = (state: RunState): readonly string[] =>
   [...state.diagnostics].map(([key, count]) => `${key.replace("\0", ":")}=${count}`).sort();
 
-/** Run-wide budgets: once one is spent every later candidate would fail the same way, so the run stops. */
-const RUN_BUDGETS = new Set(["REQUEST_COUNT", "BLOB_ATTEMPTS", "SUCCESSFUL_BLOBS", "TOTAL_BLOB_BYTES",
-  "STACK_METADATA_BYTES", "RETRY_COUNT", "TOTAL_WAIT", "TEMPORARY_DISK"]);
+/**
+ * Run-wide budgets a candidate can spend: once one is spent every later candidate would fail the same way, so the
+ * deck and every later one are skipped. Only these reach a candidate's rejection:
+ * - retries and waiting are bounded by the retry controller, which refuses first (`RUN_RETRY_LIMIT`,
+ *   `TOTAL_WAIT_LIMIT`), so the meter's `RETRY_COUNT` and `TOTAL_WAIT` checks are only guards;
+ * - Stack metadata bytes and temporary disk are metered inside the metadata stage, which fails the run itself
+ *   (`METADATA_CAPACITY`, `TEMPORARY_DISK`).
+ */
+export const RUN_BUDGETS: ReadonlySet<string> = new Set(["REQUEST_COUNT", "BLOB_ATTEMPTS", "SUCCESSFUL_BLOBS", "TOTAL_BLOB_BYTES"]);
 
 export class BudgetExhaustedError extends Error {
   public constructor(public readonly code: string, cause: unknown) { super(code, { cause }); this.name = "BudgetExhaustedError"; }
