@@ -172,27 +172,30 @@ const maskIdentifier = (identifier: string, names: ReadonlySet<string>): Readonl
   return Object.freeze({ text: pieces.join(""), named });
 };
 
-/** Label words masked in one identifier never take more passes than this. */
+/** Label stems masked in one identifier never take more passes than this. */
 const MAXIMUM_LABEL_MASKS = 16;
 
 /**
- * Masks each run of an identifier's letters that begins a word and spells one of `prefixes`, across word
- * boundaries: `pigeonHoles` becomes `mysterys` and `createPigeonHoles` becomes `createMysterys`. A label word masks
- * only its own letters, so `coin` and `coins` stay distinct as `mystery` and `mysterys`.
+ * Masks each run of an identifier's letters that spells one of `stems`, wherever it starts and across word
+ * boundaries, together with the rest of every word it touches: `heapify` becomes `mystery`, `createPigeonHoles`
+ * becomes `createMysterys`, and `minheap` becomes `mystery`, so no stem and no telling ending (`-ify`) is left. A
+ * plural `s` right after the stem stays, so `coin` and `coins` stay distinct as `mystery` and `mysterys`.
  */
-const maskLabelWords = (identifier: string, prefixes: readonly string[]): string => {
+const maskLabelStems = (identifier: string, stems: readonly string[]): string => {
   let result = identifier;
   for (let pass = 0; pass < MAXIMUM_LABEL_MASKS; pass += 1) {
     const letters = [...result].flatMap((character, index) => /[A-Za-z0-9]/u.test(character) ? [index] : []);
     const folded = letters.map((index) => result[index]!.toLocaleLowerCase("en-US")).join("");
-    const starts = new Set(segments(result).map(({ start }) => start));
+    const words = segments(result);
+    const wordAt = (index: number) => words.find(({ start, end }) => start <= index && index < end)!;
     let span: Readonly<{ from: number; to: number }> | undefined;
-    for (const prefix of prefixes) {
-      for (let at = folded.indexOf(prefix); at >= 0 && span === undefined; at = folded.indexOf(prefix, at + 1)) {
-        const from = letters[at]!;
-        if (starts.has(from) && !/^mystery/iu.test(result.slice(from))) span = { from, to: letters[at + prefix.length - 1]! + 1 };
-      }
-      if (span) break;
+    for (const stem of stems) {
+      const at = folded.indexOf(stem);
+      if (at < 0) continue;
+      const last = letters[at + stem.length - 1]!;
+      const closing = wordAt(last);
+      span = { from: wordAt(letters[at]!).start, to: /^s$/iu.test(result.slice(last + 1, closing.end)) ? last + 1 : closing.end };
+      break;
     }
     if (!span) return result;
     result = `${result.slice(0, span.from)}${styled(result.slice(span.from, span.to))}${result.slice(span.to)}`;
@@ -206,35 +209,32 @@ export interface MaskedCode {
   readonly masked: readonly string[];
 }
 
-/** What a round's code must not show: the algorithm's spellings, exact identifiers, and its label's own words. */
+/** What a round's code must not show: the algorithm's spellings, exact identifiers, and every option's label stems. */
 export interface MaskTerms {
   /** Spellings matched across an identifier's words: `quick_sort`, `QuicksortRange`, `QuickSort`. */
   readonly names: readonly string[];
   /** Identifiers masked whole, for a file whose names are too short to match by spelling (`Count`). */
   readonly symbols: readonly string[];
-  /** The label's words, masked as word prefixes: `counting_arr` would answer "Counting sort" by its wording alone. */
-  readonly words: readonly string[];
+  /**
+   * The stems of every option's label (`labelStems`), masked wherever they appear: `counting_arr` would answer
+   * "Counting sort" by its wording alone, and a decoy's `buckets` left in view would rule out "Bucket sort".
+   */
+  readonly stems: readonly string[];
 }
 
-/** Masks every identifier that names the algorithm, and every word of its label, as `mystery` / `Mystery`. */
+/** Masks every identifier that names the algorithm, and every label stem of its options, as `mystery` / `Mystery`. */
 export const maskNames = (text: string, terms: MaskTerms): MaskedCode => {
   const folded = new Set(terms.names.map(fold).filter((name) => name.length > 0));
-  const prefixes = terms.words.map(fold).filter((word) => word.length > 0);
+  const stems = terms.stems.map(fold).filter((stem) => stem.length > 0);
   const exact = new Set(terms.symbols);
   const masked: string[] = [];
   const output = text.replace(/[A-Za-z_][A-Za-z0-9_]*/gu, (identifier) => {
     const result = exact.has(identifier) ? { text: styled(identifier), named: true } : maskIdentifier(identifier, folded);
     if (result.named && !masked.includes(identifier)) masked.push(identifier);
-    return maskLabelWords(result.text, prefixes);
+    return maskLabelStems(result.text, stems);
   });
   return Object.freeze({ text: output, masked: Object.freeze(masked) });
 };
-
-/** Words too common in labels to mask: every sort sorts and every search searches. */
-const COMMON_LABEL_WORDS: ReadonlySet<string> = new Set(["sort", "search", "algorithm", "first", "with", "from", "by", "of"]);
-/** A label's distinctive words, four letters or more: "Counting sort" gives `counting`. */
-export const labelWords = (label: string): readonly string[] =>
-  Object.freeze(label.toLocaleLowerCase("en-US").split(/[^a-z]+/u).filter((word) => word.length >= 4 && !COMMON_LABEL_WORDS.has(word)));
 
 const MASK = /mystery/iu;
 /** A window that starts at the masked definition but shows fewer lines than this starts at the first definition. */
@@ -257,13 +257,16 @@ export const algorithmWindow = (
   terms: MaskTerms,
   limits: ExcerptLimits,
 ): Readonly<{ excerpt: string; functionName: string }> | undefined => {
-  const masked = maskNames(withoutCommentary(text, language), terms);
+  const plain = withoutCommentary(text, language);
+  const masked = maskNames(plain, terms);
   if (masked.masked.length === 0) return undefined;
   const lines = masked.text.split("\n");
+  // The window opens at the algorithm's own definition, not at a helper masked only for a label stem (`heapify`).
+  const named = maskNames(plain, { ...terms, stems: [] }).text.split("\n");
   const first = firstCodeLine(lines, language);
   if (first === undefined) return undefined;
   const body = afterPreamble(lines, language, first);
-  const focused = lines.findIndex((line, index) => index >= body && definesMask(line));
+  const focused = named.findIndex((line, index) => index >= body && definesMask(line));
   const opening = lines.findIndex((line, index) => index >= body && isTopLevelDefinition(line, language));
   const windows = [focused, opening, body].filter((start, index, all) => start >= 0 && all.indexOf(start) === index)
     .map((start) => fitWindow(lines, start, limits)).filter((excerpt): excerpt is string => excerpt !== undefined && MASK.test(excerpt));

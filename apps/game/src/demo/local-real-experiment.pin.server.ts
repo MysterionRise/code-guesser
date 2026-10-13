@@ -6,4 +6,4 @@ import "server-only";
  * publication; the game plays an artifact only when its hash matches, so an edited, stale,
  * or substituted artifact cannot be played.
  */
-export const TRUSTED_ARTIFACT_HASH = "1427cf105672682d0dd89ff7a1d7975b9001f939f0dcbefc0126c79160e8459a";
+export const TRUSTED_ARTIFACT_HASH = "8b7df5684fe50c175ba55b880a8e11eec2051c5ccfa990c1c5663f1f75f30861";

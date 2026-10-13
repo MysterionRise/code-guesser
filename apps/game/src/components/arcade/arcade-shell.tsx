@@ -180,7 +180,7 @@ const SOURCE_LINK = /(https:\/\/\S+)/u;
 
 /** What a single pane shows, where a deck's code needs a word of explanation; comparison panes name their version. */
 export const PANE_CAPTIONS: Readonly<Partial<Record<RoundModeKind, string>>> = Object.freeze({
-  algorithm: "Its own names are hidden as mystery.",
+  algorithm: "Its own names, and any option's name, are hidden as mystery.",
   output: "The last line is a call typed into a Python shell.",
   fix: "Lines are numbered; each option names one.",
 });

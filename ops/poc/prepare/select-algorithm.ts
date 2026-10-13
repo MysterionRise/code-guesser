@@ -1,10 +1,12 @@
 import { screenBlob } from "@codeguessr/content/local-poc-support";
 
-import { CROSS_DECK_KEYS_BY_KIND, DEDUPLICATION_KEYS_BY_KIND, namesAlgorithm } from "../../../packages/artifact/src/index";
+import {
+  CROSS_DECK_KEYS_BY_KIND, DEDUPLICATION_KEYS_BY_KIND, labelStems, namesAlgorithm, showsLabelStem,
+} from "../../../packages/artifact/src/index";
 import type { AlgorithmCandidate } from "./algorithm-rounds";
 import { DECK_SHORT, noteRejection, rejectCandidate, type DeckAttempts, type DeckOutcome, type RunState } from "./diagnostics";
 import { looksGenerated } from "./excerpt-window";
-import { algorithmWindow, labelWords } from "./function-windows";
+import { algorithmWindow } from "./function-windows";
 import type { AlgorithmEntry, AlgorithmFamily } from "./profile";
 import { sha256 } from "./round-helpers";
 import { addHashes, collidesWithSelected, revealsProtected, unreportable } from "./selection";
@@ -53,9 +55,13 @@ export const selectAlgorithm = async (
       const screened = screenBlob({ path: file.path, bytes: bound.bytes }, seen);
       if (screened.rawSha256 !== bound.rawContentHash) fail("ALGORITHM_SCREEN");
       if (looksGenerated(screened.text, profile.screening.generatedScanLines)) fail("GENERATED_CONTENT");
+      // Every option's stems are masked alike, so a word left in view never rules a decoy out.
+      const stems = family.algorithms.flatMap(({ label }) => labelStems(label));
       const window = algorithmWindow(screened.text, pin.language,
-        { names: [entry.label, ...entry.names], symbols: file.symbols, words: labelWords(entry.label) }, limits) ?? fail("ALGORITHM_WINDOW");
-      if (family.algorithms.some((option) => namesAlgorithm(window.excerpt, option))) fail("ALGORITHM_NAME_IN_CODE");
+        { names: [entry.label, ...entry.names], symbols: file.symbols, stems }, limits) ?? fail("ALGORITHM_WINDOW");
+      if (family.algorithms.some((option) => namesAlgorithm(window.excerpt, option) || showsLabelStem(window.excerpt, option.label))) {
+        fail("ALGORITHM_NAME_IN_CODE");
+      }
       const selection: AlgorithmSelection = Object.freeze({
         familyId: family.id, algorithmId: entry.id, language: pin.language, repository, commit: pin.commit, path: file.path,
         blob: bound.blob, rawContentHash: bound.rawContentHash, licenseName: bound.licenseName, licenseSpdx: bound.licenseSpdx,

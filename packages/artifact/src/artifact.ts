@@ -153,6 +153,29 @@ export const namesAlgorithm = (haystack: string, algorithm: Readonly<{ label: st
   const folded = foldName(haystack);
   return [algorithm.label, ...algorithm.names].map(foldName).some((name) => name.length > 0 && folded.includes(name));
 };
+/** Words too common in algorithm labels to tell one from another: every sort sorts and every search searches. */
+const COMMON_LABEL_WORDS: ReadonlySet<string> = new Set(["sort", "search", "algorithm", "first", "with", "from", "by", "of"]);
+/** A label's distinctive words, four letters or more: "Counting sort" gives `counting`. */
+export const labelWords = (label: string): readonly string[] =>
+  Object.freeze(label.toLocaleLowerCase("en-US").split(/[^a-z]+/u).filter((word) => word.length >= 4 && !COMMON_LABEL_WORDS.has(word)));
+/** Endings a label word drops to reach the stem code builds its names on. */
+const LABEL_ENDINGS = ["sort", "search", "ing", "ion", "er"] as const;
+/**
+ * The stems of a label's distinctive words, four letters or more: "Heapsort" gives `heap` (as in `heapify`),
+ * "Counting sort" gives `count`, and "Insertion sort" gives `insert`.
+ */
+export const labelStems = (label: string): readonly string[] => Object.freeze(labelWords(label).map((word) => {
+  const ending = LABEL_ENDINGS.find((suffix) => word.endsWith(suffix) && word.length - suffix.length >= 4);
+  return ending === undefined ? word : word.slice(0, -ending.length);
+}));
+/**
+ * Whether code shows a stem of a label anywhere inside an identifier, case and separators aside: `heapify` and
+ * `min_heap` show Heapsort's `heap`, and `buckets` shows Bucket sort's `bucket`.
+ */
+export const showsLabelStem = (code: string, label: string): boolean => {
+  const stems = labelStems(label);
+  return (code.match(/[A-Za-z0-9_]+/gu) ?? []).some((identifier) => stems.some((stem) => foldName(identifier).includes(stem)));
+};
 
 /** An algorithm a curated repository files code under, and the files that show it. */
 export interface CuratedAlgorithm {
@@ -247,7 +270,9 @@ const validateBeforeAfter = ({ panes, candidates, correctCandidateId, source }: 
 
 /**
  * The options are one whole family of algorithms; the answer is the algorithm whose files include this one; the code
- * shows the masked name, and no option's name survives in it or in any text shown before the answer.
+ * shows the masked name, and no option's name survives in it or in any text shown before the answer. No option's
+ * label stem survives in the code either, the decoys' included: were only the answer's masked, a decoy's word left
+ * in the code would rule that decoy out.
  */
 const validateAlgorithm = ({ snapshot, panes, prompt, candidates, clues, correctCandidateId, source }: Semantics): void => {
   const options = candidates.map(({ id, label }) => {
@@ -263,7 +288,8 @@ const validateAlgorithm = ({ snapshot, panes, prompt, candidates, clues, correct
     || !(STACK_LANGUAGES as readonly unknown[]).includes(source.language)) fail();
   const code = panes[0]!.text;
   if (source.excerptHash !== rawHash(code) || !foldName(code).includes(MASKED_NAME)
-    || new RegExp(`(^|[^A-Za-z0-9_])${escape(String(source.functionName))}([^A-Za-z0-9_]|$)`, "u").test(code)) fail();
+    || new RegExp(`(^|[^A-Za-z0-9_])${escape(String(source.functionName))}([^A-Za-z0-9_]|$)`, "u").test(code)
+    || options.some(({ label }) => showsLabelStem(code, label))) fail();
   for (const part of [code, prompt, ...clues]) {
     if (options.some((algorithm) => namesAlgorithm(part, algorithm))) fail();
   }

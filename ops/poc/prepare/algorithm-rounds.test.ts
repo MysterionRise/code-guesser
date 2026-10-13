@@ -1,8 +1,8 @@
 import { generateAlgorithmRounds } from "./algorithm-rounds";
 import { composeExperimentArtifact } from "./compose";
-import { algorithmCandidateId, ExperimentRecordError, parseExperimentArtifact } from "./model";
+import { algorithmCandidateId, ExperimentRecordError, labelStems, parseExperimentArtifact } from "./model";
 import { algorithmCandidates, composeInput, loadCuratedProfile, sha256, snapshotIdFor } from "./testdata/deck-builders";
-import { parseArtifactDecks } from "../../../packages/artifact/src/index";
+import { parseArtifactDecks, rawHash } from "../../../packages/artifact/src/index";
 import {
   TOLERANCE, accuracy, alphabeticalSolver, chance, frequencySolver, raritySolver, sameOptionsSolver,
 } from "../../../packages/artifact/test/solvers";
@@ -86,6 +86,23 @@ describe("algorithm rounds", () => {
       const changed = base();
       mutate(changed);
       expect(() => parseExperimentArtifact(changed)).toThrow(ExperimentRecordError);
+    }
+  });
+
+  it("parses no code that shows any option's label stem, the answer's or a decoy's", () => {
+    const withLine = (line: (fixture: any) => string): any => {
+      const value: any = structuredClone(composeExperimentArtifact(composeInput(profile)).artifact);
+      const fixture = value.decks[3].fixtures[0];
+      fixture.panes[0].text = `${fixture.panes[0].text}\n${line(fixture)}`;
+      fixture.source.excerptHash = rawHash(fixture.panes[0].text);
+      return value;
+    };
+    const stemOf = (fixture: any, answer: boolean) =>
+      labelStems(fixture.candidates.find(({ id }: any) => (id === fixture.correctCandidateId) === answer).label)[0]!;
+    // The same line with a neutral word parses, so only the stem is at fault below.
+    expect(() => parseExperimentArtifact(withLine(() => "total = 0"))).not.toThrow();
+    for (const line of [(fixture: any) => `${stemOf(fixture, true)}ify(items)`, (fixture: any) => `min_${stemOf(fixture, false)}s = []`]) {
+      expect(() => parseExperimentArtifact(withLine(line))).toThrow(ExperimentRecordError);
     }
   });
 });

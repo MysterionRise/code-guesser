@@ -7,11 +7,11 @@ import { balancedAnswers, generateOutputRounds, outputPane, type OutputCandidate
 import { generateFixRounds, type FixCandidate } from "../fix-rounds";
 import { changeKind, fixWindows } from "../fix-window";
 import type { DatasetBug } from "../github-fixes";
-import { fixSlack } from "../model";
+import { fixSlack, labelStems } from "../model";
 import { balancedChoice } from "../round-helpers";
 import { FIX_WINDOW_LINES } from "../select-fix";
 import { generateBeforeAfterRounds } from "../before-after-rounds";
-import { algorithmWindow, labelWords } from "../function-windows";
+import { algorithmWindow } from "../function-windows";
 import { canonicalBytes, canonicalHash } from "../canonical";
 import type { ComposeOptions } from "../compose";
 import type { GitHubAdmissionCandidate } from "../github-admission";
@@ -388,7 +388,7 @@ export const algorithmCandidates = (profile: CrawlProfile, snapshotId: string): 
   CURATED_SECTION.algorithm.families.flatMap((family) => family.algorithms.map((entry) => {
     const stem = entry.files["algos/python"].path.split("/")[1]!.replace(/\.py$/u, "");
     const window = algorithmWindow(curatedPythonSource(stem), "Python",
-      { names: [entry.label, ...entry.names], symbols: [], words: labelWords(entry.label) },
+      { names: [entry.label, ...entry.names], symbols: [], stems: family.algorithms.flatMap(({ label }) => labelStems(label)) },
       { maxLines: profile.screening.excerptLines, maxBytes: profile.screening.excerptBytes, minBytes: profile.screening.minimumExcerptBytes })!;
     const bytes = Buffer.from(curatedPythonSource(stem));
     return Object.freeze({

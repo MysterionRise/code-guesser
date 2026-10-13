@@ -1,6 +1,6 @@
 import { canonicalHash } from "./canonical";
 import { deepFreeze } from "./model-validation";
-import { ALGORITHM_SOURCE_KEYS, algorithmCandidateId, namesAlgorithm, type ExperimentFixture } from "./model";
+import { ALGORITHM_SOURCE_KEYS, algorithmCandidateId, namesAlgorithm, showsLabelStem, type ExperimentFixture } from "./model";
 import type { AlgorithmEntry, AlgorithmFamily, CrawlProfile, StackLanguage } from "./profile";
 import { attributionFor, fill, orderedPool, roundIdFor, sha256, shuffled, type GeneratedRounds } from "./round-helpers";
 
@@ -57,10 +57,12 @@ const fixtureFor = (candidate: AlgorithmCandidate, family: AlgorithmFamily, entr
   const template = profile.curated!.algorithm!.templates;
   if (sha256(candidate.excerpt) !== candidate.excerptHash || !/mystery/iu.test(candidate.excerpt)) fail();
   const clues = Object.freeze([entry.idea, entry.complexity]);
-  // No option may be named by the code, the prompt, or a hint: each would answer the round by its wording.
+  // No option may be named by the code, the prompt, or a hint: each would answer the round by its wording. Nor may
+  // the code show any option's label stem (`heapify`, a decoy's `buckets`), which would point to it or rule it out.
   for (const part of [candidate.excerpt, template.prompt, ...clues]) {
     if (family.algorithms.some((option) => namesAlgorithm(part, option))) fail("ALGORITHM_NAME_SHOWN");
   }
+  if (family.algorithms.some(({ label }) => showsLabelStem(candidate.excerpt, label))) fail("ALGORITHM_NAME_SHOWN");
   const source = sourceFor(candidate, profile);
   const roundId = roundIdFor("algorithm", source);
   const candidates = shuffled(roundId, family.algorithms, ({ id }) => id)
