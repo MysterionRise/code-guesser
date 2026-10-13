@@ -20,7 +20,7 @@ MAXIMUM_ATTEMPTS = 50
 MAXIMUM_BLOB_BYTES = 256 * 1024
 MAXIMUM_TOTAL_BYTES = 16 * 1024 * 1024
 MAXIMUM_TEMPORARY_BYTES = 32 * 1024 * 1024
-MAXIMUM_REQUESTS = 200
+MAXIMUM_REQUESTS = 600
 MAXIMUM_REQUEST_BYTES = 64 * 1024
 READ_BYTES = 64 * 1024
 ROW_KEYS = {
@@ -129,14 +129,17 @@ def _default_session():
 
 
 def _client_configuration():
+    from botocore import UNSIGNED
     from botocore.config import Config
+    # The Software Heritage content bucket serves objects anonymously (observed 2026-10-08),
+    # so requests carry no AWS signing material and no credential can cross to the bucket host.
     return {
         "region_name": REGION,
         "endpoint_url": ENDPOINT_URL,
         "config": Config(
             retries={"total_max_attempts": 1, "mode": "standard"},
             connect_timeout=TIMEOUT_SECONDS, read_timeout=TIMEOUT_SECONDS,
-            max_pool_connections=1, signature_version="s3v4",
+            max_pool_connections=1, signature_version=UNSIGNED,
             s3={"addressing_style": "virtual"},
         ),
     }
@@ -352,14 +355,22 @@ def _read_request(stream):
         _fail("REQUEST_MALFORMED")
 
 
-def _main(*, stdin=None, stdout=None, stderr=None, session_factory=None):
+def _main(*, argv=(), stdin=None, stdout=None, stderr=None, session_factory=None):
+    """`--check-request` validates the rows and limits the orchestrator would send and exits
+    without creating a session; it lets an offline test cross the Node-to-Python boundary."""
     active_input = sys.stdin.buffer if stdin is None else stdin
     active_output = sys.stdout if stdout is None else stdout
     active_error = sys.stderr if stderr is None else stderr
+    if list(argv) not in ([], ["--check-request"]):
+        active_error.write("ARGUMENTS_REJECTED\n")
+        return 1
     try:
         request = _read_request(active_input)
         if not isinstance(request, dict) or set(request) != {"rows", "limits"}:
             _fail("REQUEST_MALFORMED")
+        if argv:
+            _validate_rows(request["rows"], _parse_limits(request["limits"]))
+            return 0
         results, counters = fetch_selected_blobs_with_counters(
             request["rows"], limits=request["limits"], session_factory=session_factory,
         )
@@ -371,9 +382,9 @@ def _main(*, stdin=None, stdout=None, stderr=None, session_factory=None):
         active_error.write(error.code + "\n")
         return 1
     except Exception:
-        active_error.write("REQUEST_MALFORMED\n")
+        active_error.write("WORKER_UNEXPECTED\n")
         return 1
 
 
 if __name__ == "__main__":
-    raise SystemExit(_main())
+    raise SystemExit(_main(argv=sys.argv[1:]))

@@ -2,116 +2,123 @@
 
 ## Mission
 
-Continue the existing local-only proof of concept until one preparation run
-produces exactly five real rounds: three GitHub provenance rounds and two Stack
-language rounds. The goal is demo testing on one machine, not public play.
+A local-only "guess from the code" game. One preparation run crawls real
+open-source code before play and freezes three decks of five rounds: "Which
+project?" and an AI-credit deck from GitHub commit search, and "Which
+language?" from The Stack v2. The goal is a demo on one machine, not public
+play.
 
 ## Read first
 
-Treat these as the durable source of truth, in this order:
+1. `docs/review/2026-10-11-codeguessr-state-review.md`: current product and
+   engineering review, decisions, and the roadmap.
+2. `README.md`: how to play, prepare, record, and verify.
 
-1. `docs/gangsta/codeguessr-poc-readiness/checkpoints/2026-10-05-checkpoint-the-hit-boundaries.md`
-2. `docs/gangsta/codeguessr-poc-readiness/checkpoints/2026-09-04-checkpoint-handoff.md`
-3. `docs/gangsta/codeguessr-poc-readiness/reviews/2026-09-04-handoff-audit.md`
-4. `docs/gangsta/codeguessr-poc-readiness/specs/2026-08-15-contract-revision-11-signed.md`
-5. `docs/gangsta/codeguessr-poc-readiness/plans/2026-07-31-execution-plan.md`
-6. `README.md`
+`docs/gangsta/` is the historical record of the signed-Contract process, which
+was retired on 2026-10-11. Use it for background on why rules exist, not as a
+gate: changing queries, retries, ceilings, deck rules, or running
+`pnpm prepare:poc` again needs no revision, signature, or authorization.
 
-Verify the signed Contract before relying on it:
+## Guardrails
 
-```bash
-shasum -a 256 docs/gangsta/codeguessr-poc-readiness/specs/2026-08-15-contract-revision-11-signed.md
-```
-
-Expected SHA-256:
-`3acc586d8fb479e6edfd2dd43e9f38ed5d8d6268ee5b025b449d3a564b32fe41`.
+- Localhost only; no deployment and no public players.
+- Public open-source code only, with licence and recorded-author data.
+- Bounded, selective reads only. Never download a whole dataset, a whole
+  language shard, or a repository archive. The Stack v2 stays pinned to
+  revision `e565caa3a78c2423bd374333a472b049eb090e47` unless deliberately moved.
+- Credentials come only from standard stores (`~/.cache/huggingface/token`,
+  `gh auth token`) through the environment. Never log or commit tokens,
+  provider bodies, contact data, private email, or source excerpts from failed
+  diagnostics.
+- Gameplay never touches the network; it plays the frozen local artifact.
+- Malformed provider data fails closed. Transient errors may be retried within
+  the request budget.
+- Preserve unrelated worktree changes (`apps/game/tsconfig.tsbuildinfo` stays
+  unstaged).
 
 ## Current state
 
-- Branch: `claude/clever-curie-d7rv1m` (continues the merged
-  `codex/heist/codeguessr-poc-readiness` work on `main`).
-- Baseline before this work: `fd6f34cd0d8b4a344fb537e87256bc8f8e69837a`.
-- The crawler, Stack workers, five-round artifact schema, server-only game
-  authority, tests, operator command, MIT licence, and CI workflow exist.
-- The root route still uses the synthetic rehearsal catalogue.
-- The generated real-round artifact and live run report are intentionally
-  absent.
-- Report/artifact publication is transactional (staged report, commit inside
-  the artifact publisher, rollback on failure).
-- Both Python Stack workers enforce the signed endpoint, redirect, network-byte,
-  request, credential-forwarding, and temporary-disk ceilings in-process and
-  report counters the preparer meters. The Hugging Face redirect allowlist is
-  intentionally empty because no target host has been observed under
-  authorization; a live metadata stage fails closed with `REDIRECT_REJECTED`
-  until that host is recorded and added as a literal in
-  `ops/poc/stack/bounded_http.py` and `ops/poc/prepare/request-policy.ts`.
-- The bounded transport translates a GitHub 403/429 `retry-after` or exhausted
-  rate-limit budget into the controller's single bounded retry; everything else
-  still fails closed. A failed run logs
-  `PREPARATION_STAGE_FAILED <stage> <code> <statusClass>` before
-  `PREPARATION_FAILED`.
-- The 2026-10-05 authorized headers-only GitHub probe observed HTTP 200 with
-  authentication supplied, no exhausted rate limit, and no retry delay, using
-  the session's proxy-injected token rather than the operator's.
+- Branch `claude/demoable-poc`, PR #7.
+- The three-deck game plays real rounds: profile
+  `ops/poc/profiles/local-real-rounds.v2.json`, artifact schema
+  `local-experiment-artifact.v2`, and the root-route deck chooser
+  (`/?deck=project|language|ai`).
+- The committed artifact `apps/game/src/demo/generated/local-real-rounds.json`
+  came from the 2026-10-11 live run (384 of 600 requests). Its canonical
+  SHA-256 `27e117c9b6f7c5c509b22eb220aef211cb3a87b79a92ead099f326b41ed0f018` is
+  pinned in `apps/game/src/demo/local-real-experiment.pin.server.ts`; see
+  `docs/review/evidence/2026-10-11-three-deck-live-run.md`.
+- Phase 0 of the review roadmap is done: worker reason codes, a Node↔Python
+  seam test, Stack metadata first, fatal budget exhaustion, bounded retries,
+  repository screening, GET reuse, the UI quick wins, and re-recorded media.
+- Port 3000 may be taken locally by an unrelated Docker container; run browser
+  tests with `E2E_PORT=3200 pnpm test:e2e`.
 
-This is a resumable engineering handoff, not a completed or production-ready
-real-data demo.
+## Next steps
 
-## Non-negotiable boundaries
+Phases 1–3 of the review roadmap:
 
-- Localhost only; no deployment or public players.
-- Exactly five automatically prepared rounds with a three/two source split.
-- No human content-review workflow for this PoC.
-- Public open-source repositories only, with licence and recorded-author data.
-- The Stack v2 release remains `v2.2.0` at immutable revision
-  `e565caa3a78c2423bd374333a472b049eb090e47`.
-- Stream metadata and retrieve only selected blobs. Never download the complete
-  dataset, a complete language shard, or repository archives.
-- Crawling happens before play. Gameplay uses the frozen local artifact and
-  performs no network access.
-- Do not loosen capacity, completeness, validation, identity, credential,
-  atomic-publication, or fail-closed rules without revising the signed Contract
-  first.
-- Never log or commit tokens, provider bodies, contact data, private email,
-  source excerpts from failed diagnostics, or standard credential-store files.
+1. Pipeline structure: a run journal with `--resume` and `--offline`, per-deck
+   publication, a failure report, `index.ts` split into modules, one shared
+   artifact parser, one limits file for Node and Python.
+2. Deck redesign: language deck without leaks, "Before or after?" replacing the
+   AI deck, a project deck from popular Stack v2 repositories (today all five
+   answers come from facebook), sampled and shuffled sessions, and a leakage
+   test.
+3. Grow The Stack v2 (probe row-group repository spread first), then other
+   sources.
 
-## Immediate next steps
+Live run:
 
-The next external action requires explicit operator authorization. Perform one
-authenticated request to the pinned Hugging Face `resolve` endpoint for one
-parquet shard of the Stack dataset, with redirects disabled, no retry, and no
-response-body read, reporting only:
+```bash
+HF_TOKEN="$(cat ~/.cache/huggingface/token)" \
+GITHUB_TOKEN="$(gh auth token)" \
+STACK_V2_ACKNOWLEDGED_USABLE_REVISION=e565caa3a78c2423bd374333a472b049eb090e47 \
+pnpm prepare:poc
+```
 
-- Numeric HTTP status.
-- The redirect target host, if a `Location` header is present (host only; no
-  path, query, or signature).
+After a success: verify the artifact (it parses under the v2 model, preparer
+and game canonical hashes equal the report's `artifactHash`, decks are
+project/language/ai of five, no token-like strings), pin the hash, run the full
+verification matrix, and re-record the media with `pnpm demo:record`.
 
-Then add that host as a literal to `REDIRECT_HOSTS` in
-`ops/poc/stack/bounded_http.py` and to the redirect policy in
-`ops/poc/prepare/request-policy.ts`, test-first, before any full live run.
+## Reading failures
 
-If a later operator run fails at GitHub Search, read the
-`PREPARATION_STAGE_FAILED` line: `RETRY_SIGNAL_MISSING 4xx` means a 403/429
-without a usable instruction (likely secondary throttling or missing token),
-`WAIT_LIMIT` means the instruction exceeded the signed fifteen-second wait, and
-`UNSUPPORTED_STATUS` with another class means a non-rate-limit status.
+Read the `PREPARATION_STAGE_FAILED <stage> <code> <status-class>` line first.
 
-Do not rerun the complete preparation command until the redirect host is
-recorded and the signed Contract permits the response.
+- `RETRY_SIGNAL_MISSING 4xx`: a 403/429 without a usable retry instruction.
+- `WAIT_LIMIT`: a retry instruction longer than the fifteen-second wait.
+- `BUDGET_EXHAUSTED_<BUDGET>`: a run-wide budget (requests, blob attempts or
+  bytes, metadata bytes, retries, waits, temporary disk) ran out; the run stops
+  instead of rejecting every later candidate. `PREPARATION_SPEND` shows the
+  requests each stage used.
+- `LOGICAL_RETRY_LIMIT`, `RUN_RETRY_LIMIT`, `WAIT_LIMIT`: a GitHub 5xx, network
+  error, timeout, or rate limit was retried once and failed again, or the
+  run's five retries or 30 s of waiting were spent.
+- `WORKER_EXIT_<CODE>`: a Python worker exited non-zero with its own stable
+  code (`WORKER_UNEXPECTED` for an unmapped exception). A bare `WORKER_EXIT`
+  means its stderr was not a code.
+- `PUBLIC_CONTAINMENT_*`: names the protected key and public field that
+  collided.
+- `GITHUB_SEARCH_*`: the discovery check that rejected a search response.
+  `INCOMPLETE`, `TOTAL_CHANGED`, `ITEM_COUNT`, and `DUPLICATE` are provider
+  inconsistencies; `SHAPE`, `IDENTITY`, and `DATE` are record drift.
+
+Rejection aggregates name the failing check: `LINEAGE_*`, `ADMISSION_*`
+(`ADMISSION_REPOSITORY_LICENSE` is a repository licence outside the
+allowlist), and `REVALIDATION_*`. `REPOSITORY_SCREENED_OUT` counts later
+candidates of a repository already rejected once.
+
+Selection diagnostics `REPOSITORY_REPEATED`, `PROJECT_NAME_IN_EXCERPT`,
+`PROJECT_REPOSITORY_SKIPPED`, `AI_CREDIT_ABSENT`, and
+`SOURCE_IDENTITY_UNREPORTABLE` are expected screening outcomes, not faults.
 
 ## Commands
-
-Offline preparation verification:
 
 ```bash
 pnpm exec vitest run ops/poc/prepare
 pnpm exec tsc --noEmit -p ops/tsconfig.json
 uv run --project ops/poc/stack --locked python -m unittest discover -s ops/poc/stack
-```
-
-Complete workspace verification:
-
-```bash
 pnpm test
 pnpm typecheck
 pnpm test:a11y
@@ -121,30 +128,12 @@ pnpm exec node --test tests/containment/acquisition-boundary.test.mjs
 pnpm --filter @codeguessr/game build
 ```
 
-Live preparation, only after authorization and root-cause resolution:
+## Done means
 
-```bash
-pnpm prepare:poc
-```
-
-The command reads credentials from the shell/provider-standard stores. Do not
-place credential values in commands saved to documentation or version control.
-
-## Completion boundary
-
-Do not call the real-data PoC runnable until all of the following are true:
-
-1. Preparation exits successfully and emits its completion marker.
-2. Both Python workers enforce and test the signed network and disk boundaries.
-3. Report/artifact publication cannot leave an orphan success report.
-4. The generated artifact contains exactly three provenance and two language
-   fixtures and passes server-side validation.
-5. Artifact and run-report hashes, source split, warning/completeness state,
-   and capacity counts are independently verified without leaking content.
-6. The root route consumes the validated server-only authority.
-7. Browser, build, accessibility, performance, containment, unit, and type
+1. `pnpm prepare:poc` exits successfully with its completion marker.
+2. The artifact holds the three decks of five and passes server-side
+   validation; its hash is pinned.
+3. The root route plays every deck offline.
+4. Browser, build, accessibility, performance, containment, unit, and type
    checks pass freshly.
-8. The durable checkpoint and README are updated with the actual evidence.
-
-Preserve unrelated worktree changes, and do not stage, rewrite, or delete them
-unless their ownership and purpose have been verified.
+5. The README and its media reflect what actually plays.

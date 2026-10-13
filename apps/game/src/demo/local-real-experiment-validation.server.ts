@@ -40,6 +40,8 @@ export const bool = (value: unknown): boolean =>
   typeof value === "boolean" ? value : fail();
 export const positiveInteger = (value: unknown): number =>
   Number.isSafeInteger(value) && (value as number) > 0 ? value as number : fail();
+export const count = (value: unknown): number =>
+  Number.isSafeInteger(value) && (value as number) >= 0 ? value as number : fail();
 
 export const texts = (value: unknown, exactLength?: number): readonly string[] => {
   if (!Array.isArray(value) || value.length === 0

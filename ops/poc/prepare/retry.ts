@@ -5,9 +5,10 @@ export class RetryError extends Error {
   }
 }
 
+/** A request asking to be tried again after a wait; `cause` names a transient failure when there is one. */
 export class RetryRequestError extends Error {
-  public constructor(public readonly retryAfterMilliseconds: unknown) {
-    super("RETRY_REQUESTED");
+  public constructor(public readonly retryAfterMilliseconds: unknown, cause?: unknown) {
+    super("RETRY_REQUESTED", cause === undefined ? undefined : { cause });
     this.name = "RetryRequestError";
   }
 }
@@ -29,8 +30,11 @@ export interface RetryController {
   state(): RetryState;
 }
 
+/** Retries per run, shared by rate-limit and transient retries; total waiting is bounded separately. */
+export const RUN_RETRY_LIMIT = 5;
+
 const SIGNED_RETRY_CEILINGS = Object.freeze({
-  runRetries: 3,
+  runRetries: RUN_RETRY_LIMIT,
   waitMilliseconds: 15_000,
   totalWaitMilliseconds: 30_000,
 });
@@ -57,14 +61,16 @@ export const createRetryController = (options: RetryOptions): RetryController =>
       } catch (error) {
         if (!(error instanceof RetryRequestError)) throw new RetryError("RETRY_SIGNAL_MISSING", error);
         const wait = error.retryAfterMilliseconds;
+        // A refused retry keeps the transient failure, if any, as its cause for diagnostics.
+        const { cause } = error;
         if (!Number.isSafeInteger(wait) || (wait as number) <= 0) {
-          throw new RetryError("RETRY_SIGNAL_MALFORMED");
+          throw new RetryError("RETRY_SIGNAL_MALFORMED", cause);
         }
-        if (logicalRetries >= 1) throw new RetryError("LOGICAL_RETRY_LIMIT");
-        if (runRetries >= options.maxRunRetries) throw new RetryError("RUN_RETRY_LIMIT");
-        if ((wait as number) > options.maxWaitMilliseconds) throw new RetryError("WAIT_LIMIT");
+        if (logicalRetries >= 1) throw new RetryError("LOGICAL_RETRY_LIMIT", cause);
+        if (runRetries >= options.maxRunRetries) throw new RetryError("RUN_RETRY_LIMIT", cause);
+        if ((wait as number) > options.maxWaitMilliseconds) throw new RetryError("WAIT_LIMIT", cause);
         if (totalWait + (wait as number) > options.maxTotalWaitMilliseconds) {
-          throw new RetryError("TOTAL_WAIT_LIMIT");
+          throw new RetryError("TOTAL_WAIT_LIMIT", cause);
         }
         logicalRetries += 1;
         runRetries += 1;

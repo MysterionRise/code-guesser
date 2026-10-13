@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import type { CrawlProfile } from "../profile";
+import { STACK_LANGUAGES, type CrawlProfile, type StackLanguage } from "../profile";
 import type { SelectedStackBlob } from "../stack-revalidation";
 import type { StackMetadataRow } from "../stack-metadata";
 import { CAPTURED_AUTHOR_EMAIL } from "./captured-values";
@@ -10,7 +10,7 @@ type TreeEntry = Readonly<{ path: string; mode: "100644"; type: "blob"; sha: str
 
 export interface CapturedResponses {
   readonly http: ReadonlyMap<string, JsonValue | string>;
-  readonly metadata: Readonly<Record<"Python" | "TypeScript", StackMetadataRow>>;
+  readonly metadata: Readonly<Record<StackLanguage, StackMetadataRow>>;
   readonly selectedBlobs: ReadonlyMap<string, SelectedStackBlob>;
 }
 
@@ -62,14 +62,13 @@ const blobResponse = (api: string, identity: string, bytes: Uint8Array): JsonVal
   size: bytes.byteLength, content: Buffer.from(bytes).toString("base64"),
 });
 
-const addProvenance = (
-  http: Map<string, JsonValue | string>, index: number, message: string,
+const addCommit = (
+  http: Map<string, JsonValue | string>, index: number, repository: string, message: string,
 ): Readonly<{ repository: string; commit: string }> => {
-  const repository = `capture/provenance-${index}`;
   const api = `https://api.github.com/repos/${repository}`;
   const web = `https://github.com/${repository}`;
-  const commit = `${index + 4}`.repeat(40);
-  const parentCommit = `${index + 1}`.repeat(40);
+  const commit = digest("sha1", `capture-commit-${repository}`);
+  const parentCommit = digest("sha1", `capture-parent-${repository}`);
   const path = `round-${index}.ts`;
   const sourceLines = [
     "export function capturedValue(): number {", "  const scale = 2;",
@@ -93,9 +92,10 @@ const addProvenance = (
       author: { name: `Capture Author ${index}`, email: CAPTURED_AUTHOR_EMAIL } },
     author: author(index), parents: [{ sha: parentCommit, url: `${api}/commits/${parentCommit}`,
       html_url: `${web}/commit/${parentCommit}` }],
+    stats: { total: 2, additions: 1, deletions: 1 },
     files: [{ sha: childBlob, filename: path, status: "modified",
-      blob_url: `${web}/blob/${commit}/${path}`, raw_url: `${web}/raw/${commit}/${path}`,
-      contents_url: `${api}/contents/${path}?ref=${commit}` }],
+      blob_url: `${web}/blob/${commit}/${encodeURIComponent(path)}`, raw_url: `${web}/raw/${commit}/${encodeURIComponent(path)}`,
+      contents_url: `${api}/contents/${encodeURIComponent(path)}?ref=${commit}` }],
   });
   http.set(`${api}/commits/${parentCommit}`, {
     sha: parentCommit, url: `${api}/commits/${parentCommit}`, html_url: `${web}/commit/${parentCommit}`,
@@ -111,7 +111,7 @@ const addProvenance = (
 };
 
 const metadataRow = (
-  repository: string, commit: string, path: string, language: "Python" | "TypeScript", bytes: Buffer,
+  repository: string, commit: string, path: string, language: StackLanguage, bytes: Buffer,
 ): StackMetadataRow => {
   const fields = {
     swhBlobId: digest("sha1", bytes), swhContentId: gitBlob(bytes),
@@ -126,13 +126,13 @@ const metadataRow = (
   return Object.freeze({ stableRowId: digest("sha256", canonical), ...fields });
 };
 const addLanguage = (
-  http: Map<string, JsonValue | string>, index: number, language: "Python" | "TypeScript",
+  http: Map<string, JsonValue | string>, index: number, language: StackLanguage,
   path: string, bytes: Buffer,
 ): Readonly<{ row: StackMetadataRow; selected: SelectedStackBlob }> => {
   const repository = `capture/language-${index}`;
   const api = `https://api.github.com/repos/${repository}`;
   const web = `https://github.com/${repository}`;
-  const commit = `${index + 8}`.repeat(40);
+  const commit = digest("sha1", `capture-language-commit-${index}`);
   const blob = gitBlob(bytes);
   const entries: TreeEntry[] = [{ path, mode: "100644", type: "blob", sha: blob }];
   const tree = treeId(entries);
@@ -170,31 +170,42 @@ export const createCapturedResponses = (
     siblings: [{ rfilename: "README.md" }],
   });
   http.set("https://huggingface.co/datasets/bigcode/the-stack-v2/raw/main/README.md", stackCard());
-  const messages = [profile.markers[0]!, profile.markers[1]!, "Ordinary captured refactor"];
-  messages.forEach((message, index) => {
-    const source = addProvenance(http, index, message);
-    const query = profile.github.queries[index]!;
+  // Revision 12 discovery: three AI-credited commits and seven ordinary commits across the signed query set.
+  const credit = "Co-authored-by: Copilot <198982749+Copilot@users.noreply.github.com>";
+  const perQuery: Readonly<Record<string, readonly Readonly<{ repository: string; message: string }>[]>> = {
+    "ai-copilot-github": [0, 1].map((index) => ({ repository: `capture/ai-${index}`, message: `Captured fix ${index}\n\n${credit}` })),
+    "ai-copilot-microsoft": [{ repository: "capture/ai-2", message: `Captured fix 2\n\n${credit}` }],
+    "ordinary-facebook": [0, 1, 2, 3].map((index) => ({ repository: `capture/ordinary-${index}`, message: `Ordinary captured refactor ${index}` })),
+    "ordinary-google": [4, 5, 6].map((index) => ({ repository: `capture/ordinary-${index}`, message: `Ordinary captured refactor ${index}` })),
+  };
+  let commitIndex = 0;
+  profile.github.queries.forEach((query) => {
+    const entries = perQuery[query.id] ?? [];
+    const sources = entries.map(({ repository, message }) => addCommit(http, commitIndex++, repository, message));
     const url = new URL("https://api.github.com/search/commits");
     Object.entries({ q: query.query, sort: query.sort, order: query.order, page: "1", per_page: "100" })
       .forEach(([key, value]) => url.searchParams.set(key, value));
-    http.set(url.href, { total_count: 1, incomplete_results: query.id === providerIncompleteQueryId, items: [{
+    http.set(url.href, { total_count: sources.length, incomplete_results: query.id === providerIncompleteQueryId, items: sources.map((source, index) => ({
       sha: source.commit, url: `https://api.github.com/repos/${source.repository}/commits/${source.commit}`,
       html_url: `https://github.com/${source.repository}/commit/${source.commit}`,
-      commit: { committer: { date: `2026-07-${30 - index}T10:00:00Z` } },
+      commit: { committer: { date: `2026-07-${String(20 - index).padStart(2, "0")}T10:00:00Z` } },
       repository: { full_name: source.repository, url: `https://api.github.com/repos/${source.repository}`,
         html_url: `https://github.com/${source.repository}` },
-    }] });
+    })) });
   });
-  const pythonBytes = Buffer.from(Array.from({ length: 160 }, (_, index) => [
-    `def captured_${index}(value):`, `    adjusted = value + ${index + 7}`,
-    "    return adjusted * 2", "",
-  ].join("\n")).join("\n"));
-  const typeScriptBytes = Buffer.from(Array.from({ length: 100 }, (_, index) => [
-    `export function captured${index}(value: number): number {`,
-    `  const adjusted = value + ${index + 9};`, "  return adjusted * 3;", "}", "",
-  ].join("\n")).join("\n"));
-  const python = addLanguage(http, 0, "Python", "captured.py", pythonBytes);
-  const typeScript = addLanguage(http, 1, "TypeScript", "captured.ts", typeScriptBytes);
-  return Object.freeze({ http, metadata: Object.freeze({ Python: python.row, TypeScript: typeScript.row }),
-    selectedBlobs: new Map([[python.row.stableRowId, python.selected], [typeScript.row.stableRowId, typeScript.selected]]) });
+  const repeated = (count: number, block: (index: number) => readonly string[]): Buffer =>
+    Buffer.from(Array.from({ length: count }, (_, index) => block(index).join("\n")).join("\n"));
+  const sources: Readonly<Record<StackLanguage, Readonly<{ path: string; bytes: Buffer }>>> = {
+    Python: { path: "captured.py", bytes: repeated(40, (index) => [`def captured_${index}(value):`, `    adjusted = value + ${index + 7}`, "    return adjusted * 2", ""]) },
+    TypeScript: { path: "captured.ts", bytes: repeated(30, (index) => [`export function captured${index}(value: number): number {`, `  const adjusted = value + ${index + 9};`, "  return adjusted * 3;", "}", ""]) },
+    Go: { path: "captured.go", bytes: Buffer.from(["package captured", "", ...Array.from({ length: 20 }, (_, index) => `func captured${index}(value int) int {\n\tadjusted := value + ${index + 5}\n\treturn adjusted * 4\n}\n`)].join("\n")) },
+    Rust: { path: "captured.rs", bytes: repeated(25, (index) => [`pub fn captured_${index}(value: i64) -> i64 {`, `    let adjusted = value + ${index + 3};`, "    adjusted * 5", "}", ""]) },
+    Ruby: { path: "captured.rb", bytes: repeated(25, (index) => [`def captured_${index}(value)`, `  adjusted = value + ${index + 2}`, "  adjusted * 6", "end", ""]) },
+  };
+  const languages = STACK_LANGUAGES.map((language, index) => [language, addLanguage(http, index, language, sources[language].path, sources[language].bytes)] as const);
+  return Object.freeze({
+    http,
+    metadata: Object.freeze(Object.fromEntries(languages.map(([language, { row }]) => [language, row]))) as Readonly<Record<StackLanguage, StackMetadataRow>>,
+    selectedBlobs: new Map(languages.map(([, { row, selected }]) => [row.stableRowId, selected])),
+  });
 };

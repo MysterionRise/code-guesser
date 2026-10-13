@@ -19,3 +19,6 @@ ops/poc/stack/tmp/
 ops/poc/stack/.tmp/
 ops/poc/stack/**/__pycache__/
 ops/poc/stack/**/*.py[cod]
+
+# Demo recorder screencasts (encoded media is tracked)
+docs/media/.work/

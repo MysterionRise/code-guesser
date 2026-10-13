@@ -9,15 +9,17 @@ import {
   type RecordValue,
 } from "./model-validation";
 
-const EXPERIMENT_ROUND_COUNT = 5;
+const ROUNDS_PER_DECK = 5;
+const DECK_MODE_KINDS = ["project", "language", "ai"] as const;
 const CLUES_PER_ROUND = 2;
-const MINIMUM_CANDIDATE_COUNT = 2;
+export type RoundModeKind = typeof DECK_MODE_KINDS[number];
+
 export interface PublicRoundRecord {
   readonly roundId: string;
   readonly roundVersionId: string;
   readonly excerpt: Readonly<{ versionId: string; text: string }>;
   readonly mode: Readonly<{
-    kind: "provenance" | "language";
+    kind: RoundModeKind;
     contractVersionId: string;
     calibrationVersionId: string;
     prompt: string;
@@ -53,12 +55,13 @@ export interface PrivateRevealRecord {
 
 export interface RoundRecordSet {
   readonly sessionContractVersionId: string;
+  /** Fifteen rounds in deck order: five project, five language, five AI. */
   readonly publicRounds: readonly PublicRoundRecord[];
   readonly privateReveals: Readonly<Record<string, PrivateRevealRecord>>;
 }
 
-const parseCandidates = (value: unknown): void => {
-  if (!Array.isArray(value) || value.length < MINIMUM_CANDIDATE_COUNT) return fail();
+const parseCandidates = (value: unknown, kind: RoundModeKind): void => {
+  if (!Array.isArray(value) || value.length !== (kind === "ai" ? 2 : 4)) return fail();
   const ids = value.map((candidate) => {
     const item = record(candidate, ["candidateId", "label"]);
     text(item.label);
@@ -80,9 +83,9 @@ const parsePublicMode = (value: unknown): void => {
   const mode = record(value, [
     "kind", "contractVersionId", "calibrationVersionId", "prompt", "candidates", "clues",
   ]);
-  if (mode.kind !== "provenance" && mode.kind !== "language") fail();
+  if (!(DECK_MODE_KINDS as readonly unknown[]).includes(mode.kind)) fail();
   for (const key of ["contractVersionId", "calibrationVersionId", "prompt"]) text(mode[key]);
-  parseCandidates(mode.candidates);
+  parseCandidates(mode.candidates, mode.kind as RoundModeKind);
   parseClues(mode.clues);
 };
 
@@ -116,9 +119,9 @@ export const parsePrivateReveal = (value: unknown): PrivateRevealRecord => {
   return deepFreeze(structuredClone(reveal)) as unknown as PrivateRevealRecord;
 };
 
-const parsePrivateMap = (value: unknown): Record<string, PrivateRevealRecord> => {
-  if (!isRecord(value) || Object.keys(value).length !== EXPERIMENT_ROUND_COUNT) return fail();
-  return Object.fromEntries(Object.entries(value).map(([roundId, reveal]) => {
+const parsePrivateMap = (value: unknown, total: number): Record<string, PrivateRevealRecord> => {
+  if (!isRecord(value) || Object.keys(value).length !== total) return fail();
+  return Object.fromEntries(Object.entries(value as RecordValue).map(([roundId, reveal]) => {
     text(roundId);
     const parsed = parsePrivateReveal(reveal);
     if (parsed.roundId !== roundId) fail();
@@ -139,8 +142,8 @@ const requireRoundBinding = (
 };
 
 const requireComposition = (rounds: readonly PublicRoundRecord[]): void => {
-  const kinds = rounds.map(({ mode }) => mode.kind);
-  if (kinds.join("|") !== "provenance|provenance|provenance|language|language") fail();
+  const expected = DECK_MODE_KINDS.flatMap((kind) => Array.from({ length: ROUNDS_PER_DECK }, () => kind));
+  if (rounds.map(({ mode }) => mode.kind).join("|") !== expected.join("|")) fail();
   const ids = rounds.map(({ roundId }) => roundId);
   if (new Set(ids).size !== ids.length) fail();
 };
@@ -148,10 +151,11 @@ const requireComposition = (rounds: readonly PublicRoundRecord[]): void => {
 export const parseRoundRecordSet = (value: unknown): RoundRecordSet => {
   const set = record(value, ["sessionContractVersionId", "publicRounds", "privateReveals"]);
   text(set.sessionContractVersionId);
-  if (!Array.isArray(set.publicRounds) || set.publicRounds.length !== EXPERIMENT_ROUND_COUNT) return fail();
+  const total = DECK_MODE_KINDS.length * ROUNDS_PER_DECK;
+  if (!Array.isArray(set.publicRounds) || set.publicRounds.length !== total) return fail();
   const publicRounds = set.publicRounds.map(parsePublicRound);
   requireComposition(publicRounds);
-  const privateReveals = parsePrivateMap(set.privateReveals);
+  const privateReveals = parsePrivateMap(set.privateReveals, total);
   const publicIds = publicRounds.map(({ roundId }) => roundId).sort();
   if (publicIds.join("|") !== Object.keys(privateReveals).sort().join("|")) fail();
   for (const round of publicRounds) requireRoundBinding(round, privateReveals[round.roundId]!);

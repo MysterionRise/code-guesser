@@ -41,7 +41,7 @@ interface HarnessOptions {
   readonly providerIncompleteQueryId?: string;
 }
 
-const PROFILE_URL = new URL("../../profiles/local-real-rounds.v1.json", import.meta.url);
+const PROFILE_URL = new URL("../../profiles/local-real-rounds.v2.json", import.meta.url);
 const REVISION = "e565caa3a78c2423bd374333a472b049eb090e47";
 
 const loadProfile = async (failure?: CapturedFailure): Promise<CrawlProfile> => {

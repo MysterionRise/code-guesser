@@ -80,15 +80,17 @@ describe("playable synthetic demo", () => {
     );
 
     expect(page).toContain("DemoArcade");
-    expect(page).toContain("ACTIVE_REHEARSAL_CATALOGUE");
-    expect(page).toContain("authorizeRehearsalReveal");
+    expect(page).toContain("activeLocalRealExperiment");
+    expect(page).toContain("authorizeLocalExperimentReveal");
+    expect(page).not.toContain("ACTIVE_REHEARSAL_CATALOGUE");
     expect(rehearsal).toContain("Synthetic local demo");
     expect(mount).toContain("ArcadeShell");
     expect(mount).toContain("dynamic");
     expect(mount).toContain("ssr: false");
     expect(actions).toContain('"use server"');
-    expect(actions).toContain("createRehearsalReveal");
-    expect(actions).toContain("ACTIVE_REHEARSAL_CATALOGUE");
+    expect(actions).toContain("activeLocalRealExperiment");
+    expect(actions).toContain("createReveal");
+    expect(actions).not.toContain("ACTIVE_REHEARSAL_CATALOGUE");
     expect(actions).not.toMatch(/READY|APPROVED|invitation|deployment/gu);
   });
 });

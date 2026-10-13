@@ -45,6 +45,10 @@ export interface TransportLimits {
 }
 
 type FetchLike = (input: string | URL, init: RequestInit) => Promise<Response>;
+/** GitHub statuses and failures that are usually transient; each becomes one bounded retry request. */
+const TRANSIENT_STATUSES = new Set([500, 502, 503, 504]);
+const TRANSIENT_FAILURES: ReadonlySet<string> = new Set(["TIMEOUT", "NETWORK"]);
+const TRANSIENT_RETRY_MILLISECONDS = 2_000;
 const MINIMUM_SUCCESS_STATUS = 200;
 const MAXIMUM_SUCCESS_STATUS = 299;
 const STATUS_CLASS_DIVISOR = 100;
@@ -217,6 +221,12 @@ const fetchResponse = async (
       throw new RetryRequestError(instruction);
     }
   }
+  if (request.provider === "github" && TRANSIENT_STATUSES.has(response.status)) {
+    const instruction = retryInstruction(response.headers, (options.now ?? Date.now)());
+    await discardBody(response);
+    throw new RetryRequestError(typeof instruction === "number" ? instruction : TRANSIENT_RETRY_MILLISECONDS,
+      new TransportError("UNSUPPORTED_STATUS", diagnostic(request, "UNSUPPORTED_STATUS", response.status)));
+  }
   if (response.status < MINIMUM_SUCCESS_STATUS || response.status > MAXIMUM_SUCCESS_STATUS) {
     return reject(request, "UNSUPPORTED_STATUS", response.status);
   }
@@ -251,8 +261,13 @@ const performRequest = async (
     return await withinDeadline(request, limits.timeoutMilliseconds, controller, () =>
       fetchResponse(options, request, authorized, controller.signal));
   } catch (error) {
-    if (error instanceof TransportError || error instanceof RetryRequestError) throw error;
-    return reject(request, controller.signal.aborted ? "TIMEOUT" : "NETWORK");
+    if (error instanceof RetryRequestError) throw error;
+    const code = controller.signal.aborted ? "TIMEOUT" : "NETWORK";
+    const failure = error instanceof TransportError ? error : new TransportError(code, diagnostic(request, code));
+    if (request.provider === "github" && TRANSIENT_FAILURES.has(failure.code)) {
+      throw new RetryRequestError(TRANSIENT_RETRY_MILLISECONDS, failure);
+    }
+    throw failure;
   } finally {
     state.activeRequests -= 1;
   }

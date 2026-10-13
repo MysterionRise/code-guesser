@@ -13,6 +13,8 @@ const ArcadeShell = dynamic(
 interface DemoArcadeProps {
   readonly mode: PublicModeContract;
   readonly authorizeRevealAction: (request: RevealRequest) => Promise<AuthorizedReveal>;
+  readonly chooseAnotherDeckHref?: string;
+  readonly deckTitle?: string;
 }
 
 export function DemoArcade(props: DemoArcadeProps) {

@@ -1,6 +1,9 @@
 import { defineConfig } from "@playwright/test";
 
 const nodeExecutable = JSON.stringify(process.execPath);
+// E2E_PORT moves the local dev server off 3000 when something else already listens there.
+const port = Number(process.env.E2E_PORT ?? 3000);
+const baseURL = `http://127.0.0.1:${port}`;
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -11,9 +14,9 @@ export default defineConfig({
     headless: true,
   },
   webServer: {
-    command: `${nodeExecutable} node_modules/next/dist/bin/next dev --hostname 127.0.0.1 --port 3000`,
+    command: `${nodeExecutable} node_modules/next/dist/bin/next dev --hostname 127.0.0.1 --port ${port}`,
     cwd: "apps/game",
-    url: "http://127.0.0.1:3000",
+    url: baseURL,
     timeout: 300_000,
     reuseExistingServer: false,
   },
@@ -25,7 +28,7 @@ export default defineConfig({
     {
       name: "provenance-accessibility",
       testMatch: /provenance-accessibility\.spec\.ts/,
-      use: { baseURL: "http://127.0.0.1:3000" },
+      use: { baseURL },
     },
     {
       name: "language",
@@ -34,17 +37,17 @@ export default defineConfig({
     {
       name: "language-accessibility",
       testMatch: /language-accessibility\.spec\.ts/,
-      use: { baseURL: "http://127.0.0.1:3000" },
+      use: { baseURL },
     },
     {
       name: "privacy-accessibility",
       testMatch: /privacy-accessibility\.spec\.ts/,
-      use: { baseURL: "http://127.0.0.1:3000" },
+      use: { baseURL },
     },
     {
       name: "arcade",
       testMatch: /(?:arcade-shell|accessibility-local)\.spec\.ts/,
-      use: { baseURL: "http://127.0.0.1:3000" },
+      use: { baseURL },
     },
   ],
 });

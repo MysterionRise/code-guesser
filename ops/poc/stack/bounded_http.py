@@ -17,23 +17,31 @@ import httpx
 ALLOWED_HOST = "huggingface.co"
 DATASET = "bigcode/the-stack-v2"
 PINNED_REVISION = "e565caa3a78c2423bd374333a472b049eb090e47"
-# Exact hosts a resolve redirect may target. None has been observed under
-# authorization yet, so redirects fail closed until an observation adds one.
-REDIRECT_HOSTS = frozenset()
-MAXIMUM_REQUESTS = 200
-MAXIMUM_NETWORK_BYTES = 64 * 1024 * 1024
+# Exact hosts a resolve redirect may target. The one entry was observed under
+# authorization on 2026-10-08 (HEAD on the pinned resolve endpoint answered 302
+# to this host); see evidence/2026-10-08-hugging-face-redirect-observation.md.
+REDIRECT_HOSTS = frozenset({"us.aws.cdn.hf.co"})
+MAXIMUM_REQUESTS = 600
+MAXIMUM_NETWORK_BYTES = 96 * 1024 * 1024
 TIMEOUT_SECONDS = 15.0
 READ_METHODS = ("GET", "HEAD")
-ORIGIN_ONLY_HEADERS = ("authorization", "cookie", "x-request-id")
+# Headers that belong to the origin request only; the rebuilt redirect request derives its own Host.
+ORIGIN_ONLY_HEADERS = ("authorization", "cookie", "host", "x-request-id")
 CREDENTIAL_QUERY = re.compile(
     r"(?i)(?:^|[?&])(?:token|access_token|authorization|signature|x-amz-[a-z-]+|key|secret|credential)=",
+)
+# The pinned file endpoints answer 404 for an absent entry; the Hub client relies on that
+# answer to detect that no loading script exists, so it passes through body-free.
+FILE_ENDPOINT_PATTERN = re.compile(
+    rf"^/datasets/{re.escape(DATASET)}/(?:resolve|raw)/{PINNED_REVISION}/[^/]+(?:/[^/]+)*$",
 )
 ENDPOINT_PATTERNS = tuple(re.compile(pattern) for pattern in (
     rf"^/api/datasets/{re.escape(DATASET)}$",
     rf"^/api/datasets/{re.escape(DATASET)}/revision/{PINNED_REVISION}$",
     rf"^/api/datasets/{re.escape(DATASET)}/tree/{PINNED_REVISION}(?:/[^/]+)*$",
-    rf"^/datasets/{re.escape(DATASET)}/(?:resolve|raw)/{PINNED_REVISION}/[^/]+(?:/[^/]+)*$",
-))
+)) + (FILE_ENDPOINT_PATTERN,)
+ABSENT_ENTRY_STATUS = 404
+BODY_HEADERS = (b"content-length", b"content-encoding", b"transfer-encoding")
 HUB_HARDENING = {
     "HF_HUB_DISABLE_XET": "1",
     "HF_HUB_DISABLE_TELEMETRY": "1",
@@ -182,12 +190,19 @@ class BoundedHttpTransport(httpx.BaseTransport):
             _fail("REDIRECT_REJECTED" if 300 <= result.status_code < 400 else "UNSUPPORTED_STATUS")
         return self._metered(result, follow)
 
+    def _absent_entry(self, request, response):
+        headers = [(key, value) for key, value in response.headers.raw if key.lower() not in BODY_HEADERS]
+        self._discard(response)
+        return httpx.Response(ABSENT_ENTRY_STATUS, headers=headers, content=b"", request=request)
+
     def handle_request(self, request):
         _validate_target(request.url, request.method)
         self._budget.begin_request()
         response = self._send(request)
         if 300 <= response.status_code < 400:
             return self._follow(request, response)
+        if response.status_code == ABSENT_ENTRY_STATUS and FILE_ENDPOINT_PATTERN.fullmatch(request.url.path):
+            return self._absent_entry(request, response)
         if not 200 <= response.status_code < 300:
             self._discard(response)
             _fail("UNSUPPORTED_STATUS")

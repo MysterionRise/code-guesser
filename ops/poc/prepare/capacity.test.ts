@@ -1,5 +1,6 @@
 import { createCapacityMeter, CapacityError } from "./capacity";
-import { SIGNED_CAPACITY_CEILINGS, type CapacityLimits } from "./profile";
+import { RUN_RETRY_LIMIT } from "./retry";
+import { SIGNED_CAPACITY_CEILINGS, type CapacityLimits, STACK_LANGUAGES } from "./profile";
 
 const testModuleName: string = "vitest";
 const { describe, expect, it } = await import(testModuleName) as any;
@@ -12,7 +13,7 @@ const limits = (overrides: Partial<CapacityLimits> = {}): CapacityLimits => ({
 const meter = (overrides: Partial<CapacityLimits> = {}) => createCapacityMeter({
   limits: limits(overrides),
   githubQueryIds: ["first", "second"],
-  stackLanguages: ["Python", "TypeScript"],
+  stackLanguages: STACK_LANGUAGES,
 });
 
 describe("preparation capacity", () => {
@@ -47,11 +48,11 @@ describe("preparation capacity", () => {
 
   it("meters exact per-language rows and total Stack metadata bytes", () => {
     const capacity = meter();
-    capacity.recordStackRows("Python", 10_000, 64 * 1024 * 1024);
+    capacity.recordStackRows("Python", 10_000, 96 * 1024 * 1024);
     const exact = capacity.snapshot();
 
-    expect(exact.stackRows).toEqual({ Python: 10_000, TypeScript: 0 });
-    expect(exact.stackMetadataBytes).toBe(64 * 1024 * 1024);
+    expect(exact.stackRows).toEqual({ Python: 10_000, TypeScript: 0, Go: 0, Rust: 0, Ruby: 0 });
+    expect(exact.stackMetadataBytes).toBe(96 * 1024 * 1024);
     expect(() => capacity.recordStackRows("Python", 1, 0)).toThrow(CapacityError);
     expect(() => capacity.recordStackRows("TypeScript", 0, 1)).toThrow(CapacityError);
     expect(capacity.snapshot()).toEqual(exact);
@@ -103,8 +104,8 @@ describe("preparation capacity", () => {
     expect(concurrent.snapshot().responseBytes).toBe(beforeRejection.responseBytes);
 
     const requests = meter();
-    for (let index = 0; index < 200; index += 1) requests.beginRequest().release();
-    expect(requests.snapshot().requestCount).toBe(200);
+    for (let index = 0; index < 600; index += 1) requests.beginRequest().release();
+    expect(requests.snapshot().requestCount).toBe(600);
     expect(() => requests.beginRequest()).toThrow(CapacityError);
   });
 
@@ -121,12 +122,23 @@ describe("preparation capacity", () => {
     expect(() => single.recordRetryWait(15_001)).toThrow(CapacityError);
     expect(single.snapshot().retryWaits).toBe(0);
 
+    const discarded = createCapacityMeter({ limits: { ...SIGNED_CAPACITY_CEILINGS, githubPages: 2 },
+      githubQueryIds: ["q"], stackLanguages: STACK_LANGUAGES });
+    discarded.recordGitHubPage("q", 100);
+    discarded.recordGitHubPage("q", 50);
+    expect(() => discarded.recordGitHubPage("q", 1)).toThrow(CapacityError);
+    const spentBefore = discarded.snapshot().requestCount;
+    // A discarded pass no longer counts toward the query's accepted pages and results.
+    discarded.discardGitHubQuery("q");
+    discarded.recordGitHubPage("q", 100);
+    expect(discarded.snapshot().github.q).toEqual({ pages: 1, results: 100 });
+    expect(discarded.snapshot().requestCount).toBe(spentBefore);
+    expect(() => discarded.discardGitHubQuery("unknown")).toThrow(CapacityError);
+
     const retries = meter();
-    retries.recordRetryWait(1);
-    retries.recordRetryWait(1);
-    retries.recordRetryWait(1);
+    for (let retry = 0; retry < RUN_RETRY_LIMIT; retry += 1) retries.recordRetryWait(1);
     expect(() => retries.recordRetryWait(1)).toThrow(CapacityError);
-    expect(retries.snapshot().retryWaits).toBe(3);
+    expect(retries.snapshot().retryWaits).toBe(RUN_RETRY_LIMIT);
   });
 
   it("meters live and peak temporary disk with idempotent release and frozen snapshots", () => {
@@ -152,15 +164,15 @@ describe("preparation capacity", () => {
   it("meters worker-reported requests against the shared request ceiling", () => {
     const capacity = meter();
     capacity.recordWorkerRequests(0);
-    capacity.recordWorkerRequests(199);
-    expect(capacity.snapshot().requestCount).toBe(199);
+    capacity.recordWorkerRequests(599);
+    expect(capacity.snapshot().requestCount).toBe(599);
     capacity.beginRequest().release();
-    expect(capacity.snapshot().requestCount).toBe(200);
+    expect(capacity.snapshot().requestCount).toBe(600);
     expect(() => capacity.recordWorkerRequests(1)).toThrow(CapacityError);
     expect(() => capacity.recordWorkerRequests(1)).toThrow("REQUEST_COUNT");
     expect(() => capacity.recordWorkerRequests(-1)).toThrow(CapacityError);
     expect(() => capacity.recordWorkerRequests(1.5)).toThrow(CapacityError);
-    expect(capacity.snapshot().requestCount).toBe(200);
+    expect(capacity.snapshot().requestCount).toBe(600);
     expect(() => capacity.beginRequest()).toThrow(CapacityError);
   });
 });

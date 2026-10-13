@@ -1,6 +1,8 @@
 import "server-only";
 
 import {
+  PROFILE_VERSION,
+  STACK_LANGUAGES,
   STACK_REVISION,
   fail,
   type JsonRecord,
@@ -8,6 +10,7 @@ import {
 } from "./local-real-experiment-domain.server";
 import {
   bool,
+  count,
   gitId,
   positiveInteger,
   record,
@@ -22,10 +25,13 @@ const BASE_SOURCE_KEYS = [
   "licenseName", "licenseSpdx", "licenseFileUrl", "commit", "commitUrl", "blobUrl",
   "profileVersion", "crawlSnapshotId",
 ] as const;
-const PROVENANCE_SOURCE_KEYS = [
+const PROJECT_SOURCE_KEYS = [
   ...BASE_SOURCE_KEYS, "queryId", "childCommit", "childTree", "parentCommit", "parentTree",
   "parentPath", "childPath", "parentMode", "childMode", "parentBlob", "childBlob",
-  "parentRawContentHash", "childRawContentHash", "changedLineHash", "markerMatched",
+  "parentRawContentHash", "childRawContentHash", "changedLineHash",
+] as const;
+const AI_SOURCE_KEYS = [
+  ...PROJECT_SOURCE_KEYS, "aiCreditRecorded", "aiAssistant", "changedFileCount", "commitAdditions", "commitDeletions",
 ] as const;
 const LANGUAGE_SOURCE_KEYS = [
   ...BASE_SOURCE_KEYS, "stackRelease", "stackRevision", "configuration", "stableRowId",
@@ -54,11 +60,7 @@ const validateGitHubBinding = (source: JsonRecord): void => {
     || text(source.licenseFileUrl).length === licensePrefix.length) fail();
 };
 
-const validateBaseSource = (
-  source: JsonRecord,
-  snapshotId: string,
-  profileVersion: string,
-): void => {
+const validateBaseSource = (source: JsonRecord, snapshotId: string): void => {
   for (const key of [
     "repository", "repositoryUrl", "authorName", "path", "licenseName", "licenseSpdx",
     "licenseFileUrl", "commitUrl", "blobUrl", "profileVersion",
@@ -69,20 +71,13 @@ const validateBaseSource = (
   gitId(source.commit);
   sha256(source.rawContentHash);
   sha256(source.excerptHash);
-  if (source.profileVersion !== profileVersion || source.crawlSnapshotId !== snapshotId) fail();
+  if (source.profileVersion !== PROFILE_VERSION || source.crawlSnapshotId !== snapshotId) fail();
   validateGitHubBinding(source);
 };
 
-export const validateProvenanceSource = (
-  value: unknown,
-  snapshotId: string,
-  profileVersion: string,
-  queryIds: ReadonlySet<string>,
-): ParsedSource => {
-  const source = record(value, PROVENANCE_SOURCE_KEYS);
-  validateBaseSource(source, snapshotId, profileVersion);
-  if (source.discoverySource !== "GITHUB_COMMIT_SEARCH"
-    || !queryIds.has(text(source.queryId))) fail();
+const validateLineage = (source: JsonRecord, queryRoles: ReadonlyMap<string, string>): string => {
+  if (source.discoverySource !== "GITHUB_COMMIT_SEARCH") fail();
+  const role = queryRoles.get(text(source.queryId)) ?? fail();
   for (const key of [
     "childCommit", "childTree", "parentCommit", "parentTree", "parentBlob", "childBlob",
   ]) gitId(source[key]);
@@ -92,11 +87,41 @@ export const validateProvenanceSource = (
   for (const key of ["parentPath", "childPath"]) text(source[key]);
   if ((source.parentMode !== "100644" && source.parentMode !== "100755")
     || (source.childMode !== "100644" && source.childMode !== "100755")) fail();
-  bool(source.markerMatched);
   if (source.commit !== source.childCommit || source.blob !== source.childBlob
     || source.path !== source.parentPath || source.path !== source.childPath
     || source.rawContentHash !== source.childRawContentHash
     || source.parentCommit === source.childCommit || source.parentBlob === source.childBlob) fail();
+  return role;
+};
+
+/** FR-032: a project round comes from an `ordinary` query commit. */
+export const validateProjectSource = (
+  value: unknown,
+  snapshotId: string,
+  queryRoles: ReadonlyMap<string, string>,
+): ParsedSource => {
+  const source = record(value, PROJECT_SOURCE_KEYS);
+  validateBaseSource(source, snapshotId);
+  if (validateLineage(source, queryRoles) !== "ordinary") fail();
+  return source as ParsedSource;
+};
+
+/** FR-020 roles: a credited commit comes from an `ai-credit` query and an uncredited one from `ordinary`. */
+export const validateAiSource = (
+  value: unknown,
+  snapshotId: string,
+  queryRoles: ReadonlyMap<string, string>,
+): ParsedSource => {
+  const source = record(value, AI_SOURCE_KEYS);
+  validateBaseSource(source, snapshotId);
+  const role = validateLineage(source, queryRoles);
+  const recorded = bool(source.aiCreditRecorded);
+  if (recorded) text(source.aiAssistant);
+  else if (source.aiAssistant !== null) fail();
+  if (recorded !== (role === "ai-credit")) fail();
+  positiveInteger(source.changedFileCount);
+  count(source.commitAdditions);
+  count(source.commitDeletions);
   return source as ParsedSource;
 };
 
@@ -115,14 +140,13 @@ const validTimestamp = (value: unknown): void => {
 export const validateLanguageSource = (
   value: unknown,
   snapshotId: string,
-  profileVersion: string,
-  expectedConfiguration: "Python" | "TypeScript",
 ): ParsedSource => {
   const source = record(value, LANGUAGE_SOURCE_KEYS);
-  validateBaseSource(source, snapshotId, profileVersion);
+  validateBaseSource(source, snapshotId);
   if (source.discoverySource !== "STACK_V2" || source.stackRelease !== "v2.2.0"
-    || source.stackRevision !== STACK_REVISION || source.configuration !== expectedConfiguration
-    || source.detectedLanguage !== expectedConfiguration || source.sourceEncoding !== "UTF-8"
+    || source.stackRevision !== STACK_REVISION
+    || !(STACK_LANGUAGES as readonly unknown[]).includes(source.configuration)
+    || source.detectedLanguage !== source.configuration || source.sourceEncoding !== "UTF-8"
     || bool(source.generated) || bool(source.vendor)) fail();
   sha256(source.stableRowId);
   for (const key of [

@@ -435,7 +435,7 @@ describe("safe local rehearsal catalogue", () => {
     )).toThrow(/accepted-answer entitlement/iu);
   });
 
-  it("mounts only the explicit selected catalogue and retains synthetic source truth", () => {
+  it("mounts the local experiment on the root route and retains synthetic source truth", () => {
     const page = readFileSync(new URL("../src/app/page.tsx", import.meta.url), "utf8");
     const actions = readFileSync(new URL("../src/app/actions.ts", import.meta.url), "utf8");
     const demo = readFileSync(new URL("../src/demo/demo-game.ts", import.meta.url), "utf8");
@@ -447,10 +447,12 @@ describe("safe local rehearsal catalogue", () => {
       new URL("../src/demo/rehearsal-server.ts", import.meta.url),
       "utf8",
     );
-    expect(page).toContain("ACTIVE_REHEARSAL_CATALOGUE");
-    expect(page).toContain("authorizeRehearsalReveal");
-    expect(page).toContain("rehearsal-server");
-    expect(actions).toContain("rehearsal-server");
+    // FR-015: the root route binds the local experiment directly; synthetic truth stays intact elsewhere.
+    expect(page).toContain("local-real-experiment-loader.server");
+    expect(page).toContain("authorizeLocalExperimentReveal");
+    expect(actions).toContain("local-real-experiment-loader.server");
+    expect(page).not.toContain("ACTIVE_REHEARSAL_CATALOGUE");
+    expect(page).not.toContain("rehearsal-server");
     expect(page).not.toContain("authorizeDemoReveal");
     expect(page).not.toContain("DEMO_MODE");
     expect(demo).toContain("synthetic-demo-session-v1");

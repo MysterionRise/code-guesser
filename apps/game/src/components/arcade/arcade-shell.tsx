@@ -40,6 +40,7 @@ export interface ArcadeSession {
   readonly reveal: AuthorizedReveal | null;
   readonly score: number;
   readonly completedRounds: number;
+  readonly correctRounds: number;
   readonly result: EntertainmentResultProjection | null;
   readonly status: "playing" | "complete";
 }
@@ -54,7 +55,7 @@ export type ArcadeSessionAction =
 
 export function createArcadeSession(_mode: PublicModeContract): ArcadeSession {
   return Object.freeze({ roundIndex: 0, visibleHintCount: 0, lockedCandidateId: null,
-    reveal: null, score: 0, completedRounds: 0, result: null, status: "playing" });
+    reveal: null, score: 0, completedRounds: 0, correctRounds: 0, result: null, status: "playing" });
 }
 
 export function projectDisplayReveal(value: unknown): AuthorizedReveal {
@@ -132,7 +133,7 @@ export function transitionArcadeSession(
       throw new ArcadeShellRuleError("reveal score does not match accepted clue and session state");
     }
     return Object.freeze({ ...session, reveal, result: reveal.result,
-      score: reveal.result.score, completedRounds,
+      score: reveal.result.score, completedRounds, correctRounds: session.correctRounds + (reveal.correct ? 1 : 0),
       status: completedRounds === mode.rounds.length ? "complete" : "playing" });
   }
   if (session.reveal === null) throw new ArcadeShellRuleError("the current round must reveal before navigation");
@@ -141,31 +142,74 @@ export function transitionArcadeSession(
     lockedCandidateId: null, reveal: null });
 }
 
-export function projectSpoilerFreeShare(result: EntertainmentResultProjection) {
+const points = (value: number): string => value.toLocaleString("en-US");
+
+/** The share line names the deck and the tally, never a round's content or answer. */
+export function projectSpoilerFreeShare(result: EntertainmentResultProjection, correctRounds: number, deckTitle?: string) {
   if (result.completedRounds !== 5) throw new ArcadeShellRuleError("sharing requires a complete run");
+  if (!Number.isInteger(correctRounds) || correctRounds < 0 || correctRounds > result.completedRounds) {
+    throw new ArcadeShellRuleError("correct rounds must be within the completed rounds");
+  }
+  const parts = ["CodeGuessr", ...(deckTitle ? [deckTitle] : []),
+    `${correctRounds}/${result.completedRounds} correct`, `${points(result.score)}/${points(result.attainableMaximum)}`];
   return Object.freeze({
-    text: `CodeGuessr ${result.score}/${result.attainableMaximum} · ${result.completedRounds}/5`,
+    text: parts.join(" · "),
     score: result.score,
     rounds: result.completedRounds,
+    correct: correctRounds,
   });
 }
 
-export function formatCompletionResult(result: EntertainmentResultProjection): string {
-  const share = projectSpoilerFreeShare(result);
-  return `Run complete — ${result.score.toLocaleString()} points. Share: ${share.text}.`;
+export function formatCompletionResult(result: EntertainmentResultProjection, correctRounds: number, deckTitle?: string): string {
+  const share = projectSpoilerFreeShare(result, correctRounds, deckTitle);
+  return `Run complete — ${points(result.score)} points, ${correctRounds} of ${result.completedRounds} correct. Share: ${share.text}.`;
 }
+
+const HINT_COST_NOTE = "Each hint lowers this round’s points: 1,000 → 800 → 500.";
+const SOURCE_LINK = /(https:\/\/\S+)/u;
+
+/** Renders the public attribution with its source address as a link; the text itself is unchanged. */
+const linkedAttribution = (attribution: string): React.ReactNode[] => attribution.split(SOURCE_LINK)
+  .map((part, index) => index % 2 === 1
+    ? <a key={index} href={part} rel="noreferrer noopener" target="_blank">{part}</a>
+    : part);
 
 interface ArcadeShellProps {
   mode: PublicModeContract;
   authorizeRevealAction: (request: RevealRequest) => Promise<AuthorizedReveal>;
+  /** When set, completion also links back to the deck chooser. */
+  chooseAnotherDeckHref?: string;
+  /** When set, the share line names the deck. */
+  deckTitle?: string;
 }
 
-export function ArcadeShell({ mode, authorizeRevealAction }: ArcadeShellProps) {
+export function ArcadeShell({ mode, authorizeRevealAction, chooseAnotherDeckHref, deckTitle }: ArcadeShellProps) {
   const [session, setSession] = React.useState(() => createArcadeSession(mode));
   const [selection, setSelection] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [copied, setCopied] = React.useState(false);
   const round = mode.rounds[session.roundIndex]!;
+  const roundTitle = React.useRef<HTMLHeadingElement>(null);
+  const revealHeading = React.useRef<HTMLHeadingElement>(null);
+  const settled = React.useRef(false);
+
+  // Keyboard and screen-reader users land on the verdict after answering and on the next prompt after
+  // moving on; the first render leaves focus alone.
+  React.useEffect(() => {
+    if (!settled.current) { settled.current = true; return; }
+    (session.reveal ? revealHeading : roundTitle).current?.focus();
+  }, [session.reveal, session.roundIndex]);
+
+  const copyResult = async () => {
+    if (!session.result) return;
+    try {
+      await navigator.clipboard.writeText(projectSpoilerFreeShare(session.result, session.correctRounds, deckTitle).text);
+      setCopied(true);
+    } catch {
+      setCopied(false);
+    }
+  };
 
   const submit = async () => {
     if (selection === "" || session.reveal !== null || busy) return;
@@ -199,6 +243,7 @@ export function ArcadeShell({ mode, authorizeRevealAction }: ArcadeShellProps) {
     setSession((current) => transitionArcadeSession(mode, current, { type: "restart" }));
     setSelection("");
     setError(null);
+    setCopied(false);
   };
 
   return (
@@ -222,14 +267,15 @@ export function ArcadeShell({ mode, authorizeRevealAction }: ArcadeShellProps) {
 
       <section className="game-card" aria-labelledby="round-title">
         <p className="eyebrow">Round {session.roundIndex + 1} of {mode.rounds.length}</p>
-        <h1 id="round-title">{round.mode.prompt}</h1>
-        <pre className="code-window"><code>{round.excerpt.text}</code></pre>
+        <h1 id="round-title" ref={roundTitle} tabIndex={-1}>{round.mode.prompt}</h1>
+        <pre className="code-window" tabIndex={0} aria-label="Code excerpt"><code>{round.excerpt.text}</code></pre>
 
+        <p className="hint-cost" id={`hint-cost-${round.roundId}`}>{HINT_COST_NOTE}</p>
         <div className="hints" aria-label="Hints">
           {round.mode.clues.map((clue, index) => index < session.visibleHintCount
             ? <p className="hint" key={clue.order}>{clue.label}</p>
             : index === session.visibleHintCount
-              ? <button className="hint-button" type="button" key={clue.order} disabled={busy || session.lockedCandidateId !== null} onClick={() => setSession((current) => transitionArcadeSession(mode, current, { type: "reveal-hint" }))}>
+              ? <button className="hint-button" type="button" key={clue.order} aria-describedby={`hint-cost-${round.roundId}`} disabled={busy || session.lockedCandidateId !== null} onClick={() => setSession((current) => transitionArcadeSession(mode, current, { type: "reveal-hint" }))}>
                   Reveal hint {clue.order}
                 </button>
               : null)}
@@ -261,17 +307,19 @@ export function ArcadeShell({ mode, authorizeRevealAction }: ArcadeShellProps) {
         <div className="reveal" aria-live="polite" aria-atomic="true">
           {session.reveal && (
             <>
-              <h2>{session.reveal.correct ? "Nice read." : "Not this time."}</h2>
+              <h2 ref={revealHeading} tabIndex={-1}>{session.reveal.correct ? "Nice read." : "Not this time."}</h2>
               <p>{session.reveal.evidence}</p>
               <p>{session.reveal.explanation}</p>
               <p>Helpful signals: {session.reveal.helpfulSignals.join(" · ")}</p>
               <p>Misleading signals: {session.reveal.misleadingSignals.join(" · ")}</p>
-              <small>{session.reveal.attribution}</small>
+              <small>{linkedAttribution(session.reveal.attribution)}</small>
               {session.status !== "complete"
                 ? <button type="button" onClick={next}>Next round</button>
                 : <>
-                    <p>{formatCompletionResult(session.result!)}</p>
+                    <p>{formatCompletionResult(session.result!, session.correctRounds, deckTitle)}</p>
+                    <button type="button" onClick={copyResult}>{copied ? "Copied" : "Copy result"}</button>
                     <button type="button" onClick={restart}>Play again</button>
+                    {chooseAnotherDeckHref && <a className="deck-link" href={chooseAnotherDeckHref}>Choose another deck</a>}
                   </>}
             </>
           )}

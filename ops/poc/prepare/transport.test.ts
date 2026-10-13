@@ -1,4 +1,4 @@
-import { RetryRequestError } from "./retry";
+import { createRetryController, RetryRequestError } from "./retry";
 import { createBoundedTransport, TransportError } from "./transport";
 
 const testModuleName: string = "vitest";
@@ -153,7 +153,10 @@ describe("bounded preparation transport", () => {
         init.signal!.addEventListener("abort", () => reject(new Error("provider detail")));
       }),
     });
-    await expect(timed.requestBytes(githubRequest())).rejects.toMatchObject({ code: "TIMEOUT" });
+    // A GitHub timeout is transient: it becomes a retry request that names the timeout as its cause.
+    await expect(timed.requestBytes(githubRequest())).rejects.toMatchObject({
+      retryAfterMilliseconds: 2000, cause: { code: "TIMEOUT" },
+    });
   });
 
   it("bounds a response body stream that ignores the request AbortSignal", async () => {
@@ -174,7 +177,7 @@ describe("bounded preparation transport", () => {
       new Promise((resolve) => setTimeout(() => resolve({ code: "BODY_READ_HUNG" }), 50)),
     ]);
 
-    expect(outcome).toMatchObject({ code: "TIMEOUT" });
+    expect(outcome).toMatchObject({ cause: { code: "TIMEOUT" } });
     expect(JSON.stringify(outcome)).not.toContain(secret);
   });
 
@@ -262,8 +265,54 @@ describe("bounded preparation transport", () => {
       provider: "huggingFace", method: "GET", url: "https://huggingface.co/api/datasets/bigcode/the-stack-v2",
     })).rejects.toMatchObject({ code: "UNSUPPORTED_STATUS", diagnostic: { statusClass: "4xx", provider: "huggingFace" } });
 
-    const github500 = transportReturning(new Response(null, { status: 500, headers: { "retry-after": "1" } }));
-    await expect(github500.requestBytes(githubRequest())).rejects.toMatchObject({ code: "UNSUPPORTED_STATUS", diagnostic: { statusClass: "5xx" } });
+    const huggingFace503 = transportReturning(new Response(null, { status: 503 }));
+    await expect(huggingFace503.requestBytes({
+      provider: "huggingFace", method: "GET", url: "https://huggingface.co/api/datasets/bigcode/the-stack-v2",
+    })).rejects.toMatchObject({ code: "UNSUPPORTED_STATUS", diagnostic: { statusClass: "5xx", provider: "huggingFace" } });
+  });
+
+  it("turns a GitHub 5xx, network error, or timeout into one bounded retry request without reading the body", async () => {
+    for (const [status, wait] of [[500, 2000], [502, 2000], [503, 2000], [504, 2000]] as const) {
+      let pulled = false;
+      const body = new ReadableStream<Uint8Array>({ pull() { pulled = true; throw new Error("BODY_READ"); } }, { highWaterMark: 0 });
+      await expect(transportReturning(new Response(body, { status })).requestJson(githubRequest())).rejects.toMatchObject({
+        retryAfterMilliseconds: wait, cause: { code: "UNSUPPORTED_STATUS", diagnostic: { statusClass: "5xx" } },
+      });
+      expect(pulled).toBe(false);
+    }
+    const instructed = transportReturning(new Response(null, { status: 503, headers: { "retry-after": "4" } }));
+    await expect(instructed.requestJson(githubRequest())).rejects.toMatchObject({ retryAfterMilliseconds: 4000 });
+    const offline = createBoundedTransport({ limits, fetch: async () => { throw new TypeError("fetch failed: secret-host"); } });
+    const caught = await offline.requestJson(githubRequest()).catch((error: unknown) => error);
+    expect(caught).toBeInstanceOf(RetryRequestError);
+    expect(caught).toMatchObject({ retryAfterMilliseconds: 2000, cause: { code: "NETWORK" } });
+    expect(JSON.stringify(caught)).not.toContain("secret-host");
+    const missing = transportReturning(new Response(null, { status: 404 }));
+    await expect(missing.requestJson(githubRequest())).rejects.toMatchObject({ code: "UNSUPPORTED_STATUS" });
+  });
+
+  it("succeeds after one transient GitHub failure and meters both requests", async () => {
+    let calls = 0;
+    const transport = createBoundedTransport({
+      limits,
+      fetch: async () => (calls += 1) === 1
+        ? new Response(null, { status: 503 })
+        : new Response("{\"ok\":true}", { status: 200, headers: { "content-type": "application/json" } }),
+    });
+    const waits: number[] = [];
+    const retry = createRetryController({ maxRunRetries: 3, maxWaitMilliseconds: 15_000, maxTotalWaitMilliseconds: 30_000,
+      sleep: async (milliseconds) => { waits.push(milliseconds); } });
+    await expect(retry.execute(() => transport.requestJson(githubRequest()))).resolves.toEqual({ ok: true });
+    expect(calls).toBe(2);
+    expect(waits).toEqual([2000]);
+
+    // The retry is an ordinary request: it still needs room under the request ceiling.
+    const ceiling = createBoundedTransport({ limits: { ...limits, requestCount: 1 }, fetch: async () => new Response(null, { status: 503 }) });
+    const spent = createRetryController({ maxRunRetries: 3, maxWaitMilliseconds: 15_000, maxTotalWaitMilliseconds: 30_000,
+      sleep: async () => undefined });
+    await expect(spent.execute(() => ceiling.requestJson(githubRequest()))).rejects.toMatchObject({
+      code: "RETRY_SIGNAL_MISSING", cause: { code: "REQUEST_LIMIT" },
+    });
   });
 
   it("keeps credentials, URLs, queries, and response bodies out of errors and diagnostics", async () => {
@@ -272,7 +321,7 @@ describe("bounded preparation transport", () => {
     const transport = createBoundedTransport({
       limits,
       credentials: { github: `Bearer ${secret}` },
-      fetch: async () => new Response(`private-body-${secret}`, { status: 500 }),
+      fetch: async () => new Response(`private-body-${secret}`, { status: 404 }),
     });
 
     let caught: unknown;

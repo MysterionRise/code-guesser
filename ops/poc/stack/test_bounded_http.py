@@ -126,19 +126,69 @@ class BoundedHttpTests(unittest.TestCase):
             self.assertEqual(len(inner.requests), 1)
             self.assertEqual(budget.counters()["networkBytes"], 0)
 
-    def test_redirects_fail_closed_until_an_exact_target_host_is_allowlisted(self):
-        self.assertEqual(REDIRECT_HOSTS, frozenset())
-        inner = FakeInner([
-            (302, {"location": "https://cdn-lfs-us-1.hf.co/repos/x?X-Amz-Signature=abc"}, b""),
-            (200, {}, b"never"),
-        ])
+    def test_passes_an_absent_entry_404_on_the_pinned_file_endpoints_through_body_free(self):
+        # The Hub client decides "no loading script" from a 404 on the file endpoints; the
+        # answer passes through with its headers, no body, and no bytes charged.
+        for method in ("HEAD", "GET"):
+            inner = FakeInner([(404, {"x-error-code": "EntryNotFound", "content-length": "6"}, b"secret")] * 2)
+            client, budget = client_with(inner)
+            response = client.request(method, f"{HOST}/datasets/bigcode/the-stack-v2/resolve/{REVISION}/the-stack-v2.py")
+            self.assertEqual(response.status_code, 404)
+            self.assertEqual(response.headers.get("x-error-code"), "EntryNotFound")
+            self.assertEqual(response.content, b"")
+            self.assertEqual(len(inner.requests), 1)
+            self.assertEqual(budget.counters(), {
+                "networkBytes": 0, "peakTemporaryDiskBytes": 0, "redirectsFollowed": 0, "requests": 1,
+            })
+        # Every other status on the file endpoints, and a 404 on the API family, still fail closed.
+        for status in (401, 403, 410, 429, 500):
+            inner = FakeInner([(status, {"content-length": "6"}, b"secret")] * 2)
+            client, budget = client_with(inner)
+            self.assert_code("UNSUPPORTED_STATUS", lambda: client.head(
+                f"{HOST}/datasets/bigcode/the-stack-v2/resolve/{REVISION}/the-stack-v2.py"))
+            self.assertEqual(len(inner.requests), 1)
+        inner = FakeInner([(404, {"x-error-code": "EntryNotFound"}, b"")] * 2)
         client, budget = client_with(inner)
-        self.assert_code("REDIRECT_REJECTED", lambda: client.get(
-            f"{HOST}/datasets/bigcode/the-stack-v2/resolve/{REVISION}/data/Python/train-00000.parquet",
-            headers={"authorization": "Bearer external", "range": "bytes=0-9"},
-        ))
+        self.assert_code("UNSUPPORTED_STATUS", lambda: client.get(f"{HOST}/api/datasets/bigcode/the-stack-v2"))
         self.assertEqual(len(inner.requests), 1)
-        self.assertEqual(budget.counters()["redirectsFollowed"], 0)
+
+    def test_redirects_follow_only_the_observed_hugging_face_cdn_host(self):
+        # Observed under authorization on 2026-10-08: a HEAD on the pinned
+        # resolve endpoint answered 302 with this exact target host.
+        self.assertEqual(REDIRECT_HOSTS, frozenset({"us.aws.cdn.hf.co"}))
+
+        followed = FakeInner([
+            (302, {"location": "https://us.aws.cdn.hf.co/repos/x?X-Amz-Signature=abc&Expires=1"}, b""),
+            (206, {"content-length": "10"}, b"0123456789"),
+        ])
+        client, budget = client_with(followed)
+        response = client.get(
+            f"{HOST}/datasets/bigcode/the-stack-v2/resolve/{REVISION}/data/Python/train-00000-of-00009.parquet",
+            headers={"authorization": "Bearer external", "cookie": "session=1", "range": "bytes=0-9"},
+        )
+        self.assertEqual(response.status_code, 206)
+        self.assertEqual(response.content, b"0123456789")
+        follow = followed.requests[1]
+        self.assertEqual(follow.url.host, "us.aws.cdn.hf.co")
+        self.assertEqual(follow.url.query, b"X-Amz-Signature=abc&Expires=1")
+        self.assertNotIn("authorization", follow.headers)
+        self.assertNotIn("cookie", follow.headers)
+        self.assertEqual(follow.headers.get("host"), "us.aws.cdn.hf.co")
+        self.assertEqual(follow.headers.get("range"), "bytes=0-9")
+        self.assertEqual(budget.counters()["redirectsFollowed"], 1)
+
+        for unobserved in ["cdn-lfs-us-1.hf.co", "cdn-lfs.hf.co", "cas-bridge.xethub.hf.co", "huggingface.co"]:
+            inner = FakeInner([
+                (302, {"location": f"https://{unobserved}/repos/x?X-Amz-Signature=abc"}, b""),
+                (200, {}, b"never"),
+            ])
+            client, budget = client_with(inner)
+            self.assert_code("REDIRECT_REJECTED", lambda: client.get(
+                f"{HOST}/datasets/bigcode/the-stack-v2/resolve/{REVISION}/data/Python/train-00000-of-00009.parquet",
+                headers={"authorization": "Bearer external", "range": "bytes=0-9"},
+            ))
+            self.assertEqual(len(inner.requests), 1)
+            self.assertEqual(budget.counters()["redirectsFollowed"], 0)
 
     def test_follows_one_redirect_to_an_allowlisted_host_with_origin_credentials_stripped(self):
         import bounded_http
@@ -161,6 +211,8 @@ class BoundedHttpTests(unittest.TestCase):
             self.assertEqual(str(follow.url), "https://cdn.example.test/repos/x?X-Amz-Signature=abc")
             self.assertNotIn("authorization", follow.headers)
             self.assertNotIn("cookie", follow.headers)
+            # The rebuilt request addresses the target host; the origin Host header never carries over.
+            self.assertEqual(follow.headers.get("host"), "cdn.example.test")
             self.assertEqual(follow.headers.get("range"), "bytes=0-9")
             self.assertEqual(budget.counters(), {
                 "networkBytes": 10, "peakTemporaryDiskBytes": 0, "redirectsFollowed": 1, "requests": 2,

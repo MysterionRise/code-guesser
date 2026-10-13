@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { ChangedLinesError, reconstructChangedLines } from "./changed-lines";
+import { ChangedLinesError, patchFitsExcerptWindow, reconstructChangedLines } from "./changed-lines";
 
 const testModuleName: string = "vitest";
 interface Expectation {
@@ -136,6 +136,21 @@ describe("same-path changed-line reconstruction", () => {
       parent: blob(parentText, "d"),
       child: blob(`${parentText}changed();\n`, "e"),
     })).toThrow("DIFF_LINE_LIMIT");
+  });
+
+  it("pre-screens a recorded unified patch against the excerpt window and diff ceiling", () => {
+    const fits = "@@ -1,3 +1,3 @@\n export function value() {\n-  return 1;\n+  return 2;\n }";
+    const noNewline = "@@ -1,2 +1,2 @@\n-a = 1\n+a = 2\n\\ No newline at end of file";
+    const farHunks = "@@ -8,3 +8,3 @@\n a\n-b\n+c = 1\n d\n@@ -398,3 +398,3 @@\n e\n-f\n+g = 2\n h";
+    const commentsOnly = "@@ -1,2 +1,3 @@\n a\n+// note\n+\n b";
+    const deletionsOnly = "@@ -1,3 +1,2 @@\n a\n-b\n c";
+    const beyondCeiling = "@@ -2500,2 +2500,2 @@\n-x = 1\n+x = 2\n y";
+    const wideHunk = `@@ -1,40 +1,40 @@\n+first = 1\n${" ctx\n".repeat(30)}+last = 2`;
+    expect(patchFitsExcerptWindow(fits)).toBe(true);
+    expect(patchFitsExcerptWindow(noNewline)).toBe(true);
+    for (const patch of [farHunks, commentsOnly, deletionsOnly, beyondCeiling, wideHunk, "", "not a patch", "+orphan"]) {
+      expect(patchFitsExcerptWindow(patch)).toBe(false);
+    }
   });
 
   it("uses a non-sensitive specific error type", () => {

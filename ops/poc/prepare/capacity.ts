@@ -1,7 +1,10 @@
 import {
   SIGNED_CAPACITY_CEILINGS,
+  STACK_LANGUAGES,
   type CapacityLimits,
+  type StackLanguage,
 } from "./profile";
+import { RUN_RETRY_LIMIT } from "./retry";
 
 export class CapacityError extends Error {
   public constructor(public readonly code: string) {
@@ -10,7 +13,6 @@ export class CapacityError extends Error {
   }
 }
 
-type StackLanguage = "Python" | "TypeScript";
 type Usage = { pages: number; results: number };
 
 export interface CapacityOptions {
@@ -48,6 +50,8 @@ export interface CapacitySnapshot {
 
 export interface CapacityMeter {
   recordGitHubPage(queryId: string, results: number): void;
+  /** Forgets a discarded search pass's pages and results; its requests stay counted. */
+  discardGitHubQuery(queryId: string): void;
   recordStackRows(language: StackLanguage, rows: number, metadataBytes: number): void;
   beginBlob(): BlobCapacityLease;
   beginRequest(): RequestCapacityLease;
@@ -103,14 +107,12 @@ const validateDimensions = (options: CapacityOptions): void => {
     || queries.some((id) => typeof id !== "string" || id.trim() !== id || id.length === 0)) {
     fail("QUERY_DIMENSIONS");
   }
-  if (options.stackLanguages.length !== 2
-    || options.stackLanguages[0] !== "Python"
-    || options.stackLanguages[1] !== "TypeScript") fail("STACK_DIMENSIONS");
+  if (options.stackLanguages.join("|") !== STACK_LANGUAGES.join("|")) fail("STACK_DIMENSIONS");
 };
 
 const initialState = (queryIds: readonly string[]): CapacityState => ({
   github: Object.fromEntries(queryIds.map((id) => [id, { pages: 0, results: 0 }])),
-  stackRows: { Python: 0, TypeScript: 0 },
+  stackRows: Object.fromEntries(STACK_LANGUAGES.map((language) => [language, 0])) as Record<StackLanguage, number>,
   stackMetadataBytes: 0,
   blobAttempts: 0,
   successfulBlobs: 0,
@@ -206,6 +208,11 @@ export const createCapacityMeter = (options: CapacityOptions): CapacityMeter => 
       usage.pages = pages;
       usage.results = resultCount;
     },
+    discardGitHubQuery: (queryId: string): void => {
+      const usage = state.github[queryId] ?? fail("UNKNOWN_QUERY");
+      usage.pages = 0;
+      usage.results = 0;
+    },
     recordStackRows: (language: StackLanguage, rows: number, metadataBytes: number): void => {
       if (!(language in state.stackRows)) fail("UNKNOWN_LANGUAGE");
       const rowCount = addWithin(state.stackRows[language], rows, limits.stackRowsPerLanguage, "STACK_ROWS");
@@ -221,7 +228,7 @@ export const createCapacityMeter = (options: CapacityOptions): CapacityMeter => 
     recordRetryWait: (milliseconds: number): void => {
       const wait = positive(milliseconds, "WAIT_VALUE");
       if (wait > limits.waitMilliseconds) fail("WAIT_VALUE");
-      const retries = addWithin(state.retryWaits, 1, 3, "RETRY_COUNT");
+      const retries = addWithin(state.retryWaits, 1, RUN_RETRY_LIMIT, "RETRY_COUNT");
       const total = addWithin(state.waitedMilliseconds, wait, limits.totalWaitMilliseconds, "TOTAL_WAIT");
       state.retryWaits = retries;
       state.waitedMilliseconds = total;

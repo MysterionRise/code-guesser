@@ -1,0 +1,205 @@
+{
+  "profileVersion": "local-real-rounds.v2",
+  "github": {
+    "apiVersion": "2022-11-28",
+    "queries": [
+      {
+        "id": "ai-copilot-github",
+        "role": "ai-credit",
+        "query": "\"Co-authored-by: Copilot\" org:github committer-date:2026-09-01 merge:false is:public",
+        "sort": "committer-date",
+        "order": "desc"
+      },
+      {
+        "id": "ai-copilot-microsoft",
+        "role": "ai-credit",
+        "query": "\"Co-authored-by: Copilot\" org:microsoft committer-date:2026-09-06 merge:false is:public",
+        "sort": "committer-date",
+        "order": "desc"
+      },
+      {
+        "id": "ai-claude-github",
+        "role": "ai-credit",
+        "query": "\"Co-Authored-By: Claude\" org:github committer-date:2026-09-02..2026-09-30 merge:false is:public",
+        "sort": "committer-date",
+        "order": "desc"
+      },
+      {
+        "id": "ai-claude-vercel",
+        "role": "ai-credit",
+        "query": "\"Co-Authored-By: Claude\" org:vercel committer-date:2026-09-01..2026-09-30 merge:false is:public",
+        "sort": "committer-date",
+        "order": "desc"
+      },
+      {
+        "id": "ordinary-facebook",
+        "role": "ordinary",
+        "query": "refactor org:facebook committer-date:2026-07-01..2026-07-31 merge:false is:public",
+        "sort": "committer-date",
+        "order": "desc"
+      },
+      {
+        "id": "ordinary-google",
+        "role": "ordinary",
+        "query": "refactor org:google committer-date:2026-09-01..2026-09-07 merge:false is:public",
+        "sort": "committer-date",
+        "order": "desc"
+      },
+      {
+        "id": "ordinary-vercel",
+        "role": "ordinary",
+        "query": "refactor org:vercel committer-date:2026-08-01..2026-08-31 merge:false is:public",
+        "sort": "committer-date",
+        "order": "desc"
+      },
+      {
+        "id": "ordinary-github",
+        "role": "ordinary",
+        "query": "refactor org:github committer-date:2026-08-01..2026-08-31 merge:false is:public",
+        "sort": "committer-date",
+        "order": "desc"
+      }
+    ]
+  },
+  "stack": {
+    "release": "v2.2.0",
+    "revision": "e565caa3a78c2423bd374333a472b049eb090e47",
+    "configurations": [
+      { "language": "Python", "configuration": "Python", "extensions": [".py"] },
+      { "language": "TypeScript", "configuration": "TypeScript", "extensions": [".ts", ".tsx"] },
+      { "language": "Go", "configuration": "Go", "extensions": [".go"] },
+      { "language": "Rust", "configuration": "Rust", "extensions": [".rs"] },
+      { "language": "Ruby", "configuration": "Ruby", "extensions": [".rb"] }
+    ]
+  },
+  "aiCredits": {
+    "trailers": [
+      {
+        "assistant": "GitHub Copilot",
+        "key": "Co-authored-by",
+        "names": ["Copilot", "Copilot App", "GitHub Copilot"],
+        "domain": "users.noreply.github.com"
+      },
+      {
+        "assistant": "Claude",
+        "key": "Co-authored-by",
+        "names": ["Claude"],
+        "domain": "anthropic.com"
+      }
+    ],
+    "literals": [
+      { "assistant": "GitHub Copilot", "line": "Generated-by: Copilot" }
+    ]
+  },
+  "licenses": ["Apache-2.0", "BSD-3-Clause", "MIT"],
+  "templates": {
+    "project": {
+      "title": "Which project?",
+      "description": "Read real open-source code and pick the project it came from.",
+      "prompt": "Which project is this code from?",
+      "extensionClue": "The changed file's extension is {extension}.",
+      "ownerClue": "The project belongs to {owner}.",
+      "evidence": "This change was committed to {repository}.",
+      "explanation": "The answer comes from the pinned GitHub repository record, not from the code's style."
+    },
+    "language": {
+      "title": "Which language?",
+      "description": "Name the programming language from a short real excerpt.",
+      "prompt": "Which programming language is this?",
+      "evidence": "The file extension, The Stack v2's detected language, and the GitHub record agree on {language}.",
+      "explanation": "The answer comes from the file's recorded language, confirmed by its extension.",
+      "languages": [
+        {
+          "language": "Python",
+          "clues": [
+            "Blocks are marked by indentation instead of braces.",
+            "Look for keywords such as def, elif, and lambda."
+          ],
+          "distractors": ["Ruby", "JavaScript", "PHP"]
+        },
+        {
+          "language": "TypeScript",
+          "clues": [
+            "Type annotations follow names after a colon.",
+            "Look for interfaces and generic parameters written like <T>."
+          ],
+          "distractors": ["JavaScript", "Java", "C#"]
+        },
+        {
+          "language": "Go",
+          "clues": [
+            "Functions often return an error value next to their result.",
+            "Look for := declarations and the func keyword."
+          ],
+          "distractors": ["Rust", "C++", "Java"]
+        },
+        {
+          "language": "Rust",
+          "clues": [
+            "Macros end with an exclamation mark, like println!.",
+            "Look for fn, let mut, and return types written after ->."
+          ],
+          "distractors": ["Go", "C++", "Swift"]
+        },
+        {
+          "language": "Ruby",
+          "clues": [
+            "Blocks usually close with the keyword end.",
+            "Look for symbols written like :name and methods ending in a question mark."
+          ],
+          "distractors": ["Python", "PHP", "Kotlin"]
+        }
+      ]
+    },
+    "ai": {
+      "title": "Is this AI-generated?",
+      "description": "Guess whether the commit credited an AI coding assistant.",
+      "notice": "AI answers come from AI co-author credits in commit messages, not from analyzing the code.",
+      "prompt": "Is this AI-generated?",
+      "recordedCandidate": "Yes, the commit credits an AI assistant",
+      "absentCandidate": "No AI credit on this commit",
+      "fileClue": "The commit changed {files}.",
+      "subjectClue": "Commit subject: “{subject}”",
+      "linesClue": "The change added {added} and removed {removed}.",
+      "recordedEvidence": "The commit message credits {assistant}.",
+      "absentEvidence": "The commit message credits no AI assistant. That does not show the code was written without AI.",
+      "explanation": "The answer comes from the commit's AI credit, not from analyzing the code."
+    }
+  },
+  "ordering": {
+    "github": ["queryIndex", "committerDateDescending", "repository", "commit", "path", "blob"],
+    "stack": ["configurationIndex", "stableRowId", "repository", "revision", "path", "blob"]
+  },
+  "deduplication": ["repository", "commit", "path", "blob", "rawContentHash", "excerptHash"],
+  "capacity": {
+    "githubPages": 3,
+    "githubResults": 300,
+    "stackRowsPerLanguage": 10000,
+    "stackMetadataBytes": 100663296,
+    "blobAttempts": 50,
+    "successfulBlobs": 50,
+    "perBlobBytes": 262144,
+    "totalBlobBytes": 16777216,
+    "concurrentRequests": 4,
+    "requestCount": 600,
+    "responseBytes": 8388608,
+    "waitMilliseconds": 15000,
+    "totalWaitMilliseconds": 30000,
+    "temporaryDiskBytes": 33554432
+  },
+  "screening": {
+    "excerptBytes": 4096,
+    "minimumExcerptBytes": 64,
+    "languageExcerptLines": 20,
+    "generatedScanLines": 30,
+    "subjectMaxLength": 100
+  },
+  "selection": {
+    "projectRounds": 5,
+    "languageRounds": 5,
+    "aiRounds": 5,
+    "projectCandidates": 4,
+    "languageCandidates": 4,
+    "aiMinimumPerOutcome": 2
+  }
+}

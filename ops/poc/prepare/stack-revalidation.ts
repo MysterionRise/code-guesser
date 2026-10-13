@@ -2,7 +2,8 @@ import { createHash } from "node:crypto";
 
 import { screenBlob, screenLicenseEvidence } from "@codeguessr/content/local-poc-support";
 import { canonicalHash } from "./canonical";
-import type { CrawlProfile } from "./profile";
+import type { CrawlProfile, StackLanguage } from "./profile";
+import { languageExcerpt, looksGenerated } from "./excerpt-window";
 import type { RetryController } from "./retry";
 import type { StackMetadataRow } from "./stack-metadata";
 import type { BoundedTransport } from "./transport";
@@ -10,7 +11,8 @@ import type { BoundedTransport } from "./transport";
 type UnknownRecord = Record<string, unknown>;
 type GitHubEntry = Readonly<{ path: string; mode: string; type: string; sha: string }>;
 export class StackRevalidationError extends Error {
-  public constructor() {
+  /** `code` names the check that rejected the candidate; the message stays the stable stage code. */
+  public constructor(public readonly code: string = "STACK_REVALIDATION_REJECTED") {
     super("STACK_REVALIDATION_REJECTED");
     this.name = "StackRevalidationError";
   }
@@ -37,15 +39,15 @@ export interface RevalidatedStackCandidate extends Readonly<Record<string, unkno
   readonly path: string;
   readonly commit: string;
   readonly excerpt: string;
-  readonly detectedLanguage: "Python" | "TypeScript";
+  readonly detectedLanguage: StackLanguage;
 }
-const fail = (): never => { throw new StackRevalidationError(); };
+const fail = (code: string): never => { throw new StackRevalidationError(code); };
 const record = (value: unknown): UnknownRecord =>
-  typeof value === "object" && value !== null && !Array.isArray(value) ? value as UnknownRecord : fail();
+  typeof value === "object" && value !== null && !Array.isArray(value) ? value as UnknownRecord : fail("REVALIDATION_SHAPE");
 const text = (value: unknown): string =>
-  typeof value === "string" && value.trim() === value && value.length > 0 ? value : fail();
-const gitId = (value: unknown): string => /^[0-9a-f]{40}$/u.test(text(value)) ? value as string : fail();
-const hash = (value: unknown): string => /^[0-9a-f]{64}$/u.test(text(value)) ? value as string : fail();
+  typeof value === "string" && value.trim() === value && value.length > 0 ? value : fail("REVALIDATION_SHAPE");
+const gitId = (value: unknown): string => /^[0-9a-f]{40}$/u.test(text(value)) ? value as string : fail("REVALIDATION_SHAPE");
+const hash = (value: unknown): string => /^[0-9a-f]{64}$/u.test(text(value)) ? value as string : fail("REVALIDATION_SHAPE");
 const sha = (algorithm: "sha1" | "sha256", value: Uint8Array | string): string =>
   createHash(algorithm).update(value).digest("hex");
 const gitBlob = (bytes: Uint8Array): string => createHash("sha1")
@@ -61,7 +63,7 @@ const UTC_DATE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{6})?Z$
 const MAX_TREE_ENTRIES = 10_000;
 const exactKeys = (value: UnknownRecord, expected: readonly string[]): void => {
   const actual = Object.keys(value).sort();
-  if (actual.join("|") !== [...expected].sort().join("|")) fail();
+  if (actual.join("|") !== [...expected].sort().join("|")) fail("REVALIDATION_SHAPE");
 };
 
 const request = (options: StackRevalidationOptions, url: string): Promise<unknown> =>
@@ -80,11 +82,14 @@ const validDate = (value: unknown): boolean => {
   return !Number.isNaN(instant.valueOf()) && expected.every((part, index) => part === observed[index]);
 };
 const decode = (value: unknown, size: unknown, whitespace = true): Uint8Array => {
-  const source = text(value);
+  // GitHub wraps base64 content at 60 columns with a trailing newline; the worker's own base64 is exact.
+  const source = whitespace
+    ? (typeof value === "string" && value.trim().length > 0 ? value : fail("REVALIDATION_DECODE"))
+    : text(value);
   const encoded = whitespace ? source.replace(/\s/gu, "") : source;
-  if (!Number.isSafeInteger(size) || !/^[A-Za-z0-9+/]*={0,2}$/u.test(encoded)) fail();
+  if (!Number.isSafeInteger(size) || !/^[A-Za-z0-9+/]*={0,2}$/u.test(encoded)) fail("REVALIDATION_DECODE");
   const bytes = Buffer.from(encoded, "base64");
-  if (bytes.byteLength !== size || bytes.toString("base64") !== encoded) fail();
+  if (bytes.byteLength !== size || bytes.toString("base64") !== encoded) fail("REVALIDATION_DECODE");
   return bytes;
 };
 const selectedBytes = (options: StackRevalidationOptions): Uint8Array => {
@@ -97,26 +102,26 @@ const selectedBytes = (options: StackRevalidationOptions): Uint8Array => {
   }
   const repository = text(metadata.repository);
   const path = text(metadata.path);
-  const licenses = Array.isArray(metadata.detectedLicenses) ? metadata.detectedLicenses.map(text) : fail();
+  const licenses = Array.isArray(metadata.detectedLicenses) ? metadata.detectedLicenses.map(text) : fail("REVALIDATION_BLOB_BYTES");
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u.test(repository)
     || path.startsWith("/") || path.includes("\\") || path.split("/").some((part) => !part || part === "." || part === "..")
     || licenses.length === 0 || new Set(licenses).size !== licenses.length
     || licenses.some((identifier) => !options.profile.licenses.includes(identifier))
     || !Number.isSafeInteger(metadata.byteLength) || (metadata.byteLength as number) < 1
     || (metadata.byteLength as number) > options.profile.capacity.perBlobBytes
-    || ![metadata.visitDate, metadata.revisionDate, metadata.committerDate].every(validDate)) fail();
+    || ![metadata.visitDate, metadata.revisionDate, metadata.committerDate].every(validDate)) fail("REVALIDATION_BLOB_BYTES");
   const { stableRowId, ...fields } = metadata;
   const canonical = JSON.stringify(Object.fromEntries(Object.entries(fields).sort()));
   if (hash(stableRowId) !== sha("sha256", canonical)
     || selected.stableRowId !== stableRowId || selected.swhBlobId !== metadata.swhBlobId
     || selected.byteLength !== metadata.byteLength || metadata.sourceEncoding !== "UTF-8"
-    || metadata.generated !== false || metadata.vendor !== false) fail();
+    || metadata.generated !== false || metadata.vendor !== false) fail("REVALIDATION_BLOB_BYTES");
   const bytes = decode(selected.contentBase64, selected.byteLength, false);
   if (sha("sha1", bytes) !== gitId(metadata.swhBlobId)
-    || gitBlob(bytes) !== gitId(metadata.swhContentId)) fail();
+    || gitBlob(bytes) !== gitId(metadata.swhContentId)) fail("REVALIDATION_BLOB_BYTES");
   const language = metadata.detectedLanguage;
-  const configuration = options.profile.stack.configurations.find(({ language: name }) => name === language) ?? fail();
-  if (!configuration.extensions.some((extension) => text(metadata.path).endsWith(extension))) fail();
+  const configuration = options.profile.stack.configurations.find(({ language: name }) => name === language) ?? fail("REVALIDATION_BLOB_BYTES");
+  if (!configuration.extensions.some((extension) => text(metadata.path).endsWith(extension))) fail("REVALIDATION_BLOB_BYTES");
   return bytes;
 };
 
@@ -124,28 +129,28 @@ const repositoryState = (value: unknown, repository: string, api: string, web: s
   const response = record(value);
   if (response.full_name !== repository || response.url !== api || response.html_url !== web
     || response.private !== false || response.visibility !== "public" || response.disabled !== false
-    || response.archived !== false || response.fork !== false) fail();
+    || response.archived !== false || response.fork !== false) fail("REVALIDATION_REPOSITORY");
   const license = record(response.license);
   const key = text(license.key);
   const name = text(license.name);
   const spdx = text(license.spdx_id);
-  if (license.url !== `https://api.github.com/licenses/${key}`) fail();
+  if (license.url !== `https://api.github.com/licenses/${key}`) fail("REVALIDATION_REPOSITORY");
   return Object.freeze({ name, spdx });
 };
 const commitState = (value: unknown, commit: string, api: string, web: string) => {
   const response = record(value);
   if (response.sha !== commit || response.url !== `${api}/commits/${commit}`
-    || response.html_url !== `${web}/commit/${commit}`) fail();
+    || response.html_url !== `${web}/commit/${commit}`) fail("REVALIDATION_COMMIT");
   const details = record(response.commit);
   const tree = record(details.tree);
   const treeSha = gitId(tree.sha);
-  if (tree.url !== `${api}/git/trees/${treeSha}`) fail();
+  if (tree.url !== `${api}/git/trees/${treeSha}`) fail("REVALIDATION_COMMIT");
   const name = text(record(details.author).name);
   if (response.author === null) return Object.freeze({ treeSha, name, login: null });
   const author = record(response.author);
   const login = text(author.login);
   if (author.url !== `https://api.github.com/users/${login}`
-    || author.html_url !== `https://github.com/${login}`) fail();
+    || author.html_url !== `https://github.com/${login}`) fail("REVALIDATION_COMMIT");
   return Object.freeze({ treeSha, name, login });
 };
 const treeSha = (entries: readonly GitHubEntry[]): string => {
@@ -161,43 +166,43 @@ const treeSha = (entries: readonly GitHubEntry[]): string => {
 };
 const loadTree = async (options: StackRevalidationOptions, api: string, expected: string) => {
   const response = record(await request(options, `${api}/git/trees/${expected}`));
-  const treeValues: unknown[] = Array.isArray(response.tree) ? response.tree : fail();
+  const treeValues: unknown[] = Array.isArray(response.tree) ? response.tree : fail("REVALIDATION_TREE");
   if (response.sha !== expected || response.url !== `${api}/git/trees/${expected}`
-    || response.truncated !== false || treeValues.length > MAX_TREE_ENTRIES) fail();
+    || response.truncated !== false || treeValues.length > MAX_TREE_ENTRIES) fail("REVALIDATION_TREE");
   const entries: GitHubEntry[] = treeValues.map((value: unknown) => {
     const item = record(value);
     if (Object.keys(item).some((key) => !["path", "mode", "type", "sha", "url", "size"].includes(key))
-      || (item.size !== undefined && (!Number.isSafeInteger(item.size) || (item.size as number) < 0))) fail();
+      || (item.size !== undefined && (!Number.isSafeInteger(item.size) || (item.size as number) < 0))) fail("REVALIDATION_TREE");
     const entry = { path: text(item.path), mode: text(item.mode), type: text(item.type), sha: gitId(item.sha) };
     if (entry.path.includes("/") || entry.path === "." || entry.path === ".."
-      || item.url !== `${api}/git/${entry.type}s/${entry.sha}`) fail();
+      || item.url !== `${api}/git/${entry.type}s/${entry.sha}`) fail("REVALIDATION_TREE");
     const regular = entry.type === "blob" && (entry.mode === "100644" || entry.mode === "100755");
-    if (!regular && !(entry.type === "tree" && entry.mode === "040000")) fail();
+    if (!regular && !(entry.type === "tree" && entry.mode === "040000")) fail("REVALIDATION_TREE");
     return Object.freeze(entry);
   });
-  if (new Set(entries.map(({ path }) => path)).size !== entries.length || treeSha(entries) !== expected) fail();
+  if (new Set(entries.map(({ path }) => path)).size !== entries.length || treeSha(entries) !== expected) fail("REVALIDATION_TREE");
   return Object.freeze(entries);
 };
 const resolvePath = async (options: StackRevalidationOptions, api: string, root: string, path: string) => {
   const segments = path.split("/");
-  if (segments.some((segment) => !/^(?!\.{1,2}$)[^/\\\0]+$/u.test(segment))) fail();
+  if (segments.some((segment) => !/^(?!\.{1,2}$)[^/\\\0]+$/u.test(segment))) fail("REVALIDATION_PATH");
   let cursor = root;
   for (const [index, segment] of segments.entries()) {
-    const entry = (await loadTree(options, api, cursor)).find(({ path: name }) => name === segment) ?? fail();
+    const entry = (await loadTree(options, api, cursor)).find(({ path: name }) => name === segment) ?? fail("REVALIDATION_PATH");
     if (index === segments.length - 1) {
-      if (entry.type !== "blob" || (entry.mode !== "100644" && entry.mode !== "100755")) fail();
+      if (entry.type !== "blob" || (entry.mode !== "100644" && entry.mode !== "100755")) fail("REVALIDATION_PATH");
       return entry.sha;
     }
-    if (entry.type !== "tree" || entry.mode !== "040000") fail();
+    if (entry.type !== "tree" || entry.mode !== "040000") fail("REVALIDATION_PATH");
     cursor = entry.sha;
   }
-  return fail();
+  return fail("REVALIDATION_PATH");
 };
 const loadGitHubBytes = async (options: StackRevalidationOptions, api: string, blob: string) => {
   const response = record(await request(options, `${api}/git/blobs/${blob}`));
-  if (response.sha !== blob || response.url !== `${api}/git/blobs/${blob}` || response.encoding !== "base64") fail();
+  if (response.sha !== blob || response.url !== `${api}/git/blobs/${blob}` || response.encoding !== "base64") fail("REVALIDATION_GITHUB_BLOB");
   const bytes = decode(response.content, response.size);
-  if (gitBlob(bytes) !== blob) fail();
+  if (gitBlob(bytes) !== blob) fail("REVALIDATION_GITHUB_BLOB");
   return bytes;
 };
 
@@ -205,9 +210,9 @@ const licenseState = async (
   options: StackRevalidationOptions, api: string, web: string, commit: string,
   metadata: Readonly<{ name: string; spdx: string }>, stackIdentifiers: unknown,
 ) => {
-  if (!options.profile.licenses.includes(metadata.spdx)) fail();
-  const identifiers = Array.isArray(stackIdentifiers) ? stackIdentifiers.map(text) : fail();
-  if (!identifiers.includes(metadata.spdx)) fail();
+  if (!options.profile.licenses.includes(metadata.spdx)) fail("REVALIDATION_LICENSE");
+  const identifiers = Array.isArray(stackIdentifiers) ? stackIdentifiers.map(text) : fail("REVALIDATION_LICENSE");
+  if (!identifiers.includes(metadata.spdx)) fail("REVALIDATION_LICENSE");
   const response = record(await request(options, `${api}/license?ref=${commit}`));
   const path = text(response.path);
   const blob = gitId(response.sha);
@@ -219,7 +224,7 @@ const licenseState = async (
     || response.git_url !== `${api}/git/blobs/${blob}`
     || response.download_url !== `https://raw.githubusercontent.com/${text(options.metadata.repository)}/${commit}/${encodedPath(path)}`
     || detected.name !== metadata.name || detected.spdx_id !== metadata.spdx
-    || detected.url !== `https://api.github.com/licenses/${key}`) fail();
+    || detected.url !== `https://api.github.com/licenses/${key}`) fail("REVALIDATION_LICENSE");
   const bytes = decode(response.content, response.size);
   const textHash = sha("sha256", bytes);
   const screened = screenLicenseEvidence({
@@ -229,25 +234,14 @@ const licenseState = async (
   });
   if (screened.decision !== "ADMISSION_SCREENING_ONLY" || screened.identifier !== metadata.spdx
     || screened.licenseBlobSha !== blob || screened.licenseTextSha256 !== textHash
-    || screened.repositoryPolicyHash !== options.profileHash) fail();
+    || screened.repositoryPolicyHash !== options.profileHash) fail("REVALIDATION_LICENSE");
   return response.html_url as string;
-};
-const excerpt = (textValue: string, maximum: number, minimum: number): string => {
-  const bytes = new TextEncoder().encode(textValue);
-  let end = Math.min(bytes.byteLength, maximum);
-  let value: string | undefined;
-  while (end > 0 && value === undefined) {
-    try { value = new TextDecoder("utf-8", { fatal: true }).decode(bytes.slice(0, end)); } catch { end -= 1; }
-  }
-  const excerptValue = value ?? fail();
-  if (new TextEncoder().encode(excerptValue).byteLength < minimum) fail();
-  return excerptValue;
 };
 
 export const revalidateStackCandidate = async (
   options: StackRevalidationOptions,
 ): Promise<Readonly<RevalidatedStackCandidate>> => {
-  if (canonicalHash(options.profile) !== hash(options.profileHash)) fail();
+  if (canonicalHash(options.profile) !== hash(options.profileHash)) fail("REVALIDATION_BINDING");
   const crawlSnapshotId = hash(options.crawlSnapshotId);
   const selected = selectedBytes(options);
   const metadata = options.metadata;
@@ -259,14 +253,19 @@ export const revalidateStackCandidate = async (
   const repo = repositoryState(await request(options, api), repository, api, web);
   const commitRecord = commitState(await request(options, `${api}/commits/${commit}`), commit, api, web);
   const blob = await resolvePath(options, api, commitRecord.treeSha, path);
-  if (blob !== metadata.swhContentId) fail();
+  if (blob !== metadata.swhContentId) fail("REVALIDATION_BINDING");
   const githubBytes = await loadGitHubBytes(options, api, blob);
   if (githubBytes.byteLength !== selected.byteLength
-    || githubBytes.some((value, index) => value !== selected[index])) fail();
+    || githubBytes.some((value, index) => value !== selected[index])) fail("REVALIDATION_BINDING");
   const licenseUrl = await licenseState(options, api, web, commit, repo, metadata.detectedLicenses);
   const screened = screenBlob({ path, bytes: githubBytes }, options.seenNormalizedHashes ?? new Set());
-  const excerptText = excerpt(screened.text, options.profile.screening.excerptBytes,
-    options.profile.screening.minimumExcerptBytes);
+  // FR-023 as amended: stricter experiment-local generated-file screen; FR-025: header-skipping window.
+  if (looksGenerated(screened.text, options.profile.screening.generatedScanLines)) fail("REVALIDATION_BINDING");
+  const excerptText = languageExcerpt(screened.text, metadata.detectedLanguage as StackLanguage, {
+    maxLines: options.profile.screening.languageExcerptLines,
+    maxBytes: options.profile.screening.excerptBytes,
+    minBytes: options.profile.screening.minimumExcerptBytes,
+  }) ?? fail("REVALIDATION_BINDING");
   return Object.freeze({
     discoverySource: "STACK_V2", repository, repositoryUrl: web,
     authorName: commitRecord.name, authorLogin: commitRecord.login, authorBasis: "SELECTED_COMMIT",
