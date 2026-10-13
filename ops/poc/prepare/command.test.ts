@@ -19,7 +19,8 @@ import {
 
 const testModuleName: string = "vitest";
 const { afterEach, describe, expect, it } = await import(testModuleName) as any;
-const sourcePath = new URL("./index.ts", import.meta.url);
+const COMMAND_MODULES = ["index", "pipeline", "dependencies", "runtime", "selection", "select-github", "select-stack", "diagnostics", "types"];
+const sourceOf = (module: string) => readFile(new URL(`./${module}.ts`, import.meta.url), "utf8");
 const originalArguments = [...process.argv];
 afterEach(() => { process.argv.splice(0, process.argv.length, ...originalArguments); });
 const admittedWith = (candidate: any, source: Record<string, unknown> = {}) => accepted({
@@ -213,8 +214,25 @@ const logLines = (calls: readonly string[]): string[] =>
     const scarce = await makeHarness({ bindGitHubLineage: async ({ candidate }: any) => accepted({ ...candidate,
       excerpt: `value_${candidate.id} = compute(${candidate.id}) + 1000`,
       commitMessage: candidate.id === 20 ? `Fix\n\n${HARNESS_CREDIT}` : "ordinary refactor" }, "3") });
-    await expect(prepareLocalExperiment(scarce.dependencies)).rejects.toThrow("PREPARATION_FAILED");
-    expect(scarce.published).toEqual([]);
+    await prepareLocalExperiment(scarce.dependencies);
+    expect(scarce.calls).toContain("log:PREPARATION_DECK_SKIPPED ai DECK_SHORT");
+    expect(scarce.calls).toContain("log:PREPARATION_DECKS project,language");
+    expect(scarce.calls).toContain("compose:5/5/0");
+    expect((scarce.reports[0] as any).diagnostics).toContainEqual({ stage: "SELECTION", reasonCode: "AI_DECK_SKIPPED", count: 1 });
+  });
+
+  it("publishes the decks that filled and skips each other deck with its reason", async () => {
+    const harness = await makeHarness({ collectStackMetadata: async () => accepted([], "5") });
+    const result = await prepareLocalExperiment(harness.dependencies);
+    expect(result.artifactHash).toMatch(/^[0-9a-f]{64}$/u);
+    expect(harness.calls).toContain("compose:5/0/5");
+    expect(harness.calls.some((call) => call.startsWith("fetch:"))).toBe(false);
+    expect(logLines(harness.calls)).toEqual([
+      "log:PREPARATION_DECK_SKIPPED language DECK_SHORT",
+      "log:PREPARATION_DECKS project,ai",
+      "log:PREPARATION_COMPLETE",
+    ]);
+    expect((harness.reports[0] as any).counts.selected).toBe(10);
   });
 
   it("rejects a duplicate within the project deck and across decks, then continues to unique replacements", async () => {
@@ -277,8 +295,10 @@ const logLines = (calls: readonly string[]): string[] =>
   });
 
   it("never publishes on insufficient selection, composition, or report failure", async () => {
+    const profile = await loadProfile();
     const failures: Partial<PreparationDependencies>[] = [
-      { collectStackMetadata: async () => accepted([], "5") },
+      { collectStackMetadata: async () => accepted([], "5"),
+        searchGitHub: async () => accepted({ candidates: [], queryClassifications: classificationsFor(profile) } as any, "2") },
       { compose: () => { throw new Error("COMPOSE_REJECTED"); } },
       { stageReport: async () => { throw new Error("REPORT_REJECTED"); } },
     ];
@@ -339,6 +359,7 @@ const logLines = (calls: readonly string[]): string[] =>
 
     expect(logLines(harness.calls)).toEqual([
       "log:GITHUB_SEARCH_INCOMPLETE",
+      "log:PREPARATION_DECKS project,language,ai",
       "log:PREPARATION_COMPLETE",
     ]);
     expect(harness.calls.indexOf("report:stage")).toBeLessThan(harness.calls.indexOf("publish"));
@@ -352,6 +373,7 @@ const logLines = (calls: readonly string[]): string[] =>
     await prepareLocalExperiment(harness.dependencies);
 
     expect(logLines(harness.calls)).toEqual([
+      "log:PREPARATION_DECKS project,language,ai",
       "log:PREPARATION_COMPLETE",
     ]);
   });
@@ -432,7 +454,57 @@ const logLines = (calls: readonly string[]): string[] =>
     ]);
   });
 
-  it("replays captured responses in order without a second live request", async () => {
+  it("closes the runtime after success and after failure, logging its counts-only journal line", async () => {
+    const closed: unknown[] = [];
+    const harness = await makeHarness({ finishRuntime: (runtime) => { closed.push(runtime); return "PREPARATION_JOURNAL mode=fresh replayed=0 live=3"; } });
+    await prepareLocalExperiment(harness.dependencies);
+    expect(closed).toHaveLength(1);
+    expect(logLines(harness.calls).slice(-2)).toEqual(["log:PREPARATION_JOURNAL mode=fresh replayed=0 live=3", "log:PREPARATION_COMPLETE"]);
+
+    const failing = await makeHarness({
+      finishRuntime: () => { throw new Error("disk full at /secret/path"); },
+      searchGitHub: async () => { throw new GitHubSearchError("GITHUB_SEARCH_SHAPE"); },
+    });
+    await expect(prepareLocalExperiment(failing.dependencies)).rejects.toThrow("PREPARATION_FAILED");
+    expect(logLines(failing.calls).slice(-2)).toEqual(["log:PREPARATION_JOURNAL_FAILED", "log:PREPARATION_FAILED"]);
+    expect(failing.calls.join(" ")).not.toContain("/secret/path");
+  });
+
+  it("writes a counts-only failure report with the stage, code, spend, and rejection aggregates", async () => {
+    const reports: any[] = [];
+    const harness = await makeHarness({
+      writeFailureReport: async (report) => { reports.push(report); },
+      admitGitHubCandidate: async () => { throw new Error("LICENSE_REJECTED"); },
+      fetchStackBlob: async () => { throw new StackMetadataError("WORKER_EXIT_TOKEN_REJECTED"); },
+      log: () => undefined,
+    });
+    await expect(prepareLocalExperiment(harness.dependencies)).rejects.toThrow("PREPARATION_FAILED");
+    expect(reports).toHaveLength(1);
+    expect(reports[0]).toMatchObject({ schemaVersion: "local-experiment-failure.v1", stage: "SELECTION",
+      code: "DECK_SHORT", statusClass: "none", journal: null });
+    expect(reports[0].rejections).toContainEqual({ stage: "SELECTION", reasonCode: "LANGUAGE_DECK_SKIPPED", count: 1 });
+    expect(reports[0].rejections).toContainEqual({ stage: "BLOB_RETRIEVAL", reasonCode: "WORKER_EXIT_TOKEN_REJECTED", count: expect.any(Number) });
+    expect(reports[0].capacity.requests).toBeTypeOf("number");
+    expect(JSON.stringify(reports[0])).not.toMatch(/external-(?:hf|gh)|Bearer/u);
+
+    const unwritable = await makeHarness({
+      writeFailureReport: async () => { throw new Error("EACCES /secret"); },
+      preflight: async () => { throw new Error("PREFLIGHT_REJECTED"); },
+    });
+    await expect(prepareLocalExperiment(unwritable.dependencies)).rejects.toThrow("PREPARATION_FAILED");
+    expect(logLines(unwritable.calls).slice(-2)).toEqual(["log:PREPARATION_FAILURE_REPORT_FAILED", "log:PREPARATION_FAILED"]);
+  });
+
+  it("writes the game's pin in the committed format", async () => {
+    const { pinSource } = await import("./dependencies");
+    const pinPath = new URL("../../../apps/game/src/demo/local-real-experiment.pin.server.ts", import.meta.url);
+    const committed = await readFile(pinPath, "utf8");
+    const pinned = /TRUSTED_ARTIFACT_HASH = "([0-9a-f]{64})"/u.exec(committed)![1]!;
+    expect(pinSource(pinned)).toBe(committed);
+    expect(pinSource(hash("a"))).toMatch(/^import "server-only";[\s\S]*TRUSTED_ARTIFACT_HASH = "a{64}";\n$/u);
+  });
+
+  it("finalizes from responses this run accepted and refuses any request it did not", async () => {
     const command = await import("./index") as Record<string, any>;
     const profile = await loadProfile();
     const capacity = createCapacityMeter({ limits: profile.capacity,
@@ -442,14 +514,19 @@ const logLines = (calls: readonly string[]): string[] =>
       async () => new Response(JSON.stringify({ sequence: ++liveRequests }), {
         status: 200, headers: { "content-type": "application/json" },
       }));
-    const request = { provider: "huggingFace", method: "GET",
+    const headers = { accept: "application/vnd.github+json", "x-github-api-version": profile.github.apiVersion };
+    const commit = { provider: "github", method: "GET", headers,
+      url: `https://api.github.com/repos/example/project/commits/${"a".repeat(40)}` };
+    const access = { provider: "huggingFace", method: "GET",
       url: "https://huggingface.co/api/datasets/bigcode/the-stack-v2", headers: { accept: "application/json" } };
 
-    expect(await runtime.transport.requestJson(request)).toEqual({ sequence: 1 });
-    expect(await runtime.transport.requestJson(request)).toEqual({ sequence: 2 });
+    expect(await runtime.transport.requestJson(commit)).toEqual({ sequence: 1 });
+    expect(await runtime.transport.requestJson(access)).toEqual({ sequence: 2 });
     runtime.beginReplay();
-    expect(await runtime.transport.requestJson(request)).toEqual({ sequence: 1 });
-    expect(await runtime.transport.requestJson(request)).toEqual({ sequence: 2 });
+    expect(await runtime.transport.requestJson(commit)).toEqual({ sequence: 1 });
+    await expect(runtime.transport.requestJson(access)).rejects.toMatchObject({ code: "FINALIZE_REPLAY_MISS" });
+    await expect(runtime.transport.requestJson({ ...commit, url: commit.url.replace("a", "b") }))
+      .rejects.toMatchObject({ code: "FINALIZE_REPLAY_MISS" });
     expect(liveRequests).toBe(2);
     expect(capacity.snapshot().requestCount).toBe(2);
   });
@@ -516,11 +593,12 @@ const logLines = (calls: readonly string[]): string[] =>
         return accepted({ repository }, "2");
       },
     });
-    await expect(prepareLocalExperiment(harness.dependencies)).rejects.toThrow("PREPARATION_FAILED");
+    await prepareLocalExperiment(harness.dependencies);
     expect(harness.calls.some((call) => call.startsWith("fetch:"))).toBe(false);
-    const rejections = harness.calls.find((call) => call.startsWith("log:PREPARATION_REJECTIONS "));
-    expect(rejections).toContain("GITHUB_REVALIDATION:ADMISSION_REPOSITORY=1");
-    expect(rejections).toContain("GITHUB_REVALIDATION:REPOSITORY_SCREENED_OUT=4");
+    expect(harness.calls).toContain("log:PREPARATION_DECK_SKIPPED language DECK_SHORT");
+    // The first language finds no row, so the deck cannot fill and no later language is screened.
+    expect((harness.reports[0] as any).diagnostics).toContainEqual({ stage: "GITHUB_REVALIDATION", reasonCode: "ADMISSION_REPOSITORY", count: 1 });
+    expect((harness.reports[0] as any).diagnostics.some(({ reasonCode }: any) => reasonCode === "REPOSITORY_SCREENED_OUT")).toBe(false);
   });
 
   it("rejects a composed snapshot that disagrees with captured hashes before publication", async () => {
@@ -630,7 +708,32 @@ const logLines = (calls: readonly string[]): string[] =>
     });
     await expect(prepareLocalExperiment(harness.dependencies)).rejects.toThrow("PREPARATION_FAILED");
     expect(lineageCalls).toBe(1);
-    expect(logLines(harness.calls)[0]).toBe("log:PREPARATION_STAGE_FAILED ADMISSION BUDGET_EXHAUSTED_REQUEST_COUNT none");
+    expect(harness.calls.some((call) => call.startsWith("fetch:"))).toBe(false);
+    expect(logLines(harness.calls).slice(0, 4)).toEqual([
+      "log:PREPARATION_DECK_SKIPPED project BUDGET_EXHAUSTED_REQUEST_COUNT",
+      "log:PREPARATION_DECK_SKIPPED language BUDGET_EXHAUSTED_REQUEST_COUNT",
+      "log:PREPARATION_DECK_SKIPPED ai BUDGET_EXHAUSTED_REQUEST_COUNT",
+      "log:PREPARATION_STAGE_FAILED SELECTION BUDGET_EXHAUSTED_REQUEST_COUNT none",
+    ]);
+  });
+
+  it("publishes the decks filled before a run-wide budget ran out", async () => {
+    let lineageCalls = 0;
+    const harness = await makeHarness({
+      bindGitHubLineage: async ({ candidate }: any) => {
+        lineageCalls += 1;
+        if (lineageCalls > 5) throw new RetryError("RETRY_SIGNAL_MISSING", new CapacityError("REQUEST_COUNT"));
+        return accepted({ ...candidate, excerpt: `value_${candidate.id} = compute(${candidate.id}) + 1000` }, "3");
+      },
+    });
+    await prepareLocalExperiment(harness.dependencies);
+    expect(lineageCalls).toBe(6);
+    expect(logLines(harness.calls)).toEqual([
+      "log:PREPARATION_DECK_SKIPPED language BUDGET_EXHAUSTED_REQUEST_COUNT",
+      "log:PREPARATION_DECK_SKIPPED ai BUDGET_EXHAUSTED_REQUEST_COUNT",
+      "log:PREPARATION_DECKS project",
+      "log:PREPARATION_COMPLETE",
+    ]);
   });
 
   it("logs request spend per stage on success and on failure, counts only", async () => {
@@ -707,12 +810,17 @@ const logLines = (calls: readonly string[]): string[] =>
       admitGitHubCandidate: async ({ candidate }) => {
         throw new Error((candidate as any).id % 2 === 0 ? "LICENSE_REJECTED" : "https://github.com/owner/repo secret");
       },
+      collectStackMetadata: async () => accepted([], "5"),
     });
     await expect(prepareLocalExperiment(harness.dependencies)).rejects.toThrow("PREPARATION_FAILED");
     expect(logLines(harness.calls)).toEqual([
-      "log:PREPARATION_STAGE_FAILED ADMISSION INVARIANT_REJECTED none",
+      "log:PREPARATION_DECK_SKIPPED project DECK_SHORT",
+      "log:PREPARATION_DECK_SKIPPED language DECK_SHORT",
+      "log:PREPARATION_DECK_SKIPPED ai DECK_SHORT",
+      "log:PREPARATION_STAGE_FAILED SELECTION DECK_SHORT none",
       "log:PREPARATION_COUNTS discovered=11 admitted=0 duplicates=0",
-      "log:PREPARATION_REJECTIONS ADMISSION:CANDIDATE_REJECTED=4 ADMISSION:LICENSE_REJECTED=4",
+      "log:PREPARATION_REJECTIONS ADMISSION:CANDIDATE_REJECTED=5 ADMISSION:LICENSE_REJECTED=6 "
+        + "SELECTION:AI_DECK_SKIPPED=1 SELECTION:LANGUAGE_DECK_SKIPPED=1 SELECTION:PROJECT_DECK_SKIPPED=1",
       "log:PREPARATION_FAILED",
     ]);
     expect(harness.calls.join(" ")).not.toMatch(/owner\/repo|secret/u);
@@ -724,10 +832,9 @@ const logLines = (calls: readonly string[]): string[] =>
     const harness = await makeHarness({
       bindGitHubLineage: async () => { throw new RetryError("RETRY_SIGNAL_MISSING", new TransportError("REQUEST_LIMIT", diagnostic)); },
     });
-    await expect(prepareLocalExperiment(harness.dependencies)).rejects.toThrow("PREPARATION_FAILED");
-    expect(logLines(harness.calls)).toContain(
-      "log:PREPARATION_REJECTIONS DISCOVERY:REQUEST_LIMIT=8",
-    );
+    await prepareLocalExperiment(harness.dependencies);
+    // Eight ordinary and three credited candidates, each rejected by its lineage request's transport cause.
+    expect((harness.reports[0] as any).diagnostics).toContainEqual({ stage: "DISCOVERY", reasonCode: "REQUEST_LIMIT", count: 11 });
   });
 
   it("screens Stack rows by the profile licence allowlist before any blob is fetched", async () => {
@@ -789,9 +896,11 @@ const logLines = (calls: readonly string[]): string[] =>
   });
 
   it("keeps game and browser code out of the command and redacts top-level failures", async () => {
-    const source = await readFile(sourcePath, "utf8");
-    expect(source).not.toMatch(/from\s+["'][^"']*(?:apps\/game|next\/|playwright)|startGame|demo-game/u);
-    expect(source).toMatch(/publishArtifact: async \(\{ artifact, expectedHash, beforeCommit \}\)[\s\S]*?targetPath: ARTIFACT_PATH, \.\.\.\(beforeCommit \? \{ beforeCommit \} : \{\}\)/u);
+    for (const module of COMMAND_MODULES) {
+      expect(await sourceOf(module)).not.toMatch(/from\s+["'][^"']*(?:apps\/game|next\/|playwright)|startGame|demo-game/u);
+    }
+    expect(await sourceOf("dependencies")).toMatch(/publishArtifact: publishWithPin,/u);
+    expect(await sourceOf("dependencies")).toMatch(/targetPath: ARTIFACT_PATH,\s+beforeCommit: async \(\) => \{\s+await input\.beforeCommit\?\.\(\);\s+await writeAtomically\(PIN_PATH/u);
     const messages: string[] = [];
     const harness = await makeHarness({
       preflight: async () => { throw new Error("Bearer raw-secret account@example.test"); },

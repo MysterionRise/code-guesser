@@ -174,7 +174,7 @@ const makeArtifactDependencies = (
     return { fixtures: Array.from({ length: 5 }, () => ({ kind: "AI_CREDIT" })) } as any;
   },
   compose: (options) => {
-    state.calls.push(`compose:${options.project.fixtures.length}/${options.language.fixtures.length}/${options.ai.fixtures.length}`);
+    state.calls.push(`compose:${options.project?.fixtures.length ?? 0}/${options.language?.fixtures.length ?? 0}/${options.ai?.fixtures.length ?? 0}`);
     const crawlSnapshotId = canonicalHash({ profileHash: canonicalHash(options.profile),
       acceptedResponseHashes: options.acceptedResponseHashes });
     let index = 0;
@@ -183,7 +183,7 @@ const makeArtifactDependencies = (
       return { ...(fixture as object), source: { repository: `owner/repo-${index}`, commit: String(index % 10).repeat(40), path: `src/file-${index}.ts` } };
     }) });
     return { artifact: { crawlSnapshot: { id: crawlSnapshotId },
-      decks: [deck("project", options.project), deck("language", options.language), deck("ai", options.ai)] },
+      decks: (["project", "language", "ai"] as const).filter((id) => options[id] !== undefined).map((id) => deck(id, options[id]!)) },
       artifactHash: hash("9"), artifactBytes: new Uint8Array([1]), roundRecordSet: {} } as any;
   },
 });

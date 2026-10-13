@@ -1,9 +1,10 @@
+import { STACK_DATASET, STACK_RELEASE, STACK_REVISION } from "../limits";
 import type { CrawlProfile } from "./profile";
 import type { BoundedTransport } from "./transport";
 
-const DATASET = "bigcode/the-stack-v2";
-const RELEASE = "v2.2.0";
-const REVISION = "e565caa3a78c2423bd374333a472b049eb090e47";
+const DATASET = STACK_DATASET;
+const RELEASE = STACK_RELEASE;
+const REVISION = STACK_REVISION;
 const METADATA_URL = `https://huggingface.co/api/datasets/${DATASET}/revision/${REVISION}`;
 const CARD_URL = `https://huggingface.co/datasets/${DATASET}/raw/main/README.md`;
 const REVISION_PATTERN = /^[0-9a-f]{40}$/u;
@@ -21,8 +22,8 @@ export class StackAccessError extends Error {
 }
 
 export interface StackAccessGrant {
-  readonly release: "v2.2.0";
-  readonly revision: "e565caa3a78c2423bd374333a472b049eb090e47";
+  readonly release: string;
+  readonly revision: string;
 }
 
 export interface StackAccessOptions {

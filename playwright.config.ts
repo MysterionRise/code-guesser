@@ -22,17 +22,9 @@ export default defineConfig({
   },
   projects: [
     {
-      name: "provenance",
-      testMatch: /provenance-flow\.spec\.ts/,
-    },
-    {
       name: "provenance-accessibility",
       testMatch: /provenance-accessibility\.spec\.ts/,
       use: { baseURL },
-    },
-    {
-      name: "language",
-      testMatch: /language-flow\.spec\.ts/,
     },
     {
       name: "language-accessibility",

@@ -86,13 +86,16 @@ It needs `ffmpeg` on the `PATH` and the Playwright Chromium build
    lineage, licence, and recorded author.
 3. Fetch only the selected blobs from Software Heritage and revalidate them
    against GitHub.
-4. Compose the three decks and publish the artifact and its run report
-   atomically.
+4. Compose every deck that filled and publish the artifact, its pinned hash,
+   and its run report together. A deck that cannot fill is skipped with its
+   reason (`PREPARATION_DECK_SKIPPED <deck> <code>`); the run fails only when no
+   deck fills.
 
 The profile `ops/poc/profiles/local-real-rounds.v2.json` holds the queries and
-ceilings: 600 requests, 96 MiB of Stack metadata, and 3 pages or 300 results per
-query. The Python workers enforce the same limits in-process and report their
-counts back to the preparer.
+per-run budgets: 600 requests, 96 MiB of Stack metadata, and 3 pages or 300
+results per query. `ops/poc/limits.json` holds the pinned Stack v2 revision and
+the hard ceilings no profile may exceed; the preparer and the Python workers
+both read it.
 
 ### Credentials
 
@@ -115,11 +118,29 @@ pnpm prepare:poc
 
 Outputs:
 
-- `apps/game/src/demo/generated/local-real-rounds.json` (committed)
-- `ops/poc/stack/tmp/local-experiment-run.json` (ignored)
+- `apps/game/src/demo/generated/local-real-rounds.json` and its pinned hash in
+  `apps/game/src/demo/local-real-experiment.pin.server.ts` (committed; written
+  together)
+- `ops/poc/stack/tmp/local-experiment-run.json`: the run report (ignored)
+- `ops/poc/stack/tmp/local-experiment-last-failure.json`: counts and codes from
+  the last failed run (ignored)
+- `ops/poc/stack/tmp/journal/run.jsonl`: the run journal (ignored)
 
-After a successful run, verify the artifact and update the pinned hash before
-the root route will accept it.
+### Resuming and replaying
+
+Every run journals the responses it accepts. Two flags reuse that journal:
+
+| Command | What it does |
+| --- | --- |
+| `pnpm prepare:poc` | A fresh run that starts a new journal. |
+| `pnpm prepare:poc --resume` | Replays repository, commit, tree, blob, and licence responses and worker outputs, re-checks Stack access live, and fetches only what the journal lacks. Use it after a failed run. |
+| `pnpm prepare:poc --offline` | Replays the journal only, needs no token, and fails with `JOURNAL_MISS` rather than touch the network. Use it to iterate on deck rules. |
+
+Replayed responses count against the same budgets as live ones, so an offline
+run predicts what a live run would spend. The journal also keeps deterministic
+GitHub answers such as 404s, so an offline replay rejects the same candidates
+for the same reasons. It stores structured `email` fields redacted and is
+checked against its hashes on every load.
 
 A failed run logs `PREPARATION_STAGE_FAILED <stage> <reason-code> <status-class>`
 and `PREPARATION_FAILURE_SITE <function>@<file>`. When selection fails it also
@@ -158,10 +179,12 @@ If Playwright reports that Chromium is missing on a fresh machine, run
 
 | Path | Responsibility |
 | --- | --- |
-| `apps/game` | Next.js game, deck chooser, arcade UI, reveal authorization, and artifact validation |
-| `ops/poc/prepare` | GitHub and Stack orchestration, selection, deck composition, reporting, and publication |
+| `apps/game` | Next.js game, deck chooser, arcade UI, and reveal authorization |
+| `packages/artifact` | The one artifact model: parser, source validation, and canonical hash, shared by the game and the preparer |
+| `ops/poc/prepare` | GitHub and Stack orchestration, selection, deck composition, journal, reporting, and publication |
 | `ops/poc/stack` | Locked Python workers for Stack metadata and selected blob retrieval |
 | `ops/poc/profiles` | Versioned crawl profiles |
+| `ops/poc/limits.json` | Pinned Stack revision and hard ceilings shared by Node and Python |
 | `ops/demo/record` | Scripted README media recorder |
 | `tests` | Accessibility, browser, performance, and containment suites |
 | `docs/review` | Current state review and roadmap |

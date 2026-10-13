@@ -1,3 +1,4 @@
+import { STACK_DATASET } from "../limits";
 import {
   authorizeRequest,
   type CredentialPolicy,
@@ -30,6 +31,8 @@ export class TransportError extends Error {
   public constructor(
     public readonly code: TransportErrorCode,
     public readonly diagnostic: TransportDiagnostic,
+    /** The exact HTTP status, kept on the error for the run journal; diagnostics carry only its class. */
+    public readonly status?: number,
   ) {
     super(code);
     this.name = "TransportError";
@@ -72,7 +75,7 @@ export interface BoundedTransport {
 const pathTemplate = (provider: Provider, pathname: string): string => {
   if (provider === "github" && pathname === "/search/commits") return "/search/commits";
   if (provider === "github") return "/repos/{owner}/{repository}/{resource}";
-  if (provider === "huggingFace") return "/datasets/bigcode/the-stack-v2/{resource}";
+  if (provider === "huggingFace") return `/datasets/${STACK_DATASET}/{resource}`;
   return "/content/{object}";
 };
 
@@ -98,8 +101,12 @@ const diagnostic = (
 };
 
 const reject = (request: RequestInput, code: TransportErrorCode, status?: number): never => {
-  throw new TransportError(code, diagnostic(request, code, status));
+  throw new TransportError(code, diagnostic(request, code, status), status);
 };
+
+/** Rebuilds the error a request answered with, for a replayed journal entry. */
+export const statusError = (request: RequestInput, status: number): TransportError =>
+  new TransportError("UNSUPPORTED_STATUS", diagnostic(request, "UNSUPPORTED_STATUS", status), status);
 
 const readMetered = async (
   request: RequestInput,

@@ -1,3 +1,4 @@
+import { STACK_RELEASE, STACK_REVISION } from "../limits";
 import {
   count,
   deepFreeze,
@@ -10,10 +11,12 @@ import {
   texts,
   type RecordValue,
 } from "./model-validation";
-import { SIGNED_CAPACITY_CEILINGS, STACK_LANGUAGES } from "./profile";
+import { CAPACITY_CEILINGS, STACK_LANGUAGES } from "./profile";
+import { RUN_RETRY_LIMIT } from "./retry";
 
-/** Revision 12: three decks of five fixtures. */
+/** One to three decks of five fixtures. */
 const EXPERIMENT_ROUND_COUNT = 15;
+const ROUNDS_PER_DECK = 5;
 const RUN_COUNT_KEYS = [
   "requests", "githubPages", "githubResults", "repositoriesAdmitted", "stackRows",
   "blobAttempts", "blobsRetrieved", "githubRevalidations", "screened",
@@ -24,7 +27,7 @@ const GITHUB_RESPONSE_STATES = new Set([
 ]);
 const STACK_RESPONSE_STATES = new Set(["COMPLETE", "INCOMPLETE", "NOT_STARTED"]);
 const SUCCESSFUL_GITHUB_STATES = new Set(["COMPLETE", "PROVIDER_REPORTED_INCOMPLETE"]);
-const MAX_RUN_RETRIES = 3;
+const MAX_RUN_RETRIES = RUN_RETRY_LIMIT;
 const EXPERIMENT_SOURCE_ID = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+@[0-9a-f]{40}:[^?#\r\n]+$/u;
 /** True when the run report can record `repository@commit:path` as a source identity. */
 export const isReportableSourceIdentity = (identity: string): boolean => EXPERIMENT_SOURCE_ID.test(identity);
@@ -68,8 +71,8 @@ const parseRunQueries = (value: unknown): readonly RecordValue[] => {
     text(query.query);
     exact(query.sort, "committer-date");
     exact(query.order, "desc");
-    boundedCount(query.pageCeiling, SIGNED_CAPACITY_CEILINGS.githubPages);
-    boundedCount(query.resultCeiling, SIGNED_CAPACITY_CEILINGS.githubResults);
+    boundedCount(query.pageCeiling, CAPACITY_CEILINGS.githubPages);
+    boundedCount(query.resultCeiling, CAPACITY_CEILINGS.githubResults);
     validateCompleteness(query.completeness, GITHUB_RESPONSE_STATES);
     return query;
   });
@@ -85,7 +88,7 @@ const parseRunConfigurations = (value: unknown): readonly RecordValue[] => {
     ]);
     exact(configuration.language, STACK_LANGUAGES[index]!);
     exact(configuration.configuration, STACK_LANGUAGES[index]!);
-    boundedCount(configuration.rowCeiling, SIGNED_CAPACITY_CEILINGS.stackRowsPerLanguage);
+    boundedCount(configuration.rowCeiling, CAPACITY_CEILINGS.stackRowsPerLanguage);
     validateCompleteness(configuration.completeness, STACK_RESPONSE_STATES);
     return configuration;
   });
@@ -99,26 +102,26 @@ const validateRunUsage = (
   const sourceCapacity = queries.reduce((sum, query) => sum + count(query.resultCeiling), 0)
     + configurations.reduce((sum, configuration) => sum + count(configuration.rowCeiling), 0);
   const counts = record(run.counts, RUN_COUNT_KEYS);
-  const requests = boundedCount(counts.requests, SIGNED_CAPACITY_CEILINGS.requestCount);
+  const requests = boundedCount(counts.requests, CAPACITY_CEILINGS.requestCount);
   boundedCount(counts.githubPages, queries.reduce((sum, query) => sum + count(query.pageCeiling), 0));
   boundedCount(counts.githubResults, queries.reduce((sum, query) => sum + count(query.resultCeiling), 0));
   boundedCount(counts.repositoriesAdmitted, sourceCapacity);
   const stackRows = record(counts.stackRows, STACK_LANGUAGES);
   STACK_LANGUAGES.forEach((language, index) =>
     boundedCount(stackRows[language], count(configurations[index]!.rowCeiling)));
-  const attempts = boundedCount(counts.blobAttempts, SIGNED_CAPACITY_CEILINGS.blobAttempts);
-  const retrieved = boundedCount(counts.blobsRetrieved, SIGNED_CAPACITY_CEILINGS.successfulBlobs);
+  const attempts = boundedCount(counts.blobAttempts, CAPACITY_CEILINGS.blobAttempts);
+  const retrieved = boundedCount(counts.blobsRetrieved, CAPACITY_CEILINGS.successfulBlobs);
   if (retrieved > attempts || count(counts.githubRevalidations) > attempts) fail();
   const screened = boundedCount(counts.screened, sourceCapacity);
   boundedCount(counts.duplicatesRejected, screened);
   boundedCount(counts.selected, Math.min(EXPERIMENT_ROUND_COUNT, screened));
   const bytes = record(run.bytes, ["githubResponses", "stackMetadata", "stackBlobs"]);
-  boundedCount(bytes.githubResponses, requests * SIGNED_CAPACITY_CEILINGS.responseBytes);
-  boundedCount(bytes.stackMetadata, SIGNED_CAPACITY_CEILINGS.stackMetadataBytes);
-  boundedCount(bytes.stackBlobs, SIGNED_CAPACITY_CEILINGS.totalBlobBytes);
+  boundedCount(bytes.githubResponses, requests * CAPACITY_CEILINGS.responseBytes);
+  boundedCount(bytes.stackMetadata, CAPACITY_CEILINGS.stackMetadataBytes);
+  boundedCount(bytes.stackBlobs, CAPACITY_CEILINGS.totalBlobBytes);
   const waits = record(run.waits, ["retries", "milliseconds"]);
   boundedCount(waits.retries, MAX_RUN_RETRIES);
-  boundedCount(waits.milliseconds, SIGNED_CAPACITY_CEILINGS.totalWaitMilliseconds);
+  boundedCount(waits.milliseconds, CAPACITY_CEILINGS.totalWaitMilliseconds);
   return sourceCapacity;
 };
 
@@ -127,12 +130,13 @@ const validateRunResult = (run: RecordValue, queries: readonly RecordValue[], co
     if (queries.some(({ completeness }) => !SUCCESSFUL_GITHUB_STATES.has(completeness as string))
       || configurations.some(({ completeness }) => completeness !== "COMPLETE")) fail();
     const counts = run.counts as RecordValue;
-    if (counts.selected !== EXPERIMENT_ROUND_COUNT) fail();
+    const selected = count(counts.selected);
+    if (selected === 0 || selected > EXPERIMENT_ROUND_COUNT || selected % ROUNDS_PER_DECK !== 0) fail();
     const result = record(run.result, ["artifactHash", "crawlSnapshotId", "sourceIdentities"]);
     sha256(result.artifactHash);
     sha256(result.crawlSnapshotId);
     const identities = texts(result.sourceIdentities);
-    if (identities.length !== EXPERIMENT_ROUND_COUNT || identities.some((identity) => !EXPERIMENT_SOURCE_ID.test(identity))) fail();
+    if (identities.length !== selected || identities.some((identity) => !EXPERIMENT_SOURCE_ID.test(identity))) fail();
     return;
   }
   exact(run.outcome, "FAILURE");
@@ -162,8 +166,8 @@ export const parseRunRecord = (value: unknown): RunRecord => {
   validateExecutionIdentity(run.executionId);
   validateObservationTime(run.observedAt);
   for (const key of ["profileVersion", "githubApiVersion"]) text(run[key]);
-  exact(run.stackRelease, "v2.2.0");
-  exact(run.stackRevision, "e565caa3a78c2423bd374333a472b049eb090e47");
+  exact(run.stackRelease, STACK_RELEASE);
+  exact(run.stackRevision, STACK_REVISION);
   const queries = parseRunQueries(run.githubQueries);
   const configurations = parseRunConfigurations(run.stackConfigurations);
   const outcomeCapacity = validateRunUsage(run, queries, configurations);

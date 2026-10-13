@@ -1,12 +1,12 @@
 import { createCapacityMeter, CapacityError } from "./capacity";
 import { RUN_RETRY_LIMIT } from "./retry";
-import { SIGNED_CAPACITY_CEILINGS, type CapacityLimits, STACK_LANGUAGES } from "./profile";
+import { CAPACITY_CEILINGS, type CapacityLimits, STACK_LANGUAGES } from "./profile";
 
 const testModuleName: string = "vitest";
 const { describe, expect, it } = await import(testModuleName) as any;
 
 const limits = (overrides: Partial<CapacityLimits> = {}): CapacityLimits => ({
-  ...SIGNED_CAPACITY_CEILINGS,
+  ...CAPACITY_CEILINGS,
   ...overrides,
 });
 
@@ -27,8 +27,8 @@ describe("preparation capacity", () => {
   it("accepts lower profile limits and rejects every raised signed limit", () => {
     expect(() => meter({ githubPages: 2, temporaryDiskBytes: 1024 })).not.toThrow();
 
-    for (const key of Object.keys(SIGNED_CAPACITY_CEILINGS) as (keyof CapacityLimits)[]) {
-      expect(() => meter({ [key]: SIGNED_CAPACITY_CEILINGS[key] + 1 })).toThrow(CapacityError);
+    for (const key of Object.keys(CAPACITY_CEILINGS) as (keyof CapacityLimits)[]) {
+      expect(() => meter({ [key]: CAPACITY_CEILINGS[key] + 1 })).toThrow(CapacityError);
     }
   });
 
@@ -122,7 +122,7 @@ describe("preparation capacity", () => {
     expect(() => single.recordRetryWait(15_001)).toThrow(CapacityError);
     expect(single.snapshot().retryWaits).toBe(0);
 
-    const discarded = createCapacityMeter({ limits: { ...SIGNED_CAPACITY_CEILINGS, githubPages: 2 },
+    const discarded = createCapacityMeter({ limits: { ...CAPACITY_CEILINGS, githubPages: 2 },
       githubQueryIds: ["q"], stackLanguages: STACK_LANGUAGES });
     discarded.recordGitHubPage("q", 100);
     discarded.recordGitHubPage("q", 50);

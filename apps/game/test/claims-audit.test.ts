@@ -7,7 +7,7 @@ type Literal = Readonly<{ file: string; text: string }>;
 type ClaimPattern = Readonly<{ id: string; expression: RegExp }>;
 
 const ROOT = resolve(process.cwd());
-const SOURCE_ROOTS = ["apps/game/app", "apps/game/src", "packages/domain/src", "packages/measurement/src", "docs/operations"];
+const SOURCE_ROOTS = ["apps/game/app", "apps/game/src", "packages/domain/src", "packages/measurement/src", "packages/artifact/src", "docs/operations"];
 const SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".md", ".mdx"]);
 const EXCLUDED = /(?:^|\/)(?:docs\/gangsta|test|tests|support|fixtures|node_modules|\.next|coverage|reports|artifacts)(?:\/|$)/;
 const PERMITTED_RECORDED_SOURCE_PHRASES = new Set([
@@ -145,7 +145,8 @@ describe("product claims audit", () => {
     const projectPaths = files.map((file) => relative(ROOT, file).replaceAll("\\", "/"));
     expect(files.length).toBeGreaterThan(0);
     expect(projectPaths).toContain("apps/game/src/app/page.tsx");
-    expect(projectPaths).toContain("apps/game/src/modes/provenance/server/provenance-flow.ts");
+    expect(projectPaths).toContain("apps/game/src/components/arcade/arcade-shell.tsx");
+    expect(projectPaths).toContain("packages/artifact/src/artifact.ts");
     expect(projectPaths).toContain("packages/domain/src/provenance/index.ts");
     expect(projectPaths).toContain("packages/measurement/src/events/index.ts");
     expect(projectPaths.every((path) => !EXCLUDED.test(path) && !path.startsWith("docs/gangsta/"))).toBe(true);

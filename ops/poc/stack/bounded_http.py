@@ -5,7 +5,7 @@ through this transport. It allowlists exact hosts and endpoint families,
 permits only HTTPS GET/HEAD, counts requests and received bytes against the
 budget the Node preparer handed over, never follows a redirect automatically,
 and never returns a retryable status or transport exception to the Hub
-client's backoff loop, so no retry can happen outside the signed ceilings.
+client's backoff loop, so no retry can happen outside the ceilings in ``ops/poc/limits.json``.
 """
 
 import os
@@ -13,16 +13,18 @@ import re
 
 import httpx
 
+from limits import CEILINGS, STACK_DATASET, STACK_REVISION
+
 
 ALLOWED_HOST = "huggingface.co"
-DATASET = "bigcode/the-stack-v2"
-PINNED_REVISION = "e565caa3a78c2423bd374333a472b049eb090e47"
+DATASET = STACK_DATASET
+PINNED_REVISION = STACK_REVISION
 # Exact hosts a resolve redirect may target. The one entry was observed under
 # authorization on 2026-10-08 (HEAD on the pinned resolve endpoint answered 302
 # to this host); see evidence/2026-10-08-hugging-face-redirect-observation.md.
 REDIRECT_HOSTS = frozenset({"us.aws.cdn.hf.co"})
-MAXIMUM_REQUESTS = 600
-MAXIMUM_NETWORK_BYTES = 96 * 1024 * 1024
+MAXIMUM_REQUESTS = CEILINGS["requestCount"]
+MAXIMUM_NETWORK_BYTES = CEILINGS["stackMetadataBytes"]
 TIMEOUT_SECONDS = 15.0
 READ_METHODS = ("GET", "HEAD")
 # Headers that belong to the origin request only; the rebuilt redirect request derives its own Host.

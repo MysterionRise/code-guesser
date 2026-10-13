@@ -68,6 +68,7 @@ test("browser and gameplay dependency surfaces exclude acquisition capabilities"
     ...filesUnder(join(game, "src")),
     ...filesUnder(join(root, "packages", "domain", "src")),
     ...filesUnder(join(root, "packages", "measurement", "src")),
+    ...filesUnder(join(root, "packages", "artifact", "src")),
   ];
   assertContainsNoFingerprint(participantSources, "participant dependency surface");
   assert.equal(participantSources.some((path) => /(?:^|\/)(?:route|middleware|instrumentation)\.[cm]?[jt]sx?$/u.test(path)), false);

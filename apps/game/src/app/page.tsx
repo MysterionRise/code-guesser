@@ -6,6 +6,10 @@ import {
 } from "../demo/local-real-experiment-loader.server";
 import type { LocalRealDeck } from "../demo/local-real-experiment.server";
 
+const DECK_COUNT_WORDS = ["No decks", "One deck", "Two decks", "Three decks"] as const;
+/** A run publishes every deck it could fill, so the notice counts what this artifact holds. */
+const deckSummary = (count: number): string => `${DECK_COUNT_WORDS[count] ?? `${count} decks`} of five rounds.`;
+
 interface PageProps {
   readonly searchParams: Promise<Readonly<Record<string, string | string[] | undefined>>>;
 }
@@ -38,7 +42,7 @@ export default async function Page({ searchParams }: PageProps) {
   return (
     <div className="demo-page">
       <p className="demo-notice">
-        <strong>{LOCAL_REAL_EXPERIMENT_NOTICE}</strong> {loaded.ok ? "Three decks of five rounds." : "No rounds are available."}
+        <strong>{LOCAL_REAL_EXPERIMENT_NOTICE}</strong> {loaded.ok ? deckSummary(loaded.experiment.decks.length) : "No rounds are available."}
       </p>
       {deck?.notice && <p className="demo-notice deck-notice">{deck.notice}</p>}
       <noscript><p className="demo-notice">CodeGuessr needs JavaScript to accept answers and reveal progressive evidence.</p></noscript>

@@ -8,6 +8,8 @@ import sys
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
+from limits import CEILINGS
+
 
 BUCKET = "softwareheritage"
 KEY_PREFIX = "content/"
@@ -16,11 +18,12 @@ ENDPOINT_URL = "https://s3.amazonaws.com"
 BUCKET_HOST = f"{BUCKET}.s3.amazonaws.com"
 KEY_PATH = re.compile(r"^/content/[0-9a-f]{40}$")
 TIMEOUT_SECONDS = 15
-MAXIMUM_ATTEMPTS = 50
-MAXIMUM_BLOB_BYTES = 256 * 1024
-MAXIMUM_TOTAL_BYTES = 16 * 1024 * 1024
-MAXIMUM_TEMPORARY_BYTES = 32 * 1024 * 1024
-MAXIMUM_REQUESTS = 600
+MAXIMUM_ATTEMPTS = CEILINGS["blobAttempts"]
+MAXIMUM_SUCCESSFUL_BLOBS = CEILINGS["successfulBlobs"]
+MAXIMUM_BLOB_BYTES = CEILINGS["perBlobBytes"]
+MAXIMUM_TOTAL_BYTES = CEILINGS["totalBlobBytes"]
+MAXIMUM_TEMPORARY_BYTES = CEILINGS["temporaryDiskBytes"]
+MAXIMUM_REQUESTS = CEILINGS["requestCount"]
 MAXIMUM_REQUEST_BYTES = 64 * 1024
 READ_BYTES = 64 * 1024
 ROW_KEYS = {
@@ -44,7 +47,7 @@ class BlobLimits:
 
 
 SIGNED_LIMITS = BlobLimits(
-    MAXIMUM_ATTEMPTS, MAXIMUM_ATTEMPTS, MAXIMUM_BLOB_BYTES,
+    MAXIMUM_ATTEMPTS, MAXIMUM_SUCCESSFUL_BLOBS, MAXIMUM_BLOB_BYTES,
     MAXIMUM_TOTAL_BYTES, MAXIMUM_TEMPORARY_BYTES, MAXIMUM_REQUESTS, MAXIMUM_BLOB_BYTES,
 )
 
@@ -74,7 +77,7 @@ def _parse_limits(value):
         _fail("LIMIT_SHAPE")
     maxima = {
         "blobAttempts": MAXIMUM_ATTEMPTS,
-        "successfulBlobs": MAXIMUM_ATTEMPTS,
+        "successfulBlobs": MAXIMUM_SUCCESSFUL_BLOBS,
         "perBlobBytes": MAXIMUM_BLOB_BYTES,
         "totalBlobBytes": MAXIMUM_TOTAL_BYTES,
         "temporaryDiskBytes": MAXIMUM_TEMPORARY_BYTES,

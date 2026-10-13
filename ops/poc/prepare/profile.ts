@@ -1,24 +1,9 @@
-const MEBIBYTE = 1024 * 1024;
+import { CAPACITY_CEILINGS, STACK_RELEASE, STACK_REVISION, type CeilingKey } from "../limits";
 
-/** Revision 12 ceilings: requests rose to 600 and Stack metadata to 96 MiB; the rest carry forward. */
-export const SIGNED_CAPACITY_CEILINGS = Object.freeze({
-  githubPages: 3,
-  githubResults: 300,
-  stackRowsPerLanguage: 10_000,
-  stackMetadataBytes: 96 * MEBIBYTE,
-  blobAttempts: 50,
-  successfulBlobs: 50,
-  perBlobBytes: 256 * 1024,
-  totalBlobBytes: 16 * MEBIBYTE,
-  concurrentRequests: 4,
-  requestCount: 600,
-  responseBytes: 8 * MEBIBYTE,
-  waitMilliseconds: 15_000,
-  totalWaitMilliseconds: 30_000,
-  temporaryDiskBytes: 32 * MEBIBYTE,
-} as const);
+/** The hard ceilings from `ops/poc/limits.json`; a profile may lower any of them, never raise one. */
+export { CAPACITY_CEILINGS };
 
-export type CapacityLimits = Readonly<Record<keyof typeof SIGNED_CAPACITY_CEILINGS, number>>;
+export type CapacityLimits = Readonly<Record<CeilingKey, number>>;
 export const PROFILE_VERSION = "local-real-rounds.v2";
 export const STACK_LANGUAGES = Object.freeze(["Python", "TypeScript", "Go", "Rust", "Ruby"] as const);
 export type StackLanguage = typeof STACK_LANGUAGES[number];
@@ -84,8 +69,8 @@ export interface CrawlProfile {
   readonly profileVersion: typeof PROFILE_VERSION;
   readonly github: Readonly<{ apiVersion: "2022-11-28"; queries: readonly ProfileQuery[] }>;
   readonly stack: Readonly<{
-    release: "v2.2.0";
-    revision: "e565caa3a78c2423bd374333a472b049eb090e47";
+    release: string;
+    revision: string;
     configurations: readonly Readonly<{
       language: StackLanguage;
       configuration: StackLanguage;
@@ -259,11 +244,11 @@ const parseAiCredits = (value: unknown): CrawlProfile["aiCredits"] => {
 };
 
 const parseCapacity = (value: unknown): CapacityLimits => {
-  const keys = Object.keys(SIGNED_CAPACITY_CEILINGS) as (keyof CapacityLimits)[];
+  const keys = Object.keys(CAPACITY_CEILINGS) as (keyof CapacityLimits)[];
   const item = exactRecord(value, keys);
   return Object.freeze(Object.fromEntries(keys.map((key) => {
     const parsed = integer(item[key]);
-    if (parsed > SIGNED_CAPACITY_CEILINGS[key]) fail();
+    if (parsed > CAPACITY_CEILINGS[key]) fail();
     return [key, parsed];
   })) as Record<keyof CapacityLimits, number>);
 };
@@ -383,13 +368,13 @@ export const parseCrawlProfile = (value: unknown): CrawlProfile => {
   const github = exactRecord(root.github, ["apiVersion", "queries"]);
   if (github.apiVersion !== "2022-11-28") fail();
   const stack = exactRecord(root.stack, ["release", "revision", "configurations"]);
-  if (stack.release !== "v2.2.0" || stack.revision !== "e565caa3a78c2423bd374333a472b049eb090e47") fail();
+  if (stack.release !== STACK_RELEASE || stack.revision !== STACK_REVISION) fail();
   return deepFreeze({
     profileVersion: PROFILE_VERSION,
     github: Object.freeze({ apiVersion: "2022-11-28" as const, queries: parseQueries(github.queries) }),
     stack: Object.freeze({
-      release: "v2.2.0" as const,
-      revision: "e565caa3a78c2423bd374333a472b049eb090e47" as const,
+      release: STACK_RELEASE,
+      revision: STACK_REVISION,
       configurations: parseConfigurations(stack.configurations),
     }),
     aiCredits: parseAiCredits(root.aiCredits),

@@ -13,7 +13,7 @@ import {
   type WorkerResult,
 } from "./stack-metadata";
 import type { SelectedStackBlob } from "./stack-revalidation";
-import { SIGNED_CAPACITY_CEILINGS } from "./profile";
+import { CAPACITY_CEILINGS } from "./profile";
 
 const RUNTIME_DIRECTORY = fileURLToPath(new URL("../stack/", import.meta.url)).replace(/\/$/u, "");
 const WORKER_PATH = join(RUNTIME_DIRECTORY, "fetch_blob.py");
@@ -26,13 +26,13 @@ const WORKER_ENVIRONMENT_KEYS = [
   "AWS_PROFILE", "AWS_SHARED_CREDENTIALS_FILE", "AWS_CONFIG_FILE",
 ] as const;
 const LIMIT_CEILINGS = Object.freeze({
-  blobAttempts: SIGNED_CAPACITY_CEILINGS.blobAttempts,
-  successfulBlobs: SIGNED_CAPACITY_CEILINGS.successfulBlobs,
-  perBlobBytes: SIGNED_CAPACITY_CEILINGS.perBlobBytes,
-  totalBlobBytes: SIGNED_CAPACITY_CEILINGS.totalBlobBytes,
-  temporaryDiskBytes: SIGNED_CAPACITY_CEILINGS.temporaryDiskBytes,
-  requestLimit: SIGNED_CAPACITY_CEILINGS.requestCount,
-  networkByteLimit: SIGNED_CAPACITY_CEILINGS.perBlobBytes,
+  blobAttempts: CAPACITY_CEILINGS.blobAttempts,
+  successfulBlobs: CAPACITY_CEILINGS.successfulBlobs,
+  perBlobBytes: CAPACITY_CEILINGS.perBlobBytes,
+  totalBlobBytes: CAPACITY_CEILINGS.totalBlobBytes,
+  temporaryDiskBytes: CAPACITY_CEILINGS.temporaryDiskBytes,
+  requestLimit: CAPACITY_CEILINGS.requestCount,
+  networkByteLimit: CAPACITY_CEILINGS.perBlobBytes,
 });
 
 export class BlobWorkerError extends Error {

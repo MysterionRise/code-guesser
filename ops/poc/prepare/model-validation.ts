@@ -1,13 +1,8 @@
-export class ExperimentRecordError extends Error {
-  public constructor() {
-    super("EXPERIMENT_RECORD_REJECTED");
-    this.name = "ExperimentRecordError";
-  }
-}
+/** Run records and round records fail exactly as artifact records do. */
+export { ExperimentRecordError, fail } from "../../../packages/artifact/src/errors";
+import { fail } from "../../../packages/artifact/src/errors";
 
 export type RecordValue = Record<string, unknown>;
-
-export const fail = (): never => { throw new ExperimentRecordError(); };
 
 export const isRecord = (value: unknown): value is RecordValue =>
   typeof value === "object" && value !== null && !Array.isArray(value);

@@ -144,9 +144,10 @@ describe("operational run records", () => {
       (candidate) => { candidate.counts.blobsRetrieved = 9; },
       (candidate) => { candidate.bytes.stackMetadata = 96 * 1024 * 1024 + 1; },
       (candidate) => { candidate.bytes.stackBlobs = 16 * 1024 * 1024 + 1; },
-      (candidate) => { candidate.waits.retries = 4; },
+      (candidate) => { candidate.waits.retries = 6; },
       (candidate) => { candidate.waits.milliseconds = 30_001; },
       (candidate) => { candidate.counts.selected = 14; },
+      (candidate) => { candidate.counts.selected = 10; },
       (candidate) => { candidate.counts.requests = 601; },
     ];
 
