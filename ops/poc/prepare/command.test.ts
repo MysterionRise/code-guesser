@@ -811,7 +811,18 @@ const logLines = (calls: readonly string[]): string[] =>
       STACK_V2_ACKNOWLEDGED_USABLE_REVISION: "7".repeat(40),
     });
     process.argv.splice(0, process.argv.length, "node", "index.ts", "https://example.test/?token=secret");
-    await expect(runPreparationCli()).rejects.toThrow("COMMAND_ARGUMENTS_REJECTED");
+    const logged: string[] = [];
+    await expect(runPreparationCli((message) => { logged.push(message); })).rejects.toThrow("COMMAND_ARGUMENTS_REJECTED");
+    expect(logged.join(" ")).not.toMatch(/example\.test|token|secret/u);
+  });
+
+  it("prints the stable code and the accepted flags when it gets a mistyped flag, then exits non-zero", async () => {
+    for (const argv of [["--ofline"], ["--resume", "--offline"], ["offline"]]) {
+      process.argv.splice(0, process.argv.length, "node", "index.ts", ...argv);
+      const logged: string[] = [];
+      await expect(runPreparationCli((message) => { logged.push(message); })).rejects.toThrow("COMMAND_ARGUMENTS_REJECTED");
+      expect(logged).toEqual(["COMMAND_ARGUMENTS_REJECTED", "usage: pnpm prepare:poc [--resume | --offline]"]);
+    }
   });
 
   it("projects only AWS and provider-store values into the selected-blob worker", async () => {
