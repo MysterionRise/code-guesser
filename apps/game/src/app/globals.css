@@ -26,6 +26,7 @@ h1[tabindex="-1"]:focus, h2[tabindex="-1"]:focus { outline: none; }
 .hints { min-height: 54px; display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
 .hint, .hint-button { margin: 0; padding: 9px 13px; border: 1px dashed #527565; border-radius: 10px; background: #10251d; color: #cdeada; }
 .hint-button { cursor: pointer; color: #baff65; }
+.hint:focus-visible { outline: 3px solid #baff65; outline-offset: 3px; }
 fieldset { padding: 0; margin: 0; border: 0; }
 legend { margin-bottom: 10px; font-weight: 700; }
 .candidate-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }

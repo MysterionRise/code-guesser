@@ -83,6 +83,8 @@ describe("static arcade shell", () => {
     // Hint costs are visible up front and announced with the hint button.
     expect(html).toMatch(/<p class="hint-cost" id="hint-cost-round-1">Each hint lowers this round’s points: 1,000 → 800 → 500\.<\/p>/u);
     expect(html).toMatch(/<button class="hint-button"[^>]*aria-describedby="hint-cost-round-1"/u);
+    // A revealed hint is announced politely; focus handling lives in the browser tests.
+    expect(html).toMatch(/<div class="hints"[^>]*aria-live="polite"/u);
     // Long lines scroll inside a keyboard-reachable code window instead of wrapping.
     expect(html).toMatch(/<pre class="code-window" tabindex="0" aria-label="Code excerpt">/u);
     expect(html).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");

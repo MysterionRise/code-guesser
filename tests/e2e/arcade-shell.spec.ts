@@ -126,3 +126,35 @@ test("a fix round numbers its lines, shows each option's code, and highlights th
   await expect(pane.locator(`[data-line="${line}"]`)).toHaveClass(/highlighted/u);
   await expect(pane.locator(".code-line.highlighted")).toHaveCount(1);
 });
+
+test("revealing a hint keeps keyboard focus, and a failed check returns it to Lock in answer", async ({ page }) => {
+  await page.goto("/?deck=project");
+  await expect(page.getByText("Round 1 of 5")).toBeVisible();
+  const hints = page.locator(".hints");
+  await expect(hints).toHaveAttribute("aria-live", "polite");
+  const focusedTag = () => page.evaluate(() => document.activeElement?.tagName ?? "");
+
+  await page.getByRole("button", { name: "Reveal hint 1" }).focus();
+  await page.keyboard.press("Enter");
+  await expect(hints.locator(".hint")).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "Reveal hint 2" })).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(hints.locator(".hint")).toHaveCount(2);
+  await expect(hints.locator(".hint").nth(1)).toBeFocused();
+  expect(await focusedTag()).not.toBe("BODY");
+
+  // Every POST is the reveal's server action; failing it shows the alert with focus back on the button.
+  await page.getByLabel(answers.get(await currentRound(page))!, { exact: true }).check();
+  await page.route("**/*", (route) => route.request().method() === "POST" ? route.abort() : route.continue());
+  const lockIn = page.getByRole("button", { name: "Lock in answer" });
+  await lockIn.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("main").getByRole("alert")).toHaveText("Couldn’t check that answer. Try again.");
+  await expect(lockIn).toBeFocused();
+
+  await page.unrouteAll();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("heading", { name: "Nice read." })).toBeFocused();
+  await expect(page.locator(".reveal .round-points")).toHaveText("+500 points (2 hints)");
+  await expect(page.getByRole("main").getByRole("alert")).toHaveCount(0);
+});

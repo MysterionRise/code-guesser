@@ -224,6 +224,9 @@ export function ArcadeShell({ mode, authorizeRevealAction, chooseAnotherDeckHref
     : undefined;
   const roundTitle = React.useRef<HTMLHeadingElement>(null);
   const revealHeading = React.useRef<HTMLHeadingElement>(null);
+  const hintButton = React.useRef<HTMLButtonElement>(null);
+  const latestHint = React.useRef<HTMLParagraphElement>(null);
+  const answerButton = React.useRef<HTMLButtonElement>(null);
   const settled = React.useRef(false);
 
   // Keyboard and screen-reader users land on the verdict after answering and on the next prompt after
@@ -232,6 +235,18 @@ export function ArcadeShell({ mode, authorizeRevealAction, chooseAnotherDeckHref
     if (!settled.current) { settled.current = true; return; }
     (session.reveal ? revealHeading : roundTitle).current?.focus();
   }, [session.reveal, session.roundIndex]);
+
+  // A revealed hint replaces the button that asked for it, so focus moves on to the next hint button, or to the
+  // hint itself once none is left, instead of falling to the page; the hints region announces the hint.
+  React.useEffect(() => {
+    if (session.visibleHintCount === 0) return;
+    (hintButton.current ?? latestHint.current)?.focus();
+  }, [session.visibleHintCount]);
+
+  // "Lock in answer" disables while it checks; when the check fails, focus returns to it beside the alert.
+  React.useEffect(() => {
+    if (error !== null && !busy) answerButton.current?.focus();
+  }, [error, busy]);
 
   const copyResult = async () => {
     if (!session.result) return;
@@ -313,11 +328,12 @@ export function ArcadeShell({ mode, authorizeRevealAction, chooseAnotherDeckHref
         </div>
 
         <p className="hint-cost" id={`hint-cost-${round.roundId}`}>{hintCostNote(round.points)}</p>
-        <div className="hints" aria-label="Hints">
+        {/* Keyed by round, so a new round's hints arrive in a fresh live region instead of being announced. */}
+        <div className="hints" aria-label="Hints" aria-live="polite" key={round.roundId}>
           {round.mode.clues.map((clue, index) => index < session.visibleHintCount
-            ? <p className="hint" key={clue.order}>{clue.label}</p>
+            ? <p className="hint" key={clue.order} tabIndex={-1} ref={index === session.visibleHintCount - 1 ? latestHint : undefined}>{clue.label}</p>
             : index === session.visibleHintCount
-              ? <button className="hint-button" type="button" key={clue.order} aria-describedby={`hint-cost-${round.roundId}`} disabled={busy || session.lockedCandidateId !== null} onClick={() => setSession((current) => transitionArcadeSession(mode, current, { type: "reveal-hint" }))}>
+              ? <button className="hint-button" type="button" key={clue.order} ref={hintButton} aria-describedby={`hint-cost-${round.roundId}`} disabled={busy || session.lockedCandidateId !== null} onClick={() => setSession((current) => transitionArcadeSession(mode, current, { type: "reveal-hint" }))}>
                   Reveal hint {clue.order}
                 </button>
               : null)}
@@ -357,7 +373,7 @@ export function ArcadeShell({ mode, authorizeRevealAction, chooseAnotherDeckHref
           </div>
         </fieldset>
 
-        <button className="answer-button" type="button" disabled={selection === "" || session.reveal !== null || busy} onClick={submit}>
+        <button className="answer-button" type="button" ref={answerButton} disabled={selection === "" || session.reveal !== null || busy} onClick={submit}>
           {busy ? "Checking…" : "Lock in answer"}
         </button>
         {error && <p className="demo-error" role="alert">{error}</p>}
