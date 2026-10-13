@@ -38,22 +38,26 @@ describe("server-only local real experiment loader", () => {
   it("reports a missing artifact without any synthetic fallback", () => {
     const loaded = loadLocalRealExperiment({ artifactPath: join(tmpdir(), "codeguessr-absent", "none.json"), trustedArtifactHash: hashValue(artifact()) });
 
-    expect(loaded).toEqual({ ok: false, reason: "ARTIFACT_MISSING" });
+    expect(loaded).toEqual({ ok: false, reason: "MISSING" });
   });
 
-  it("rejects malformed, hash-mismatched, edited, and placeholder-pinned artifacts", () => {
+  it("tells a hash mismatch from a schema failure when it rejects an artifact", () => {
     const value = artifact();
     const edited = artifact();
     edited.decks[0].fixtures[0].panes[0].text = "edited";
+    const older = { ...artifact(), schemaVersion: "local-experiment-artifact.v3" };
     const cases = [
-      { artifactPath: written("{not json"), trustedArtifactHash: hashValue(value) },
-      { artifactPath: written(value), trustedArtifactHash: "f".repeat(64) },
-      { artifactPath: written(value), trustedArtifactHash: "not-a-hash" },
-      { artifactPath: written(edited), trustedArtifactHash: hashValue(value) },
-      { artifactPath: written(value) },
+      // A pin that does not match, is not a hash, or is the committed artifact's; or an artifact edited after pinning.
+      { options: { artifactPath: written(value), trustedArtifactHash: "f".repeat(64) }, reason: "HASH_MISMATCH" },
+      { options: { artifactPath: written(value), trustedArtifactHash: "not-a-hash" }, reason: "HASH_MISMATCH" },
+      { options: { artifactPath: written(edited), trustedArtifactHash: hashValue(value) }, reason: "HASH_MISMATCH" },
+      { options: { artifactPath: written(value) }, reason: "HASH_MISMATCH" },
+      // A file that is not JSON, or an artifact that matches its pin but not the current format.
+      { options: { artifactPath: written("{not json"), trustedArtifactHash: hashValue(value) }, reason: "SCHEMA" },
+      { options: { artifactPath: written(older), trustedArtifactHash: hashValue(older) }, reason: "SCHEMA" },
     ];
-    for (const options of cases) {
-      expect(loadLocalRealExperiment(options)).toEqual({ ok: false, reason: "ARTIFACT_REJECTED" });
+    for (const { options, reason } of cases) {
+      expect(loadLocalRealExperiment(options)).toEqual({ ok: false, reason });
     }
   });
 
@@ -71,11 +75,18 @@ describe("server-only local real experiment loader", () => {
     }
   });
 
-  it("resolves the default artifact beside the game sources and memoizes the active authority", () => {
+  it("resolves the default artifact beside the game sources, memoizes the active authority, and logs only a reason code once", () => {
     expect(ARTIFACT_RELATIVE_PATH).toBe("src/demo/generated/local-real-rounds.json");
-    const first = activeLocalRealExperiment();
-    expect(activeLocalRealExperiment()).toBe(first);
-    expect(typeof first.ok).toBe("boolean");
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      const first = activeLocalRealExperiment();
+      expect(activeLocalRealExperiment()).toBe(first);
+      expect(typeof first.ok).toBe("boolean");
+      // From the repository root, where the tests run, the default path holds no artifact.
+      expect(logged.mock.calls).toEqual(first.ok ? [] : [[`LOCAL_REAL_EXPERIMENT_UNAVAILABLE ${first.reason}`]]);
+    } finally {
+      logged.mockRestore();
+    }
   });
 
   it("names every round source and the unreviewed localhost status in a short permanent notice", () => {

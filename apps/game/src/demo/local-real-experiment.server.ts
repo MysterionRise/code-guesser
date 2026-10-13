@@ -207,13 +207,24 @@ const revealFor = (
   });
 };
 
+/** The pinned hash, when the artifact matches it; a pin that is not a hash, or an artifact that does not match it, is a hash mismatch. */
+const pinnedHash = (artifactInput: unknown, trustedArtifactHash: string): string => {
+  try {
+    const expected = sha256(trustedArtifactHash);
+    if (canonicalHash(artifactInput) === expected) return expected;
+  } catch {
+    // A malformed pin falls through to the mismatch.
+  }
+  return fail("HASH_MISMATCH");
+};
+
 export const createLocalRealExperiment = (
   artifactInput: unknown,
   trustedArtifactHash: string,
 ): LocalRealExperiment => {
+  const expectedArtifactHash = pinnedHash(artifactInput, trustedArtifactHash);
+  // Anything an artifact that matches its pin then fails is the schema's.
   try {
-    const expectedArtifactHash = sha256(trustedArtifactHash);
-    if (canonicalHash(artifactInput) !== expectedArtifactHash) fail();
     const artifact = record(artifactInput, ARTIFACT_KEYS);
     const decks = deriveDecks(parseArtifact(artifact), artifact);
     const privateReveals = deepFreeze(Object.fromEntries(decks.flatMap(({ rounds }) =>
@@ -237,6 +248,6 @@ export const createLocalRealExperiment = (
       },
     });
   } catch {
-    return fail();
+    return fail("SCHEMA");
   }
 };

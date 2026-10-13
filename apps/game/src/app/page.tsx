@@ -1,4 +1,5 @@
 import { authorizeLocalExperimentReveal } from "./actions";
+import { ArtifactUnavailable } from "../demo/artifact-unavailable";
 import { DemoArcade } from "../demo/demo-arcade";
 import {
   LOCAL_REAL_EXPERIMENT_NOTICE_BODY,
@@ -68,16 +69,7 @@ export default async function Page({ searchParams }: PageProps) {
       </p>
       <noscript><p className="demo-notice">CodeGuessr needs JavaScript to accept answers and reveal progressive evidence.</p></noscript>
       {!loaded.ok
-        ? (
-          <section className="empty-state" role="alert" aria-labelledby="empty-state-title">
-            <h1 id="empty-state-title">No rounds are ready yet</h1>
-            <p>The decks are prepared from real open-source code before play, and this copy has none to serve.</p>
-            <p className="operator-note">
-              For the operator: run <code>pnpm prepare:poc</code>, verify the new artifact, and pin its hash. The
-              current artifact is missing, from an older format, or does not match its pinned hash.
-            </p>
-          </section>
-        )
+        ? <ArtifactUnavailable reason={loaded.reason} />
         : deck
           ? (
             <>
