@@ -1,5 +1,6 @@
 import { LANGUAGE_SLUGS } from "../../../packages/artifact/src/index";
 import { createRunReport } from "./run-report";
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 
 import { canonicalBytes, canonicalHash } from "./canonical";
@@ -48,6 +49,8 @@ interface HarnessState {
   readonly reports: unknown[];
   readonly candidates: readonly HarnessCandidate[];
   readonly rows: Readonly<Record<StackLanguage, readonly HarnessRow[]>>;
+  /** Curated files the stub serves, as `owner/name:path` to source text. */
+  readonly curatedFiles: ReadonlyMap<string, string>;
 }
 
 export interface HarnessCandidate { readonly id: number; readonly queryId: string; readonly repository: string; readonly subject: string }
@@ -82,7 +85,7 @@ const harnessRows = (): HarnessState["rows"] => Object.fromEntries(STACK_LANGUAG
   return [language, [...popular, ...ordinary]];
 })) as unknown as HarnessState["rows"];
 
-const makeState = (profile: CrawlProfile): HarnessState => ({
+const makeState = (profile: CrawlProfile, curatedFiles: ReadonlyMap<string, string> = new Map()): HarnessState => ({
   profile,
   calls: [],
   dependencyMeters: [],
@@ -91,6 +94,7 @@ const makeState = (profile: CrawlProfile): HarnessState => ({
   reports: [],
   candidates: HARNESS_CANDIDATES,
   rows: harnessRows(),
+  curatedFiles,
 });
 
 const makeFoundationDependencies = (
@@ -164,7 +168,7 @@ const makeGitHubDependencies = (
 
 const makeStackDependencies = (
   state: HarnessState,
-): Pick<PreparationDependencies, "collectStackMetadata" | "fetchStackBlob" | "revalidateStackCandidate" | "validateLanguageCandidate"> => ({
+): Pick<PreparationDependencies, "collectStackMetadata" | "fetchStackBlob" | "revalidateStackCandidate" | "validateLanguageCandidate" | "bindCuratedFile"> => ({
   collectStackMetadata: async ({ configuration, capacity }) => {
     state.calls.push(`metadata:${configuration}`);
     state.dependencyMeters.push(capacity);
@@ -186,13 +190,23 @@ const makeStackDependencies = (
     if (candidate.id === "py-reject") throw new Error("LANGUAGE_ROUNDS_REJECTED");
     return candidate;
   },
+  bindCuratedFile: async ({ repository, commit, path, capacity }) => {
+    state.calls.push(`curated:${repository}:${path}`);
+    state.dependencyMeters.push(capacity);
+    const bytes = new TextEncoder().encode(state.curatedFiles.get(`${repository}:${path}`) ?? "");
+    if (bytes.byteLength === 0) throw new Error("FILE_PATH");
+    return accepted({ repository, commit, path, mode: "100644", blob: createHash("sha1").update(path).digest("hex"), bytes,
+      rawContentHash: createHash("sha256").update(bytes).digest("hex"), licenseName: "MIT License", licenseSpdx: "MIT",
+      licenseFileUrl: `https://github.com/${repository}/blob/${commit}/LICENSE`,
+      author: { name: "Curated Author", login: "curated-author", commit: "c".repeat(40) } } as any, "6");
+  },
 });
 
 const stubDeck = (kind: string, size: number) => ({ fixtures: Array.from({ length: size }, () => ({ kind })) }) as any;
 
 const makeArtifactDependencies = (
   state: HarnessState,
-): Pick<PreparationDependencies, "generateProject" | "generateLanguage" | "generateBeforeAfter" | "compose"> => ({
+): Pick<PreparationDependencies, "generateProject" | "generateLanguage" | "generateBeforeAfter" | "generateAlgorithm" | "compose"> => ({
   generateProject: ({ profile, rounds }) => {
     state.calls.push(`project:${rounds.length}:${rounds.map((round) => round.distractors.length).join(",")}`);
     return stubDeck("PROJECT", poolSizes(profile).project);
@@ -205,8 +219,13 @@ const makeArtifactDependencies = (
     state.calls.push(`before-after:${selected.length}`);
     return stubDeck("BEFORE_AFTER", profile.selection.beforeAfterPool);
   },
+  generateAlgorithm: ({ profile, candidates: selected }) => {
+    state.calls.push(`algorithm:${selected.length}`);
+    return stubDeck("ALGORITHM", poolSizes(profile).algorithm);
+  },
   compose: (options) => {
-    const sizes = (["project", "language", "before-after"] as const).map((id) => options.decks[id]?.fixtures.length ?? 0);
+    const sizes = (["project", "language", "before-after", ...(options.decks.algorithm ? ["algorithm"] as const : [])] as const)
+      .map((id) => options.decks[id]?.fixtures.length ?? 0);
     state.calls.push(`compose:${sizes.join("/")}`);
     const crawlSnapshotId = canonicalHash({ profileHash: canonicalHash(options.profile),
       acceptedResponseHashes: options.acceptedResponseHashes });
@@ -216,7 +235,7 @@ const makeArtifactDependencies = (
       return { ...(fixture as object), source: { repository: `owner/repo-${index}`, commit: String(index % 10).repeat(40), path: `src/file-${index}.ts` } };
     }) });
     return { artifact: { crawlSnapshot: { id: crawlSnapshotId },
-      decks: (["project", "language", "before-after"] as const).filter((id) => options.decks[id] !== undefined).map((id) => deck(id, options.decks[id]!)) },
+      decks: (["project", "language", "before-after", "algorithm"] as const).filter((id) => options.decks[id] !== undefined).map((id) => deck(id, options.decks[id]!)) },
       artifactHash: hash("9"), artifactBytes: new Uint8Array([1]) } as any;
   },
 });
@@ -255,9 +274,10 @@ const makeOutputDependencies = (
 
 export const makeHarness = async (
   overrides: Partial<PreparationDependencies> = {},
+  options: Readonly<{ profile?: CrawlProfile; curatedFiles?: ReadonlyMap<string, string> }> = {},
 ): Promise<CommandHarness> => {
-  const profile = await loadProfile();
-  const state = makeState(profile);
+  const profile = options.profile ?? await loadProfile();
+  const state = makeState(profile, options.curatedFiles);
   const base: PreparationDependencies = {
     ...makeFoundationDependencies(state),
     ...makeGitHubDependencies(state),

@@ -1,6 +1,7 @@
 import type { BlobWorkerLimits } from "./blob-worker";
 import type { CapacityMeter, createCapacityMeter } from "./capacity";
 import type { ComposedExperiment, composeExperimentArtifact } from "./compose";
+import type { CuratedFile } from "./github-files";
 import type { GitHubQueryClassification } from "./github-search";
 import type { CrawlProfile, StackLanguage } from "./profile";
 import type { StagedRunReport } from "./report-store";
@@ -42,6 +43,8 @@ export interface PreparationDependencies {
   fetchStackBlob(options: Context & Readonly<{ row: unknown; limits: BlobLimits }>): Promise<StageResult<Readonly<{ byteLength: number }>>>;
   revalidateStackCandidate(options: Context & Readonly<{ row: unknown; blob: unknown; crawlSnapshotId: string }>): Promise<StageResult<unknown>>;
   validateLanguageCandidate(options: Context & Readonly<{ candidate: unknown }>): unknown;
+  /** One file of a curated repository at its pinned commit, with its licence and last human author bound. */
+  bindCuratedFile(options: Context & Readonly<{ repository: string; commit: string; path: string }>): Promise<StageResult<CuratedFile>>;
   /** Rebinds every selected source to the final crawl snapshot, from responses the run already accepted. */
   finalizeBindings?(options: Context & Readonly<{
     crawlSnapshotId: string;
@@ -56,6 +59,7 @@ export interface PreparationDependencies {
   generateProject(options: Readonly<{ profile: CrawlProfile; rounds: readonly ProjectRoundInput[] }>): GeneratedRounds;
   generateLanguage(options: Readonly<{ profile: CrawlProfile; candidates: readonly unknown[] }>): GeneratedRounds;
   generateBeforeAfter(options: Readonly<{ profile: CrawlProfile; candidates: readonly unknown[] }>): GeneratedRounds;
+  generateAlgorithm(options: Readonly<{ profile: CrawlProfile; candidates: readonly unknown[] }>): GeneratedRounds;
   compose(options: Parameters<typeof composeExperimentArtifact>[0]): ComposedExperiment;
   createReport(input: Readonly<Record<string, unknown>>): unknown;
   stageReport(report: unknown): Promise<StagedRunReport>;

@@ -6,7 +6,7 @@ import {
 } from "../demo/local-real-experiment-loader.server";
 import type { LocalRealDeck } from "../demo/local-real-experiment.server";
 
-const DECK_COUNT_WORDS = ["No decks", "One deck", "Two decks", "Three decks"] as const;
+const DECK_COUNT_WORDS = ["No decks", "One deck", "Two decks", "Three decks", "Four decks", "Five decks", "Six decks"] as const;
 /** A run publishes every deck it could fill, so the notice counts what this artifact holds. */
 const deckSummary = (count: number): string => `${DECK_COUNT_WORDS[count] ?? `${count} decks`}; each game deals five rounds.`;
 

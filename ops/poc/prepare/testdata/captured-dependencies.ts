@@ -2,7 +2,9 @@ import { publishArtifact } from "../artifact-store";
 import { canonicalBytes, canonicalHash } from "../canonical";
 import { createCapacityMeter, type CapacityMeter } from "../capacity";
 import { composeExperimentArtifact } from "../compose";
+import { generateAlgorithmRounds } from "../algorithm-rounds";
 import { generateBeforeAfterRounds } from "../before-after-rounds";
+import { bindGitHubFile } from "../github-files";
 import { admitGitHubCandidates, describeGitHubRepository, screenGitHubRepository } from "../github-admission";
 import { bindGitHubLineage } from "../github-lineage";
 import { crawlGitHubCommitSearch } from "../github-search";
@@ -186,7 +188,7 @@ const metadataOutput = (rows: readonly StackMetadataRow[]): Uint8Array =>
 const stackLane = (
   state: CapturedDependencyState, reference: RuntimeReference,
 ): Pick<PreparationDependencies, "collectStackMetadata" | "fetchStackBlob"
-  | "revalidateStackCandidate" | "validateLanguageCandidate"> => ({
+  | "revalidateStackCandidate" | "validateLanguageCandidate" | "bindCuratedFile"> => ({
   collectStackMetadata: (context) => record(state, `stack-metadata-${context.configuration}`, async () => {
     state.metadataConfigurations.push(context.configuration);
     const value = await collectStackMetadata({ profile: context.profile, capacity: context.capacity,
@@ -215,6 +217,11 @@ const stackLane = (
   validateLanguageCandidate: (context) => validateLanguageCandidate({
     profile: context.profile, candidate: context.candidate as any,
   }),
+  bindCuratedFile: (context) => record(state, "curated-file", () => {
+    const runtime = runtimeOf(reference);
+    return stage(runtime, () => bindGitHubFile({ profile: context.profile, profileHash: context.profileHash,
+      transport: runtime.transport, retry: runtime.retry }, context));
+  }),
 });
 
 const finalizeLane = (
@@ -238,11 +245,12 @@ const finalizeLane = (
 });
 
 const outputLane = (state: CapturedDependencyState): Pick<PreparationDependencies,
-  "generateProject" | "generateLanguage" | "generateBeforeAfter" | "compose" | "createReport" | "stageReport"
+  "generateProject" | "generateLanguage" | "generateBeforeAfter" | "generateAlgorithm" | "compose" | "createReport" | "stageReport"
   | "publishArtifact" | "now" | "uuid" | "log"> => ({
   generateProject: (context) => generateProjectRounds(context as any),
   generateLanguage: (context) => generateLanguageRounds(context as any),
   generateBeforeAfter: (context) => generateBeforeAfterRounds(context as any),
+  generateAlgorithm: (context) => generateAlgorithmRounds(context),
   compose: composeExperimentArtifact,
   createReport: createRunReport,
   stageReport: async (report) => {

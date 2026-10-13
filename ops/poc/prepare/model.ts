@@ -1,5 +1,6 @@
 /** The artifact model is shared with the game: one parser, in packages/artifact. */
 export {
+  ALGORITHM_SOURCE_KEYS,
   BASE_SOURCE_KEYS,
   BEFORE_AFTER_CANDIDATE_IDS,
   CROSS_DECK_KEYS,
@@ -11,8 +12,10 @@ export {
   PANE_LABELS,
   ROUNDS_PER_SESSION,
   STACK_SOURCE_KEYS,
+  algorithmCandidateId,
   artifactFixtures,
   languageCandidateId,
+  namesAlgorithm,
   mentionsRepository,
   parseExperimentArtifact,
   projectCandidateId,

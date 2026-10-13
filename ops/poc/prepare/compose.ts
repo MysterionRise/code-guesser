@@ -11,12 +11,13 @@ import {
   DECK_KINDS,
   ROUNDS_PER_SESSION,
   mentionsRepository,
+  namesAlgorithm,
   parseExperimentArtifact,
   type DeckId,
   type ExperimentArtifact,
   type ExperimentFixture,
 } from "./model";
-import { STACK_LANGUAGES, mentionsLabel, poolSizes, type CrawlProfile } from "./profile";
+import { STACK_LANGUAGES, mentionsLabel, poolSizes, type AlgorithmEntry, type CrawlProfile } from "./profile";
 import type { GeneratedRounds } from "./round-helpers";
 
 const SHA256 = /^[0-9a-f]{64}$/u;
@@ -103,7 +104,7 @@ const publicParts = (fixture: ExperimentFixture) => ({
   clues: fixture.clues.join("\n"),
 });
 
-const requireOwnCandidatesAbsent = (fixture: ExperimentFixture): void => {
+const requireOwnCandidatesAbsent = (fixture: ExperimentFixture, algorithmEntries: readonly AlgorithmEntry[]): void => {
   const parts = publicParts(fixture);
   const shown = [["PANES", parts.panes], ["PROMPT", parts.prompt], ["CLUES", parts.clues]] as const;
   for (const [part, value] of shown) {
@@ -113,15 +114,20 @@ const requireOwnCandidatesAbsent = (fixture: ExperimentFixture): void => {
     if (fixture.kind === "LANGUAGE" && STACK_LANGUAGES.some((label) => mentionsLabel(value, label))) {
       fail(`PUBLIC_CONTAINMENT_CANDIDATE_IN_${part}`);
     }
+    if (fixture.kind === "ALGORITHM" && fixture.candidates.some(({ label }) => {
+      const entry = algorithmEntries.find((known) => known.label === label);
+      return entry === undefined || namesAlgorithm(value, entry);
+    })) fail(`PUBLIC_CONTAINMENT_CANDIDATE_IN_${part}`);
   }
 };
 
 /** Names the protected key and the public part that exposed it, never the value. */
-const requirePublicContainment = (fixtures: readonly ExperimentFixture[]): void => {
+const requirePublicContainment = (fixtures: readonly ExperimentFixture[], profile: CrawlProfile): void => {
+  const algorithmEntries = profile.curated?.algorithm?.families.flatMap(({ algorithms }) => algorithms) ?? [];
   const shown = fixtures.map(publicParts);
   const publicText = shown.map((parts) => Object.values(parts).join("\n")).join("\n");
   for (const fixture of fixtures) {
-    requireOwnCandidatesAbsent(fixture);
+    requireOwnCandidatesAbsent(fixture, algorithmEntries);
     const protectedEntries: readonly (readonly [string, unknown])[] = [
       ["evidence", fixture.evidence], ["explanation", fixture.explanation], ["attribution", fixture.attribution],
       ...PROTECTED_SOURCE_KEYS.map((key) => [key, fixture.source[key]] as const),
@@ -151,9 +157,25 @@ const crawlSnapshot = (profile: CrawlProfile, profileHash: string, acceptedRespo
     configurations: Object.freeze(profile.stack.configurations.map(({ configuration }) => configuration)),
   }),
   acceptedResponseHashes,
+  ...curatedSnapshot(profile),
 });
 
 const TEMPLATE_KEYS = Object.freeze({ project: "project", language: "language", "before-after": "beforeAfter" } as const);
+/** A deck's title and description: from the shared templates, or from the curated section that configures it. */
+const deckTemplate = (profile: CrawlProfile, id: DeckId): Readonly<{ title: string; description: string }> =>
+  id === "algorithm" ? profile.curated?.algorithm?.templates ?? fail() : profile.templates[TEMPLATE_KEYS[id]];
+
+/** The curated repositories' pins and the algorithms a round may offer, in the snapshot so the parser can check rounds. */
+const curatedSnapshot = (profile: CrawlProfile) => {
+  if (!profile.curated) return {};
+  const pins = [...profile.curated.repositories].map(({ repository, commit }) => Object.freeze({ repository, commit }))
+    .sort((left, right) => `${left.repository}@${left.commit}` < `${right.repository}@${right.commit}` ? -1 : 1);
+  const algorithms = profile.curated.algorithm?.families.flatMap((family) => family.algorithms.map((entry) => Object.freeze({
+    id: entry.id, label: entry.label, family: family.id, names: entry.names,
+    files: Object.entries(entry.files).map(([repository, file]) => `${repository}:${file.path}`).sort(),
+  }))).sort((left, right) => left.id < right.id ? -1 : 1);
+  return { curated: Object.freeze({ pins: Object.freeze(pins), ...(algorithms ? { algorithms: Object.freeze(algorithms) } : {}) }) };
+};
 
 export const composeExperimentArtifact = (options: ComposeOptions): ComposedExperiment => {
   if (!(options.canonicalProfileBytes instanceof Uint8Array)
@@ -166,14 +188,14 @@ export const composeExperimentArtifact = (options: ComposeOptions): ComposedExpe
   for (const id of present) requireDeck(options.decks[id]!, id, options.profile);
   requireBindings(present.map((id) => options.decks[id]!.fixtures), options.profile, snapshot.id);
   // Named first, so a leak reports its key and part instead of the parser's single rejection.
-  requirePublicContainment(present.flatMap((id) => options.decks[id]!.fixtures));
+  requirePublicContainment(present.flatMap((id) => options.decks[id]!.fixtures), options.profile);
   const artifact = parseExperimentArtifact({
     schemaVersion: "local-experiment-artifact.v3",
     contentClass: "LOCAL_UNREVIEWED_EXPERIMENT",
     profileHash,
     crawlSnapshot: snapshot,
     decks: present.map((id) => {
-      const template = options.profile.templates[TEMPLATE_KEYS[id]];
+      const template = deckTemplate(options.profile, id);
       return { id, title: template.title, description: template.description, roundsPerSession: ROUNDS_PER_SESSION,
         fixtures: options.decks[id]!.fixtures };
     }),

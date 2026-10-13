@@ -4,6 +4,7 @@ import { canonicalHash } from "./canonical";
 import { CapacityError, createCapacityMeter } from "./capacity";
 import { GitHubSearchError } from "./github-search";
 import { HARNESS_CANDIDATES, accepted, classificationsFor, harnessRow, hash, loadProfile, makeHarness } from "./command-test-harness";
+import { curatedFiles, loadCuratedProfile } from "./testdata/deck-builders";
 import { LANGUAGE_SLUGS } from "../../../packages/artifact/src/index";
 import { STACK_LANGUAGES } from "./profile";
 import { RetryError } from "./retry";
@@ -206,6 +207,41 @@ const logLines = (calls: readonly string[]): string[] =>
     await prepareLocalExperiment(harness.dependencies);
     expect(offered.get("python-org/python-pop-2")).toEqual(new Set(["Python"]));
     expect([...offered.values()].every((languages) => languages.size === 1)).toBe(true);
+  });
+
+  it("selects a configured algorithm deck after the Stack decks, one whole family at a time, languages taking turns", async () => {
+    const profile = loadCuratedProfile({ beforeAfterPool: 5 });
+    const harness = await makeHarness({}, { profile, curatedFiles: curatedFiles() });
+    await prepareLocalExperiment(harness.dependencies);
+    const curated = harness.calls.filter((call) => call.startsWith("curated:"));
+    // Languages take turns being tried first; the Go files are absent, so every Go turn falls back to Python.
+    expect(curated.slice(0, 3)).toEqual([
+      "curated:algos/python:algorithms/bubble_sort.py",
+      "curated:algos/go:algorithms/insertion_sort.go", "curated:algos/python:algorithms/insertion_sort.py",
+    ]);
+    const lastStackFetch = harness.calls.length - 1 - [...harness.calls].reverse().findIndex((call: string) => call.startsWith("fetch:"));
+    expect(harness.calls.indexOf(curated[0]!)).toBeGreaterThan(lastStackFetch);
+    expect(harness.calls).toContain("algorithm:8");
+    expect(harness.calls).toContain(`compose:${STACK_POOL}/${STACK_POOL}/5/8`);
+    expect(logLines(harness.calls)).toContain("log:PREPARATION_DECKS project,language,before-after,algorithm");
+  });
+
+  it("drops a family that cannot fill, and skips the algorithm deck alone when too few families remain", async () => {
+    const profile = loadCuratedProfile({ beforeAfterPool: 5 });
+    const files = new Map(curatedFiles());
+    files.delete("algos/python:algorithms/jump_search.py");
+    const harness = await makeHarness({}, { profile, curatedFiles: files });
+    await prepareLocalExperiment(harness.dependencies);
+    expect(logLines(harness.calls)).toContain("log:PREPARATION_DECK_SKIPPED algorithm DECK_SHORT");
+    expect(logLines(harness.calls)).toContain("log:PREPARATION_DECKS project,language,before-after");
+    expect((harness.reports[0] as any).diagnostics).toContainEqual({ stage: "SELECTION", reasonCode: "ALGORITHM_FAMILY_SHORT", count: 1 });
+  });
+
+  it("attempts no algorithm deck when the profile configures none", async () => {
+    const harness = await makeHarness();
+    await prepareLocalExperiment(harness.dependencies);
+    expect(harness.calls.some((call) => call.startsWith("curated:"))).toBe(false);
+    expect(logLines(harness.calls).some((line) => line.includes("algorithm"))).toBe(false);
   });
 
   it("screens out a source whose identity the run report could not record, before it can fail publication", async () => {

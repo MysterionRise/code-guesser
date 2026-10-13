@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 
+import { generateAlgorithmRounds, type AlgorithmCandidate } from "../algorithm-rounds";
 import { generateBeforeAfterRounds } from "../before-after-rounds";
+import { algorithmWindow, labelWords } from "../function-windows";
 import { canonicalBytes, canonicalHash } from "../canonical";
 import type { ComposeOptions } from "../compose";
 import type { GitHubAdmissionCandidate } from "../github-admission";
@@ -233,7 +235,96 @@ export const composeInput = (
       project: generateProjectRounds({ profile, rounds: candidates.project }),
       language: generateLanguageRounds({ profile, candidates: candidates.language }),
       "before-after": generateBeforeAfterRounds({ profile, candidates: candidates.beforeAfter }),
+      // A profile with a curated section adds its algorithm deck.
+      ...(profile.curated?.algorithm ? { algorithm: generateAlgorithmRounds({ profile, candidates: algorithmCandidates(profile, snapshotId) }) } : {}),
     },
     candidates,
   };
 };
+
+/** Two curated repositories and two families of four algorithms: a small algorithm deck of eight rounds. */
+export const CURATED_REPOSITORIES = Object.freeze([
+  { repository: "algos/python", commit: sha1("python-pin"), language: "Python" },
+  { repository: "algos/go", commit: sha1("go-pin"), language: "Go" },
+] as const);
+const curatedAlgorithm = (id: string, label: string, names: readonly string[], idea: string, complexity: string, stem: string) => ({
+  id, label, names, idea, complexity,
+  files: { "algos/python": { path: `algorithms/${stem}.py`, symbols: [] }, "algos/go": { path: `algorithms/${stem}.go`, symbols: [] } },
+});
+export const CURATED_SECTION = Object.freeze({
+  repositories: CURATED_REPOSITORIES,
+  algorithm: {
+    rounds: 8,
+    templates: {
+      title: "Which algorithm?",
+      description: "Read an algorithm with its name hidden and pick which one it is.",
+      prompt: "Which algorithm is this?",
+      evidence: "This is {path} in {repository}; its own name, hidden here, is {name}.",
+      explanation: "The answer is the algorithm the repository files this code under.",
+    },
+    families: [
+      { id: "simple-sorts", note: "All four sort by comparing pairs of items; look at which items move.", algorithms: [
+        curatedAlgorithm("bubble-sort", "Bubble sort", ["bubble_sort", "bubblesort"], "It swaps neighbours that are out of order.", "O(n²).", "bubble_sort"),
+        curatedAlgorithm("insertion-sort", "Insertion sort", ["insertion_sort", "insertionsort"], "It slides each item left until it fits.", "O(n²) at worst.", "insertion_sort"),
+        curatedAlgorithm("selection-sort", "Selection sort", ["selection_sort", "selectionsort"], "It moves the smallest remaining item forward.", "Always O(n²).", "selection_sort"),
+        curatedAlgorithm("quick-sort", "Quicksort", ["quick_sort", "quicksort"], "It splits items around a pivot and recurses.", "O(n log n) on average.", "quick_sort"),
+      ] },
+      { id: "searches", note: "All four look for a target in a list; look at the next position checked.", algorithms: [
+        curatedAlgorithm("binary-search", "Binary search", ["binary_search", "binarysearch"], "It halves the range at every step.", "O(log n).", "binary_search"),
+        curatedAlgorithm("linear-search", "Linear search", ["linear_search", "linearsearch"], "It checks each item in turn.", "O(n).", "linear_search"),
+        curatedAlgorithm("jump-search", "Jump search", ["jump_search", "jumpsearch"], "It leaps ahead a block at a time.", "O(√n).", "jump_search"),
+        curatedAlgorithm("interpolation-search", "Interpolation search", ["interpolation_search", "interpolationsearch"],
+          "It estimates the position from the target's value.", "O(log log n) on even data.", "interpolation_search"),
+      ] },
+    ],
+  },
+});
+
+/** The deck profile with the curated section: it configures an eight-round algorithm deck. */
+export const loadCuratedProfile = (selection: Readonly<Record<string, number>> = {}): CrawlProfile => {
+  const raw = JSON.parse(readFileSync(new URL("../../profiles/local-real-rounds.v4.json", import.meta.url), "utf8"));
+  return parseCrawlProfile({ ...raw, selection: { ...raw.selection, ...selection }, curated: structuredClone(CURATED_SECTION) });
+};
+
+/** A body for each algorithm, long enough for a window and naming no other algorithm of its family. */
+const ALGORITHM_BODIES: Readonly<Record<string, string>> = Object.freeze({
+  bubble_sort: "    for end in range(len(items) - 1, 0, -1):\n        swapped = False\n        for i in range(end):\n            if items[i] > items[i + 1]:\n                items[i], items[i + 1] = items[i + 1], items[i]\n                swapped = True\n        if not swapped:\n            break\n    return items",
+  insertion_sort: "    for index in range(1, len(items)):\n        value = items[index]\n        position = index\n        while position > 0 and items[position - 1] > value:\n            items[position] = items[position - 1]\n            position -= 1\n        items[position] = value\n    return items",
+  selection_sort: "    for index in range(len(items) - 1):\n        smallest = index\n        for other in range(index + 1, len(items)):\n            if items[other] < items[smallest]:\n                smallest = other\n        items[index], items[smallest] = items[smallest], items[index]\n    return items",
+  quick_sort: "    if len(items) < 2:\n        return items\n    pivot = items[len(items) // 2]\n    lower = [item for item in items if item < pivot]\n    same = [item for item in items if item == pivot]\n    upper = [item for item in items if item > pivot]\n    return quick_sort(lower) + same + quick_sort(upper)",
+  binary_search: "    low, high = 0, len(items) - 1\n    while low <= high:\n        middle = (low + high) // 2\n        if items[middle] == target:\n            return middle\n        if items[middle] < target:\n            low = middle + 1\n        else:\n            high = middle - 1\n    return -1",
+  linear_search: "    for index, item in enumerate(items):\n        if item == target:\n            return index\n    return -1\n\n\ndef count_matches(items, target):\n    return sum(1 for item in items if item == target)",
+  jump_search: "    step = int(len(items) ** 0.5)\n    previous = 0\n    while previous < len(items) and items[min(previous + step, len(items)) - 1] < target:\n        previous += step\n    for index in range(previous, min(previous + step, len(items))):\n        if items[index] == target:\n            return index\n    return -1",
+  interpolation_search: "    low, high = 0, len(items) - 1\n    while low <= high and items[low] <= target <= items[high]:\n        if items[high] == items[low]:\n            return low if items[low] == target else -1\n        guess = low + (target - items[low]) * (high - low) // (items[high] - items[low])\n        if items[guess] == target:\n            return guess\n        low, high = (guess + 1, high) if items[guess] < target else (low, guess - 1)\n    return -1",
+});
+
+/** A curated file's Python source: a docstring, the named function, and a script entry point to strip. */
+export const curatedPythonSource = (stem: string): string => {
+  const search = stem.endsWith("_search");
+  return `"""Reference implementation."""\n\nimport math\n\n\ndef ${stem}(items${search ? ", target" : ""}):\n    """Doc for ${stem}.\n\n    >>> ${stem}([3, 1, 2]${search ? ", 2" : ""})\n    """\n${ALGORITHM_BODIES[stem]}\n\n\nif __name__ == "__main__":\n    print(${stem}([5, 4, 3]${search ? ", 4" : ""}))\n`;
+};
+
+/** The small profile's Python files; its Go files are absent, so a Go turn falls back to Python. */
+export const curatedFiles = (): ReadonlyMap<string, string> => new Map(CURATED_SECTION.algorithm.families
+  .flatMap(({ algorithms }) => algorithms.map((entry) => {
+    const file = entry.files["algos/python"];
+    return [`algos/python:${file.path}`, curatedPythonSource(file.path.split("/")[1]!.replace(/\.py$/u, ""))] as const;
+  })));
+
+/** Bound algorithm candidates for the small profile, as selection and the final snapshot would leave them. */
+export const algorithmCandidates = (profile: CrawlProfile, snapshotId: string): readonly AlgorithmCandidate[] =>
+  CURATED_SECTION.algorithm.families.flatMap((family) => family.algorithms.map((entry) => {
+    const stem = entry.files["algos/python"].path.split("/")[1]!.replace(/\.py$/u, "");
+    const window = algorithmWindow(curatedPythonSource(stem), "Python",
+      { names: [entry.label, ...entry.names], symbols: [], words: labelWords(entry.label) },
+      { maxLines: profile.screening.excerptLines, maxBytes: profile.screening.excerptBytes, minBytes: profile.screening.minimumExcerptBytes })!;
+    const bytes = Buffer.from(curatedPythonSource(stem));
+    return Object.freeze({
+      familyId: family.id, algorithmId: entry.id, language: "Python" as const, repository: "algos/python",
+      commit: CURATED_REPOSITORIES[0].commit, path: entry.files["algos/python"].path, blob: sha1(`curated-blob-${stem}`),
+      rawContentHash: sha256(bytes.toString()), licenseName: "MIT License", licenseSpdx: "MIT",
+      licenseFileUrl: `https://github.com/algos/python/blob/${CURATED_REPOSITORIES[0].commit}/LICENSE`,
+      authorName: "Curated Author", authorLogin: "curated-author", authorCommit: sha1(`author-${stem}`),
+      excerpt: window.excerpt, excerptHash: sha256(window.excerpt), functionName: window.functionName, crawlSnapshotId: snapshotId,
+    });
+  }));

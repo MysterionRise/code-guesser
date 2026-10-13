@@ -1,14 +1,14 @@
 import type { JsonRecord } from "./validation";
 
 /** The decks an artifact may carry, in this order; a run publishes every deck it could fill. */
-export const DECK_IDS = Object.freeze(["project", "language", "before-after"] as const);
+export const DECK_IDS = Object.freeze(["project", "language", "before-after", "algorithm"] as const);
 export type DeckId = typeof DECK_IDS[number];
-export type FixtureKind = "PROJECT" | "LANGUAGE" | "BEFORE_AFTER";
+export type FixtureKind = "PROJECT" | "LANGUAGE" | "BEFORE_AFTER" | "ALGORITHM";
 export const DECK_KINDS: Readonly<Record<DeckId, FixtureKind>> = Object.freeze({
-  project: "PROJECT", language: "LANGUAGE", "before-after": "BEFORE_AFTER",
+  project: "PROJECT", language: "LANGUAGE", "before-after": "BEFORE_AFTER", algorithm: "ALGORITHM",
 });
 export const MODE_KINDS: Readonly<Record<FixtureKind, DeckId>> = Object.freeze({
-  PROJECT: "project", LANGUAGE: "language", BEFORE_AFTER: "before-after",
+  PROJECT: "project", LANGUAGE: "language", BEFORE_AFTER: "before-after", ALGORITHM: "algorithm",
 });
 export const ARTIFACT_SCHEMA_VERSION = "local-experiment-artifact.v3";
 export const CONTENT_CLASS = "LOCAL_UNREVIEWED_EXPERIMENT";
@@ -28,8 +28,8 @@ export const LANGUAGE_PAIRS: readonly (readonly [StackLanguage, StackLanguage])[
 ].map((pair) => Object.freeze(pair as [StackLanguage, StackLanguage])));
 /** Project and language decks hold this many rounds per language; the language deck's option design needs exactly two. */
 export const ROUNDS_PER_LANGUAGE = 2;
-/** Options per round: four for project and language rounds, two for before-or-after rounds. */
-export const CANDIDATE_COUNTS: Readonly<Record<FixtureKind, number>> = Object.freeze({ PROJECT: 4, LANGUAGE: 4, BEFORE_AFTER: 2 });
+/** Options per round: four for project, language, and algorithm rounds, two for before-or-after rounds. */
+export const CANDIDATE_COUNTS: Readonly<Record<FixtureKind, number>> = Object.freeze({ PROJECT: 4, LANGUAGE: 4, BEFORE_AFTER: 2, ALGORITHM: 4 });
 /** Before-or-after answers, in pane order: the first names pane A as the later version. */
 export const BEFORE_AFTER_CANDIDATE_IDS = Object.freeze([
   "local-experiment.before-after.a-later.v3",
@@ -75,6 +75,8 @@ export const LINEAGE_SOURCE_KEYS = [
  * found in the file's history up to the pin, so `authorSourceUrl` names that author's commit, not the pin.
  */
 export const CURATED_SOURCE_KEYS = [...BASE_SOURCE_KEYS, "authorCommit"] as const;
+/** An algorithm round's file: which algorithm the repository files it as, its language, and its real name. */
+export const ALGORITHM_SOURCE_KEYS = [...CURATED_SOURCE_KEYS, "algorithmId", "language", "functionName"] as const;
 /** Identities that may not repeat within a deck. */
 export const DECK_DEDUPLICATION_KEYS = ["repository", "commit", "path", "blob", "rawContentHash", "excerptHash"] as const;
 /** Identities that may not repeat across decks; a repository may. */
@@ -83,16 +85,22 @@ export const CROSS_DECK_KEYS = ["commit", "blob", "rawContentHash", "excerptHash
  * The same rules per kind. A deck of curated files holds many rounds from one repository at one pinned commit,
  * so its kinds leave `repository` and `commit` out; two kinds compare across decks on the keys both list.
  */
+/** A curated file's identities: many rounds may share its repository and pinned commit, never its file. */
+const FILE_KEYS = ["path", "blob", "rawContentHash", "excerptHash"] as const;
 export const DEDUPLICATION_KEYS_BY_KIND: Readonly<Record<FixtureKind, readonly string[]>> = Object.freeze({
   PROJECT: DECK_DEDUPLICATION_KEYS, LANGUAGE: DECK_DEDUPLICATION_KEYS, BEFORE_AFTER: DECK_DEDUPLICATION_KEYS,
+  ALGORITHM: [...FILE_KEYS, "algorithmId"],
 });
 export const CROSS_DECK_KEYS_BY_KIND: Readonly<Record<FixtureKind, readonly string[]>> = Object.freeze({
   PROJECT: CROSS_DECK_KEYS, LANGUAGE: CROSS_DECK_KEYS, BEFORE_AFTER: CROSS_DECK_KEYS,
+  ALGORITHM: ["blob", "rawContentHash", "excerptHash"],
 });
 /** Each kind's panes: one unlabelled pane, or panes `A` and `B`. */
 export const PANE_LAYOUTS: Readonly<Record<FixtureKind, readonly (string | null)[]>> = Object.freeze({
-  PROJECT: Object.freeze([null]), LANGUAGE: Object.freeze([null]), BEFORE_AFTER: PANE_LABELS,
+  PROJECT: Object.freeze([null]), LANGUAGE: Object.freeze([null]), BEFORE_AFTER: PANE_LABELS, ALGORITHM: Object.freeze([null]),
 });
+/** The word an algorithm round's code shows in place of the algorithm's own name (`mystery`, `Mystery`). */
+export const MASKED_NAME = "mystery";
 /** Kinds whose options may carry a public detail, such as a repository's description. */
 export const DETAIL_KINDS: ReadonlySet<FixtureKind> = new Set<FixtureKind>(["PROJECT"]);
 /** Source values no pre-answer text may contain as a whole token. */

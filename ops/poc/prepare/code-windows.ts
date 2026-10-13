@@ -46,6 +46,9 @@ const DEFINITION_LOOKAHEAD = 60;
 
 const isComment = (line: string, language: StackLanguage): boolean =>
   language === "Python" || language === "Ruby" ? line.startsWith("#") : line.startsWith("//") || line.startsWith("*") || line.startsWith("/*");
+/** A line that starts a definition at the top level of its file, where a reader sees the shape of the code. */
+export const isTopLevelDefinition = (line: string, language: StackLanguage): boolean =>
+  DEFINITION[language].test(line.trim()) && atTopLevel(line, language);
 const atTopLevel = (line: string, language: StackLanguage): boolean =>
   line.trimStart() === line || (NESTED_DEFINITIONS.has(language) && /^(?: {4}|\t)\S/u.test(line));
 
@@ -70,7 +73,7 @@ export const afterPreamble = (lines: readonly string[], language: StackLanguage,
   return index;
 };
 
-const fitWindow = (lines: readonly string[], start: number, limits: ExcerptLimits): string | undefined => {
+export const fitWindow = (lines: readonly string[], start: number, limits: ExcerptLimits): string | undefined => {
   const window: string[] = [];
   let bytes = 0;
   for (const line of lines.slice(start, start + limits.maxLines)) {
