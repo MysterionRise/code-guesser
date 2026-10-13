@@ -3,17 +3,23 @@
 ## Mission
 
 A local-only "guess from the code" game. One preparation run crawls real
-open-source code before play and freezes three decks, each a pool of ten
-rounds from which every game deals five: "Which project?" (popular
-repositories from The Stack v2), "Which language?" (The Stack v2), and
-"Before or after?" (refactor commits from GitHub search). The goal is a demo on
-one machine, not public play.
+open-source code before play and freezes three decks, each a pool of rounds
+from which every game deals five:
+
+- "Which project?": 24 rounds of popular repositories from The Stack v2.
+- "Which language?": 24 rounds over twelve languages in look-alike pairs,
+  from The Stack v2.
+- "Before or after?": 10 refactor commits from GitHub search.
+
+The goal is a demo on one machine, not public play.
 
 ## Read first
 
 1. `docs/review/2026-10-11-codeguessr-state-review.md`: current product and
    engineering review, decisions, and the roadmap.
-2. `README.md`: how to play, prepare, record, and verify.
+2. `docs/review/2026-10-13-next-sources-plan.md`: the plan for sources beyond
+   The Stack v2 and GitHub search, with the decisions it needs.
+3. `README.md`: how to play, prepare, record, and verify.
 
 `docs/gangsta/` is the historical record of the signed-Contract process, which
 was retired on 2026-10-11. Use it for background on why rules exist, not as a
@@ -40,20 +46,24 @@ gate: changing queries, retries, ceilings, deck rules, or running
 ## Current state
 
 - Branches and PRs, stacked: `claude/demoable-poc` (#7, Phase 0),
-  `claude/phase-1-pipeline` (#8, Phase 1), `claude/phase-2-decks` (Phase 2).
-- The game plays profile `ops/poc/profiles/local-real-rounds.v3.json` and
+  `claude/phase-1-pipeline` (#8, Phase 1), `claude/phase-2-decks` (#9,
+  Phase 2), `claude/phase-3-stack` (Phase 3a).
+- The game plays profile `ops/poc/profiles/local-real-rounds.v4.json` and
   artifact schema `local-experiment-artifact.v3` from the root-route deck
   chooser (`/?deck=project|language|before-after`). A page load deals five
   rounds from the deck's pool; `dealSession` in
   `apps/game/src/demo/local-real-experiment.server.ts` does it server-side.
 - The committed artifact `apps/game/src/demo/generated/local-real-rounds.json`
-  came from the 2026-10-11 v3 run (569 of 1,500 requests). Its canonical SHA-256
-  `cf5bc8d31407b0dad797ffb372dda7d11d4d5da50ed1c30e0218bead31e14e0a` is pinned
-  in `apps/game/src/demo/local-real-experiment.pin.server.ts` (the preparer
-  writes it); see `docs/review/evidence/2026-10-11-v3-decks-run.md`. The
-  journal for that run is in `ops/poc/stack/tmp/journal/run.jsonl` on this
-  machine, so `pnpm prepare:poc --offline` rebuilds it with no network.
-- Phases 0–2 of the review roadmap are done:
+  came from the 2026-10-13 v4 run (1,146 of 3,000 requests).
+  - Its canonical SHA-256
+    `ba7ce4346ca492c5791eb64da220441443f780822ef9257fb8df5bd47a2fc3af` is
+    pinned in `apps/game/src/demo/local-real-experiment.pin.server.ts`; the
+    preparer writes the pin.
+  - Evidence: `docs/review/evidence/2026-10-13-v4-stack-growth-run.md`.
+  - The run's journal is in `ops/poc/stack/tmp/journal/run.jsonl` on this
+    machine, so `STACK_V2_ACKNOWLEDGED_USABLE_REVISION=… pnpm prepare:poc
+    --offline` rebuilds it byte for byte with no network.
+- Phases 0–2 of the review roadmap and Phase 3a are done:
   - Phase 0: diagnostics, retries, yield, and UI quick wins.
   - Phase 1: the module split, the run journal (`--resume`, `--offline`),
     per-deck publication, the failure report, `ops/poc/limits.json`, and
@@ -64,21 +74,39 @@ gate: changing queries, retries, ceilings, deck rules, or running
     `code-windows.ts`. The game deals sessions, shows panes and option
     details, highlights the answer, and scores 250 × options per round. The
     leakage test is `packages/artifact/test/deck-leakage.test.ts`.
+  - Phase 3a, growing The Stack v2:
+    - **Rows:** twelve languages in look-alike pairs (`LANGUAGE_PAIRS` in
+      `packages/artifact`). The worker reads each language's whole first row
+      group and returns a bounded sample (`selection.popularRepositories`,
+      `filesPerRepository`, `ordinaryRows`).
+    - **Language deck:** two whole pairs per round in a private cycle. A
+      round's code must tell its language from the look-alike
+      (`language-markers.ts`).
+    - **Project deck:** two rounds per language, each repository an option
+      in one language only.
+    - **Journal:** keeps failures for offline replay, and a journal miss
+      fails the run.
 - Port 3000 may be taken locally by an unrelated Docker container; run browser
   tests with `E2E_PORT=3200 pnpm test:e2e`.
 
 ## Next steps
 
-Phase 3 of the review roadmap: grow the sources.
+Phase 3b of the review roadmap: the next sources, as planned in
+`docs/review/2026-10-13-next-sources-plan.md`.
 
-1. More Stack v2 row groups and languages (look-alike pairs such as
-   TypeScript/JavaScript, Java/Kotlin, C/C++), so pools can grow past ten and
-   the language deck's options stay answerable.
-2. A `SourceAdapter` seam, then the next source (the Software Heritage API or
-   curated GitHub repositories).
+1. The `SourceAdapter` seam (no new source). Its exit test is that
+   `--offline` rebuilds the same rounds.
+2. Curated GitHub repositories and a possible "Which era?" deck.
+3. A GitLab adapter.
+4. The Software Heritage API.
 
-Iterate on deck rules with `pnpm prepare:poc --offline`; use `--resume` when
-a change needs responses the journal lacks.
+The plan lists the decisions these steps need from the owner: widening the
+licence allowlist, a fourth deck, and the GitLab and Software Heritage
+accounts. Ask before starting a step that depends on one.
+
+Iterate on deck rules with
+`STACK_V2_ACKNOWLEDGED_USABLE_REVISION=e565caa3a78c2423bd374333a472b049eb090e47 pnpm prepare:poc --offline`
+(no token); use `--resume` when a change needs responses the journal lacks.
 
 Live run:
 
@@ -106,12 +134,17 @@ Read the `PREPARATION_STAGE_FAILED <stage> <code> <status-class>` line first;
 `ops/poc/stack/tmp/local-experiment-last-failure.json` holds the same codes
 with spend, capacity counts, and rejection aggregates.
 
+- `WORKER_EXIT_SAMPLE_REJECTED`, `SAMPLE_REJECTED`: the metadata worker's
+  sample request or output broke its bounds (a licence off the allowlist, too
+  many repositories or files, an ordinary repository twice).
 - `PREPARATION_DECK_SKIPPED <deck> <code>`: that deck did not fill (`DECK_SHORT`,
   or the `BUDGET_EXHAUSTED_*` budget that ran out) and was left out; the others
   still publish. `SELECTION DECK_SHORT` or `NO_DECK_FILLED` means none filled.
 - `JOURNAL_MISS`, `JOURNAL_MISSING`, `JOURNAL_CORRUPT`: `--offline` needed a
   response the journal lacks, there is no journal, or a journal entry failed its
-  hash check. Run without `--offline` (or with `--resume`).
+  hash check. Run without `--offline` (or with `--resume`). A miss fails the
+  whole run, even inside one candidate, so a replay never publishes fewer decks
+  than the run it replays.
 
 - `RETRY_SIGNAL_MISSING 4xx`: a 403/429 without a usable retry instruction.
 - `WAIT_LIMIT`: a retry instruction longer than the fifteen-second wait.
@@ -138,10 +171,17 @@ the allowlist), and `REVALIDATION_*` (`REVALIDATION_WINDOW` is a file with no
 code window past its preamble). `REPOSITORY_SCREENED_OUT` counts later
 candidates of a repository already rejected once.
 
-Selection diagnostics `REPOSITORY_REPEATED`, `SUBJECT_UNUSABLE` (a commit
-subject no hint can quote), `PROJECT_NAME_IN_EXCERPT` (code or a file name
-that names an option), `LANGUAGE_ROUNDS_REJECTED`, and
-`SOURCE_IDENTITY_UNREPORTABLE` are expected screening outcomes, not faults.
+Selection diagnostics are expected screening outcomes, not faults:
+
+- `REPOSITORY_REPEATED`
+- `SUBJECT_UNUSABLE`: a commit subject no hint can quote.
+- `PROJECT_NAME_IN_EXCERPT`: code or a file name names an option, including
+  a distinctive part of a name, such as `graphql` for graphql-ruby.
+- `PROJECT_NAMED_BY_TEMPLATE`: the deck's own wording names the repository.
+- `LANGUAGE_PAIR_AMBIGUOUS`: the code does not tell its language from the
+  look-alike.
+- `LANGUAGE_ROUNDS_REJECTED`
+- `SOURCE_IDENTITY_UNREPORTABLE`
 
 ## Commands
 
