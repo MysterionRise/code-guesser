@@ -5,6 +5,9 @@ dist/
 playwright-report/
 test-results/
 .worktrees/
+*.tsbuildinfo
+.pnpm-store/
+.DS_Store
 .env
 .env.*
 !.env.example

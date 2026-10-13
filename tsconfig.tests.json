@@ -1,0 +1,18 @@
+{
+  // Test files and e2e specs, which Vitest and Playwright run without checking types.
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "customConditions": ["node"],
+    "types": ["node"],
+    // Vitest's bundled Vite declarations do not pass exactOptionalPropertyTypes;
+    // the source projects still check library declarations.
+    "skipLibCheck": true
+  },
+  "include": [
+    "apps/game/test/**/*.ts",
+    "apps/game/test/**/*.tsx",
+    "packages/*/test/**/*.ts",
+    "tests/e2e/**/*.ts",
+    "playwright.config.ts"
+  ]
+}
