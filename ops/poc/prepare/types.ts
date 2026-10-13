@@ -2,8 +2,9 @@ import type { BlobWorkerLimits } from "./blob-worker";
 import type { CapacityMeter, createCapacityMeter } from "./capacity";
 import type { ComposedExperiment, composeExperimentArtifact } from "./compose";
 import type { CuratedFile } from "./github-files";
+import type { BoundFix, DatasetBug, FixPointer } from "./github-fixes";
 import type { GitHubQueryClassification } from "./github-search";
-import type { CrawlProfile, StackLanguage } from "./profile";
+import type { CrawlProfile, FixDataset, StackLanguage } from "./profile";
 import type { StagedRunReport } from "./report-store";
 import type { ProjectRoundInput } from "./project-rounds";
 import type { GeneratedRounds } from "./round-helpers";
@@ -47,6 +48,12 @@ export interface PreparationDependencies {
   bindCuratedFile(options: Context & Readonly<{ repository: string; commit: string; path: string }>): Promise<StageResult<CuratedFile>>;
   /** The files directly inside one directory of a curated repository at its pinned commit. */
   listCuratedDirectory(options: Context & Readonly<{ repository: string; commit: string; path: string }>): Promise<StageResult<readonly string[]>>;
+  /** The bugs a dataset lists for its configured projects, from verified trees at its pin. */
+  readDatasetBugs(options: Context & Readonly<{ dataset: FixDataset }>): Promise<StageResult<readonly DatasetBug[]>>;
+  /** One blob of a dataset's repository: a patch, or the record of a bug's commits. */
+  readDatasetBlob(options: Context & Readonly<{ repository: string; blob: string }>): Promise<StageResult<Uint8Array>>;
+  /** A dataset's one-line fix, confirmed against its upstream repository. */
+  bindFixCommit(options: Context & Readonly<{ pointer: FixPointer }>): Promise<StageResult<BoundFix>>;
   /** One curated file's verified bytes, read before its licence and author are bound. */
   readCuratedFile(options: Context & Readonly<{ repository: string; commit: string; path: string }>): Promise<StageResult<Readonly<{ blob: string; bytes: Uint8Array }>>>;
   /** Rebinds every selected source to the final crawl snapshot, from responses the run already accepted. */
@@ -65,6 +72,7 @@ export interface PreparationDependencies {
   generateBeforeAfter(options: Readonly<{ profile: CrawlProfile; candidates: readonly unknown[] }>): GeneratedRounds;
   generateAlgorithm(options: Readonly<{ profile: CrawlProfile; candidates: readonly unknown[] }>): GeneratedRounds;
   generateOutput(options: Readonly<{ profile: CrawlProfile; candidates: readonly unknown[] }>): GeneratedRounds;
+  generateFix(options: Readonly<{ profile: CrawlProfile; candidates: readonly unknown[] }>): GeneratedRounds;
   compose(options: Parameters<typeof composeExperimentArtifact>[0]): ComposedExperiment;
   createReport(input: Readonly<Record<string, unknown>>): unknown;
   stageReport(report: unknown): Promise<StagedRunReport>;

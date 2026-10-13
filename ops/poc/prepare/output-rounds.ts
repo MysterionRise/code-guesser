@@ -5,7 +5,7 @@ import {
   OUTPUT_HINT, OUTPUT_ORDERS, OUTPUT_SOURCE_KEYS, echoesArgument, outputCandidateId, outputOrder, outputShape, type ExperimentFixture,
 } from "./model";
 import { OUTPUT_OPTIONS, type CrawlProfile } from "./profile";
-import { attributionFor, fill, orderedPool, roundIdFor, sha256, shuffled, type GeneratedRounds } from "./round-helpers";
+import { attributionFor, balancedChoice, fill, orderedPool, roundIdFor, sha256, shuffled, type GeneratedRounds } from "./round-helpers";
 
 export class OutputRoundsError extends Error {
   public constructor(code = "OUTPUT_ROUNDS_REJECTED") {
@@ -70,9 +70,6 @@ export const answerRanks = (candidate: Pick<OutputCandidate, "answer" | "decoys"
   return OUTPUT_ORDERS.map((order) => order(outputs).indexOf(candidate.answer.output));
 };
 
-/** How many choices the answer search may try before it gives up on a pool. */
-const SEARCH_LIMIT = 200_000;
-
 /**
  * One answer per round, as an index into that round's examples, such that the answers fill every rank equally in
  * each order a solver might rank options by (numeric, else by length; and plain text), and no answer repeats one of
@@ -80,31 +77,11 @@ const SEARCH_LIMIT = 200_000;
  * undefined when no such choice exists.
  */
 export const balancedAnswers = (rounds: readonly (readonly DoctestExample[])[]): readonly number[] | undefined => {
-  if (rounds.length % OUTPUT_OPTIONS !== 0 || rounds.some((examples) => examples.length !== OUTPUT_OPTIONS)) return undefined;
-  const quota = rounds.length / OUTPUT_OPTIONS;
-  const counts = OUTPUT_ORDERS.map(() => Array.from({ length: OUTPUT_OPTIONS }, () => 0));
-  const ranked = rounds.map((examples) => {
+  if (rounds.some((examples) => examples.length !== OUTPUT_OPTIONS)) return undefined;
+  return balancedChoice(rounds.map((examples) => {
     const outputs = examples.map(({ output }) => output);
     return examples.map(({ call, output }) => echoesArgument(call, output) ? undefined : OUTPUT_ORDERS.map((order) => order(outputs).indexOf(output)));
-  });
-  const choice: number[] = [];
-  let tries = 0;
-  const visit = (index: number): boolean => {
-    if (index === rounds.length) return true;
-    // Each round first tries the next rank in turn, so most rounds settle without backtracking.
-    for (let step = 0; step < OUTPUT_OPTIONS; step += 1) {
-      const pick = ranked[index]!.findIndex((ranks) => ranks?.[0] === (index + step) % OUTPUT_OPTIONS);
-      const ranks = ranked[index]![pick];
-      if (!ranks || ranks.some((rank, order) => counts[order]![rank]! >= quota) || (tries += 1) > SEARCH_LIMIT) continue;
-      ranks.forEach((rank, order) => { counts[order]![rank]! += 1; });
-      choice.push(pick);
-      if (visit(index + 1)) return true;
-      ranks.forEach((rank, order) => { counts[order]![rank]! -= 1; });
-      choice.pop();
-    }
-    return false;
-  };
-  return visit(0) && tries <= SEARCH_LIMIT ? Object.freeze(choice) : undefined;
+  }), OUTPUT_OPTIONS);
 };
 
 const fixtureFor = (candidate: OutputCandidate, profile: CrawlProfile): ExperimentFixture => {

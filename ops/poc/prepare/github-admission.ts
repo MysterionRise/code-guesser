@@ -120,6 +120,8 @@ export const selectedAuthor = (
   if (response.sha !== commit || response.url !== `${api}/commits/${commit}`
     || response.html_url !== `${web}/commit/${commit}`) fail("ADMISSION_AUTHOR");
   const name = text(record(record(response.commit).author).name);
+  // Some imported histories record an email address as the author's name: contact data, never published.
+  if (name.includes("@")) fail("ADMISSION_AUTHOR_CONTACT");
   if (response.author === null) return Object.freeze({ name, login: null });
   const author = record(response.author);
   const login = text(author.login);

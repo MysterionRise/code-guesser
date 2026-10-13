@@ -108,6 +108,24 @@ export interface OutputDeck {
   readonly fileReads: number;
   readonly templates: Readonly<{ title: string; description: string; prompt: string; evidence: string; explanation: string }>;
 }
+/** A bug dataset at a pinned commit, and the upstream repository and language of each of its projects it may use. */
+export interface FixDataset {
+  readonly id: "defects4j" | "bugsinpy";
+  readonly repository: string;
+  readonly commit: string;
+  /** A list, not a map: a project's name is data, and a name such as `cookiecutter` is no credential-shaped key. */
+  readonly projects: readonly Readonly<{ name: string; repository: string; language: StackLanguage }>[];
+}
+/** The fix deck: one-line fixes two bug datasets record, read from their upstream repositories. */
+export interface FixDeck {
+  readonly rounds: number;
+  readonly datasets: readonly FixDataset[];
+  /** At most this many dataset patches are read; most fix more than one line. */
+  readonly patchReads: number;
+  /** At most this many rounds come from one upstream repository. */
+  readonly perRepository: number;
+  readonly templates: Readonly<{ title: string; description: string; prompt: string; evidence: string; explanation: string }>;
+}
 export interface CuratedProfile {
   readonly repositories: readonly CuratedRepository[];
   readonly algorithm?: Readonly<{
@@ -116,6 +134,7 @@ export interface CuratedProfile {
     families: readonly AlgorithmFamily[];
   }>;
   readonly output?: OutputDeck;
+  readonly fix?: FixDeck;
 }
 
 /** Options per algorithm round: one whole family. */
@@ -124,6 +143,12 @@ export const ALGORITHM_FAMILY_SIZE = 4;
 export const OUTPUT_OPTIONS = 4;
 /** The most files an output deck may read. */
 export const OUTPUT_FILE_READS_MAXIMUM = 240;
+/** Options per fix round; the answer's rank among them cycles through all four across the pool. */
+export const FIX_OPTIONS = 4;
+/** The most dataset patches a fix deck may read. */
+export const FIX_PATCH_READS_MAXIMUM = 240;
+/** The datasets a fix deck can read, each with the direction its patches run in. */
+export const FIX_DATASETS = Object.freeze(["defects4j", "bugsinpy"] as const);
 
 /** Rounds in each deck's pool; a session deals five of them. A deck the profile does not configure holds none. */
 export const poolSizes = (profile: CrawlProfile): Readonly<Record<DeckId, number>> => Object.freeze({
@@ -132,6 +157,7 @@ export const poolSizes = (profile: CrawlProfile): Readonly<Record<DeckId, number
   "before-after": profile.selection.beforeAfterPool,
   algorithm: profile.curated?.algorithm?.rounds ?? 0,
   output: profile.curated?.output?.rounds ?? 0,
+  fix: profile.curated?.fix?.rounds ?? 0,
 });
 
 export class CrawlProfileError extends Error {
@@ -409,15 +435,52 @@ const parseOutputDeck = (value: unknown, repositories: readonly CuratedRepositor
   });
 };
 
+const PROJECT_NAME = /^[A-Za-z0-9_.-]+$/u;
+const parseFixDeck = (value: unknown): FixDeck => {
+  const deck = exactRecord(value, ["rounds", "datasets", "patchReads", "perRepository", "templates"]);
+  const rounds = integer(deck.rounds);
+  if (rounds % FIX_OPTIONS !== 0 || rounds < 8 || rounds > 40) fail();
+  const datasets = (Array.isArray(deck.datasets) && deck.datasets.length > 0 ? deck.datasets : fail()).map((entry: unknown) => {
+    const dataset = exactRecord(entry, ["id", "repository", "commit", "projects"]);
+    if (!(FIX_DATASETS as readonly unknown[]).includes(dataset.id)) fail();
+    const repository = text(dataset.repository);
+    const commit = text(dataset.commit);
+    if (!REPOSITORY_NAME.test(repository) || !/^[0-9a-f]{40}$/u.test(commit)) fail();
+    const projects = (Array.isArray(dataset.projects) && dataset.projects.length > 0 ? dataset.projects : fail()).map((project: unknown) => {
+      const item = exactRecord(project, ["name", "repository", "language"]);
+      const name = text(item.name);
+      if (!PROJECT_NAME.test(name) || !REPOSITORY_NAME.test(text(item.repository))
+        || !(STACK_LANGUAGES as readonly unknown[]).includes(item.language)) fail();
+      return Object.freeze({ name, repository: item.repository as string, language: item.language as StackLanguage });
+    });
+    if (new Set(projects.map(({ name }) => name)).size !== projects.length) fail();
+    return Object.freeze({ id: dataset.id as FixDataset["id"], repository, commit, projects: Object.freeze(projects) });
+  });
+  if (new Set(datasets.map(({ id }) => id)).size !== datasets.length) fail();
+  const patchReads = integer(deck.patchReads);
+  const perRepository = integer(deck.perRepository);
+  if (patchReads < rounds || patchReads > FIX_PATCH_READS_MAXIMUM || perRepository > rounds / 2) fail();
+  const templates = exactRecord(deck.templates, ["title", "description", "prompt", "evidence", "explanation"]);
+  return Object.freeze({
+    rounds, datasets: Object.freeze(datasets), patchReads, perRepository,
+    templates: Object.freeze({
+      title: text(templates.title), description: text(templates.description), prompt: placeholderText(templates.prompt, []),
+      evidence: placeholderText(templates.evidence, ["dataset", "bug", "repository", "line"]),
+      explanation: placeholderText(templates.explanation, []),
+    }),
+  });
+};
+
 /** The curated pins, and each deck built from them that the profile configures. */
 const parseCurated = (value: unknown): CuratedProfile => {
-  const decks = (["algorithm", "output"] as const).filter((key) => isRecord(value) && Object.hasOwn(value, key));
+  const decks = (["algorithm", "output", "fix"] as const).filter((key) => isRecord(value) && Object.hasOwn(value, key));
   const curated = exactRecord(value, ["repositories", ...decks]);
   const repositories = parseCuratedRepositories(curated.repositories);
   return Object.freeze({
     repositories,
     ...(decks.includes("algorithm") ? { algorithm: parseAlgorithmDeck(curated.algorithm, repositories) } : {}),
     ...(decks.includes("output") ? { output: parseOutputDeck(curated.output, repositories) } : {}),
+    ...(decks.includes("fix") ? { fix: parseFixDeck(curated.fix) } : {}),
   });
 };
 

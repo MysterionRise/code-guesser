@@ -1,4 +1,5 @@
 import {
+  FIX_SOURCE_KEYS,
   LINEAGE_SOURCE_KEYS,
   PROFILE_VERSION,
   STACK_LANGUAGES,
@@ -56,6 +57,8 @@ const validateBaseSource = (source: JsonRecord, snapshotId: string, authorBasis 
     "licenseFileUrl", "commitUrl", "blobUrl", "profileVersion",
   ]) text(source[key]);
   if (source.authorLogin !== null) text(source.authorLogin);
+  // An author's name is never an email address: that is contact data.
+  if (text(source.authorName).includes("@")) fail();
   if (source.authorBasis !== authorBasis) fail();
   gitId(source.blob);
   gitId(source.commit);
@@ -83,6 +86,23 @@ export const validateCuratedSource = (
   if (source.discoverySource !== "CURATED_GITHUB") fail();
   validateBaseSource(source, snapshotId, "PATH_HISTORY", gitId(source.authorCommit));
   if (!pins.has(pinKey(text(source.repository), gitId(source.commit)))) fail();
+  return source as ParsedSource;
+};
+
+/**
+ * A file before a one-line fix a bug dataset records: the dataset must be one the snapshot pins, the shown file is
+ * at the fix's parent (`commit`), and the fix's author is credited through `fixCommit` (`FIX_COMMIT`).
+ */
+export const validateFixSource = (value: unknown, snapshotId: string, datasets: ReadonlySet<string>): ParsedSource => {
+  const source = record(value, FIX_SOURCE_KEYS);
+  if (source.discoverySource !== "CURATED_DATASET" || !datasets.has(text(source.dataset))) fail();
+  validateBaseSource(source, snapshotId, "FIX_COMMIT", gitId(source.fixCommit));
+  gitId(source.fixBlob);
+  text(source.bugId);
+  if (!(STACK_LANGUAGES as readonly unknown[]).includes(source.language)) fail();
+  const changedLine = positiveInteger(source.changedLine);
+  const windowStart = positiveInteger(source.windowStart);
+  if (windowStart > changedLine || source.fixCommit === source.commit || source.fixBlob === source.blob) fail();
   return source as ParsedSource;
 };
 

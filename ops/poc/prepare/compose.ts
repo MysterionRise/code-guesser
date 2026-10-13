@@ -164,9 +164,10 @@ const TEMPLATE_KEYS = Object.freeze({ project: "project", language: "language", 
 /** A deck's title and description: from the shared templates, or from the curated section that configures it. */
 const deckTemplate = (profile: CrawlProfile, id: DeckId): Readonly<{ title: string; description: string }> =>
   id === "algorithm" ? profile.curated?.algorithm?.templates ?? fail()
-    : id === "output" ? profile.curated?.output?.templates ?? fail() : profile.templates[TEMPLATE_KEYS[id]];
+    : id === "output" ? profile.curated?.output?.templates ?? fail()
+      : id === "fix" ? profile.curated?.fix?.templates ?? fail() : profile.templates[TEMPLATE_KEYS[id]];
 
-/** The curated repositories' pins and the algorithms a round may offer, in the snapshot so the parser can check rounds. */
+/** The curated repositories' pins, the algorithms a round may offer, and the bug datasets, so the parser can check rounds. */
 const curatedSnapshot = (profile: CrawlProfile) => {
   if (!profile.curated) return {};
   const pins = [...profile.curated.repositories].map(({ repository, commit }) => Object.freeze({ repository, commit }))
@@ -175,7 +176,10 @@ const curatedSnapshot = (profile: CrawlProfile) => {
     id: entry.id, label: entry.label, family: family.id, names: entry.names,
     files: Object.entries(entry.files).map(([repository, file]) => `${repository}:${file.path}`).sort(),
   }))).sort((left, right) => left.id < right.id ? -1 : 1);
-  return { curated: Object.freeze({ pins: Object.freeze(pins), ...(algorithms ? { algorithms: Object.freeze(algorithms) } : {}) }) };
+  const datasets = profile.curated.fix?.datasets.map(({ id, repository, commit }) => Object.freeze({ id, repository, commit }))
+    .sort((left, right) => left.id < right.id ? -1 : 1);
+  return { curated: Object.freeze({ pins: Object.freeze(pins), ...(algorithms ? { algorithms: Object.freeze(algorithms) } : {}),
+    ...(datasets ? { datasets: Object.freeze(datasets) } : {}) }) };
 };
 
 export const composeExperimentArtifact = (options: ComposeOptions): ComposedExperiment => {
