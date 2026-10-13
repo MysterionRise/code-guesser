@@ -106,10 +106,17 @@ class BoundedParquetTests(unittest.TestCase):
         for listing in ([], [{"type": "file", "path": "data/Python/README.md"}], {"path": "x"}, [1]):
             client, _budget = self.client_for(RangeServer(b"", listing=listing))
             self.assert_code("SHARD_LISTING_REJECTED", lambda: list_first_shard(client, "Python", "t"))
-        self.assert_code("CONFIGURATION_REJECTED", lambda: list_first_shard(client, "JavaScript", "t"))
+        self.assert_code("CONFIGURATION_REJECTED", lambda: list_first_shard(client, "PHP", "t"))
+        self.assert_code("CONFIGURATION_REJECTED", lambda: list_first_shard(client, "C-Sharp", "t"))
         rust_listing = [{"type": "file", "path": "data/Rust/train-00000-of-00001.parquet"}]
         client, _budget = self.client_for(RangeServer(b"", listing=rust_listing))
         self.assertEqual(list_first_shard(client, "Rust", "t"), "data/Rust/train-00000-of-00001.parquet")
+        # C# lives in the dataset's C-Sharp directory; C++ keeps its plus signs.
+        for configuration, directory in (("C#", "C-Sharp"), ("C++", "C++")):
+            listing = [{"type": "file", "path": f"data/{directory}/train-00000-of-00003.parquet"},
+                       {"type": "file", "path": "data/C/train-00000-of-00001.parquet"}]
+            client, _budget = self.client_for(RangeServer(b"", listing=listing))
+            self.assertEqual(list_first_shard(client, configuration, "t"), f"data/{directory}/train-00000-of-00003.parquet")
 
     def test_reads_one_row_group_through_exact_ranges_and_never_touches_the_rest(self):
         data, table = parquet_bytes(rows_per_group=3000, groups=2)

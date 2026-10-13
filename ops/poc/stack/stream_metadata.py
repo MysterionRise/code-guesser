@@ -19,8 +19,15 @@ MAXIMUM_TEMPORARY_BYTES = CEILINGS["temporaryDiskBytes"]
 DISK_CHECK_INTERVAL = 256
 REQUEST_KEYS = {
     "configuration", "revision", "rowLimit", "perBlobByteLimit",
-    "requestLimit", "networkByteLimit", "temporaryDiskBytes",
+    "requestLimit", "networkByteLimit", "temporaryDiskBytes", "sample",
 }
+SAMPLE_KEYS = {"licenses", "minimumStarEvents", "popularRepositories", "rowsPerRepository", "ordinaryRows"}
+# Bounds on what one language may emit: the decks need a few files from each popular repository and a
+# modest sample of ordinary ones, never the whole row group.
+MAXIMUM_POPULAR_REPOSITORIES = 100
+MAXIMUM_ROWS_PER_REPOSITORY = 10
+MAXIMUM_ORDINARY_ROWS = 1000
+MAXIMUM_LICENSES = 16
 PROVIDER_KEYS = {
     "blob_id", "directory_id", "path", "content_id", "detected_licenses",
     "license_type", "repo_name", "snapshot_id", "revision_id", "branch_name",
@@ -38,13 +45,21 @@ HUB_HARDENING = {
     "HF_HUB_ETAG_TIMEOUT": "15",
     "HF_HUB_DOWNLOAD_TIMEOUT": "15",
 }
-# Revision 12 FR-025/FR-028: the five configured language subsets and their exact extensions.
+# The configured language subsets and their exact extensions. C keeps to `.c` because a `.h`
+# header may be C or C++.
 EXTENSIONS = {
     "Python": (".py",),
+    "Ruby": (".rb",),
     "TypeScript": (".ts", ".tsx"),
+    "JavaScript": (".js",),
     "Go": (".go",),
     "Rust": (".rs",),
-    "Ruby": (".rb",),
+    "Java": (".java",),
+    "C#": (".cs",),
+    "Kotlin": (".kt",),
+    "Swift": (".swift",),
+    "C": (".c",),
+    "C++": (".cpp", ".cc", ".cxx", ".hpp"),
 }
 HEX_40 = re.compile(r"^[0-9a-f]{40}$")
 REPOSITORY = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
@@ -79,10 +94,71 @@ def _parse_request(value, environment):
     disk_limit = _bounded_integer(
         value["temporaryDiskBytes"], MAXIMUM_TEMPORARY_BYTES, "DISK_LIMIT_REJECTED"
     )
+    sample = _parse_sample(value["sample"])
     token = environment.get("HF_TOKEN")
     if not isinstance(token, str) or not token.strip():
         _fail("TOKEN_MISSING")
-    return configuration, row_limit, byte_limit, token, request_limit, network_limit, disk_limit
+    return configuration, row_limit, byte_limit, token, request_limit, network_limit, disk_limit, sample
+
+
+def _parse_sample(value):
+    if not isinstance(value, dict) or set(value) != SAMPLE_KEYS:
+        _fail("SAMPLE_REJECTED")
+    licenses = value["licenses"]
+    if (not isinstance(licenses, list) or not 1 <= len(licenses) <= MAXIMUM_LICENSES
+            or len(set(licenses)) != len(licenses)):
+        _fail("SAMPLE_REJECTED")
+    for license_id in licenses:
+        _text(license_id, "SAMPLE_REJECTED")
+    minimum = _bounded_integer(value["minimumStarEvents"], 2 ** 31, "SAMPLE_REJECTED")
+    popular = _bounded_integer(value["popularRepositories"], MAXIMUM_POPULAR_REPOSITORIES, "SAMPLE_REJECTED")
+    per_repository = _bounded_integer(value["rowsPerRepository"], MAXIMUM_ROWS_PER_REPOSITORY, "SAMPLE_REJECTED")
+    ordinary = _bounded_integer(value["ordinaryRows"], MAXIMUM_ORDINARY_ROWS, "SAMPLE_REJECTED")
+    return Sample(frozenset(licenses), minimum, popular, per_repository, ordinary)
+
+
+class Sample:
+    """What one language emits from the rows it inspected. Rows whose licences all sit on the allowlist
+    are split by their repository's star events: from the most-starred repositories (ties by name) the
+    rows with the lowest stable ids, a few per repository; from every other repository its lowest-id row,
+    and of those the lowest ids overall. The choice depends only on the rows, never on their order."""
+
+    def __init__(self, licenses, minimum_star_events, popular_repositories, rows_per_repository, ordinary_rows):
+        self.licenses = licenses
+        self.minimum_star_events = minimum_star_events
+        self.popular_repositories = popular_repositories
+        self.rows_per_repository = rows_per_repository
+        self.ordinary_rows = ordinary_rows
+        self._popular = {}
+        self._ordinary = {}
+
+    def offer(self, projected):
+        if not set(projected["detectedLicenses"]) <= self.licenses:
+            return
+        repository = projected["repository"]
+        stars = projected["starEventsCount"]
+        if stars >= self.minimum_star_events:
+            entry = self._popular.setdefault(repository, [0, []])
+            entry[0] = max(entry[0], stars)
+            entry[1].append(projected)
+            entry[1].sort(key=_stable_id)
+            del entry[1][self.rows_per_repository:]
+            return
+        current = self._ordinary.get(repository)
+        if current is None or projected["stableRowId"] < current["stableRowId"]:
+            self._ordinary[repository] = projected
+
+    def rows(self):
+        ranked = sorted(self._popular.items(), key=lambda item: (-item[1][0], item[0]))
+        popular = [row for _repository, (_stars, rows) in ranked[:self.popular_repositories] for row in rows]
+        # A repository whose rows straddle the threshold counts as popular only.
+        ordinary = sorted((row for repository, row in self._ordinary.items() if repository not in self._popular),
+                          key=_stable_id)
+        return popular + ordinary[:self.ordinary_rows]
+
+
+def _stable_id(row):
+    return row["stableRowId"]
 
 
 def _bounded_integer(value, maximum, code):
@@ -124,13 +200,16 @@ def _date(value, *, optional=False):
 
 
 def _path(value):
-    """Structural path validation; the configured extension is a screening criterion, not a schema rule."""
+    """Structural path validation: a non-empty text rooted at `/` is the documented shape, and anything
+    else fails closed. A rooted path that is still unusable as a repository path (a backslash, which a
+    Unix file name may hold, or an empty, `.`, or `..` segment) is data, not drift: it returns None and
+    the row is screened out. The configured extension is likewise a screening criterion."""
     parsed = _text(value, "PATH_REJECTED")
-    relative = parsed[1:] if parsed.startswith("/") else parsed
-    if not parsed.startswith("/") or "\\" in parsed:
+    if not parsed.startswith("/"):
         _fail("PATH_REJECTED")
-    if any(part in ("", ".", "..") for part in relative.split("/")):
-        _fail("PATH_REJECTED")
+    relative = parsed[1:]
+    if "\\" in parsed or any(part in ("", ".", "..") for part in relative.split("/")):
+        return None
     return relative
 
 
@@ -197,7 +276,8 @@ def _validate_row(value, configuration, byte_limit):
     licenses = _licenses(value["detected_licenses"])
     _validate_documented_columns(value, path)
     screened_out = (
-        value["is_generated"] or value["is_vendor"] or encoding != "UTF-8"
+        path is None
+        or value["is_generated"] or value["is_vendor"] or encoding != "UTF-8"
         or not 1 <= length <= byte_limit or not licenses or len(set(licenses)) != len(licenses)
         or not _plain_path(path)
         or not path.endswith(_extensions(configuration))
@@ -289,7 +369,7 @@ def stream_metadata(request, *, read_rows_fn=None, environment=None, output=None
     active_environment = os.environ if environment is None else environment
     active_output = sys.stdout if output is None else output
     (configuration, row_limit, byte_limit, token,
-     request_limit, network_limit, disk_limit) = _parse_request(request, active_environment)
+     request_limit, network_limit, disk_limit, sample) = _parse_request(request, active_environment)
     reader = _default_reader if read_rows_fn is None else read_rows_fn
     installer = _default_installer if install_backend_fn is None else install_backend_fn
     measure = _default_measure if measure_disk_fn is None else measure_disk_fn
@@ -303,7 +383,6 @@ def stream_metadata(request, *, read_rows_fn=None, environment=None, output=None
             except Exception as error:  # noqa: BLE001 - only a stable code leaves the worker
                 _fail(_stable_code(error, "DATASET_LOAD_FAILED"))
             _check_temporary_disk(budget, measure, cache_root, disk_limit)
-            emitted = 0
             for index in range(row_limit):
                 try:
                     source_row = next(iterator)
@@ -311,19 +390,22 @@ def stream_metadata(request, *, read_rows_fn=None, environment=None, output=None
                     _fail("EARLY_STOP")
                 except Exception as error:  # noqa: BLE001 - only a stable code leaves the worker
                     _fail(_stable_code(error, "STREAM_FAILED"))
+                # Every row is validated, so schema drift anywhere in the inspected rows fails closed.
                 projected = _validate_row(source_row, configuration, byte_limit)
                 if projected is not None:
-                    active_output.write(json.dumps(projected, ensure_ascii=False, separators=(",", ":")) + "\n")
-                    emitted += 1
+                    sample.offer(projected)
                 if (index + 1) % DISK_CHECK_INTERVAL == 0:
                     _check_temporary_disk(budget, measure, cache_root, disk_limit)
             _check_temporary_disk(budget, measure, cache_root, disk_limit)
-            # Every inspected row counts against the signed row ceiling, whether or not it was emitted.
+            emitted = sample.rows()
+            for projected in emitted:
+                active_output.write(json.dumps(projected, ensure_ascii=False, separators=(",", ":")) + "\n")
+            # Every inspected row counts against the row ceiling, whether or not it was emitted.
             active_output.write(json.dumps(
                 {"counters": {**budget.counters(), "rowsInspected": row_limit}},
                 separators=(",", ":"), sort_keys=True,
             ) + "\n")
-            return emitted
+            return len(emitted)
         finally:
             _restore_environment(active_environment, previous)
 

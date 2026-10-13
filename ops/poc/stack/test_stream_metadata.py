@@ -56,6 +56,19 @@ def request(**overrides):
         "requestLimit": CEILINGS["requestCount"],
         "networkByteLimit": 96 * 1024 * 1024,
         "temporaryDiskBytes": 32 * 1024 * 1024,
+        "sample": sample(),
+    }
+    value.update(overrides)
+    return value
+
+
+def sample(**overrides):
+    value = {
+        "licenses": ["Apache-2.0", "BSD-3-Clause", "MIT"],
+        "minimumStarEvents": 1000,
+        "popularRepositories": 2,
+        "rowsPerRepository": 2,
+        "ordinaryRows": 3,
     }
     value.update(overrides)
     return value
@@ -122,24 +135,36 @@ class StreamMetadataTests(unittest.TestCase):
             self.assertEqual((args[0], args[1], args[3]), (configuration, "external-token", 1))
             self.assertIsInstance(args[2], NetworkBudget)
 
-    def test_accepts_the_five_signed_languages_with_their_exact_extensions(self):
+    def test_accepts_the_configured_languages_with_their_exact_extensions(self):
         for configuration, path, extension in [
             ("Go", "/cmd/main.go", "go"),
             ("Rust", "/src/lib.rs", "rs"),
             ("Ruby", "/lib/app.rb", "rb"),
             ("TypeScript", "/src/view.tsx", "tsx"),
+            ("JavaScript", "/src/view.js", "js"),
+            ("Java", "/src/Main.java", "java"),
+            ("C#", "/src/Program.cs", "cs"),
+            ("Kotlin", "/src/Main.kt", "kt"),
+            ("Swift", "/Sources/App.swift", "swift"),
+            ("C", "/src/main.c", "c"),
+            ("C++", "/src/main.cpp", "cpp"),
+            ("C++", "/src/main.cc", "cc"),
         ]:
             record = row(language=configuration, path=path, extension=extension, gha_language=configuration)
             count, _calls, text, _environment = self.run_stream([record], request(configuration=configuration))
             self.assertEqual(count, 1)
             self.assertEqual(self.rows_of(text)[0]["detectedLanguage"], configuration)
-        screened = row(language="Go", path="/cmd/main.rs", extension="rs", gha_language="Go")
-        count, _calls, _text, _environment = self.run_stream([screened], request(configuration="Go"))
-        self.assertEqual(count, 0)
-        for configuration in ("JavaScript", "C", "go"):
+        for screened, configuration in [
+            (row(language="Go", path="/cmd/main.rs", extension="rs", gha_language="Go"), "Go"),
+            # A header may be C or C++, so C keeps to `.c`.
+            (row(language="C", path="/src/main.h", extension="h", gha_language="C"), "C"),
+        ]:
+            count, _calls, _text, _environment = self.run_stream([screened], request(configuration=configuration))
+            self.assertEqual(count, 0)
+        for configuration in ("PHP", "C-Sharp", "go"):
             self.assert_code("CONFIGURATION_REJECTED", lambda value=configuration: self.run_stream([row()], request(configuration=value)))
 
-    def test_projects_only_documented_fields_in_input_order_and_stops_at_limit(self):
+    def test_projects_only_documented_fields_and_stops_at_limit(self):
         pulled = []
 
         def rows():
@@ -147,11 +172,11 @@ class StreamMetadataTests(unittest.TestCase):
                 pulled.append(index)
                 name = f"example{index}.py"
                 yield row(
-                    blob_id=str(index + 1) * 40, path=f"/src/{name}"
+                    blob_id=str(index + 1) * 40, path=f"/src/{name}", repo_name=f"example/project{index}"
                 )
 
         count, _calls, text, _environment = self.run_stream(rows(), request(rowLimit=2))
-        emitted = self.rows_of(text)
+        emitted = sorted(self.rows_of(text), key=lambda entry: entry["swhBlobId"])
         self.assertEqual(count, 2)
         self.assertEqual(pulled, [0, 1])
         self.assertEqual([entry["swhBlobId"] for entry in emitted], ["1" * 40, "2" * 40])
@@ -178,18 +203,29 @@ class StreamMetadataTests(unittest.TestCase):
     def test_rejects_request_shape_configuration_revision_limits_and_missing_token(self):
         failures = [
             ("REQUEST_MALFORMED", request(extra=True), "external-token"),
-            ("CONFIGURATION_REJECTED", request(configuration="Java"), "external-token"),
+            ("CONFIGURATION_REJECTED", request(configuration="PHP"), "external-token"),
             ("REVISION_REJECTED", request(revision="main"), "external-token"),
             ("ROW_LIMIT_REJECTED", request(rowLimit=0), "external-token"),
             ("ROW_LIMIT_REJECTED", request(rowLimit=True), "external-token"),
-            ("ROW_LIMIT_REJECTED", request(rowLimit=10_001), "external-token"),
+            ("ROW_LIMIT_REJECTED", request(rowLimit=CEILINGS["stackRowsPerLanguage"] + 1), "external-token"),
             ("BYTE_LIMIT_REJECTED", request(perBlobByteLimit=262_145), "external-token"),
             ("REQUEST_MALFORMED", {key: value for key, value in request().items() if key != "requestLimit"},
              "external-token"),
             ("REQUEST_LIMIT_REJECTED", request(requestLimit=0), "external-token"),
             ("REQUEST_LIMIT_REJECTED", request(requestLimit=CEILINGS["requestCount"] + 1), "external-token"),
-            ("NETWORK_LIMIT_REJECTED", request(networkByteLimit=96 * 1024 * 1024 + 1), "external-token"),
+            ("NETWORK_LIMIT_REJECTED", request(networkByteLimit=CEILINGS["stackMetadataBytes"] + 1), "external-token"),
             ("DISK_LIMIT_REJECTED", request(temporaryDiskBytes=32 * 1024 * 1024 + 1), "external-token"),
+            ("REQUEST_MALFORMED", {key: value for key, value in request().items() if key != "sample"},
+             "external-token"),
+            ("SAMPLE_REJECTED", request(sample=sample(extra=1)), "external-token"),
+            ("SAMPLE_REJECTED", request(sample=sample(licenses=[])), "external-token"),
+            ("SAMPLE_REJECTED", request(sample=sample(licenses=["MIT", "MIT"])), "external-token"),
+            ("SAMPLE_REJECTED", request(sample=sample(licenses=[" MIT"])), "external-token"),
+            ("SAMPLE_REJECTED", request(sample=sample(minimumStarEvents=0)), "external-token"),
+            ("SAMPLE_REJECTED", request(sample=sample(popularRepositories=101)), "external-token"),
+            ("SAMPLE_REJECTED", request(sample=sample(rowsPerRepository=11)), "external-token"),
+            ("SAMPLE_REJECTED", request(sample=sample(ordinaryRows=1001)), "external-token"),
+            ("SAMPLE_REJECTED", request(sample=sample(ordinaryRows=True)), "external-token"),
             ("TOKEN_MISSING", request(), ""),
         ]
         for code, request_value, token in failures:
@@ -209,8 +245,8 @@ class StreamMetadataTests(unittest.TestCase):
                                      if key != "blob_id"}),
             ("IDENTIFIER_REJECTED", row(blob_id="bad/id")),
             ("REPOSITORY_REJECTED", row(repo_name="not-a-repository")),
-            ("PATH_REJECTED", row(path="/../secret.py")),
             ("PATH_REJECTED", row(path="src/example.py")),
+            ("PATH_REJECTED", row(path="")),
             ("LICENSE_REJECTED", row(detected_licenses="MIT")),
             ("LICENSE_REJECTED", row(detected_licenses=[" MIT"])),
             ("LANGUAGE_REJECTED", row(language="TypeScript")),
@@ -243,6 +279,11 @@ class StreamMetadataTests(unittest.TestCase):
             row(blob_id="d" * 40, path="/ src/example.py"),
             row(blob_id="e" * 40, path="/\ufeffsrc/example.py"),
             row(blob_id="f" * 40, path="/src/exa\u0007mple.py"),
+            # Observed on a live TypeScript row: a backslash in a file name. Odd segments are screened too.
+            row(blob_id="0" * 39 + "1", path="/src\\example.py"),
+            row(blob_id="0" * 39 + "2", path="/../secret.py"),
+            row(blob_id="0" * 39 + "3", path="/src//example.py"),
+            row(blob_id="0" * 39 + "4", path="/src/./example.py"),
         ]
         eligible = row(blob_id="9" * 40, github_id=None, branch_name="HEAD")
         rows = [*screened_out[:4], eligible, *screened_out[4:]]
@@ -394,6 +435,53 @@ class StreamMetadataTests(unittest.TestCase):
             request(rowLimit=3, temporaryDiskBytes=1024 * 1024), read_rows_fn=slow_growth,
             environment=environment, output=io.StringIO(), install_backend_fn=RecordingInstaller(),
         ))
+
+    def test_emits_a_few_rows_of_the_most_starred_repositories_and_one_row_of_other_repositories(self):
+        def hex_of(index):
+            return f"{index:040x}"
+
+        rows = []
+        # Three popular repositories with three files each; the star counts rank them c, a, b.
+        for stars, name in ((5000, "acme/a"), (3000, "acme/b"), (9000, "acme/c")):
+            for index in range(3):
+                rows.append(row(blob_id=hex_of(len(rows) + 1), repo_name=name, star_events_count=stars,
+                                path=f"/src/{name[-1]}{index}.py"))
+        # Five ordinary repositories, one with two files; one licence outside the allowlist.
+        for index in range(5):
+            rows.append(row(blob_id=hex_of(len(rows) + 1), repo_name=f"small/r{index}", path=f"/r{index}/x.py"))
+        rows.append(row(blob_id=hex_of(len(rows) + 1), repo_name="small/r0", path="/r0/y.py"))
+        rows.append(row(blob_id=hex_of(len(rows) + 1), repo_name="small/gpl", path="/gpl/x.py",
+                        detected_licenses=["GPL-3.0-only"]))
+        rows.append(row(blob_id=hex_of(len(rows) + 1), repo_name="acme/gpl", path="/gpl/y.py",
+                        star_events_count=99999, detected_licenses=["MIT", "GPL-3.0-only"]))
+
+        count, _calls, text, _environment = self.run_stream(rows, request(rowLimit=len(rows)))
+        emitted = self.rows_of(text)
+
+        self.assertEqual(count, 2 * 2 + 3)
+        self.assertEqual([entry["repository"] for entry in emitted[:4]], ["acme/c", "acme/c", "acme/a", "acme/a"])
+        for name in ("acme/c", "acme/a"):
+            ids = [entry["stableRowId"] for entry in emitted[:4] if entry["repository"] == name]
+            every = sorted(entry["stableRowId"] for entry in emitted[:4] if entry["repository"] == name)
+            self.assertEqual(ids, every)
+        ordinary = emitted[4:]
+        self.assertEqual(len({entry["repository"] for entry in ordinary}), 3)
+        self.assertEqual([entry["stableRowId"] for entry in ordinary], sorted(entry["stableRowId"] for entry in ordinary))
+        self.assertTrue(all(entry["repository"].startswith("small/r") for entry in ordinary))
+        self.assertTrue(all(entry["starEventsCount"] < 1000 for entry in ordinary))
+
+        # The choice depends on the rows, not their order.
+        _count, _calls, reversed_text, _environment = self.run_stream(list(reversed(rows)), request(rowLimit=len(rows)))
+        self.assertEqual(self.rows_of(reversed_text), emitted)
+
+    def test_a_repository_straddling_the_star_threshold_counts_as_popular_only(self):
+        rows = [
+            row(blob_id="1" * 40, repo_name="acme/a", star_events_count=2000, path="/a.py"),
+            row(blob_id="2" * 40, repo_name="acme/a", star_events_count=10, path="/b.py"),
+        ]
+        _count, _calls, text, _environment = self.run_stream(rows, request(rowLimit=2))
+        emitted = self.rows_of(text)
+        self.assertEqual([entry["starEventsCount"] for entry in emitted], [2000])
 
     def test_sets_hub_hardening_environment_during_load_and_restores_it(self):
         environment = {"HF_TOKEN": "external-token", "HF_HUB_DISABLE_XET": "0", "TMPDIR": "/prior"}
