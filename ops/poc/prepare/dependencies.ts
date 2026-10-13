@@ -31,7 +31,7 @@ import { revalidateStackCandidate, type SelectedStackBlob } from "./stack-revali
 import type { Environment, PreparationDependencies, StackSelection } from "./types";
 import { journaledWorker } from "./worker-journal";
 
-const PROFILE_URL = new URL("../profiles/local-real-rounds.v4.json", import.meta.url);
+const PROFILE_URL = new URL("../profiles/local-real-rounds.v5.json", import.meta.url);
 const ARTIFACT_PATH = fileURLToPath(new URL("../../../apps/game/src/demo/generated/local-real-rounds.json", import.meta.url));
 const REPORT_PATH = fileURLToPath(new URL("../stack/tmp/local-experiment-run.json", import.meta.url));
 const PIN_PATH = fileURLToPath(new URL("../../../apps/game/src/demo/local-real-experiment.pin.server.ts", import.meta.url));

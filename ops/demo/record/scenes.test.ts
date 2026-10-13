@@ -15,9 +15,11 @@ describe("demo recorder scenes", () => {
   });
 
   it("records one scene per deck, each opened through the deck parameter, plus a full run with the MP4", () => {
-    expect(SCENES.map(({ id }) => id)).toEqual(["deck-project", "deck-language", "deck-before-after", "full-run"]);
+    expect(SCENES.map(({ id }) => id)).toEqual([
+      "deck-project", "deck-language", "deck-before-after", "deck-algorithm", "deck-output", "deck-fix", "full-run",
+    ]);
     expect(SCENES.filter(({ mp4 }) => mp4).map(({ id, mp4 }) => `${id}:${mp4}`)).toEqual(["full-run:codeguessr-demo"]);
-    for (const deck of ["project", "language", "before-after"]) {
+    for (const deck of ["project", "language", "before-after", "algorithm", "output", "fix"]) {
       const scene = SCENES.find(({ id }) => id === `deck-${deck}`)!;
       expect(scene.steps[0]).toEqual({ kind: "goto", path: `/?deck=${deck}` });
     }

@@ -41,11 +41,13 @@ interface HarnessOptions {
   readonly providerIncompleteQueryId?: string;
 }
 
-const PROFILE_URL = new URL("../../profiles/local-real-rounds.v4.json", import.meta.url);
+const PROFILE_URL = new URL("../../profiles/local-real-rounds.v5.json", import.meta.url);
 const REVISION = "e565caa3a78c2423bd374333a472b049eb090e47";
 
 const loadProfile = async (failure?: CapturedFailure): Promise<CrawlProfile> => {
   const raw = JSON.parse(await readFile(PROFILE_URL, "utf8")) as Record<string, any>;
+  // The captured run records the Stack and search decks; curated decks have their own tests.
+  delete raw.curated;
   raw.selection = { ...raw.selection, beforeAfterPool: 5 };
   if (failure === "capacity") raw.capacity.blobAttempts = 1;
   return parseCrawlProfile(raw);

@@ -6,7 +6,7 @@ import { parseCrawlProfile, type CrawlProfile } from "./profile";
 
 const testModuleName: string = "vitest";
 const { describe, expect, it } = await import(testModuleName) as any;
-const PROFILE_URL = new URL("../profiles/local-real-rounds.v4.json", import.meta.url);
+const PROFILE_URL = new URL("../profiles/local-real-rounds.v5.json", import.meta.url);
 
 const loadProfile = async (): Promise<CrawlProfile> =>
   parseCrawlProfile(JSON.parse(await readFile(PROFILE_URL, "utf8")));
@@ -118,7 +118,7 @@ describe("GitHub search completeness classifications", () => {
   it("rejects provider-incomplete results when the authorized profile tuple set drifts", async () => {
     const profile = await loadProfile();
     const mutations: readonly [string, (profileValue: any) => void][] = [
-      ["profile version", (value) => { value.profileVersion = "local-real-rounds.v4"; }],
+      ["profile version", (value) => { value.profileVersion = "local-real-rounds.v5"; }],
       ["query count", (value) => { value.github.queries.pop(); }],
       ["identifier", (value) => { value.github.queries[0].id = "other-query"; }],
       ["query", (value) => { value.github.queries[0].query += " repo:example/project"; }],

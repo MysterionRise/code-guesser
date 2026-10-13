@@ -12,11 +12,12 @@ import {
   type RecordValue,
 } from "./model-validation";
 import { CAPACITY_CEILINGS, STACK_LANGUAGES } from "./profile";
+import { DECK_IDS, MAXIMUM_POOL_SIZE } from "../../../packages/artifact/src/index";
 import { RUN_RETRY_LIMIT } from "./retry";
 
-/** One to three decks, each a pool of five to forty rounds. */
+/** One deck or more, up to every deck, each a pool of five to forty rounds. */
 const MINIMUM_SELECTED = 5;
-const MAXIMUM_SELECTED = 120;
+const MAXIMUM_SELECTED = DECK_IDS.length * MAXIMUM_POOL_SIZE;
 const RUN_COUNT_KEYS = [
   "requests", "githubPages", "githubResults", "repositoriesAdmitted", "stackRows",
   "blobAttempts", "blobsRetrieved", "githubRevalidations", "screened",

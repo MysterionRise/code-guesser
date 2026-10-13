@@ -6,7 +6,7 @@
 import { createHash } from "node:crypto";
 
 import { composeExperimentArtifact } from "../../../../ops/poc/prepare/compose";
-import { composeInput } from "../../../../ops/poc/prepare/testdata/deck-builders";
+import { composeInput, loadCuratedProfile } from "../../../../ops/poc/prepare/testdata/deck-builders";
 
 export const canonical = (value: unknown): string => {
   if (value === null || typeof value === "boolean" || typeof value === "number") {
@@ -30,6 +30,11 @@ export const COMPOSED_ARTIFACT_HASH = composed.artifactHash;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const artifact = (): any => structuredClone(composed.artifact);
+
+const curated = composeExperimentArtifact(composeInput(loadCuratedProfile({}, { algorithm: true, output: true, fix: true })));
+/** The same three decks plus the three curated ones: algorithm, output, and fix rounds. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const curatedArtifact = (): any => structuredClone(curated.artifact);
 
 /** The correct candidate for a fixture, resolved on the Node side as a test oracle. */
 export const correctLabel = (fixture: { candidates: { id: string; label: string }[]; correctCandidateId: string }): string =>

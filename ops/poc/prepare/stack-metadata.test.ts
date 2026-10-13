@@ -13,7 +13,7 @@ const collectStackMetadata = typeof metadataModule.collectStackMetadata === "fun
   ? metadataModule.collectStackMetadata as (...args: any[]) => Promise<any>
   : async (): Promise<never> => { throw new Error("STACK_METADATA_NOT_IMPLEMENTED"); };
 
-const profilePath = new URL("../profiles/local-real-rounds.v4.json", import.meta.url);
+const profilePath = new URL("../profiles/local-real-rounds.v5.json", import.meta.url);
 const runtimeDirectory = new URL("../stack/", import.meta.url);
 const lockPath = new URL("uv.lock", runtimeDirectory);
 const pythonPath = new URL(".python-version", runtimeDirectory);

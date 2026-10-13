@@ -10,7 +10,7 @@ import { parseCrawlProfile, poolSizes, STACK_LANGUAGES, type CrawlProfile, type 
 import type { PreparationDependencies } from "./index";
 import type { FixHarnessData } from "./testdata/deck-builders";
 
-const profilePath = new URL("../profiles/local-real-rounds.v4.json", import.meta.url);
+const profilePath = new URL("../profiles/local-real-rounds.v5.json", import.meta.url);
 
 /** A fake SHA-256 made of one repeated digit, or a repeated two-character tag. */
 export const hash = (digit: string): string => digit.repeat(64).slice(0, 64);
@@ -18,9 +18,13 @@ export const accepted = <Value>(value: Value, digit = "a") => ({
   value,
   acceptedResponseHashes: [hash(digit)],
 });
-/** The v4 profile with a before-or-after pool of five; the Stack decks hold two rounds per language. */
+/**
+ * The run's profile without its curated section, and with a before-or-after pool of five; the Stack decks hold
+ * two rounds per language. Curated decks are tested with the profiles `loadCuratedProfile` builds.
+ */
 export const loadProfile = async (): Promise<CrawlProfile> => {
   const raw = JSON.parse(await readFile(profilePath, "utf8"));
+  delete raw.curated;
   raw.selection = { ...raw.selection, beforeAfterPool: 5 };
   return parseCrawlProfile(raw);
 };

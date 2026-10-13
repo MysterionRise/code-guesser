@@ -24,9 +24,11 @@ import type { RevalidatedStackCandidate } from "../stack-revalidation";
 export const sha1 = (seed: string): string => createHash("sha1").update(seed).digest("hex");
 export const sha256 = (value: string): string => createHash("sha256").update(value).digest("hex");
 
-export const loadDeckProfile = (): CrawlProfile => parseCrawlProfile(JSON.parse(
-  readFileSync(new URL("../../profiles/local-real-rounds.v4.json", import.meta.url), "utf8"),
-));
+/** The run's profile without its curated section: the three decks built from The Stack v2 and GitHub search. */
+export const loadDeckProfile = (): CrawlProfile => {
+  const { curated: _curated, ...raw } = JSON.parse(readFileSync(new URL("../../profiles/local-real-rounds.v5.json", import.meta.url), "utf8"));
+  return parseCrawlProfile(raw);
+};
 
 export const RESPONSE_HASHES = Object.freeze([sha256("response-a"), sha256("response-b"), sha256("response-c")]);
 export const snapshotIdFor = (profile: CrawlProfile, hashes: readonly string[] = RESPONSE_HASHES): string =>
@@ -295,7 +297,7 @@ export const loadCuratedProfile = (
   selection: Readonly<Record<string, number>> = {},
   decks: Readonly<{ algorithm?: boolean; output?: boolean; fix?: boolean }> = { algorithm: true },
 ): CrawlProfile => {
-  const raw = JSON.parse(readFileSync(new URL("../../profiles/local-real-rounds.v4.json", import.meta.url), "utf8"));
+  const raw = JSON.parse(readFileSync(new URL("../../profiles/local-real-rounds.v5.json", import.meta.url), "utf8"));
   const curated = { repositories: CURATED_REPOSITORIES, ...(decks.algorithm ? { algorithm: CURATED_SECTION.algorithm } : {}),
     ...(decks.output ? { output: OUTPUT_SECTION } : {}), ...(decks.fix ? { fix: FIX_SECTION } : {}) };
   return parseCrawlProfile({ ...raw, selection: { ...raw.selection, ...selection }, curated: structuredClone(curated) });

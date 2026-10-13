@@ -61,7 +61,7 @@ const playRound = (round: number, hints: number): Step[] => [
 
 /** One deck's teaser: open it through the deck parameter, take a hint, and lock in an answer. */
 const deckScene = (
-  deck: "project" | "language" | "before-after",
+  deck: "project" | "language" | "before-after" | "algorithm" | "output" | "fix",
   captions: Readonly<{ opening: string; hint: string; answer: string }>,
   answerIndex: number,
   gif: Partial<GifOptions> = {},
@@ -108,6 +108,21 @@ export const SCENES: readonly Scene[] = Object.freeze([
     hint: "The hint quotes the commit.",
     answer: "Which version is newer?",
   }, Math.min(ANSWER_CHOREOGRAPHY[3] ?? 1, 1), { width: 360, maximumColors: 96 }),
+  deckScene("algorithm", {
+    opening: "Which algorithm is this?",
+    hint: "Its own name is hidden.",
+    answer: "Four of one family. Pick one.",
+  }, ANSWER_CHOREOGRAPHY[2] ?? 0, { width: 360, maximumColors: 96 }),
+  deckScene("output", {
+    opening: "What does the last line return?",
+    hint: "Hints work other calls.",
+    answer: "Trace it, then lock it in.",
+  }, ANSWER_CHOREOGRAPHY[4] ?? 0, { width: 360, maximumColors: 96 }),
+  deckScene("fix", {
+    opening: "A real bug fix changed one line.",
+    hint: "The hint names the kind of change.",
+    answer: "Which line was it?",
+  }, ANSWER_CHOREOGRAPHY[3] ?? 1, { width: 360, maximumColors: 96 }),
   {
     id: "full-run",
     gif: { speed: 2, framesPerSecond: 8, width: 340, maximumColors: 48 },
@@ -116,7 +131,7 @@ export const SCENES: readonly Scene[] = Object.freeze([
       goto("/"),
       { kind: "expectHeading", pattern: "^Pick a deck$" },
       wait(500),
-      caption("Three decks of real code. Five rounds a game."),
+      caption("Six decks of real code. Five rounds a game."),
       wait(1800),
       link("Which project?"),
       { kind: "expectText", pattern: "Round 1 of 5" },

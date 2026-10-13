@@ -37,6 +37,13 @@ describe("algorithm windows", () => {
     expect(maskNames("RADIX = 10", { names: [], symbols: [], words: ["radix"] }).text).toBe("MYSTERY = 10");
   });
 
+  it("masks a label word that begins a word even when the identifier splits it", () => {
+    const code = "holes = pigeonHoles(xs)\nmake = createPigeonHoles(n)\nLIMIT = MAX_PIGEON_HOLES\nfill(populate_pigeon_holes, pigeonhole)\nkeep(escaped, napigeonholes)";
+    const masked = maskNames(code, { names: [], symbols: [], words: ["pigeonhole"] });
+    expect(masked.text).toBe("holes = mysterys(xs)\nmake = createMysterys(n)\nLIMIT = MAX_MYSTERYS\nfill(populate_mysterys, mystery)\nkeep(escaped, napigeonholes)");
+    expect(masked.masked).toEqual([]);
+  });
+
   it("starts at the masked definition and shows no name of the algorithm", () => {
     const window = algorithmWindow(curatedPythonSource("binary_search"), "Python", terms(["binary_search"], "Binary search"), limits)!;
     expect(window.functionName).toBe("binary_search");

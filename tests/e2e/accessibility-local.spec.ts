@@ -1,4 +1,9 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { expect, test } from "@playwright/test";
+
+const deckIds = (JSON.parse(readFileSync(resolve(process.cwd(), "apps/game/src/demo/generated/local-real-rounds.json"), "utf8")) as
+  { decks: { id: string }[] }).decks.map(({ id }) => id);
 
 test.use({ viewport: { width: 320, height: 568 }, reducedMotion: "reduce" });
 
@@ -9,7 +14,7 @@ test("the deck chooser and every deck fit the minimum viewport", async ({ page }
   await expect(page.getByRole("main")).toBeVisible();
   await expect(page.getByRole("heading", { level: 1, name: "Pick a deck" })).toBeVisible();
   expect(await page.evaluate(noHorizontalScroll)).toBe(true);
-  for (const deck of ["project", "language", "before-after"]) {
+  for (const deck of deckIds) {
     await page.goto(`/?deck=${deck}`);
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
     await expect(page.getByText("Round 1 of 5")).toBeVisible();
@@ -20,13 +25,13 @@ test("the deck chooser and every deck fit the minimum viewport", async ({ page }
 test("the deck chooser is keyboard operable with named links", async ({ page }) => {
   await page.goto("/");
   const links = page.getByRole("list").getByRole("link");
-  await expect(links).toHaveCount(3);
+  await expect(links).toHaveCount(deckIds.length);
   await page.keyboard.press("Tab");
   await expect(links.first()).toBeFocused();
   await page.keyboard.press("Tab");
   await expect(links.nth(1)).toBeFocused();
   await page.keyboard.press("Enter");
-  await expect(page).toHaveURL(/\?deck=language$/u);
+  await expect(page).toHaveURL(new RegExp(`\\?deck=${deckIds[1]}$`, "u"));
   await expect(page.getByText("Round 1 of 5")).toBeVisible();
 });
 
