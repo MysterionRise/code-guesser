@@ -134,11 +134,14 @@ I read all 24 algorithm rounds and all 24 fix rounds of the new artifact.
 
 ## Verification
 
+These ran on the branch merged with `main` at `b35ce0c`; an offline rebuild
+there gives the same bytes and pin.
+
 | Check | Result |
 | --- | --- |
-| `pnpm test` | 1,782 pass, none skipped; the leakage test runs against this artifact, with two expected failures (#77, #78) |
-| `pnpm exec vitest run ops/poc/prepare` | 428 pass |
-| `pnpm typecheck`, ops `tsc` | Clean |
+| `pnpm test` | 1,796 pass, none skipped; the leakage test runs against this artifact, with two expected failures (#77, #78) |
+| `pnpm exec vitest run ops/poc/prepare` | 442 pass |
+| `pnpm typecheck` (test files included), ops `tsc` | Clean |
 | Python worker tests | 55 OK |
 | Containment | 3 pass |
 | Build | OK |
