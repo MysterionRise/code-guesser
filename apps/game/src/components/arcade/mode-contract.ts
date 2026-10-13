@@ -3,6 +3,11 @@ export interface PublicClue { order: 1 | 2; label: string }
 export interface Pane { label: string | null; text: string }
 export type RoundModeKind = "project" | "language" | "before-after" | "algorithm" | "output" | "fix";
 const ROUND_KINDS: readonly RoundModeKind[] = ["project", "language", "before-after", "algorithm", "output", "fix"];
+/** A fix round's options name pane lines, `Line 7`; any other label names none. */
+export const optionLine = (label: string): number | undefined => {
+  const line = /^Line ([1-9][0-9]*)$/u.exec(label)?.[1];
+  return line === undefined ? undefined : Number(line);
+};
 /** A session deals this many rounds from one deck. */
 export const SESSION_ROUNDS = 5;
 export interface RoundModeInput {
@@ -67,9 +72,11 @@ export function createPublicModeContract(input: PublicModeContractInput): Public
       if (clue.order !== index + 1) throw new ArcadeShellRuleError("clues must be consecutively ordered");
       return Object.freeze({ order: clue.order, label: requirePublicText(clue.label, "clue label") });
     }));
-    const panes = Object.freeze(round.content.panes.map((pane) => Object.freeze({
-      label: pane.label === null ? null : requirePublicText(pane.label, "pane label"), text: requirePublicText(pane.text, "pane"),
-    })));
+    // Code keeps its own whitespace: the first line's indentation, and the lines a fix round's options count.
+    const panes = Object.freeze(round.content.panes.map((pane) => {
+      requirePublicText(pane.text, "pane");
+      return Object.freeze({ label: pane.label === null ? null : requirePublicText(pane.label, "pane label"), text: pane.text });
+    }));
     return Object.freeze({
       roundId: requirePublicText(round.roundId, "round id"), roundVersionId: requirePublicText(round.roundVersionId, "round version id"),
       content: Object.freeze({ versionId: requirePublicText(round.content.versionId, "content version id"), panes }),

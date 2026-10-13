@@ -10,6 +10,11 @@ const DECK_COUNT_WORDS = ["No decks", "One deck", "Two decks", "Three decks", "F
 /** A run publishes every deck it could fill, so the notice counts what this artifact holds. */
 const deckSummary = (count: number): string => `${DECK_COUNT_WORDS[count] ?? `${count} decks`}; each game deals five rounds.`;
 
+/** What a deck asks of a player: to recognise where code comes from, or to reason about what it does. */
+const DECK_TAGS: Readonly<Record<string, string>> = Object.freeze({
+  project: "Recognise", language: "Recognise", algorithm: "Recognise", "before-after": "Reason", output: "Reason", fix: "Reason",
+});
+
 interface PageProps {
   readonly searchParams: Promise<Readonly<Record<string, string | string[] | undefined>>>;
 }
@@ -24,6 +29,7 @@ function DeckChooser({ decks }: { readonly decks: readonly LocalRealDeck[] }) {
           <li key={deck.id}>
             <a className="deck-card" href={`/?deck=${deck.id}`}>
               <span className="deck-title">{deck.title}</span>{" "}
+              {DECK_TAGS[deck.id] && <span className="deck-tag">{DECK_TAGS[deck.id]}</span>}{" "}
               <span className="deck-description">{deck.description}</span>{" "}
               <span className="deck-size">{deck.poolSize} rounds in the deck</span>
             </a>

@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { ArcadeShellRuleError, requirePublicText as required, type PublicModeContract } from "./mode-contract";
+import { ArcadeShellRuleError, optionLine, requirePublicText as required, type PublicModeContract, type RoundModeKind } from "./mode-contract";
 
 export interface RevealRequest {
   roundId: string;
@@ -178,6 +178,13 @@ export const hintCostNote = (values: readonly number[]): string =>
   `Each hint lowers this round’s points: ${values.map(points).join(" → ")}.`;
 const SOURCE_LINK = /(https:\/\/\S+)/u;
 
+/** What a single pane shows, where a deck's code needs a word of explanation; comparison panes name their version. */
+export const PANE_CAPTIONS: Readonly<Partial<Record<RoundModeKind, string>>> = Object.freeze({
+  algorithm: "Its own names are hidden as mystery.",
+  output: "The last line is a call typed into a Python shell.",
+  fix: "Lines are numbered; each option names one.",
+});
+
 /** Renders the public attribution with its source address as a link; the text itself is unchanged. */
 const linkedAttribution = (attribution: string): React.ReactNode[] => attribution.split(SOURCE_LINK)
   .map((part, index) => index % 2 === 1
@@ -201,7 +208,16 @@ export function ArcadeShell({ mode, authorizeRevealAction, chooseAnotherDeckHref
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [copied, setCopied] = React.useState(false);
+  const [focusedCandidate, setFocusedCandidate] = React.useState<string | null>(null);
   const round = mode.rounds[session.roundIndex]!;
+  // A fix round's options point at pane lines: the pane numbers its lines, each option shows its line's code, and
+  // the line under the focused or chosen option (or, once revealed, the answer) is highlighted.
+  const numbered = round.mode.kind === "fix" && round.content.panes.length === 1;
+  const paneLines = numbered ? round.content.panes[0]!.text.split("\n") : [];
+  const labelOf = (candidateId: string | null) => round.mode.candidates.find((candidate) => candidate.candidateId === candidateId)?.label ?? "";
+  const highlighted = numbered
+    ? optionLine(labelOf(session.reveal?.answerCandidateId ?? focusedCandidate ?? (selection === "" ? null : selection)))
+    : undefined;
   const roundTitle = React.useRef<HTMLHeadingElement>(null);
   const revealHeading = React.useRef<HTMLHeadingElement>(null);
   const settled = React.useRef(false);
@@ -248,6 +264,7 @@ export function ArcadeShell({ mode, authorizeRevealAction, chooseAnotherDeckHref
   const next = () => {
     setSession((current) => transitionArcadeSession(mode, current, { type: "next-round" }));
     setSelection("");
+    setFocusedCandidate(null);
     setError(null);
   };
 
@@ -283,8 +300,17 @@ export function ArcadeShell({ mode, authorizeRevealAction, chooseAnotherDeckHref
         <div className={round.content.panes.length > 1 ? "code-panes compare" : "code-panes"}>
           {round.content.panes.map((pane, index) => (
             <figure className="code-pane" key={pane.label ?? index}>
-              {pane.label && <figcaption>Version {pane.label}</figcaption>}
-              <pre className="code-window" tabIndex={0} aria-label={pane.label ? `Code, version ${pane.label}` : "Code excerpt"}><code>{pane.text}</code></pre>
+              {pane.label ? <figcaption>Version {pane.label}</figcaption>
+                : PANE_CAPTIONS[round.mode.kind] && <figcaption className="pane-note">{PANE_CAPTIONS[round.mode.kind]}</figcaption>}
+              {numbered
+                ? <pre className="code-window numbered" tabIndex={0} aria-label="Code excerpt with numbered lines"><code>
+                    {paneLines.map((line, lineIndex) => (
+                      <span className={lineIndex + 1 === highlighted ? "code-line highlighted" : "code-line"} data-line={lineIndex + 1} key={lineIndex}>
+                        <span className="line-number" aria-hidden="true">{lineIndex + 1}</span>{line}
+                      </span>
+                    ))}
+                  </code></pre>
+                : <pre className="code-window" tabIndex={0} aria-label={pane.label ? `Code, version ${pane.label}` : "Code excerpt"}><code>{pane.text}</code></pre>}
             </figure>
           ))}
         </div>
@@ -308,6 +334,9 @@ export function ArcadeShell({ mode, authorizeRevealAction, chooseAnotherDeckHref
                 : candidate.candidateId === session.reveal.answerCandidateId ? " correct"
                   : candidate.candidateId === session.lockedCandidateId ? " missed" : "";
               const detailId = `detail-${round.roundId}-${candidate.candidateId}`;
+              const line = numbered ? optionLine(candidate.label) : undefined;
+              const lineText = line === undefined ? undefined : paneLines[line - 1]?.trim();
+              const detail = candidate.detail ?? lineText ?? null;
               return (
                 <label className={`${selection === candidate.candidateId ? "candidate selected" : "candidate"}${verdict}`} key={candidate.candidateId}>
                   <input
@@ -315,13 +344,15 @@ export function ArcadeShell({ mode, authorizeRevealAction, chooseAnotherDeckHref
                     name={`candidate-${round.roundId}`}
                     value={candidate.candidateId}
                     aria-label={candidate.label}
-                    aria-describedby={candidate.detail ? detailId : undefined}
+                    aria-describedby={detail ? detailId : undefined}
                     checked={selection === candidate.candidateId}
                     onChange={() => setSelection(candidate.candidateId)}
+                    onFocus={numbered ? () => setFocusedCandidate(candidate.candidateId) : undefined}
+                    onBlur={numbered ? () => setFocusedCandidate(null) : undefined}
                   />
                   <span className="candidate-text">
                     <span className="candidate-label">{candidate.label}</span>
-                    {candidate.detail && <span className="candidate-detail" id={detailId}>{candidate.detail}</span>}
+                    {detail && <span className={lineText ? "candidate-detail code-detail" : "candidate-detail"} id={detailId}>{detail}</span>}
                   </span>
                 </label>
               );
