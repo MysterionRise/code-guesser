@@ -77,3 +77,8 @@ noscript { display: block; padding: 12px; margin-bottom: 16px; background: #522;
 .line-number { display: inline-block; width: 3ch; margin-right: 14px; text-align: right; color: #6f9283; user-select: none; }
 .code-detail { font: 500 .82rem/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre; overflow: hidden; text-overflow: ellipsis; }
 .deck-list > li { display: grid; }
+.completion-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 18px; margin-top: 18px; }
+.completion-actions .deck-link { margin: 0; }
+.reveal .completion-actions button, .primary-action { display: inline-block; margin: 0; }
+.primary-action { border-radius: 12px; padding: 14px 20px; background: #baff65; color: #07120f; font-weight: 900; text-decoration: none; }
+.reveal .secondary-action { padding: 12px 18px; border: 2px solid #baff65; background: transparent; color: #baff65; }

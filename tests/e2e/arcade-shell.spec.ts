@@ -17,19 +17,24 @@ const points = (value: number): string => value.toLocaleString("en-US");
 
 const currentRound = async (page: Page): Promise<string> => (await page.locator(".game-card").getAttribute("data-round-id"))!;
 
-const answerRounds = async (page: Page, firstRoundHint: boolean) => {
+/** Answers all five rounds right and returns the dealt round ids in play order. */
+const answerRounds = async (page: Page, firstRoundHint: boolean): Promise<string[]> => {
+  const dealt: string[] = [];
   for (let index = 0; index < 5; index += 1) {
     if (index > 0) await page.getByRole("button", { name: "Next round" }).click();
     await expect(page.getByText(`Round ${index + 1} of 5`)).toBeVisible();
     await expect(page.locator(".reveal small")).toHaveCount(0);
     if (index === 0 && firstRoundHint) await page.getByRole("button", { name: "Reveal hint 1" }).click();
-    const answer = answers.get(await currentRound(page))!;
+    const roundId = await currentRound(page);
+    dealt.push(roundId);
+    const answer = answers.get(roundId)!;
     await page.getByLabel(answer, { exact: true }).check();
     await page.getByRole("button", { name: "Lock in answer" }).click();
     await expect(page.getByRole("heading", { name: "Nice read." })).toBeVisible();
     await expect(page.locator(".candidate.correct")).toContainText(answer);
     await expect(page.locator(".reveal small")).toBeVisible();
   }
+  return dealt;
 };
 
 test("the root route offers every deck under the permanent notice", async ({ page }) => {
@@ -47,7 +52,7 @@ test("the root route offers every deck under the permanent notice", async ({ pag
 });
 
 for (const deck of artifact.decks) {
-  test(`plays the ${deck.id} deck through hints, scoring, replay, a new deal, and choosing another deck`, async ({ page }) => {
+  test(`plays the ${deck.id} deck through hints, scoring, a fresh deal, and choosing another deck`, async ({ page }) => {
     const full = fullPoints(deck);
     await page.goto("/");
     await page.getByRole("link", { name: titlePattern(deck.title) }).click();
@@ -55,18 +60,25 @@ for (const deck of artifact.decks) {
     await expect(page.getByText(/Local unreviewed experiment/)).toBeVisible();
     if (deck.id === "before-after") await expect(page.locator("figcaption")).toHaveText(["Version A", "Version B"]);
 
-    await answerRounds(page, true);
+    const first = await answerRounds(page, true);
     const hinted = full * 0.8 + 4 * full;
     await expect(page.getByLabel(/Score/)).toHaveText(`${points(hinted)} pts`);
     await expect(page.getByText(new RegExp(`Run complete — ${points(hinted)} points`, "u"))).toBeVisible();
 
-    await page.getByRole("button", { name: "Play again" }).click();
+    // A finished run offers a fresh deal and another deck, never a replay of the rounds it just revealed.
+    await expect(page.getByRole("button", { name: "Play again" })).toHaveCount(0);
+    const deal = page.getByRole("link", { name: "Deal new rounds" });
+    await expect(deal).toHaveAttribute("href", `/?deck=${deck.id}`);
+    await expect(deal).toHaveClass(/primary-action/u);
+    await deal.click();
     await expect(page.getByText("Round 1 of 5")).toBeVisible();
     await expect(page.getByLabel(/Score/)).toHaveText("0 pts");
-    await answerRounds(page, false);
+    await expect(page.getByRole("heading", { name: /Nice read\.|Not this time\./u })).toHaveCount(0);
+    const second = await answerRounds(page, false);
+    // Five rounds dealt in the same order again is at most a one-in-30,240 chance, even from the ten-round pool.
+    expect(second).not.toEqual(first);
     await expect(page.getByText(new RegExp(`Run complete — ${points(5 * full)} points`, "u"))).toBeVisible();
 
-    await expect(page.getByRole("link", { name: "Deal new rounds" })).toHaveAttribute("href", `/?deck=${deck.id}`);
     await page.getByRole("link", { name: "Choose another deck" }).click();
     await expect(page.getByRole("heading", { level: 1, name: "Pick a deck" })).toBeVisible();
   });

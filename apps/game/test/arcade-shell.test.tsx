@@ -262,12 +262,27 @@ describe("static arcade shell", () => {
     expect(formatCompletionResult(session.result!, session.correctRounds, "Which language?"))
       .toBe("Run complete — 5,000 points, 5 of 5 correct. Share: CodeGuessr · Which language? · 5/5 correct · 5,000/5,000.");
 
-    const restarted = transitionArcadeSession(
-      mode,
-      session,
-      { type: "restart" } as unknown as Parameters<typeof transitionArcadeSession>[2],
-    );
-    expect(restarted).toEqual(createArcadeSession(mode));
+  });
+
+  it("never replays revealed rounds: a finished run takes no further action, and unknown actions are refused", () => {
+    const mode = createPublicModeContract(modeInput());
+    const restart = { type: "restart" } as unknown as Parameters<typeof transitionArcadeSession>[2];
+    let session = createArcadeSession(mode);
+    session = transitionArcadeSession(mode, session, { type: "lock-answer", candidateId: "candidate-a" });
+    session = transitionArcadeSession(mode, session, { type: "accept-reveal", reveal: displayReveal(0, 1000, 5000, 1) });
+    // A revealed round would otherwise fall through to the next-round transition.
+    expect(() => transitionArcadeSession(mode, session, restart)).toThrow("unsupported session action");
+    for (let index = 1; index < 5; index += 1) {
+      session = transitionArcadeSession(mode, session, { type: "next-round" });
+      session = transitionArcadeSession(mode, session, { type: "lock-answer", candidateId: "candidate-a" });
+      session = transitionArcadeSession(mode, session, {
+        type: "accept-reveal",
+        reveal: displayReveal(index, (index + 1) * 1000, 5000, index + 1),
+      });
+    }
+    expect(session.status).toBe("complete");
+    expect(() => transitionArcadeSession(mode, session, restart)).toThrow("the run is already complete");
+    expect(() => transitionArcadeSession(mode, session, { type: "next-round" })).toThrow("the run is already complete");
   });
 
   it("rejects canonically duplicated round and candidate identifiers", () => {
@@ -285,14 +300,16 @@ describe("static arcade shell", () => {
     expect(contract.rounds[0]!.mode.candidates[0]!.candidateId).toBe("candidate-a");
   });
 
-  it("keeps excluded country attribution out and exposes demo errors and replay", () => {
+  it("keeps excluded country attribution out and exposes demo errors and a fresh deal, never a replay", () => {
     const page = readFileSync(new URL("../src/app/page.tsx", import.meta.url), "utf8");
     const layout = readFileSync(new URL("../src/app/layout.tsx", import.meta.url), "utf8");
     const shell = readFileSync(new URL("../src/components/arcade/arcade-shell.tsx", import.meta.url), "utf8");
     expect(`${page}\n${layout}`).not.toMatch(/country|code-location|where did this code come from|finland|brazil|japan|germany|india/iu);
     expect(existsSync(new URL("../src/app/actions.ts", import.meta.url))).toBe(true);
     expect(shell).toContain('role="alert"');
-    expect(shell).toContain("Play again");
+    expect(shell).not.toContain("Play again");
+    expect(shell).not.toMatch(/type: "restart"/u);
+    expect(shell).toMatch(/<a className="primary-action" href=\{newGameHref\}>Deal new rounds<\/a>/u);
     expect(shell).toContain("Choose another deck");
   });
 });

@@ -51,8 +51,7 @@ export type ArcadeSessionAction =
   | { type: "reveal-hint" }
   | { type: "lock-answer"; candidateId: string }
   | { type: "accept-reveal"; reveal: AuthorizedReveal }
-  | { type: "next-round" }
-  | { type: "restart" };
+  | { type: "next-round" };
 
 
 export function createArcadeSession(_mode: PublicModeContract): ArcadeSession {
@@ -108,7 +107,6 @@ export function transitionArcadeSession(
   session: ArcadeSession,
   action: ArcadeSessionAction,
 ): ArcadeSession {
-  if (action.type === "restart") return createArcadeSession(mode);
   if (session.status === "complete") throw new ArcadeShellRuleError("the run is already complete");
   const round = mode.rounds[session.roundIndex]!;
   if (action.type === "reveal-hint") {
@@ -144,6 +142,8 @@ export function transitionArcadeSession(
       score: reveal.result.score, completedRounds, correctRounds: session.correctRounds + (reveal.correct ? 1 : 0),
       status: completedRounds === mode.rounds.length ? "complete" : "playing" });
   }
+  // A finished run is never replayed: a new game is a fresh deal from the server, so revealed rounds stay spent.
+  if (action.type !== "next-round") throw new ArcadeShellRuleError("unsupported session action");
   if (session.reveal === null) throw new ArcadeShellRuleError("the current round must reveal before navigation");
   if (session.roundIndex >= mode.rounds.length - 1) throw new ArcadeShellRuleError("there is no next round");
   return Object.freeze({ ...session, roundIndex: session.roundIndex + 1, visibleHintCount: 0,
@@ -268,13 +268,6 @@ export function ArcadeShell({ mode, authorizeRevealAction, chooseAnotherDeckHref
     setError(null);
   };
 
-  const restart = () => {
-    setSession((current) => transitionArcadeSession(mode, current, { type: "restart" }));
-    setSelection("");
-    setError(null);
-    setCopied(false);
-  };
-
   return (
     <main className="arcade-shell" data-round-count={mode.rounds.length}>
       <noscript>This game needs JavaScript for answers and progressive evidence.</noscript>
@@ -379,10 +372,11 @@ export function ArcadeShell({ mode, authorizeRevealAction, chooseAnotherDeckHref
                 ? <button type="button" onClick={next}>Next round</button>
                 : <>
                     <p>{formatCompletionResult(session.result!, session.correctRounds, deckTitle)}</p>
-                    <button type="button" onClick={copyResult}>{copied ? "Copied" : "Copy result"}</button>
-                    <button type="button" onClick={restart}>Play again</button>
-                    {newGameHref && <a className="deck-link" href={newGameHref}>Deal new rounds</a>}
-                    {chooseAnotherDeckHref && <a className="deck-link" href={chooseAnotherDeckHref}>Choose another deck</a>}
+                    <div className="completion-actions">
+                      {newGameHref && <a className="primary-action" href={newGameHref}>Deal new rounds</a>}
+                      <button className="secondary-action" type="button" onClick={copyResult}>{copied ? "Copied" : "Copy result"}</button>
+                      {chooseAnotherDeckHref && <a className="deck-link" href={chooseAnotherDeckHref}>Choose another deck</a>}
+                    </div>
                   </>}
             </>
           )}
