@@ -10,9 +10,9 @@ export const DECK_KINDS: Readonly<Record<DeckId, FixtureKind>> = Object.freeze({
 export const MODE_KINDS: Readonly<Record<FixtureKind, DeckId>> = Object.freeze({
   PROJECT: "project", LANGUAGE: "language", BEFORE_AFTER: "before-after", ALGORITHM: "algorithm", OUTPUT: "output", FIX: "fix",
 });
-export const ARTIFACT_SCHEMA_VERSION = "local-experiment-artifact.v3";
+export const ARTIFACT_SCHEMA_VERSION = "local-experiment-artifact.v4";
 export const CONTENT_CLASS = "LOCAL_UNREVIEWED_EXPERIMENT";
-export const PROFILE_VERSION = "local-real-rounds.v4";
+export const PROFILE_VERSION = "local-real-rounds.v5";
 /** A session deals this many rounds from a deck's pool. */
 export const ROUNDS_PER_SESSION = 5;
 /** A deck's pool holds at least one session's rounds and at most this many. */

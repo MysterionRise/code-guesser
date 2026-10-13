@@ -9,7 +9,7 @@ import stream_metadata
 
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-PROFILE_PATH = os.path.join(HERE, "..", "profiles", "local-real-rounds.v4.json")
+PROFILE_PATH = os.path.join(HERE, "..", "profiles", "local-real-rounds.v5.json")
 
 
 def load(path):

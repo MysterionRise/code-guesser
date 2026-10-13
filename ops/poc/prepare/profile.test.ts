@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { CAPACITY_CEILINGS, CrawlProfileError, parseCrawlProfile, poolSizes } from "./profile";
 import { CURATED_REPOSITORIES, FIX_SECTION, OUTPUT_SECTION } from "./testdata/deck-builders";
 
-const profilePath = new URL("../profiles/local-real-rounds.v4.json", import.meta.url);
+const profilePath = new URL("../profiles/local-real-rounds.v5.json", import.meta.url);
 const testModuleName: string = "vitest";
 const { describe, expect, it } = await import(testModuleName) as any;
 
@@ -13,10 +13,10 @@ const rejects = (value: unknown): void => {
   expect(() => parseCrawlProfile(value)).toThrow(CrawlProfileError);
 };
 
-describe("local crawl profile v4", () => {
+describe("local crawl profile v5", () => {
   it("loads the profile with the pinned dataset and twelve languages in look-alike pairs", async () => {
     const profile = parseCrawlProfile(await validProfile());
-    expect(profile.profileVersion).toBe("local-real-rounds.v4");
+    expect(profile.profileVersion).toBe("local-real-rounds.v5");
     expect(profile.stack.revision).toBe("e565caa3a78c2423bd374333a472b049eb090e47");
     expect(profile.stack.configurations).toEqual([
       { language: "Python", configuration: "Python", extensions: [".py"] },
@@ -35,9 +35,9 @@ describe("local crawl profile v4", () => {
     expect(profile.selection).toEqual({
       beforeAfterPool: 10, minimumStarEvents: 1000, popularRepositories: 24, filesPerRepository: 3, ordinaryRows: 200,
     });
-    // The v4 profile reads no curated repositories, so it configures no algorithm deck.
-    expect(poolSizes(profile)).toEqual({ project: 24, language: 24, "before-after": 10, algorithm: 0, output: 0, fix: 0 });
-    expect(profile.curated).toBeUndefined();
+    // The run profile carries the curated section: three more decks of 24 rounds.
+    expect(poolSizes(profile)).toEqual({ project: 24, language: 24, "before-after": 10, algorithm: 24, output: 24, fix: 24 });
+    expect(profile.curated!.repositories.map(({ repository }) => repository)).toEqual(["TheAlgorithms/Python", "TheAlgorithms/Go", "TheAlgorithms/Java"]);
   });
 
   it("accepts the curated section the go-live profile will carry, and rejects a hint that names its family", async () => {

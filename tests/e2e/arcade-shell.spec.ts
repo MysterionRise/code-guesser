@@ -36,7 +36,7 @@ test("the root route offers every deck under the permanent notice", async ({ pag
   await page.goto("/");
   await expect(page.getByText(/Local unreviewed experiment/)).toBeVisible();
   await expect(page.getByRole("heading", { level: 1, name: "Pick a deck" })).toBeVisible();
-  expect(artifact.decks.map(({ id }) => id)).toEqual(["project", "language", "before-after"]);
+  expect(artifact.decks.map(({ id }) => id)).toEqual(["project", "language", "before-after", "algorithm", "output", "fix"]);
   for (const deck of artifact.decks) {
     const link = page.getByRole("link", { name: titlePattern(deck.title) });
     await expect(link).toBeVisible();
@@ -95,4 +95,18 @@ test("each visit deals rounds from the deck's pool", async ({ page }) => {
     seen.add(await currentRound(page));
   }
   expect(seen.size).toBeGreaterThan(1);
+});
+
+test("a fix round numbers its lines, shows each option's code, and highlights the chosen line", async ({ page }) => {
+  await page.goto("/?deck=fix");
+  const pane = page.getByLabel("Code excerpt with numbered lines");
+  await expect(pane).toBeVisible();
+  await expect(pane.locator(".line-number")).toHaveCount(14);
+  const option = page.locator(".candidate").first();
+  const line = Number((await option.locator(".candidate-label").textContent())!.slice("Line ".length));
+  const code = (await pane.locator(`[data-line="${line}"]`).textContent())!.slice(String(line).length).trim();
+  await expect(option.locator(".code-detail")).toHaveText(code);
+  await option.locator("input").check();
+  await expect(pane.locator(`[data-line="${line}"]`)).toHaveClass(/highlighted/u);
+  await expect(pane.locator(".code-line.highlighted")).toHaveCount(1);
 });

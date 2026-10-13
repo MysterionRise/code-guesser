@@ -9,7 +9,7 @@ const createLocalRealExperiment = typeof authorityModule.createLocalRealExperime
   ? authorityModule.createLocalRealExperiment as (input: unknown, expectedArtifactHash: string) => any
   : (): never => { throw new Error("LOCAL_REAL_EXPERIMENT_NOT_IMPLEMENTED"); };
 
-import { COMPOSED_ARTIFACT_HASH, artifact, hash, hashValue } from "./support/local-real-artifact";
+import { COMPOSED_ARTIFACT_HASH, artifact, curatedArtifact, hash, hashValue } from "./support/local-real-artifact";
 
 const DECKS = ["project", "language", "before-after"] as const;
 const create = (value = artifact(), expectedArtifactHash = hashValue(value)) =>
@@ -74,6 +74,21 @@ describe("server-only local real experiment authority v3", () => {
     const pairs = experiment.dealSession("before-after", seeded(3)).rounds.map((round: any) => round.mode.candidates.map(({ label }: any) => label));
     expect(pairs.every((labels: string[]) => labels[0]!.startsWith("A ") && labels[1]!.startsWith("B "))).toBe(true);
     expect(experiment.dealSession("before-after", seeded(3)).rounds[0].content.panes.map((pane: any) => pane.label)).toEqual(["A", "B"]);
+  });
+
+  it("plays all six decks, and keeps a fix round's lines in line order while reshuffling other four-option rounds", () => {
+    const experiment = create(curatedArtifact());
+    expect(experiment.decks.map((deck: any) => `${deck.id}:${deck.poolSize}`))
+      .toEqual(["project:24", "language:24", "before-after:10", "algorithm:8", "output:8", "fix:8"]);
+    for (let seed = 1; seed <= 6; seed += 1) {
+      for (const round of experiment.dealSession("fix", seeded(seed)).rounds) {
+        const lines = round.mode.candidates.map(({ label }: any) => Number(label.slice("Line ".length)));
+        expect(lines).toEqual([...lines].sort((left: number, right: number) => left - right));
+      }
+    }
+    const orders = new Set(Array.from({ length: 6 }, (_, seed) => experiment.dealSession("algorithm", seeded(seed + 1)))
+      .flatMap((mode: any) => mode.rounds.map((round: any) => round.mode.candidates.map(({ candidateId }: any) => candidateId).join("|"))));
+    expect(orders.size).toBeGreaterThan(5);
   });
 
   it("shows two panes for before-or-after rounds, details for project options, and points that equalise chance", () => {

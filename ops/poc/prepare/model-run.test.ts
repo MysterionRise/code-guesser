@@ -12,7 +12,7 @@ const runRecord = () => ({
   schemaVersion: "local-experiment-run.v3",
   executionId: "11111111-1111-4111-8111-111111111111",
   observedAt: "2026-07-31T12:00:00.000Z",
-  profileVersion: "local-real-rounds.v4",
+  profileVersion: "local-real-rounds.v5",
   githubApiVersion: "2022-11-28",
   stackRelease: "v2.2.0",
   stackRevision: "e565caa3a78c2423bd374333a472b049eb090e47",
@@ -152,6 +152,19 @@ describe("operational run records", () => {
       mutate(candidate);
       expect(() => parseRunRecord(candidate)).toThrow(ExperimentRecordError);
     }
+  });
+
+  it("accepts six full decks of selected rounds, and no more than six decks can hold", () => {
+    const sized = (selected: number) => {
+      const candidate = runRecord() as Record<string, any>;
+      candidate.counts.screened = 400;
+      candidate.counts.selected = selected;
+      candidate.result.sourceIdentities = Array.from({ length: selected }, (_, index) =>
+        `owner/project@${commit((index % 10).toString(16))}:src/file-${index}.ts`);
+      return candidate;
+    };
+    expect((parseRunRecord(sized(130)) as any).counts.selected).toBe(130);
+    expect(() => parseRunRecord(sized(241))).toThrow(ExperimentRecordError);
   });
 
   it("bounds operational outcomes by the recorded source capacities and screening relationships", () => {

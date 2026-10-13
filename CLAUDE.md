@@ -3,13 +3,19 @@
 ## Mission
 
 A local-only "guess from the code" game. One preparation run crawls real
-open-source code before play and freezes three decks, each a pool of rounds
+open-source code before play and freezes six decks, each a pool of rounds
 from which every game deals five:
 
 - "Which project?": 24 rounds of popular repositories from The Stack v2.
 - "Which language?": 24 rounds over twelve languages in look-alike pairs,
   from The Stack v2.
 - "Before or after?": 10 refactor commits from GitHub search.
+- "Which algorithm?": 24 TheAlgorithms files (Python, Go, Java), names hidden
+  as `mystery`, offered against their family of four.
+- "Predict the output": 24 TheAlgorithms/Python functions and one doctest
+  call each, read as text and never run.
+- "Spot the fix": 24 one-line fixes that Defects4J and BugsInPy record,
+  confirmed against each upstream fix commit.
 
 The goal is a demo on one machine, not public play.
 
@@ -17,9 +23,8 @@ The goal is a demo on one machine, not public play.
 
 1. `docs/review/2026-10-11-codeguessr-state-review.md`: current product and
    engineering review, decisions, and the roadmap.
-2. `docs/review/2026-10-13-new-rounds-research.md`: the new decks being built
-   (Which algorithm?, Predict the output, Spot the fix), the sources checked,
-   and the backlog.
+2. `docs/review/2026-10-13-new-rounds-research.md`: the three decks added in
+   Phase 3b, the sources checked, and the backlog of further decks.
 3. `docs/review/2026-10-13-next-sources-plan.md`: the plan for forges beyond
    GitHub (GitLab, Software Heritage) and the era deck.
 4. `README.md`: how to play, prepare, record, and verify.
@@ -49,90 +54,82 @@ gate: changing queries, retries, ceilings, deck rules, or running
 ## Current state
 
 - Phases 0 to 3a are merged into `main` (#7 Phase 0, #8 Phase 1, #9 Phase 2,
-  #10 Phase 3a, merged 2026-10-13). Start new work from `main`.
-- The game plays profile `ops/poc/profiles/local-real-rounds.v4.json` and
-  artifact schema `local-experiment-artifact.v3` from the root-route deck
-  chooser (`/?deck=project|language|before-after`). A page load deals five
-  rounds from the deck's pool; `dealSession` in
+  #10 Phase 3a). Phase 3b is a stack of pull requests, each on the one before:
+  #12 curated sources, #13 algorithm, #14 output, #15 fix, #16 game UX, and the
+  go-live pull request. Merge them in that order, then start new work from
+  `main`.
+- The game plays profile `ops/poc/profiles/local-real-rounds.v5.json` and
+  artifact schema `local-experiment-artifact.v4` from the root-route deck
+  chooser (`/?deck=project|language|before-after|algorithm|output|fix`). A
+  page load deals five rounds from the deck's pool; `dealSession` in
   `apps/game/src/demo/local-real-experiment.server.ts` does it server-side.
 - The committed artifact `apps/game/src/demo/generated/local-real-rounds.json`
-  came from the 2026-10-13 v4 run (1,146 of 3,000 requests).
+  came from the 2026-10-13 v5 run (1,859 of 3,000 requests).
   - Its canonical SHA-256
-    `ba7ce4346ca492c5791eb64da220441443f780822ef9257fb8df5bd47a2fc3af` is
+    `1427cf105672682d0dd89ff7a1d7975b9001f939f0dcbefc0126c79160e8459a` is
     pinned in `apps/game/src/demo/local-real-experiment.pin.server.ts`; the
     preparer writes the pin.
-  - Evidence: `docs/review/evidence/2026-10-13-v4-stack-growth-run.md`.
+  - Evidence: `docs/review/evidence/2026-10-13-v5-six-decks-run.md`.
   - The run's journal is in `ops/poc/stack/tmp/journal/run.jsonl` on this
     machine, so `STACK_V2_ACKNOWLEDGED_USABLE_REVISION=… pnpm prepare:poc
     --offline` rebuilds it byte for byte with no network.
-- Phases 0–2 of the review roadmap and Phase 3a are done:
-  - Phase 0: diagnostics, retries, yield, and UI quick wins.
-  - Phase 1: the module split, the run journal (`--resume`, `--offline`),
-    per-deck publication, the failure report, `ops/poc/limits.json`, and
-    `packages/artifact` as the one parser and hash.
-  - Phase 2: the v3 decks. The generators are `project-rounds.ts`,
-    `language-rounds.ts`, and `before-after-rounds.ts`; the selectors are
-    `select-stack.ts` and `select-github.ts`. The windows come from
-    `code-windows.ts`. The game deals sessions, shows panes and option
-    details, highlights the answer, and scores 250 × options per round. The
-    leakage test is `packages/artifact/test/deck-leakage.test.ts`.
-  - Phase 3a, growing The Stack v2:
-    - **Rows:** twelve languages in look-alike pairs (`LANGUAGE_PAIRS` in
-      `packages/artifact`). The worker reads each language's whole first row
-      group and returns a bounded sample (`selection.popularRepositories`,
-      `filesPerRepository`, `ordinaryRows`).
-    - **Language deck:** two whole pairs per round in a private cycle. A
-      round's code must tell its language from the look-alike
-      (`language-markers.ts`).
-    - **Project deck:** two rounds per language, each repository an option
-      in one language only.
-    - **Journal:** keeps failures for offline replay, and a journal miss
-      fails the run.
+- Done so far:
+  - **Phase 0:** diagnostics, retries, yield, and UI quick wins.
+  - **Phase 1:**
+    - the module split;
+    - the run journal (`--resume`, `--offline`);
+    - per-deck publication and the failure report;
+    - `ops/poc/limits.json`;
+    - `packages/artifact` as the one parser and hash.
+  - **Phase 2:** the v3 decks.
+    - Generators: `project-rounds.ts`, `language-rounds.ts`,
+      `before-after-rounds.ts`.
+    - Selectors: `select-stack.ts`, `select-github.ts`; windows come from
+      `code-windows.ts`.
+    - The game deals sessions, shows panes and option details, highlights the
+      answer, and scores 250 × options per round.
+    - The leakage test is `packages/artifact/test/deck-leakage.test.ts`.
+  - **Phase 3a:** The Stack v2 grown to twelve languages in look-alike pairs
+    (`LANGUAGE_PAIRS`). The language deck offers two whole pairs per round and
+    must tell a language from its look-alike (`language-markers.ts`).
+  - **Phase 3b,** the curated decks. Each runs only when the profile carries
+    its `curated` section, after the Stack and search decks.
+    - **Curated files:** `github-files.ts` reads a file at a pinned commit
+      through verified trees, with its licence and last human author.
+      `github-fixes.ts` lists dataset bugs (BugsInPy's through one recursive
+      listing with every subtree hash-checked) and confirms each one-line fix
+      upstream.
+    - **Which algorithm?:** `select-algorithm.ts`, `algorithm-rounds.ts`,
+      `function-windows.ts`. Commentary is stripped, and names and label words
+      are masked, the words even across camelCase.
+    - **Predict the output:** `doctest-parse.ts`, `select-output.ts`,
+      `output-rounds.ts`.
+    - **Spot the fix:** `fix-patch.ts`, `select-fix.ts`, `fix-window.ts`,
+      `fix-rounds.ts`.
+    - **Balance:** `balancedChoice` in `round-helpers.ts` picks answers so they
+      balance in every order a code-blind solver might use (position, text,
+      centrality, length). The shared parser checks each deck's rules.
+    - **Game:**
+      - the chooser shows two columns, each deck tagged Recognise or Reason;
+      - fix rounds number their lines, show each option's code, keep line
+        order, and highlight the chosen line;
+      - panes keep their own whitespace.
+    - An author name that is an email address is rejected as contact data.
 - Port 3000 may be taken locally by an unrelated Docker container; run browser
   tests with `E2E_PORT=3200 pnpm test:e2e`.
 
 ## Next steps
 
-Three new decks, one pull request each, from
-`docs/review/2026-10-13-new-rounds-research.md`:
+1. Merge the Phase 3b stack (#12 → #16, then go-live).
+2. Phase 3c, in `docs/review/2026-10-13-next-sources-plan.md`: other forges
+   (GitLab, Software Heritage) and the "Which era?" deck. It has open decisions
+   (licence allowlist, accounts) to settle with the user first.
+3. The research note's backlog: guess the commit message (the user said "not
+   now"), name the function, which exercise, which framework, vulnerable or
+   fixed.
 
-1. Done: the curated-source slice. `bindGitHubFile` in `github-files.ts`
-   reads one file of a curated repository at a pinned commit, with its
-   licence and last human author. The artifact's deduplication, panes, and
-   source validators are per kind.
-2. Done, staged: Which algorithm? (`algorithm`). `select-algorithm.ts`,
-   `algorithm-rounds.ts`, and `function-windows.ts` (commentary stripped, the
-   algorithm's names and label words masked as `mystery`). The real table
-   (TheAlgorithms Python, Go, Java at pinned commits; eight families of four)
-   is in `ops/poc/prepare/testdata/curated-section.json`; the deck runs only
-   when a profile carries a `curated` section, which v4 does not.
-3. Done, staged: Predict the output (`output`). `doctest-parse.ts` reads
-   TheAlgorithms/Python doctests statically and never runs them;
-   `select-output.ts` reads files in hash order and binds only usable ones;
-   `balancedAnswers` in `output-rounds.ts` picks answers so they fill every
-   rank in both shown and text order, and never repeat an argument. Its
-   go-live section is in the same `curated-section.json`.
-4. Done, staged: Spot the fix (`fix`). `github-fixes.ts` lists each
-   dataset's bugs from verified trees (BugsInPy's through one recursive
-   listing whose every subtree is hash-checked). It confirms each one-line fix
-   upstream: one parent, a one-line diff equal to the dataset's, the licence
-   at the parent, and a human author. `fix-window.ts` offers every window;
-   `balancedChoice` in `round-helpers.ts` picks one per round so the answers
-   balance by position and centrality, and within ten points by length. Its
-   go-live section is in `curated-section.json`.
-5. Done: game UX for six decks. The chooser shows two columns from 640px
-   and tags each deck "Recognise" or "Reason". Fix rounds number their lines,
-   show each option's line of code (its accessible description too), and
-   highlight the focused, chosen, or revealed line. Panes keep their own
-   whitespace.
-6. Next: go live. Profile v5 with the curated section from
-   `curated-section.json`, artifact schema v4, a live `--resume` run, every
-   round read, the recorder's scenes for the three new decks, and the media.
-
-Keep the committed profile and artifact unchanged until the go-live pull
-request. Test each deck with in-test profiles and recorded fixtures. Ask
-before widening the licence allowlist, raising the 3,000-request ceiling, or
-adding a source not named in the research note.
+Ask before widening the licence allowlist, raising the 3,000-request ceiling,
+or adding a source not named in the research note.
 
 Iterate on deck rules with
 `STACK_V2_ACKNOWLEDGED_USABLE_REVISION=e565caa3a78c2423bd374333a472b049eb090e47 pnpm prepare:poc --offline`

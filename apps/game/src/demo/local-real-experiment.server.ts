@@ -136,8 +136,10 @@ const dealFrom = (derived: DerivedDeck, artifact: JsonRecord, random: () => numb
     ...publicRound,
     mode: {
       ...publicRound.mode,
-      // Two options keep their natural A-then-B order; four are reshuffled every session.
-      candidates: publicRound.mode.candidates.length > 2 ? shuffle(publicRound.mode.candidates, random) : [...publicRound.mode.candidates],
+      // Two options keep their natural A-then-B order and a fix round's lines their line order, which the deck
+      // already balances; other four-option rounds are reshuffled every session.
+      candidates: publicRound.mode.candidates.length > 2 && publicRound.mode.kind !== "fix"
+        ? shuffle(publicRound.mode.candidates, random) : [...publicRound.mode.candidates],
     },
   }));
   return createPublicModeContract({

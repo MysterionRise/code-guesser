@@ -14,7 +14,7 @@ const codeOf = (callback: () => unknown): string | undefined => {
 describe("pooled experiment composition", () => {
   it("composes the project, language, and before-or-after pools into one artifact", () => {
     const composed = composeExperimentArtifact(composeInput());
-    expect(composed.artifact.schemaVersion).toBe("local-experiment-artifact.v3");
+    expect(composed.artifact.schemaVersion).toBe("local-experiment-artifact.v4");
     expect(composed.artifact.decks.map(({ id, fixtures, roundsPerSession }) => `${id}:${fixtures.length}:${roundsPerSession}`))
       .toEqual(["project:24:5", "language:24:5", "before-after:10:5"]);
     expect(composed.artifact.decks.map(({ title }) => title)).toEqual(["Which project?", "Which language?", "Before or after?"]);

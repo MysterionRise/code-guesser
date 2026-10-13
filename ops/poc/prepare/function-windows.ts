@@ -142,14 +142,15 @@ const fold = (value: string): string => value.toLocaleLowerCase("en-US").replace
 const segments = (identifier: string): readonly Readonly<{ text: string; start: number; end: number }>[] =>
   [...identifier.matchAll(/[A-Z]+(?![a-z])|[A-Z]?[a-z]+|[0-9]+/gu)].map((match) =>
     ({ text: match[0], start: match.index!, end: match.index! + match[0].length }));
+/** `mystery` in the case of what it replaces; underscores inside a replaced span (`PIGEON_HOLE`) do not count. */
 const styled = (original: string): string =>
-  /^[A-Z0-9]{2,}$/u.test(original) ? "MYSTERY" : /^[A-Z]/u.test(original) ? "Mystery" : "mystery";
+  /^[A-Z0-9]{2,}$/u.test(original.replaceAll("_", "")) ? "MYSTERY" : /^[A-Z]/u.test(original) ? "Mystery" : "mystery";
 
 /**
- * One identifier with each run of its words that spells a name replaced (longest first from the left), and then
- * each remaining word that starts with one of `prefixes` (`buckets` for the prefix `bucket`).
+ * One identifier with each run of its words that spells a name replaced, longest first from the left; label words
+ * are masked afterwards by `maskLabelWords`.
  */
-const maskIdentifier = (identifier: string, names: ReadonlySet<string>, prefixes: readonly string[]): Readonly<{ text: string; named: boolean }> => {
+const maskIdentifier = (identifier: string, names: ReadonlySet<string>): Readonly<{ text: string; named: boolean }> => {
   const words = segments(identifier);
   const pieces: string[] = [];
   let cursor = 0;
@@ -165,17 +166,38 @@ const maskIdentifier = (identifier: string, names: ReadonlySet<string>, prefixes
       start = end + 1;
       continue;
     }
-    // A label word masks only its own letters, so `coin` and `coins` stay distinct as `mystery` and `mysterys`.
-    const word = words[start]!;
-    const prefix = prefixes.find((candidate) => fold(word.text).startsWith(candidate));
-    if (prefix !== undefined) {
-      pieces.push(identifier.slice(cursor, word.start), styled(word.text.slice(0, prefix.length)));
-      cursor = word.start + prefix.length;
-    }
     start += 1;
   }
   pieces.push(identifier.slice(cursor));
   return Object.freeze({ text: pieces.join(""), named });
+};
+
+/** Label words masked in one identifier never take more passes than this. */
+const MAXIMUM_LABEL_MASKS = 16;
+
+/**
+ * Masks each run of an identifier's letters that begins a word and spells one of `prefixes`, across word
+ * boundaries: `pigeonHoles` becomes `mysterys` and `createPigeonHoles` becomes `createMysterys`. A label word masks
+ * only its own letters, so `coin` and `coins` stay distinct as `mystery` and `mysterys`.
+ */
+const maskLabelWords = (identifier: string, prefixes: readonly string[]): string => {
+  let result = identifier;
+  for (let pass = 0; pass < MAXIMUM_LABEL_MASKS; pass += 1) {
+    const letters = [...result].flatMap((character, index) => /[A-Za-z0-9]/u.test(character) ? [index] : []);
+    const folded = letters.map((index) => result[index]!.toLocaleLowerCase("en-US")).join("");
+    const starts = new Set(segments(result).map(({ start }) => start));
+    let span: Readonly<{ from: number; to: number }> | undefined;
+    for (const prefix of prefixes) {
+      for (let at = folded.indexOf(prefix); at >= 0 && span === undefined; at = folded.indexOf(prefix, at + 1)) {
+        const from = letters[at]!;
+        if (starts.has(from) && !/^mystery/iu.test(result.slice(from))) span = { from, to: letters[at + prefix.length - 1]! + 1 };
+      }
+      if (span) break;
+    }
+    if (!span) return result;
+    result = `${result.slice(0, span.from)}${styled(result.slice(span.from, span.to))}${result.slice(span.to)}`;
+  }
+  return result;
 };
 
 export interface MaskedCode {
@@ -201,9 +223,9 @@ export const maskNames = (text: string, terms: MaskTerms): MaskedCode => {
   const exact = new Set(terms.symbols);
   const masked: string[] = [];
   const output = text.replace(/[A-Za-z_][A-Za-z0-9_]*/gu, (identifier) => {
-    const result = exact.has(identifier) ? { text: styled(identifier), named: true } : maskIdentifier(identifier, folded, prefixes);
+    const result = exact.has(identifier) ? { text: styled(identifier), named: true } : maskIdentifier(identifier, folded);
     if (result.named && !masked.includes(identifier)) masked.push(identifier);
-    return result.text;
+    return maskLabelWords(result.text, prefixes);
   });
   return Object.freeze({ text: output, masked: Object.freeze(masked) });
 };

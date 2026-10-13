@@ -260,7 +260,7 @@ const logLines = (calls: readonly string[]): string[] =>
 
   it("skips files another deck shows, and skips the output deck alone when its reads run out", async () => {
     const files = new Map([...curatedFiles(), ...outputFiles()]);
-    const raw = JSON.parse(await readFile(new URL("../profiles/local-real-rounds.v4.json", import.meta.url), "utf8"));
+    const raw = JSON.parse(await readFile(new URL("../profiles/local-real-rounds.v5.json", import.meta.url), "utf8"));
     const wide = parseCrawlProfile({ ...raw, selection: { ...raw.selection, beforeAfterPool: 5 }, curated: {
       repositories: CURATED_REPOSITORIES, algorithm: CURATED_SECTION.algorithm,
       output: { ...OUTPUT_SECTION, directories: ["algorithms", "maths", "strings"], fileReads: 8 } } });
@@ -295,7 +295,7 @@ const logLines = (calls: readonly string[]): string[] =>
   });
 
   it("skips the fix deck alone when its patch reads run out", async () => {
-    const raw = JSON.parse(await readFile(new URL("../profiles/local-real-rounds.v4.json", import.meta.url), "utf8"));
+    const raw = JSON.parse(await readFile(new URL("../profiles/local-real-rounds.v5.json", import.meta.url), "utf8"));
     const narrow = parseCrawlProfile({ ...raw, selection: { ...raw.selection, beforeAfterPool: 5 },
       curated: { repositories: CURATED_REPOSITORIES, fix: { ...FIX_SECTION, patchReads: 8 } } });
     const harness = await makeHarness({}, { profile: narrow, fix: fixHarnessData() });

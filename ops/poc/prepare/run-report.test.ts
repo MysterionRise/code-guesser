@@ -12,7 +12,7 @@ const successReport = () => ({
   schemaVersion: "local-experiment-run.v3",
   executionId: "11111111-1111-4111-8111-111111111111",
   observedAt: "2026-07-31T12:00:00.000Z",
-  profileVersion: "local-real-rounds.v4",
+  profileVersion: "local-real-rounds.v5",
   githubApiVersion: "2022-11-28",
   stackRelease: "v2.2.0",
   stackRevision: "e565caa3a78c2423bd374333a472b049eb090e47",
