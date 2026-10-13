@@ -280,6 +280,7 @@ If Playwright reports that Chromium is missing on a fresh machine, run
 | `ops/poc/limits.json` | Pinned Stack revision and hard ceilings shared by Node and Python |
 | `ops/demo/record` | Scripted README media recorder |
 | `tests` | Accessibility, browser, performance, and containment suites |
+| [`docs/architecture.md`](docs/architecture.md) | The flow from preparation to play, the artifact's shape, and a glossary of field names |
 | `docs/review` | Current state review and roadmap |
 | `docs/gangsta` | Historical record of the retired Contract process |
 

@@ -18,6 +18,8 @@ on the owner's decisions.
 Phase 3b by PR: #12 curated sources, #13 algorithm deck, #14 output deck,
 #15 fix deck, #16 game UX, #17 go-live, #18 the vertical `demo.gif`.
 
+- [Architecture](../architecture.md): the flow from preparation to play, the
+  artifact's shape, and a glossary.
 - [State review](2026-10-11-codeguessr-state-review.md): the 2026-10-11
   decisions and roadmap, and the historical findings they came from.
 - [New rounds research](2026-10-13-new-rounds-research.md): the three decks
