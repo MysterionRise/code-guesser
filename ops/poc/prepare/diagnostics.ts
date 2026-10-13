@@ -2,9 +2,14 @@ import { CapacityError } from "./capacity";
 
 /** Where a rejected candidate failed; rejection aggregates are keyed by stage and reason code. */
 export type DiagnosticStage = "DISCOVERY" | "ADMISSION" | "BLOB_RETRIEVAL" | "GITHUB_REVALIDATION" | "SCREENING" | "DEDUPLICATION" | "SELECTION";
-/** The stage a run was in when it failed, as named on the `PREPARATION_STAGE_FAILED` line. */
+/**
+ * The stage a run was in when it failed, as named on the `PREPARATION_STAGE_FAILED` line. `GENERATION` binds the
+ * selected sources to the final snapshot, generates every deck's rounds, and composes the artifact; `REPORT`
+ * builds and validates the run report; `PUBLICATION` writes the report, the artifact, and its pin.
+ */
 export type FailureStage =
-  | "PREFLIGHT" | "DISCOVERY" | "ADMISSION" | "STACK_METADATA" | "BLOB_RETRIEVAL" | "CURATED_FILES" | "SELECTION" | "PUBLICATION";
+  | "PREFLIGHT" | "DISCOVERY" | "ADMISSION" | "STACK_METADATA" | "BLOB_RETRIEVAL" | "CURATED_FILES" | "SELECTION"
+  | "GENERATION" | "REPORT" | "PUBLICATION";
 
 export interface RunState {
   readonly diagnostics: Map<string, number>;
@@ -28,11 +33,18 @@ const STATUS_CLASS = /^(?:none|[1-5]xx)$/u;
 const FAILURE_CAUSE_DEPTH = 4;
 export type FailureDiagnostic = Readonly<{ code: string; statusClass: string }>;
 
+/**
+ * The retry controller wraps every failure that asked for no retry (a 401, a 404, a malformed body, a refused
+ * policy) as `RETRY_SIGNAL_MISSING`. The wrapper says nothing the failure does not, so it reports its cause.
+ */
+export const reportedFailure = (error: unknown): unknown =>
+  error instanceof Error && (error as { code?: unknown }).code === "RETRY_SIGNAL_MISSING" && error.cause !== undefined ? error.cause : error;
+
 /** Retains only a stable reason code and status class from a failure chain; anything else is dropped before logging. */
 export const failureDiagnostic = (error: unknown): FailureDiagnostic | undefined => {
   let code: string | undefined;
   let statusClass = "none";
-  let current: unknown = error;
+  let current: unknown = reportedFailure(error);
   for (let depth = 0; depth < FAILURE_CAUSE_DEPTH && typeof current === "object" && current !== null; depth += 1) {
     const { code: candidate, diagnostic, cause } = current as Record<string, unknown>;
     if (code === undefined && typeof candidate === "string" && REASON_CODE.test(candidate)) code = candidate;
@@ -67,18 +79,16 @@ export const failureSite = (error: unknown): string | undefined => {
   return undefined;
 };
 
-/** The stable code of a candidate rejection: a wrapped retry failure reports its transport cause instead of the wrapper. */
-const rejectionCode = (error: unknown): string => {
-  const codeOf = (value: unknown): string | undefined => {
-    if (!(value instanceof Error)) return undefined;
-    const { code } = value as Error & { code?: unknown };
-    if (typeof code === "string" && REASON_CODE.test(code)) return code;
-    return REASON_CODE.test(value.message) ? value.message : undefined;
-  };
-  const own = codeOf(error);
-  if (own === "RETRY_SIGNAL_MISSING") return codeOf((error as Error).cause) ?? own;
-  return own ?? "CANDIDATE_REJECTED";
+/** An error's stable code: its `code`, or a message that is itself a code. */
+const codeOf = (value: unknown): string | undefined => {
+  if (!(value instanceof Error)) return undefined;
+  const { code } = value as Error & { code?: unknown };
+  if (typeof code === "string" && REASON_CODE.test(code)) return code;
+  return REASON_CODE.test(value.message) ? value.message : undefined;
 };
+
+/** The stable code of a candidate rejection: a wrapped retry failure reports its transport cause instead of the wrapper. */
+const rejectionCode = (error: unknown): string => codeOf(reportedFailure(error)) ?? codeOf(error) ?? "CANDIDATE_REJECTED";
 
 export const noteRejection = (state: RunState, stage: DiagnosticStage, error: unknown): void => {
   const key = `${stage}\0${rejectionCode(error)}`;

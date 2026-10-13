@@ -7,14 +7,14 @@ import { fetchSelectedBlob } from "./blob-worker";
 import { canonicalHash } from "./canonical";
 import { CapacityError, createCapacityMeter } from "./capacity";
 import { GitHubSearchError } from "./github-search";
-import { openJournal } from "./journal";
+import { JournalError, openJournal } from "./journal";
 import { HARNESS_CANDIDATES, accepted, classificationsFor, harnessRow, hash, loadProfile, makeHarness } from "./command-test-harness";
 import {
   CURATED_REPOSITORIES, CURATED_SECTION, FIX_SECTION, OUTPUT_SECTION, curatedFiles, fixHarnessData, loadCuratedProfile, outputFiles, sha256,
 } from "./testdata/deck-builders";
 import { LANGUAGE_SLUGS } from "../../../packages/artifact/src/index";
 import { STACK_LANGUAGES, parseCrawlProfile } from "./profile";
-import { RetryError } from "./retry";
+import { createRetryController, RetryError } from "./retry";
 import { createRunReport } from "./run-report";
 import { workerStage } from "./runtime";
 import { collectStackMetadata, StackMetadataError, type StackMetadataRow } from "./stack-metadata";
@@ -925,14 +925,16 @@ const logLines = (calls: readonly string[]): string[] =>
       "log:PREPARATION_FAILED",
     ]);
 
+    // A revoked token: the search answers 401, which asks for no retry, so the retry controller wraps it.
     const diagnostic = { provider: "github", hostClass: "github", method: "GET", pathTemplate: "/search/commits",
       statusClass: "4xx", reasonCode: "UNSUPPORTED_STATUS" } as const;
+    const retry = createRetryController({ maxRunRetries: 1, maxWaitMilliseconds: 1, maxTotalWaitMilliseconds: 1, sleep: async () => undefined });
     const search = await makeHarness({
-      searchGitHub: async () => { throw new RetryError("RETRY_SIGNAL_MISSING", new TransportError("UNSUPPORTED_STATUS", diagnostic)); },
+      searchGitHub: () => retry.execute(async () => { throw new TransportError("UNSUPPORTED_STATUS", diagnostic, 401); }),
     });
     await expect(prepareLocalExperiment(search.dependencies)).rejects.toThrow("PREPARATION_FAILED");
     expect(logLines(search.calls)).toEqual([
-      "log:PREPARATION_STAGE_FAILED DISCOVERY RETRY_SIGNAL_MISSING 4xx",
+      "log:PREPARATION_STAGE_FAILED DISCOVERY UNSUPPORTED_STATUS 4xx",
       "log:PREPARATION_FAILED",
     ]);
 
@@ -971,6 +973,31 @@ const logLines = (calls: readonly string[]): string[] =>
     expect(logLines(unsafe.calls)).toEqual([
       "log:PREPARATION_STAGE_FAILED DISCOVERY UNCODED_ERROR none",
       "log:PREPARATION_FAILED",
+    ]);
+  });
+
+  it("names the generation, report, and curated-file stages when they fail, with the selection counts", async () => {
+    const counts = "log:PREPARATION_COUNTS discovered=8 admitted=5 duplicates=0";
+    const rejections = "log:PREPARATION_REJECTIONS SCREENING:LANGUAGE_ROUNDS_REJECTED=1";
+    const composing = await makeHarness({ compose: () => { throw Object.assign(new Error("EXPERIMENT_COMPOSITION_REJECTED"), { code: "DECK_SIZE_PROJECT" }); } });
+    await expect(prepareLocalExperiment(composing.dependencies)).rejects.toThrow("PREPARATION_FAILED");
+    expect(logLines(composing.calls)).toEqual([
+      "log:PREPARATION_STAGE_FAILED GENERATION DECK_SIZE_PROJECT none", counts, rejections, "log:PREPARATION_FAILED",
+    ]);
+
+    // The real run-report parser, given a selected count above its bound (v5 run 1's failure).
+    const reporting = await makeHarness({ createReport: (input: any) => createRunReport({ ...input, counts: { ...input.counts, selected: 10_000 } }) });
+    await expect(prepareLocalExperiment(reporting.dependencies)).rejects.toThrow("PREPARATION_FAILED");
+    expect(logLines(reporting.calls)).toEqual([
+      "log:PREPARATION_STAGE_FAILED REPORT EXPERIMENT_RECORD_REJECTED none", counts, rejections, "log:PREPARATION_FAILED",
+    ]);
+    expect(reporting.calls).not.toContain("report:stage");
+
+    const curated = await makeHarness({ bindCuratedFile: async () => { throw new JournalError("JOURNAL_MISS"); } },
+      { profile: loadCuratedProfile({ beforeAfterPool: 5 }), curatedFiles: curatedFiles() });
+    await expect(prepareLocalExperiment(curated.dependencies)).rejects.toThrow("PREPARATION_FAILED");
+    expect(logLines(curated.calls)).toEqual([
+      "log:PREPARATION_STAGE_FAILED CURATED_FILES JOURNAL_MISS none", counts, rejections, "log:PREPARATION_FAILED",
     ]);
   });
 

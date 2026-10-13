@@ -174,7 +174,14 @@ with spend, capacity counts, and rejection aggregates.
   whole run, even inside one candidate, so a replay never publishes fewer decks
   than the run it replays.
 
-- `RETRY_SIGNAL_MISSING 4xx`: a 403/429 without a usable retry instruction.
+- `UNSUPPORTED_STATUS 4xx`: a status the preparer does not accept (a 401
+  from a revoked token, a 404, or a 403/429 without a usable retry
+  instruction). The retry controller's `RETRY_SIGNAL_MISSING` wrapper is
+  reported as the failure it wraps.
+- Stages after `SELECTION`: `GENERATION` (binding sources to the final
+  snapshot, generating rounds, composing the artifact), `REPORT` (the run
+  report's validation), then `PUBLICATION`. A failure from `ADMISSION` to
+  `REPORT` also logs `PREPARATION_COUNTS` and `PREPARATION_REJECTIONS`.
 - `WAIT_LIMIT`: a retry instruction longer than the fifteen-second wait.
 - `BUDGET_EXHAUSTED_<BUDGET>`: a run-wide budget (requests, blob attempts or
   bytes, metadata bytes, retries, waits, temporary disk) ran out; the deck
