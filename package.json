@@ -20,7 +20,7 @@
   },
   "devDependencies": {
     "@codeguessr/content": "workspace:*",
-    "@playwright/test": "1.49.1",
+    "@playwright/test": "1.64.0",
     "@types/node": "20.17.10",
     "tsx": "4.23.1",
     "typescript": "5.7.2",

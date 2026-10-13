@@ -84,7 +84,10 @@ pnpm install --frozen-lockfile
 pnpm --filter @codeguessr/game dev
 ```
 
-Open [http://127.0.0.1:3000](http://127.0.0.1:3000). The root route reads
+Open [http://127.0.0.1:3000](http://127.0.0.1:3000). The server listens on
+127.0.0.1 only, so other machines on the network cannot reach it. If another
+app holds port 3000, pick another port with `PORT`, such as
+`PORT=3200 pnpm --filter @codeguessr/game dev`. The root route reads
 `apps/game/src/demo/generated/local-real-rounds.json`, checks it against the
 pinned hash in `apps/game/src/demo/local-real-experiment.pin.server.ts`, and
 makes no network requests while you play. If the artifact is missing, has the
@@ -96,6 +99,8 @@ For a production-mode local run:
 pnpm --filter @codeguessr/game build
 pnpm --filter @codeguessr/game start
 ```
+
+`start` also listens on 127.0.0.1 only and takes the same `PORT`.
 
 ### Recording the demo
 
@@ -252,7 +257,9 @@ uv run --project ops/poc/stack --locked python -m unittest discover -s ops/poc/s
 ```
 
 If Playwright reports that Chromium is missing on a fresh machine, run
-`pnpm exec playwright install chromium`.
+`pnpm exec playwright install chromium`. `pnpm test:e2e` starts its own dev
+server on port 3000; if another app holds it, run
+`E2E_PORT=3200 pnpm test:e2e`.
 
 ## Repository map
 

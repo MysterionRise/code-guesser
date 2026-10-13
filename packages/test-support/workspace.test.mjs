@@ -48,6 +48,19 @@ test("defines one CI workflow that pins the toolchain and runs every verificatio
   assert.doesNotMatch(workflow, /secrets\.|HF_TOKEN|AWS_|GITHUB_TOKEN|prepare:poc/u, "CI must need no provider secrets and never run live preparation");
 });
 
+test("binds the game's dev and production servers to 127.0.0.1 only", () => {
+  const { scripts } = JSON.parse(readWorkspaceFile("apps/game/package.json"));
+  for (const [name, command] of [
+    ["dev", "next dev"],
+    ["start", "next start"],
+  ]) {
+    const script = scripts[name];
+    assert.ok(script?.startsWith(`${command} `), `apps/game "${name}" must run ${command}`);
+    const hosts = [...script.matchAll(/(?:^|\s)(?:--hostname|-H)(?:\s+|=)(\S+)/gu)].map((match) => match[1]);
+    assert.deepEqual(hosts, ["127.0.0.1"], `apps/game "${name}" must bind --hostname 127.0.0.1 and no other host`);
+  }
+});
+
 test("links the CI badge from the README", () => {
   const readme = readWorkspaceFile("README.md");
   assert.ok(
