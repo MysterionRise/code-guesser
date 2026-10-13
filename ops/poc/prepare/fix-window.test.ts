@@ -30,6 +30,8 @@ describe("fix windows", () => {
       for (const window of windows) {
         const pane = window.excerpt.split("\n");
         expect(pane).toHaveLength(14);
+        expect(pane[0]!.trim()).not.toBe("");
+        expect(pane.at(-1)!.trim()).not.toBe("");
         expect(pane[window.answer - 1]).toBe(fix.buggyLine);
         expect(window.windowStart + window.answer - 1).toBe(fix.changedLine);
         expect(window.decoys).toHaveLength(3);

@@ -73,7 +73,8 @@ const DECOY_CHOICES = 6;
  * Every window of `size` lines a round could show: each start that holds the changed line, and each way to place
  * three decoys so the changed line takes some rank (from zero) among four options there. Decoys are option lines
  * whose length is within half of the changed line's (or eight characters, for a short line), never its text, drawn
- * from the first few eligible lines above and below in `seed` order. Empty when no window fits.
+ * from the first few eligible lines above and below in `seed` order. A window never starts or ends on a blank
+ * line. Empty when no window fits.
  */
 export const fixWindows = (text: string, changedLine: number, seed: string, size: number): readonly FixWindow[] => {
   const lines = text.replace(/\r\n?/gu, "\n").split("\n").map((line) => line.trimEnd());
@@ -89,6 +90,8 @@ export const fixWindows = (text: string, changedLine: number, seed: string, size
     const above = order(`${seed}:above`, Array.from({ length: index - start }, (_, offset) => start + offset).filter(fits));
     const below = order(`${seed}:below`, Array.from({ length: start + size - index - 1 }, (_, offset) => index + 1 + offset).filter(fits));
     const pane = lines.slice(start, start + size);
+    // A pane that opens or closes on a blank line looks cut off, and trimming it anywhere would shift every line.
+    if (pane[0]!.trim().length === 0 || pane.at(-1)!.trim().length === 0) continue;
     const answer = index - start + 1;
     for (let rank = 0; rank < 4; rank += 1) {
       for (const upper of combinations(above.slice(0, DECOY_CHOICES), rank)) {
