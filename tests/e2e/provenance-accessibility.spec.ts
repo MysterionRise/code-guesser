@@ -14,7 +14,7 @@ test("records local Chromium provenance observations without promoting them to s
     animations: document.getAnimations().map((animation) => {
       const effect = animation.effect;
       const target = effect instanceof KeyframeEffect && effect.target instanceof Element ? effect.target : null;
-      return { animationName: animation.animationName, target: target?.tagName ?? null, className: target?.className ?? null };
+      return { animationName: animation instanceof CSSAnimation ? animation.animationName : null, target: target?.tagName ?? null, className: target?.className ?? null };
     }),
   }));
   expect(motion.reduce).toBe(true);

@@ -6,6 +6,7 @@ import {
   promoteReserveBeforeIssue,
   quarantineAffectedRound,
   utcCompletionStreak,
+  type PreIssueReserveInput,
   type ResultCorrectionStatus,
   type SessionResultsInput,
 } from "../src/results/index.js";
@@ -50,13 +51,13 @@ describe("correction-aware results and re-entry", () => {
   });
 
   it("rejects a pre-issue reserve with a different mode or difficulty", () => {
-    const base = {
+    const base: PreIssueReserveInput = {
       currentManifestVersionId: "manifest-v1", successorManifestVersionId: "manifest-v2",
       affectedRoundId: "round-1", reserveRoundId: "reserve-7", affectedMode: "language",
       reserveMode: "provenance", affectedDifficulty: "medium", reserveDifficulty: "hard",
       currentManifestIssuanceCount: 0,
       existingBindings: [],
-    } as const;
+    };
     expect(() => promoteReserveBeforeIssue(base)).toThrowError(
       new ResultsRuleError("reserve must match mode and approved difficulty"),
     );

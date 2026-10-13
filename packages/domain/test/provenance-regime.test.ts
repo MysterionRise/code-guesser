@@ -61,7 +61,7 @@ const snapshot = (
 } as SourceRegimeSnapshotInput);
 
 const candidates = (
-  selection: "project-owned-fallback" | "stack-overflow-enabled",
+  selection: SourceRegimeSnapshotInput["selection"],
 ): ProvenanceCandidateInput[] => selection === "project-owned-fallback"
   ? [
       { id: "human", sourceClass: "project-owned-human", label: "Project-owned human sample" },

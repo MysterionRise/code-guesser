@@ -5,6 +5,7 @@ import {
   assertNoForbiddenTelemetry,
   parseAuthoritativeEvent,
   parseAuthoritativeEventBatch,
+  type AuthoritativeEvent,
 } from "../src/events/index.js";
 
 const FAMILIES = Object.freeze([
@@ -30,6 +31,7 @@ const FAMILIES = Object.freeze([
 type Family = (typeof FAMILIES)[number];
 type EventRecord = Readonly<Record<string, unknown>>;
 type MutableRecord = Record<string, unknown>;
+type ParsedEvent<F extends Family> = Extract<AuthoritativeEvent, { readonly eventFamilyId: F }>;
 
 const deepFreeze = <T>(value: T): T => {
   if (typeof value !== "object" || value === null || Object.isFrozen(value)) return value;
@@ -681,16 +683,16 @@ describe("authoritative event schema", () => {
   });
 
   it("detaches nested accepted objects and arrays", () => {
-    const completed = parseAuthoritativeEvent(EVENTS.SESSION_COMPLETED);
-    const consent = parseAuthoritativeEvent(EVENTS.CONSENT_OR_WITHDRAWAL_CHANGED);
-    const submitted = parseAuthoritativeEvent(EVENTS.SURVEY_SUBMITTED);
+    const completed = parseAuthoritativeEvent(EVENTS.SESSION_COMPLETED) as ParsedEvent<"SESSION_COMPLETED">;
+    const consent = parseAuthoritativeEvent(EVENTS.CONSENT_OR_WITHDRAWAL_CHANGED) as ParsedEvent<"CONSENT_OR_WITHDRAWAL_CHANGED">;
+    const submitted = parseAuthoritativeEvent(EVENTS.SURVEY_SUBMITTED) as ParsedEvent<"SURVEY_SUBMITTED">;
     const revocation = deepFreeze({
       ...EVENTS.CREDENTIAL_CHANGED,
       eventId: "event-detached-revocation",
       credentialAction: "REVOCATION",
       descendantCredentialIds: ["credential-child-1"],
     });
-    const parsedRevocation = parseAuthoritativeEvent(revocation);
+    const parsedRevocation = parseAuthoritativeEvent(revocation) as ParsedEvent<"CREDENTIAL_CHANGED">;
     expect(completed.roundCounts).not.toBe(EVENTS.SESSION_COMPLETED.roundCounts);
     expect(consent.analyticalInclusionTransition).not.toBe(EVENTS.CONSENT_OR_WITHDRAWAL_CHANGED.analyticalInclusionTransition);
     expect(submitted.closedResponseIds).not.toBe(EVENTS.SURVEY_SUBMITTED.closedResponseIds);
