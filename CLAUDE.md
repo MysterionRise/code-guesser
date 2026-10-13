@@ -21,13 +21,15 @@ The goal is a demo on one machine, not public play.
 
 ## Read first
 
-1. `docs/review/2026-10-11-codeguessr-state-review.md`: current product and
-   engineering review, decisions, and the roadmap.
-2. `docs/review/2026-10-13-new-rounds-research.md`: the three decks added in
+1. `docs/review/README.md`: the current state, every phase with its PRs, and
+   links to each review, plan, and run record.
+2. `docs/review/2026-10-11-codeguessr-state-review.md`: the 2026-10-11
+   decisions and roadmap; its findings are historical, from before Phase 0.
+3. `docs/review/2026-10-13-new-rounds-research.md`: the three decks added in
    Phase 3b, the sources checked, and the backlog of further decks.
-3. `docs/review/2026-10-13-next-sources-plan.md`: the plan for forges beyond
+4. `docs/review/2026-10-13-next-sources-plan.md`: the plan for forges beyond
    GitHub (GitLab, Software Heritage) and the era deck.
-4. `README.md`: how to play, prepare, record, and verify.
+5. `README.md`: how to play, prepare, record, and verify.
 
 `docs/gangsta/` is the historical record of the signed-Contract process, which
 was retired on 2026-10-11. Use it for background on why rules exist, not as a
@@ -71,6 +73,11 @@ gate: changing queries, retries, ceilings, deck rules, or running
   - The run's journal is in `ops/poc/stack/tmp/journal/run.jsonl` on this
     machine, so `STACK_V2_ACKNOWLEDGED_USABLE_REVISION=… pnpm prepare:poc
     --offline` rebuilds it byte for byte with no network.
+  - The journal holds provider bodies, so it is gitignored and never
+    committed; a fresh clone has none, and `--offline` or `--resume` fails
+    with `JOURNAL_MISSING`. A fresh `pnpm prepare:poc` writes its own journal
+    over `run.jsonl` when it ends, even when it fails, so copy `run.jsonl`
+    aside before one.
 - Done so far:
   - **Phase 0:** diagnostics, retries, yield, and UI quick wins.
   - **Phase 1:**
@@ -130,9 +137,10 @@ or adding a source not named in the research note.
 
 Iterate on deck rules with
 `STACK_V2_ACKNOWLEDGED_USABLE_REVISION=e565caa3a78c2423bd374333a472b049eb090e47 pnpm prepare:poc --offline`
-(no token); use `--resume` when a change needs responses the journal lacks.
+(no token, but it needs the local journal above); use `--resume` when a
+change needs responses the journal lacks.
 
-Live run:
+Live run (copy `run.jsonl` aside first, because a fresh run replaces it):
 
 ```bash
 HF_TOKEN="$(cat ~/.cache/huggingface/token)" \

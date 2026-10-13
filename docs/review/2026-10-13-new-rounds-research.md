@@ -20,8 +20,8 @@ forges (GitLab, Software Heritage) and the era deck.
 | Spot the fix | The version before a one-line bug fix, with line numbers; four lines | The fix commit's diff | Defects4J (MIT) and BugsInPy commit pointers; code from each upstream repository with its own licence check |
 
 Decisions taken:
-- The algorithm's own function name is masked in the displayed code (shown as `mystery_function`), and the
-  reveal gives the real name.
+- The algorithm's own function name is masked in the displayed code (shown as `mystery`, cased like the name it
+  replaces), and the reveal gives the real name.
 - A curated file is credited to its last human author: one page of the file's history up to the pinned
   commit, skipping automation accounts.
 - Spot the fix reads Defects4J and BugsInPy. BugsInPy's repository has no licence, so only its commit ids are

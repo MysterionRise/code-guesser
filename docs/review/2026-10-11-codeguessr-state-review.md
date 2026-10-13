@@ -12,13 +12,17 @@ turned them into one roadmap, and the main claims were checked against the code.
 | 0: reliability, request savings, UI quick wins | done | PR #7; [evidence](evidence/2026-10-11-three-deck-live-run.md) |
 | 1: run journal, per-deck publication, one artifact model | done | PR #8; [evidence](evidence/2026-10-11-phase-1-journal-runs.md) |
 | 2: deck redesign | done | PR #9; [evidence](evidence/2026-10-11-v3-decks-run.md) |
-| 3a: grow The Stack v2 (twelve languages in look-alike pairs, 24-round Stack decks) | done | `claude/phase-3-stack`; [evidence](evidence/2026-10-13-v4-stack-growth-run.md) |
-| 3b: new decks (Which algorithm?, Predict the output, Spot the fix) | done | #12–#16 and go-live; [evidence](evidence/2026-10-13-v5-six-decks-run.md) |
+| 3a: grow The Stack v2 (twelve languages in look-alike pairs, 24-round Stack decks) | done | PR #10; [evidence](evidence/2026-10-13-v4-stack-growth-run.md) |
+| 3b: new decks (Which algorithm?, Predict the output, Spot the fix) | done | PRs #12–#18; [evidence](evidence/2026-10-13-v5-six-decks-run.md) |
 | 3c: other forges (GitLab, Software Heritage) and Which era? | planned | [next-sources plan](2026-10-13-next-sources-plan.md) |
 
-The findings below describe the state before Phase 0 and are kept as written.
+For the current state, start at the [review index](README.md).
 
-## Summary
+## Historical findings (2026-10-11)
+
+Everything below describes the state before Phase 0 and is kept as written.
+
+### Summary
 
 After about ten weeks, thirteen Contract revisions and sixteen live preparation runs, a
 fresh checkout has nothing to play.
@@ -30,7 +34,7 @@ fresh checkout has nothing to play.
 - **Process:** about 15.5k lines of process documents sit against roughly 400 lines of
   player-facing UI.
 
-### Decisions taken
+#### Decisions taken
 
 | Question | Decision |
 | --- | --- |
@@ -39,7 +43,7 @@ fresh checkout has nothing to play.
 | First source to grow | **The Stack v2** (`bigcode/the-stack-v2`). Other sources come later |
 | Immediate scope | This review plus Phase 0: reliability, request savings, UI quick wins, and a live run |
 
-## Product-owner findings
+### Product-owner findings
 
 Ranked by impact.
 
@@ -83,7 +87,7 @@ Ranked by impact.
    - Focus is lost after Lock in and Next.
    - The README still describes five rounds and shows the v1 GIFs.
 
-## Principal-engineer findings
+### Principal-engineer findings
 
 Ranked by severity, with effort as S/M/L.
 
@@ -131,9 +135,9 @@ Ranked by severity, with effort as S/M/L.
     serialize the same artifact, and the hash is pinned by hand. About 4k lines of game
     modules (identity, consent, incident, day7) are not used by any route.
 
-## Sources
+### Sources
 
-### Extension points
+#### Extension points
 - The artifact binds every source to a GitHub commit or blob URL
   (`ops/poc/prepare/model.ts`), and its snapshot section only knows `github` and
   `stack`.
@@ -142,7 +146,7 @@ Ranked by severity, with effort as S/M/L.
   first step is a `SourceAdapter { discover, admit, bind, validateSource,
   snapshotSection }` refactor.
 
-### The Stack v2 can do more
+#### The Stack v2 can do more
 - **Fields:** Stack rows already carry `repo_name`, `star_events_count`,
   `fork_events_count` and licence data. The metadata worker validates them today but
   drops most of them.
@@ -156,7 +160,7 @@ Ranked by severity, with effort as S/M/L.
 - **"Before or after?"** still needs GitHub commit lineage, which the pipeline already
   captures.
 
-### Later candidates (ranked)
+#### Later candidates (ranked)
 
 | Source | Gives | Constraints |
 | --- | --- | --- |
@@ -173,9 +177,9 @@ Ranked by severity, with effort as S/M/L.
 - `the-stack-smol` and similar subsets: gated, with no commit or author.
 - Exercism and Project Euler: solution licences unstated.
 
-## Roadmap
+### Roadmap
 
-### Phase 0 (now)
+#### Phase 0
 - **Governance:** retire the Contract process and keep the guardrails.
 - **Diagnostics:** pass worker reason codes through, add a real Node↔Python seam test,
   and give lineage, admission and revalidation failures reason codes.
@@ -193,7 +197,7 @@ Ranked by severity, with effort as S/M/L.
 - **Ship:** a live run, then pin, full verification, re-recorded media, and an updated
   README.
 
-### Phase 1: pipeline structure
+#### Phase 1: pipeline structure
 - A gitignored, hash-verified run journal with `--resume` and `--offline` replay.
 - Per-deck publication, so one to three decks can ship.
 - A redacted report written on failure.
@@ -202,7 +206,7 @@ Ranked by severity, with effort as S/M/L.
 - One limits file that Node and Python both read.
 - Unused game modules removed.
 
-### Phase 2: deck redesign
+#### Phase 2: deck redesign
 Iterate offline against the journal.
 - **Language deck:** skip the preamble, clues drawn from the excerpt itself, look-alike
   distractors, and a pool with repeats allowed.
@@ -216,11 +220,11 @@ Iterate offline against the journal.
 - **Leakage test:** simple solvers that don't read the code must stay within chance
   plus 10%.
 
-### Phase 3: grow The Stack v2, then other sources
+#### Phase 3: grow The Stack v2, then other sources
 Run the probe first, then add more languages and row groups, then the `SourceAdapter`
 refactor and the next source.
 
-## Guardrails kept after retiring the Contract
+### Guardrails kept after retiring the Contract
 - Localhost only; no deployment and no public players.
 - Public open-source code only, with licence and recorded-author data.
 - Bounded, selective reads only. Never download a whole dataset, a whole language
