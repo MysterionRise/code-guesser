@@ -128,15 +128,27 @@ const replayGap = (error: unknown): Error | undefined => {
   return undefined;
 };
 
+const PROGRAMMING_ERRORS = [TypeError, RangeError, ReferenceError] as const;
+/**
+ * A failure no candidate explains: a broken invariant (`PreparationError`), a built-in programming error, or an
+ * error with no stable code. Counted per candidate, the same bug would reject every candidate until the deck ran
+ * short; it fails the run instead, named by `uncodedDiagnostic` and its failure site.
+ */
+const unexplained = (failure: unknown): boolean =>
+  failure instanceof PreparationError || PROGRAMMING_ERRORS.some((type) => failure instanceof type) || codeOf(failure) === undefined;
+
 /**
  * Records one rejected candidate. A spent run-wide budget ends this deck and every later one; a response
- * the offline journal lacks ends the run, so a replay can never publish fewer decks than the run it replays.
+ * the offline journal lacks ends the run, so a replay can never publish fewer decks than the run it replays;
+ * a programming error or a broken invariant ends the run too, since no other candidate can avoid it.
  */
 export const rejectCandidate = (state: RunState, stage: DiagnosticStage, error: unknown): void => {
   const gap = replayGap(error);
   if (gap !== undefined) throw gap;
   const budget = spentBudget(error);
   if (budget !== undefined) throw new BudgetExhaustedError(`BUDGET_EXHAUSTED_${budget}`, error);
+  const failure = reportedFailure(error);
+  if (unexplained(failure)) throw failure;
   noteRejection(state, stage, error);
 };
 
