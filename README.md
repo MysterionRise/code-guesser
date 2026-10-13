@@ -93,7 +93,10 @@ pnpm install --frozen-lockfile
 pnpm --filter @codeguessr/game dev
 ```
 
-Open [http://127.0.0.1:3000](http://127.0.0.1:3000). The root route reads
+Open [http://127.0.0.1:3000](http://127.0.0.1:3000). The server listens on
+127.0.0.1 only, so other machines on the network cannot reach it. If another
+app holds port 3000, pick another port with `PORT`, such as
+`PORT=3200 pnpm --filter @codeguessr/game dev`. The root route reads
 `apps/game/src/demo/generated/local-real-rounds.json`, checks it against the
 pinned hash in `apps/game/src/demo/local-real-experiment.pin.server.ts`, and
 makes no network requests while you play. If the artifact is missing, has the
@@ -105,6 +108,8 @@ For a production-mode local run:
 pnpm --filter @codeguessr/game build
 pnpm --filter @codeguessr/game start
 ```
+
+`start` also listens on 127.0.0.1 only and takes the same `PORT`.
 
 ### Recording the demo
 
@@ -218,6 +223,20 @@ Every run journals the responses it accepts. Two flags reuse that journal:
 Replayed responses count against the same budgets as live ones, so an offline
 run predicts what a live run would spend.
 
+Both flags need a journal from an earlier live run on the same machine. The
+journal holds provider bodies (API responses and the code the run fetched), so
+it is gitignored and never committed. A fresh clone has none, and both flags
+fail there with `JOURNAL_MISSING`.
+
+A fresh run starts an empty journal and writes it over `run.jsonl` when it
+ends, even when it fails. That replaces the journal that rebuilds the
+committed artifact offline, so copy it aside first; it stays in the ignored
+directory, and copying it back restores it:
+
+```bash
+cp ops/poc/stack/tmp/journal/run.jsonl ops/poc/stack/tmp/journal/run.backup.jsonl
+```
+
 The journal also keeps failures:
 
 - **Deterministic GitHub answers** such as 404s replay on resume and offline.
@@ -261,21 +280,47 @@ uv run --project ops/poc/stack --locked python -m unittest discover -s ops/poc/s
 ```
 
 If Playwright reports that Chromium is missing on a fresh machine, run
-`pnpm exec playwright install chromium`.
+`pnpm exec playwright install chromium`. `pnpm test:e2e` starts its own dev
+server on port 3000; if another app holds it, run
+`E2E_PORT=3200 pnpm test:e2e`.
 
 ## Repository map
 
-| Path | Responsibility |
-| --- | --- |
-| `apps/game` | Next.js game, deck chooser, arcade UI, and reveal authorization |
-| `packages/artifact` | The one artifact model: parser, source validation, and canonical hash, shared by the game and the preparer |
-| `ops/poc/prepare` | GitHub and Stack orchestration, selection, deck composition, journal, reporting, and publication |
-| `ops/poc/stack` | Locked Python workers for Stack metadata and selected blob retrieval |
-| `ops/poc/profiles` | Versioned crawl profiles |
-| `ops/poc/limits.json` | Pinned Stack revision and hard ceilings shared by Node and Python |
-| `ops/demo/record` | Scripted README media recorder |
-| `tests` | Accessibility, browser, performance, and containment suites |
-| `docs/review` | Current state review and roadmap |
-| `docs/gangsta` | Historical record of the retired Contract process |
+[`docs/architecture.md`](docs/architecture.md) shows how these parts fit
+together, from preparation to play, and defines the words the docs use.
+
+Each path has a status:
+- **live:** the game, the preparer, what they read, and the current docs;
+- **PoC support:** tests, tooling, configuration, and media around the live
+  code;
+- **Contract-era:** left from the retired Contract process and used by neither
+  the game nor the preparer. Deleting it is a separate decision (#38).
+
+| Path | Responsibility | Status |
+| --- | --- | --- |
+| `apps/game` | Next.js game, deck chooser, arcade UI, and reveal authorization | live |
+| `apps/game/test` | Vitest suites for the artifact loader, dealing, the reveal, and the arcade UI. `candidate-ordering.test.ts` tests `packages/domain`, and `claims-audit.test.ts` scans product text, this README included | PoC support |
+| `packages/artifact` | The one artifact model: parser, source validation, and canonical hash, shared by the game and the preparer | live |
+| `packages/content` | Its `local-poc-support` entry gives the preparer its blob and licence screens. The rest serves the `acquire:content` operator command | live (`local-poc-support`); the rest Contract-era |
+| `packages/domain` | Earlier language, manifest, round, session, provenance, and results rules, with their own scoring (1,000, 800, or 500 points whatever the option count). Only tests read it | Contract-era |
+| `packages/measurement` | Event and scoring formulas. Only its own tests, the claims audit, and the containment test read it | Contract-era |
+| `packages/test-support` | `workspace.test.mjs`, the first half of `pnpm test`: the workspace, the licence, the CI workflow, and the README badge | PoC support |
+| `ops/poc/prepare` | GitHub and Stack orchestration, selection, deck composition, journal, reporting, and publication | live |
+| `ops/poc/stack` | Locked Python workers for Stack metadata and selected blob retrieval. Its ignored `tmp/` holds the journal and run reports | live |
+| `ops/poc/profiles` | Versioned crawl profiles | live |
+| `ops/poc/limits.json` | Pinned Stack revision and hard ceilings shared by Node (`limits.ts`) and Python | live |
+| `ops/demo/record` | Scripted README media recorder | PoC support |
+| `ops/content` | The `acquire:content` operator command and its policy files. The containment test (`tests/containment/acquisition-boundary.test.mjs`) requires the script to exist | Contract-era |
+| `ops/tsconfig.json` | Type-checks everything under `ops/`; `pnpm typecheck` runs it | PoC support |
+| `tests` | Accessibility, browser, performance, and containment suites. They run in CI against the live game; the privacy and provenance checks date from the Contract era | PoC support |
+| `.github/workflows/ci.yml` | CI: every suite above, with no provider secrets and no live preparation | PoC support |
+| `vitest.config.mts` | Finds `*.test.ts` and `*.test.tsx` under `apps/`, `packages/`, and `ops/` | PoC support |
+| `playwright.config.ts` | The browser suites; starts a dev server on 127.0.0.1 (`E2E_PORT`, default 3000) | PoC support |
+| `tsconfig.base.json` | Compiler options every package and `ops/` extend | PoC support |
+| `compose.test.yaml` | A Postgres 16 test service. No script, test, or workflow uses it | Contract-era |
+| [`docs/architecture.md`](docs/architecture.md) | The flow from preparation to play, the artifact's shape, and a glossary of field names | live |
+| [`docs/review`](docs/review/README.md) | Current state, reviews, plans, and run evidence | live |
+| `docs/media` | README media, written by `pnpm demo:record` | PoC support |
+| `docs/gangsta` | Historical record of the retired Contract process | Contract-era |
 
 Claude-based agents should start with [CLAUDE.md](CLAUDE.md).

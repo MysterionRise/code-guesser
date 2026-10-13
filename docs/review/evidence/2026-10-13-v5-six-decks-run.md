@@ -50,7 +50,7 @@ live.
 | Which project? | 24 | Unchanged sources |
 | Which language? | 24 | Unchanged sources |
 | Before or after? | 10 | Unchanged sources |
-| Which algorithm? | 24 | 8 each in Python, Go, and Java, from TheAlgorithms at pinned commits; six of the eight configured families of four (the deck fills before number theory and string matching are read) |
+| Which algorithm? | 24 | 8 each in Python, Go, and Java, from TheAlgorithms at pinned commits; six families of four (the profile configures eight; the first six filled the pool) |
 | Predict the output | 24 | TheAlgorithms/Python: 8 `maths`, 6 `bit_manipulation`, 6 `strings`, 3 `conversions`, 1 `dynamic_programming` |
 | Spot the fix | 24 | 19 BugsInPy and 5 Defects4J bugs, from 15 upstream repositories (19 Python, 5 Java) |
 

@@ -1,15 +1,22 @@
 # Next sources plan
 
-2026-10-13. Phase 3 of the [state review](2026-10-11-codeguessr-state-review.md)
-roadmap has two parts. The first, growing The Stack v2, is done on
-`claude/phase-3-stack`:
+2026-10-13. Revised the same day, after Phase 3b (PRs #12–#18) went live: the
+seam needs schema v5, the snapshot already has a `curated` section, Step 2
+reuses the curated-file readers, and Which era? would be the seventh deck.
+
+Phase 3 of the [state review](2026-10-11-codeguessr-state-review.md) roadmap
+has two parts. The first, growing The Stack v2, is done (PR #10):
 
 - Twelve languages in six look-alike pairs.
 - Each language's whole first row group (100,000 rows) is inspected.
 - The worker returns a bounded sample.
 
 This plan covers the second part: sources beyond The Stack v2 and GitHub
-search. Nothing here is built yet, and each step ends with a decision point.
+search. Phase 3b came first and added three decks from pinned GitHub
+repositories and bug datasets
+([new rounds research](2026-10-13-new-rounds-research.md)). Nothing in this
+plan is built yet, though Step 2 can reuse what 3b built. Each step ends with
+a decision point.
 
 ## What a new source should add
 
@@ -35,8 +42,11 @@ GitHub is assumed in three places:
 
 - `validateGitHubBinding` in `packages/artifact/src/source.ts` checks every URL
   against `https://github.com/...`.
-- The artifact snapshot knows only `github` and `stack`.
-- The preparer's admission and revalidation call GitHub endpoints directly.
+- The artifact snapshot has `github`, `stack`, and `curated` sections and no
+  forge field. The `curated` section's pins and bug datasets are all GitHub
+  repositories.
+- The preparer's admission, revalidation, and curated-file reads call GitHub
+  endpoints directly. The curated reads go through `github-git.ts`.
 
 The seam:
 
@@ -59,11 +69,14 @@ interface SourceAdapter<Candidate, Source> {
 }
 ```
 
-- **Artifact schema v4:**
-  - The source's `discoverySource` names the adapter.
+- **Artifact schema v5** (v4 went live with Phase 3b, PR #17):
+  - The source's `discoverySource` names the adapter. Today it is one of
+    `GITHUB_COMMIT_SEARCH`, `STACK_V2`, `CURATED_GITHUB`, and
+    `CURATED_DATASET`.
   - Its URLs are checked against that adapter's `ForgeBinding`, not against
     GitHub.
-  - The snapshot lists `sources: [{ id, forge, host, ... }]`.
+  - The snapshot lists `sources: [{ id, forge, host, ... }]`; today's
+    `github`, `stack`, and `curated` sections become entries.
   - The game only changes where it builds the attribution link.
 - **Transport:** every adapter sends requests through the existing runtime
   (metering, retry policy, journal), so `--resume` and `--offline` work for
@@ -71,21 +84,38 @@ interface SourceAdapter<Candidate, Source> {
 - **Credentials:** each adapter gets only its own token from
   `projectPreparationEnvironment`, as the blob worker gets only AWS
   variables today.
-- **Exit test:** GitHub search and The Stack v2 move onto the seam, and
-  `pnpm prepare:poc --offline` rebuilds the committed artifact. Its bytes
-  change only where schema v4 renames fields; the rounds and their order stay
-  the same. A refactor that changes a round has a bug.
+- **Exit test:** GitHub search, The Stack v2, and the curated readers move
+  onto the seam, and `pnpm prepare:poc --offline` rebuilds the committed
+  artifact on the machine that holds the v5 run's journal. Its bytes change
+  only where schema v5 renames fields; the rounds and their order stay the
+  same. A refactor that changes a round has a bug.
 
 ## Step 2: curated GitHub repositories and a "Which era?" deck
 
-No new provider. The profile names repositories instead of searching for
-them.
+No new provider, and Phase 3b built part of this step. The profile's
+`curated` section already names repositories at pinned commits
+(`curated.repositories`), and two readers in `ops/poc/prepare/` do the
+verified reads:
+
+- `github-git.ts`: `gitReader` reads a commit (with the files it changed),
+  trees checked against their hashes, and blobs checked against their ids.
+- `github-files.ts`: `bindGitHubFile` reads one file at a commit through
+  those trees, with repository admission, the licence file at that commit,
+  and the file's last human author.
+
+What is new is discovery by date and the deck itself.
 
 - **Discovery:**
   1. For each era bucket (1990s, 2000s, 2010s, 2020s), list one page of
      commits up to a date: `GET /repos/{r}/commits?until=…&per_page=100`.
-  2. Pick a commit and a file changed in it.
-  3. Read that file at that commit with the existing lineage code.
+     This is a new request shape: `request-policy.ts` allows only the
+     file-history form of `/commits` (`path`, `sha`, `per_page` up to 10).
+  2. Pick a commit and a file changed in it, from `gitReader`'s commit read.
+  3. Read that file at that commit with `bindGitHubFile`.
+- **Artifact:** the parser accepts a curated file only at one of the
+  snapshot's pins (`validateCuratedSource` in
+  `packages/artifact/src/source.ts`). Era rounds find their commits by date,
+  so they need their own source rule in schema v5.
 - **Answer:** the commit's committer date, bucketed by decade, from the
   recorded commit. Author dates can be rewritten by imports, so the deck
   uses committer dates and screens out commits whose author and committer
@@ -117,9 +147,15 @@ them.
   | `postgres/postgres` | PostgreSQL | 1996 |
   | `dspinellis/unix-history-repo` | mixed by era | 1970 |
 
-- **Budget:** about 3 requests per round (commit list page, commit, blob),
-  plus the licence check per repository. A 20-round pool costs well under
-  200 requests.
+- **Old licence files:** at old commits GitHub often cannot identify the
+  licence file. Phase 3b's fix deck lost most Apache Commons fixes this way
+  (`ADMISSION_LICENSE_SHAPE`), so the oldest buckets may fill slowly.
+- **Budget:** `bindGitHubFile` costs about 4 + s requests per round, where s
+  is the number of segments in the file's path: the commit, one tree per
+  segment, the blob, the licence at that commit, and one page of the file's
+  history. With paths three or four segments deep, a 20-round pool costs
+  about 150 requests, plus one commit list page per repository and bucket:
+  under 200 in all.
 - **Also from this step:** a curated "famous projects" list for the project
   deck, for projects whose star events in one row group undercount them.
 
@@ -202,7 +238,7 @@ Last, because its API budget is the tightest.
 1. **Licence allowlist.** Add the permissive BSD-2-Clause, ISC, PostgreSQL,
    and Unlicense? That opens FreeBSD and Postgres history to the era deck.
    GPL code stays out unless you say otherwise.
-2. **A fourth deck.** Should "Which era?" join the chooser?
+2. **A seventh deck.** Should "Which era?" join the chooser?
 3. **Accounts.**
    - Step 3 needs a GitLab.com token: `glab auth login` once.
    - Step 4 works without a Software Heritage account, but it is ten times

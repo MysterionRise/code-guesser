@@ -159,7 +159,7 @@ describe("language candidate sets", () => {
     expect(candidateSet.candidates).toHaveLength(4);
     expect(candidateSet.candidates.filter(({ id }) => id === candidateSet.correctCandidateId)).toHaveLength(1);
     expect(candidateSet.candidates.filter(({ id }) => id !== candidateSet.correctCandidateId)
-      .every(({ distractorRationale }) => distractorRationale.trim().length > 0)).toBe(true);
+      .every(({ distractorRationale }) => (distractorRationale ?? "").trim().length > 0)).toBe(true);
     expect(candidateSet.candidates).not.toBe(input.candidates);
     expect(candidateSet.candidates[0]).not.toBe(input.candidates[0]);
     expect(candidateSet.candidates[0]?.aliases).not.toBe(input.candidates[0]?.aliases);
@@ -383,7 +383,7 @@ describe("language candidate sets", () => {
     },
     () => {
       const input = candidateInput();
-      return Object.freeze({ ...input, candidates: Object.freeze([{ ...input.candidates[0], aliases: [...input.candidates[0].aliases] }, ...input.candidates.slice(1)]) });
+      return Object.freeze({ ...input, candidates: Object.freeze([{ ...input.candidates[0], aliases: [...input.candidates[0]!.aliases] }, ...input.candidates.slice(1)]) });
     },
     () => Object.freeze({ ...candidateInput(), orderingPolicy: { ...candidateInput().orderingPolicy } }),
     () => Object.freeze({ ...candidateInput(), clues: [...candidateInput().clues] }),
@@ -438,7 +438,7 @@ describe("language candidate sets", () => {
       randomizedRecord(),
     );
     expect(presentation.candidateIds).toEqual(["swift", "typescript", "kotlin", "javascript"]);
-    expect(presentation.orderingRecord.randomizationRecordId).toBe("randomization-2");
+    expect(presentation.orderingRecord).toMatchObject({ randomizationRecordId: "randomization-2" });
     expectDeepFrozen(presentation);
   });
 
