@@ -121,9 +121,12 @@ export const FIX_CHANGE_HINTS = Object.freeze({
   NAME: "The fix changes a name: a method, a variable, a type, or a keyword.",
   STRUCTURE: "The fix adds, removes, or rearranges part of an expression.",
 } as const);
+/** How busy a line looks: its operator and bracket characters, so `if (a[i] > b)` counts five. */
+export const lineComplexity = (line: string): number => (line.match(/[()[\]=<>!&|+\-*/%]/gu) ?? []).length;
 /**
  * The orders a fix deck balances its answers over, each ranking a round's option lines: by position; by distance
- * from the pane's middle line, nearest first; and by length, shortest first. Ties go to the earlier line.
+ * from the pane's middle line, nearest first; by length, shortest first; and by complexity (`lineComplexity`),
+ * simplest first. Ties go to the earlier line.
  */
 export const FIX_ORDERS: readonly ((lines: readonly number[], pane: readonly string[]) => readonly number[])[] = Object.freeze([
   (lines: readonly number[]) => [...lines].sort((left, right) => left - right),
@@ -131,16 +134,61 @@ export const FIX_ORDERS: readonly ((lines: readonly number[], pane: readonly str
     Math.abs(2 * left - pane.length - 1) - Math.abs(2 * right - pane.length - 1) || left - right),
   (lines: readonly number[], pane: readonly string[]) => [...lines].sort((left, right) =>
     pane[left - 1]!.trim().length - pane[right - 1]!.trim().length || left - right),
+  (lines: readonly number[], pane: readonly string[]) => [...lines].sort((left, right) =>
+    lineComplexity(pane[left - 1]!) - lineComplexity(pane[right - 1]!) || left - right),
 ]);
 /**
  * How many more answers than an equal share one rank may hold, per fix order. Position and centrality are exact;
- * a bug's line is often the longest near it, so length allows a tenth of the deck more, which keeps a solver that
- * always picks the longest (or shortest) line within ten points of chance.
+ * a bug's line is often the longest and busiest near it, so length and complexity each allow a tenth of the deck
+ * more, which keeps a solver that always picks the longest (or busiest) line within ten points of chance.
  */
-export const fixSlack = (rounds: number): readonly number[] => Object.freeze([0, 0, Math.floor(rounds / 10)]);
+export const fixSlack = (rounds: number): readonly number[] => {
+  const tenth = Math.floor(rounds / 10);
+  return Object.freeze([0, 0, tenth, tenth]);
+};
 /** The answer's rank in each fix order. */
 export const fixRanks = (answer: number, lines: readonly number[], pane: readonly string[]): readonly number[] =>
   FIX_ORDERS.map((order) => order(lines, pane).indexOf(answer));
+/** How deep a line is indented: its leading whitespace characters. */
+export const lineIndent = (line: string): number => /^\s*/u.exec(line)![0].length;
+const WORD = /[A-Za-z_]\w+/gu;
+/** How many of a line's words appear nowhere else in its pane; a changed line often holds such a name. */
+export const rareWords = (line: string, pane: readonly string[]): number => {
+  const counts = new Map<string, number>();
+  for (const word of pane.join("\n").match(WORD) ?? []) counts.set(word, (counts.get(word) ?? 0) + 1);
+  return (line.match(WORD) ?? []).filter((word) => counts.get(word) === 1).length;
+};
+/**
+ * Line features a code-blind solver might pick the most or the least of: length, complexity, indentation, and rare
+ * words. They often tie across a round's options, and a solver splits a tie, which ranks that break ties by
+ * position do not bound.
+ */
+const FIX_FEATURES: readonly ((line: string, pane: readonly string[]) => number)[] = Object.freeze([
+  (line: string) => line.trim().length, lineComplexity, lineIndent, rareWords,
+]);
+/**
+ * What each extreme solver scores on one round: for every feature, picking the line with the most of it, then the
+ * line with the least; one when the answer alone is that line, a share when it ties, nothing otherwise.
+ */
+export const fixExtremeScores = (answer: number, lines: readonly number[], pane: readonly string[]): readonly number[] =>
+  [1, -1].flatMap((direction) => FIX_FEATURES.map((measure) => {
+    const values = lines.map((line) => direction * measure(pane[line - 1]!, pane));
+    const top = Math.max(...values);
+    return values[lines.indexOf(answer)] === top ? 1 / values.filter((value) => value === top).length : 0;
+  }));
+/** The most each extreme solver may score over a fix deck: an equal share plus a tenth of the deck, as for length. */
+export const fixExtremeLimits = (rounds: number): readonly number[] =>
+  [1, -1].flatMap(() => FIX_FEATURES.map(() => Math.ceil(rounds / 4) + Math.floor(rounds / 10)));
+/** Room for rounding when solver scores, thirds among them, are added up against a limit. */
+export const SCORE_TOLERANCE = 1e-9;
+/**
+ * What picking the longer line of the second hint's pair scores on one round: one when the answer is longer than
+ * the line it is paired with, a half when they are as long, nothing when it is shorter.
+ */
+export const pairLongerScore = (answer: number, partner: number, pane: readonly string[]): number =>
+  Math.sign(pane[answer - 1]!.trim().length - pane[partner - 1]!.trim().length) / 2 + 0.5;
+/** How far from half the deck the answer may be the longer line of its hint's pair, either way: a tenth of the deck. */
+export const pairSlack = (rounds: number): number => Math.floor(rounds / 10);
 /** The second hint of a fix round: the answer and one other option, in line order. */
 export const fixPairHint = (first: number, second: number): string =>
   `It is line ${Math.min(first, second)} or line ${Math.max(first, second)}.`;
@@ -373,16 +421,27 @@ const DECK_RULES: Readonly<Partial<Record<DeckId, (fixtures: readonly ParsedFixt
       if (Math.max(...ranks) - Math.min(...ranks) > 1) fail();
     }
   },
-  // By position and by distance from the pane's middle, every rank holds the answer equally often; by length, nearly.
+  // By position and by distance from the pane's middle, every rank holds the answer equally often; by length and by
+  // complexity, nearly. Picking the line with the most or least of a feature, ties split, scores little better than
+  // chance, and after the second hint the answer is the longer of its pair in about half the deck.
   fix: (fixtures: readonly ParsedFixture[]) => {
     const counts = FIX_ORDERS.map(() => [0, 0, 0, 0]);
+    const limits = fixExtremeLimits(fixtures.length);
+    const extremes = limits.map(() => 0);
+    let longer = 0;
     for (const fixture of fixtures) {
       const lines = fixture.candidates.map(({ label }) => Number(label.slice("Line ".length)));
       const answer = lines[fixture.candidates.findIndex(({ id }) => id === fixture.correctCandidateId)]!;
-      fixRanks(answer, lines, fixture.panes[0]!.text.split("\n")).forEach((rank, order) => { counts[order]![rank]! += 1; });
+      const pane = fixture.panes[0]!.text.split("\n");
+      fixRanks(answer, lines, pane).forEach((rank, order) => { counts[order]![rank]! += 1; });
+      fixExtremeScores(answer, lines, pane).forEach((score, index) => { extremes[index]! += score; });
+      const pair = /^It is line ([1-9][0-9]*) or line ([1-9][0-9]*)\.$/u.exec(fixture.clues[1]!)!.slice(1).map(Number);
+      longer += pairLongerScore(answer, pair.find((line) => line !== answer)!, pane);
     }
     const slack = fixSlack(fixtures.length);
-    if (counts.some((ranks, order) => Math.max(...ranks) > Math.ceil(fixtures.length / 4) + slack[order]!)) fail();
+    if (counts.some((ranks, order) => Math.max(...ranks) > Math.ceil(fixtures.length / 4) + slack[order]!)
+      || extremes.some((score, index) => score > limits[index]! + SCORE_TOLERANCE)
+      || Math.abs(longer - fixtures.length / 2) > pairSlack(fixtures.length)) fail();
   },
 });
 

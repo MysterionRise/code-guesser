@@ -125,6 +125,17 @@ const withoutMain = (lines: readonly string[], language: StackLanguage): readonl
 };
 
 /**
+ * The lines of a file, counted from zero, that hold only commentary: comments, block comments, and docstrings,
+ * every line they span included, even one whose own text looks like code (`>>> total = 1` in a docstring).
+ */
+export const commentaryLines = (text: string, language: StackLanguage): ReadonlySet<number> => {
+  const normalized = text.replace(/\r\n?/gu, "\n").replaceAll(REMOVED, "");
+  const stripped = HASH_COMMENTS.has(language) ? stripPython(normalized) : stripBraces(normalized, language);
+  return new Set(stripped.split("\n").flatMap((line, index) =>
+    line.includes(REMOVED) && line.replaceAll(REMOVED, "").trim().length === 0 ? [index] : []));
+};
+
+/**
  * The file with its commentary removed: a line that held only commentary goes, trailing spaces are trimmed, and
  * runs of blank lines collapse to one.
  */

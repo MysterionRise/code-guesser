@@ -1,5 +1,7 @@
 import { canonicalHash } from "./canonical";
-import { FIX_CHANGE_HINTS, fixRanks } from "./model";
+import { commentaryLines } from "./function-windows";
+import { FIX_CHANGE_HINTS, fixExtremeScores, fixRanks } from "./model";
+import type { StackLanguage } from "./profile";
 
 /** Which of the fix hints describes a change. */
 export type ChangeKind = keyof typeof FIX_CHANGE_HINTS;
@@ -51,8 +53,10 @@ export interface FixWindow {
   readonly answer: number;
   /** Three other lines of the window, in line order. */
   readonly decoys: readonly number[];
-  /** The answer's rank among the four options by position, by distance from the middle, and by length. */
+  /** The answer's rank among the four options in each fix order: position, distance from the middle, length, complexity. */
   readonly ranks: readonly number[];
+  /** What picking the line with the most, or least, of each line feature scores on this window, ties split. */
+  readonly extremes: readonly number[];
 }
 
 const order = (seed: string, values: readonly number[]): readonly number[] =>
@@ -73,15 +77,17 @@ const DECOY_CHOICES = 6;
  * Every window of `size` lines a round could show: each start that holds the changed line, and each way to place
  * three decoys so the changed line takes some rank (from zero) among four options there. Decoys are option lines
  * whose length is within half of the changed line's (or eight characters, for a short line), never its text, drawn
- * from the first few eligible lines above and below in `seed` order. A window never starts or ends on a blank
- * line. Empty when no window fits.
+ * from the first few eligible lines above and below in `seed` order. No decoy sits in a comment, block comment, or
+ * docstring, read over the whole file, since prose is a decoy anyone can rule out. A window never starts or ends on
+ * a blank line. Empty when no window fits.
  */
-export const fixWindows = (text: string, changedLine: number, seed: string, size: number): readonly FixWindow[] => {
+export const fixWindows = (text: string, changedLine: number, seed: string, size: number, language: StackLanguage): readonly FixWindow[] => {
   const lines = text.replace(/\r\n?/gu, "\n").split("\n").map((line) => line.trimEnd());
   const index = changedLine - 1;
   if (index < 0 || index >= lines.length || lines.length < size) return Object.freeze([]);
   const target = lines[index]!.trim();
-  const fits = (line: number): boolean => line !== index && optionLine(lines[line]!) && lines[line]!.trim() !== target
+  const commentary = commentaryLines(text, language);
+  const fits = (line: number): boolean => line !== index && !commentary.has(line) && optionLine(lines[line]!) && lines[line]!.trim() !== target
     && Math.abs(lines[line]!.trim().length - target.length) <= Math.max(target.length / 2, 8);
   const first = Math.max(0, index - size + 1);
   const last = Math.min(index, lines.length - size);
@@ -98,7 +104,7 @@ export const fixWindows = (text: string, changedLine: number, seed: string, size
         for (const lower of combinations(below.slice(0, DECOY_CHOICES), 3 - rank)) {
           const decoys = [...upper, ...lower].map((line) => line - start + 1).sort((left, right) => left - right);
           windows.push(Object.freeze({ excerpt: pane.join("\n"), windowStart: start + 1, answer, decoys: Object.freeze(decoys),
-            ranks: fixRanks(answer, [answer, ...decoys], pane) }));
+            ranks: fixRanks(answer, [answer, ...decoys], pane), extremes: fixExtremeScores(answer, [answer, ...decoys], pane) }));
         }
       }
     }

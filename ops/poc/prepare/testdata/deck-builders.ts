@@ -7,7 +7,7 @@ import { balancedAnswers, generateOutputRounds, outputPane, type OutputCandidate
 import { generateFixRounds, type FixCandidate } from "../fix-rounds";
 import { changeKind, fixWindows } from "../fix-window";
 import type { DatasetBug } from "../github-fixes";
-import { fixSlack, labelStems } from "../model";
+import { fixExtremeLimits, fixSlack, labelStems } from "../model";
 import { balancedChoice } from "../round-helpers";
 import { FIX_WINDOW_LINES } from "../select-fix";
 import { generateBeforeAfterRounds } from "../before-after-rounds";
@@ -443,14 +443,23 @@ export interface SyntheticFix {
 /** Lengths of the lines around a synthetic fix, alternately shorter and longer than the changed line's. */
 const FILLER_OFFSETS = [-10, 8, -6, 4, -3, 10, -8, 6, -4, 3, -12, 12, -2, 2] as const;
 /**
- * A 27-line file whose line 14 is `changed` and whose other lines are filler assignments, alternately shorter and
- * longer than it, so a window can place the changed line at any rank by position, centrality, and length.
+ * A 27-line file whose line 14 is `changed` and whose other lines are filler assignments, alternately smaller and
+ * larger than it in every way a solver might rank lines: shorter, simpler, less indented, and with no word of its
+ * own; or longer, busier, more indented, and with four words of its own. A window can then place the changed line
+ * at any rank by position, centrality, length, and complexity, and in the middle of every line feature.
  */
 const syntheticFile = (language: "Java" | "Python", changed: string): string => Array.from({ length: 27 }, (_, index) => {
   if (index === 13) return changed;
-  const length = changed.trim().length + FILLER_OFFSETS[index % FILLER_OFFSETS.length]!;
-  const name = `s${String(index + 1).padStart(2, "0")}`;
-  return language === "Java" ? `        String ${name} = "${"a".repeat(Math.max(1, length - 16))}";` : `    ${name} = "${"a".repeat(Math.max(1, length - 8))}"`;
+  const offset = FILLER_OFFSETS[index % FILLER_OFFSETS.length]!;
+  const length = changed.trim().length + offset;
+  const end = language === "Java" ? ";" : "";
+  const indent = " ".repeat(changed.length - changed.trimStart().length);
+  if (offset < 0) {
+    const pad = "a".repeat(Math.max(1, Math.floor((length - 11 - end.length) / 2)));
+    return `${indent.slice(4)}x = "${pad}" + "${pad}"${end}`;
+  }
+  const body = `v${index} = (w${index} - u${index}) * (k - z${index}) + "`;
+  return `${indent}    ${body}${"a".repeat(Math.max(1, length - body.length - 1 - end.length))}"${end}`;
 }).join("\n");
 /** A unified diff of one changed line; Defects4J's run from fixed to buggy, BugsInPy's from buggy to fixed. */
 const linePatch = (path: string, line: number, before: string, after: string, direction: "forward" | "reverse"): string => {
@@ -513,8 +522,9 @@ export const fixHarnessData = (): FixHarnessData => {
 export const fixCandidates = (profile: CrawlProfile, snapshotId: string): readonly FixCandidate[] => {
   const fixes = syntheticFixes();
   const chosen = [...fixes.filter(({ dataset }) => dataset === "defects4j").slice(0, 4), ...fixes.filter(({ dataset }) => dataset === "bugsinpy").slice(0, 4)];
-  const windows = chosen.map((fix) => fixWindows(fix.text, fix.changedLine, `${fix.dataset}:${fix.bug}`, FIX_WINDOW_LINES));
-  const choices = balancedChoice(windows.map((options) => options.map(({ ranks }) => ranks)), 4, fixSlack(chosen.length))!;
+  const windows = chosen.map((fix) => fixWindows(fix.text, fix.changedLine, `${fix.dataset}:${fix.bug}`, FIX_WINDOW_LINES, fix.language));
+  const choices = balancedChoice(windows.map((options) => options.map(({ ranks }) => ranks)), 4, fixSlack(chosen.length),
+    { costs: windows.map((options) => options.map(({ extremes }) => extremes)), limits: fixExtremeLimits(chosen.length) })!;
   return chosen.map((fix, index) => {
     const window = windows[index]![choices[index]!]!;
     return Object.freeze({

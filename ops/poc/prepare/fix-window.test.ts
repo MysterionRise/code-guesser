@@ -1,4 +1,5 @@
 import { changeKind, fixWindows, optionLine } from "./fix-window";
+import { commentaryLines } from "./function-windows";
 import { fixRanks } from "./model";
 import { syntheticFixes } from "./testdata/deck-builders";
 
@@ -25,7 +26,7 @@ describe("fix windows", () => {
 
   it("holds the changed line in every window and can place it at every rank", () => {
     for (const fix of syntheticFixes()) {
-      const windows = fixWindows(fix.text, fix.changedLine, `${fix.dataset}:${fix.bug}`, 14);
+      const windows = fixWindows(fix.text, fix.changedLine, `${fix.dataset}:${fix.bug}`, 14, fix.language);
       expect(windows.length).toBeGreaterThan(0);
       for (const window of windows) {
         const pane = window.excerpt.split("\n");
@@ -43,6 +44,29 @@ describe("fix windows", () => {
       }
       expect(new Set(windows.map(({ ranks }) => ranks[0])).size).toBe(4);
     }
-    expect(fixWindows("a\nb\nc", 2, "seed", 14)).toEqual([]);
+    expect(fixWindows("a\nb\nc", 2, "seed", 14, "Python")).toEqual([]);
+  });
+
+  it("never offers a line of a comment, block comment, or docstring, read over the whole file", () => {
+    const python = [
+      "def build(context_file, default_context):", '    """Generate the context for a project.', "",
+      "    :param context_file: JSON file holding the project's variables.", "    :param default_context: Dictionary of defaults to use.",
+      "    result = merge_values(context_file, default_context)", '    """', "    context = OrderedDict([])",
+      "    with open(context_file) as file_handle:", "        obj = json.load(file_handle, object_pairs_hook=OrderedDict)",
+      "    full_path = os.path.abspath(context_file)", "    context[file_stem] = obj", "    total_count = len(context) + 1",
+      "    if default_context is not None:", "        apply_overwrites_to_context(obj, default_context)", "    return context",
+    ].join("\n");
+    // The docstring's own lines, its code-like one too, are never options; every window still offers four code lines.
+    const docstring = commentaryLines(python, "Python");
+    expect([...docstring]).toEqual([1, 2, 3, 4, 5, 6]);
+    const windows = fixWindows(python, 13, "seed", 14, "Python");
+    expect(windows.length).toBeGreaterThan(0);
+    for (const window of windows) {
+      for (const line of window.decoys) expect(docstring.has(window.windowStart + line - 2)).toBe(false);
+    }
+    // Without the whole file, the line that looks like code would have been offered.
+    expect(optionLine(python.split("\n")[5]!)).toBe(true);
+    const java = "class A {\n  /* a block comment\n     total = total + step * 2;\n  */\n  int total = step * 3;\n}";
+    expect([...commentaryLines(java, "Java")]).toEqual([1, 2, 3]);
   });
 });
