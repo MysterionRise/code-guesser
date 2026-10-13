@@ -4,6 +4,7 @@ import { canonicalHash } from "./canonical";
 import { CapacityError, createCapacityMeter } from "./capacity";
 import { GitHubSearchError } from "./github-search";
 import { HARNESS_CANDIDATES, accepted, classificationsFor, harnessRow, hash, loadProfile, makeHarness } from "./command-test-harness";
+import { LANGUAGE_SLUGS } from "../../../packages/artifact/src/index";
 import { STACK_LANGUAGES } from "./profile";
 import { RetryError } from "./retry";
 import { createRunReport } from "./run-report";
@@ -30,12 +31,21 @@ const admittedWith = (candidate: any, source: Record<string, unknown> = {}) => a
     excerptHash: String(candidate.id).padStart(64, "e"), queryId: candidate.queryId, ...source,
   },
 }, "4");
+const slugOf = (language: string): string => LANGUAGE_SLUGS[language as keyof typeof LANGUAGE_SLUGS];
 /** Each language's four popular rows (the project deck's) followed by the given ordinary rows (the language deck's). */
 const popularRows = (language: string) => [0, 1, 2, 3].map((rank) =>
-  harnessRow(language, `${language.toLowerCase()}-pop-${rank}`, { starEventsCount: 9000 - rank * 1000 }));
+  harnessRow(language, `${slugOf(language)}-pop-${rank}`, { starEventsCount: 9000 - rank * 1000 }));
+/** A language's two default ordinary rows: the language deck's two rounds of it. */
+const ordinaryRows = (language: string) => [harnessRow(language, slugOf(language)), harnessRow(language, `${slugOf(language)}-2`)];
 const stackRowsWith = (python: readonly object[], others: Partial<Record<string, readonly object[]>> = {}) =>
   Object.fromEntries(STACK_LANGUAGES.map((language) => [language, [...popularRows(language), ...(language === "Python" ? python
-    : others[language] ?? [harnessRow(language, language.toLowerCase())])]])) as Record<string, readonly object[]>;
+    : others[language] ?? ordinaryRows(language))]])) as Record<string, readonly object[]>;
+/** Two rounds per language in each Stack deck. */
+const STACK_POOL = 2 * STACK_LANGUAGES.length;
+const PROJECT_CALL = `project:${STACK_POOL}:${Array(STACK_POOL).fill(3).join(",")}`;
+/** Each language's ordinary rows in the default harness, in the order the language deck tries them. */
+const DEFAULT_LANGUAGE_ROWS = STACK_LANGUAGES.flatMap((language) =>
+  language === "Python" ? ["py-reject", "py", "py-2"] : [slugOf(language), `${slugOf(language)}-2`]);
 /** Captures the commit ids the before-or-after deck is generated from. */
 const beforeAfterIds = (): Readonly<{ ids: unknown[]; generate: PreparationDependencies["generateBeforeAfter"] }> => {
   const ids: unknown[] = [];
@@ -47,7 +57,7 @@ const beforeAfterIds = (): Readonly<{ ids: unknown[]; generate: PreparationDepen
 const metadataFrom = (rows: Record<string, readonly object[]>): PreparationDependencies["collectStackMetadata"] =>
   async ({ configuration, capacity }) => {
     capacity.recordStackRows(configuration, rows[configuration]!.length, 100);
-    return accepted(rows[configuration]!, String(5 + STACK_LANGUAGES.indexOf(configuration)));
+    return accepted(rows[configuration]!, `a${STACK_LANGUAGES.indexOf(configuration).toString(16)}`);
   };
 const searchWith = (queryClassifications: unknown): PreparationDependencies["searchGitHub"] => async () => accepted({
   candidates: HARNESS_CANDIDATES,
@@ -74,10 +84,10 @@ const logLines = (calls: readonly string[]): string[] =>
     expect(harness.calls.indexOf("preflight")).toBeLessThan(harness.calls.indexOf("metadata:Python"));
     expect(harness.calls.indexOf("metadata:Ruby")).toBeLessThan(harness.calls.indexOf("search"));
     expect(harness.calls.filter((call) => call.startsWith("metadata:"))).toEqual(STACK_LANGUAGES.map((language) => `metadata:${language}`));
-    expect(harness.calls).toContain("project:5:3,3,3,3,3");
-    expect(harness.calls).toContain("language:5");
+    expect(harness.calls).toContain(PROJECT_CALL);
+    expect(harness.calls).toContain(`language:${STACK_POOL}`);
     expect(harness.calls).toContain("before-after:5");
-    expect(harness.calls).toContain("compose:5/5/5");
+    expect(harness.calls).toContain(`compose:${STACK_POOL}/${STACK_POOL}/5`);
     expect(harness.calls.indexOf("report:stage")).toBeLessThan(harness.calls.indexOf("publish"));
     expect(harness.calls.indexOf("publish")).toBeLessThan(harness.calls.indexOf("report:commit"));
     expect(harness.calls.indexOf("report:commit")).toBeLessThan(harness.calls.indexOf("report:finalize"));
@@ -93,18 +103,15 @@ const logLines = (calls: readonly string[]): string[] =>
     await prepareLocalExperiment(harness.dependencies);
 
     expect(new Set(harness.dependencyMeters).size).toBe(1);
-    // One popular file per language for the project deck, then the language deck's rows in stable order.
-    const fetched = ["python-pop-0", "typescript-pop-0", "go-pop-0", "rust-pop-0", "ruby-pop-0",
-      "py-reject", "py", "typescript", "go", "rust", "ruby"];
+    // Two popular files per language for the project deck, then the language deck's rows in stable order.
+    const fetched = [...STACK_LANGUAGES.flatMap((language) => [0, 1].map((rank) => `${slugOf(language)}-pop-${rank}`)), ...DEFAULT_LANGUAGE_ROWS];
     expect(harness.calls.filter((call) => call.startsWith("fetch:"))).toEqual(
-      fetched.map((id, index) => `fetch:${id}:${120 - index}:${16_777_216 - 80 * index}`));
-    expect(harness.calls.filter((call) => call.startsWith("eligible:"))).toEqual([
-      "eligible:py-reject", "eligible:py", "eligible:typescript", "eligible:go", "eligible:rust", "eligible:ruby",
-    ]);
+      fetched.map((id, index) => `fetch:${id}:${240 - index}:${16_777_216 - 80 * index}`));
+    expect(harness.calls.filter((call) => call.startsWith("eligible:"))).toEqual(DEFAULT_LANGUAGE_ROWS.map((id) => `eligible:${id}`));
     expect(harness.leases).toEqual([
-      ...Array(5).fill({ accepted: true, released: false, bytes: 80 }),
+      ...Array(STACK_POOL).fill({ accepted: true, released: false, bytes: 80 }),
       { accepted: false, released: true, bytes: 80 },
-      ...Array(5).fill({ accepted: true, released: false, bytes: 80 }),
+      ...Array(STACK_POOL).fill({ accepted: true, released: false, bytes: 80 }),
     ]);
   });
 
@@ -169,14 +176,36 @@ const logLines = (calls: readonly string[]): string[] =>
       harnessRow("Python", "python-pop-0b", { repository: "python-org/python-pop-0", starEventsCount: 9000 }),
       ...popularRows("Python").slice(1),
     ];
-    const rows = stackRowsWith([harnessRow("Python", "py")]);
-    rows.Python = [...python, harnessRow("Python", "py")];
+    const rows = stackRowsWith(ordinaryRows("Python"));
+    rows.Python = [...python, ...ordinaryRows("Python")];
     const harness = await makeHarness({ collectStackMetadata: metadataFrom(rows) });
 
     await prepareLocalExperiment(harness.dependencies);
     expect(harness.calls.filter((call) => call.startsWith("fetch:python-pop-0"))).toHaveLength(2);
-    expect(harness.calls).toContain("project:5:3,3,3,3,3");
+    expect(harness.calls).toContain(PROJECT_CALL);
     expect((harness.reports[0] as any).diagnostics).toContainEqual({ stage: "SCREENING", reasonCode: "PROJECT_NAME_IN_EXCERPT", count: 1 });
+  });
+
+  it("offers a repository in one language's project rounds only", async () => {
+    // python-org/python-pop-2 also has a popular Ruby file; it stays a Python decoy and Ruby offers its own repositories.
+    const rows = stackRowsWith(ordinaryRows("Python"));
+    rows.Ruby = [harnessRow("Ruby", "shared", { repository: "python-org/python-pop-2", starEventsCount: 9500 }), ...rows.Ruby!];
+    const offered = new Map<string, Set<string>>();
+    const harness = await makeHarness({
+      collectStackMetadata: metadataFrom(rows),
+      generateProject: ({ profile, rounds }) => {
+        for (const round of rounds) {
+          const language = String((round.candidate as any).detectedLanguage);
+          for (const repository of [String((round.candidate as any).repository), ...round.distractors.map((option) => option.repository)]) {
+            offered.set(repository, new Set([...(offered.get(repository) ?? []), language]));
+          }
+        }
+        return { fixtures: Array(2 * profile.stack.configurations.length).fill({ kind: "PROJECT" }) } as any;
+      },
+    });
+    await prepareLocalExperiment(harness.dependencies);
+    expect(offered.get("python-org/python-pop-2")).toEqual(new Set(["Python"]));
+    expect([...offered.values()].every((languages) => languages.size === 1)).toBe(true);
   });
 
   it("screens out a source whose identity the run report could not record, before it can fail publication", async () => {
@@ -186,6 +215,7 @@ const logLines = (calls: readonly string[]): string[] =>
         (candidate as any).id === 1 ? { path: "src/c#/file-1.ts" } : {}),
       collectStackMetadata: metadataFrom(stackRowsWith([
         harnessRow("Python", "py-hash", { stableRowId: "0" }), harnessRow("Python", "py", { stableRowId: "1" }),
+        harnessRow("Python", "py-2", { stableRowId: "2" }),
       ])),
       revalidateStackCandidate: async ({ row }: any) => accepted({ ...row,
         commit: String(Object.keys(stackRowsWith([])).indexOf(row.detectedLanguage) * 10 + row.id.length).padStart(40, "d"),
@@ -220,7 +250,7 @@ const logLines = (calls: readonly string[]): string[] =>
       searchGitHub: async () => accepted({ candidates: HARNESS_CANDIDATES.slice(0, 3), queryClassifications: classificationsFor(profile) }, "2"),
     });
     await prepareLocalExperiment(harness.dependencies);
-    expect(harness.calls).toContain("compose:5/5/0");
+    expect(harness.calls).toContain(`compose:${STACK_POOL}/${STACK_POOL}/0`);
     expect(harness.calls).toContain("log:PREPARATION_DECK_SKIPPED before-after DECK_SHORT");
     expect((harness.reports[0] as any).diagnostics).toContainEqual({ stage: "SELECTION", reasonCode: "BEFORE_AFTER_DECK_SKIPPED", count: 1 });
   });
@@ -241,12 +271,13 @@ const logLines = (calls: readonly string[]): string[] =>
     // One commit repeats the first commit's content; the Python file repeats it across decks.
     expect((harness.reports[0] as any).diagnostics).toContainEqual({ stage: "DEDUPLICATION", reasonCode: "SOURCE_DUPLICATE", count: 2 });
     // The language deck moves past the repeated Python file to the next eligible row.
-    expect(harness.calls).toContain("language:5");
+    expect(harness.calls).toContain(`language:${STACK_POOL}`);
   });
 
   it("orders the language deck's rows by the profile keys and continues after cross-source deduplication", async () => {
     const collisionHash = hash("c");
     const stackRows = stackRowsWith([
+      harnessRow("Python", "later", { stableRowId: hash("3") }),
       harnessRow("Python", "late", { stableRowId: hash("2") }),
       harnessRow("Python", "collision", { stableRowId: hash("1") }),
     ]);
@@ -260,14 +291,15 @@ const logLines = (calls: readonly string[]): string[] =>
 
     await prepareLocalExperiment(harness.dependencies);
     const languageFetches = harness.calls.filter((call) => call.startsWith("fetch:") && !call.includes("-pop-"));
-    expect(languageFetches.slice(0, 3).map((call) => call.split(":")[1])).toEqual(["collision", "late", "typescript"]);
-    expect(harness.leases[5]).toMatchObject({ accepted: false, released: true });
+    expect(languageFetches.slice(0, 4).map((call) => call.split(":")[1])).toEqual(["collision", "late", "later", "ruby"]);
+    expect(harness.leases[STACK_POOL]).toMatchObject({ accepted: false, released: true });
   });
 
   it("continues after a language row that repeats another round's content", async () => {
     const duplicateHash = hash("d");
-    const rows = stackRowsWith([harnessRow("Python", "py", { stableRowId: hash("1") })], {
+    const rows = stackRowsWith([harnessRow("Python", "py", { stableRowId: hash("1") }), harnessRow("Python", "py-2", { stableRowId: hash("5") })], {
       TypeScript: [
+        harnessRow("TypeScript", "ts-later", { stableRowId: hash("6") }),
         harnessRow("TypeScript", "ts-late", { stableRowId: hash("3") }),
         harnessRow("TypeScript", "ts-duplicate", { stableRowId: hash("2") }),
       ],
@@ -280,7 +312,8 @@ const logLines = (calls: readonly string[]): string[] =>
 
     await prepareLocalExperiment(harness.dependencies);
     const languageFetches = harness.calls.filter((call) => call.startsWith("fetch:") && !call.includes("-pop-"));
-    expect(languageFetches.slice(0, 3).map((call) => call.split(":")[1])).toEqual(["py", "ts-duplicate", "ts-late"]);
+    expect(languageFetches.map((call) => call.split(":")[1]).filter((id: string | undefined) => /^(?:py|ts-)/u.test(String(id))))
+      .toEqual(["py", "py-2", "ts-duplicate", "ts-late", "ts-later"]);
     expect((harness.reports[0] as any).diagnostics).toContainEqual({ stage: "DEDUPLICATION", reasonCode: "SOURCE_DUPLICATE", count: 1 });
   });
 
@@ -304,9 +337,10 @@ const logLines = (calls: readonly string[]): string[] =>
     await prepareLocalExperiment(harness.dependencies);
     const report = harness.reports[0] as any;
 
+    // Two project and two language rounds per language (one Python row rejected), and five commits.
     expect(report.counts).toMatchObject({
-      repositoriesAdmitted: 5, blobAttempts: 11, blobsRetrieved: 10,
-      githubRevalidations: 11, screened: 16, duplicatesRejected: 0, selected: 15,
+      repositoriesAdmitted: 5, blobAttempts: 2 * STACK_POOL + 1, blobsRetrieved: 2 * STACK_POOL,
+      githubRevalidations: 2 * STACK_POOL + 1, screened: 2 * STACK_POOL + 1 + 5, duplicatesRejected: 0, selected: 2 * STACK_POOL + 5,
     });
     expect(report.diagnostics).toEqual([
       { stage: "SCREENING", reasonCode: "LANGUAGE_ROUNDS_REJECTED", count: 1 },
@@ -627,8 +661,8 @@ const logLines = (calls: readonly string[]): string[] =>
       },
     });
     const profile = await loadProfile();
-    // Preflight, the five Stack metadata configurations, then search, lineage, and admission.
-    const acceptedResponseHashes = ["1", "5", "6", "7", "8", "9", "2", "3", "4"].map(hash);
+    // Preflight, each Stack metadata configuration, search, lineage, and admission, then blobs and revalidation.
+    const acceptedResponseHashes = ["1", ...STACK_LANGUAGES.map((_, index) => `a${index.toString(16)}`), "2", "3", "4", "7", "8"].map(hash);
     const expected = canonicalHash({ profileHash: canonicalHash(profile), acceptedResponseHashes });
 
     const result = await prepareLocalExperiment(harness.dependencies);
@@ -705,17 +739,28 @@ const logLines = (calls: readonly string[]): string[] =>
     ]);
   });
 
+  it("fails the run, publishing nothing, when an offline replay lacks a candidate's response", async () => {
+    const harness = await makeHarness({
+      fetchStackBlob: async () => {
+        throw new RetryError("RETRY_SIGNAL_MISSING", Object.assign(new Error("JOURNAL_MISS"), { code: "JOURNAL_MISS" }));
+      },
+    });
+    await expect(prepareLocalExperiment(harness.dependencies)).rejects.toThrow("PREPARATION_FAILED");
+    expect(harness.published).toEqual([]);
+    expect(logLines(harness.calls)[0]).toBe("log:PREPARATION_STAGE_FAILED BLOB_RETRIEVAL JOURNAL_MISS none");
+  });
+
   it("publishes the decks filled before a run-wide budget ran out", async () => {
     let fetches = 0;
     const harness = await makeHarness({
       fetchStackBlob: async ({ row }: any) => {
         fetches += 1;
-        if (fetches > 5) throw new RetryError("RETRY_SIGNAL_MISSING", new CapacityError("BLOB_ATTEMPTS"));
+        if (fetches > STACK_POOL) throw new RetryError("RETRY_SIGNAL_MISSING", new CapacityError("BLOB_ATTEMPTS"));
         return accepted({ stableRowId: row.id, byteLength: 80 }, "7");
       },
     });
     await prepareLocalExperiment(harness.dependencies);
-    expect(fetches).toBe(6);
+    expect(fetches).toBe(STACK_POOL + 1);
     expect(logLines(harness.calls)).toEqual([
       "log:PREPARATION_DECK_SKIPPED language BUDGET_EXHAUSTED_BLOB_ATTEMPTS",
       "log:PREPARATION_DECKS project,before-after",
@@ -833,13 +878,14 @@ const logLines = (calls: readonly string[]): string[] =>
         harnessRow("Python", "py-empty", { stableRowId: "3", detectedLicenses: [] }),
         harnessRow("Python", "py-reject", { stableRowId: "4", detectedLicenses: ["MIT"] }),
         harnessRow("Python", "py", { stableRowId: "5", detectedLicenses: ["Apache-2.0"] }),
+        harnessRow("Python", "py-2", { stableRowId: "6", detectedLicenses: ["BSD-3-Clause"] }),
       ])),
     });
 
     await prepareLocalExperiment(harness.dependencies);
 
     const fetched = harness.calls.filter((call) => call.startsWith("fetch:") && !call.includes("-pop-")).map((call) => call.split(":")[1]);
-    expect(fetched).toEqual(["py-reject", "py", "typescript", "go", "rust", "ruby"]);
+    expect(fetched).toEqual(DEFAULT_LANGUAGE_ROWS);
     expect((harness.reports[0] as any).diagnostics).toContainEqual({ stage: "SCREENING", reasonCode: "LICENSE_REJECTED", count: 3 });
   });
 

@@ -9,7 +9,7 @@ const { describe, expect, it } = await import(testModuleName) as any;
 
 const REVISION = "e565caa3a78c2423bd374333a472b049eb090e47";
 const RELEASE = "v2.2.0";
-const profilePath = new URL("../profiles/local-real-rounds.v3.json", import.meta.url);
+const profilePath = new URL("../profiles/local-real-rounds.v4.json", import.meta.url);
 
 const loadProfile = async (): Promise<CrawlProfile> =>
   parseCrawlProfile(JSON.parse(await readFile(profilePath, "utf8")));

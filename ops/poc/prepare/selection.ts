@@ -1,6 +1,7 @@
 import { canonicalHash } from "./canonical";
 import { containsProtected } from "./compose";
 import { noteRejection, PreparationError, rejectCandidate, type DiagnosticStage, type RunState } from "./diagnostics";
+import { AUTHORSHIP_CLAIM } from "../../../packages/artifact/src/index";
 import { CROSS_DECK_KEYS } from "./model";
 import { isReportableSourceIdentity } from "./model-run";
 import type { CrawlProfile } from "./profile";
@@ -110,6 +111,7 @@ export const protectedValuesOf = (candidates: readonly unknown[]): readonly stri
   return PROTECTED_SOURCE_KEYS.map((key) => source[key]).filter((value): value is string => typeof value === "string" && value.length > 0);
 }))];
 
-/** A description is shown only when it names no protected value of any selected source. */
+/** A description is shown only when it names no protected value of any selected source and claims nothing about authorship. */
 export const safeDescription = (description: string | null, protectedValues: readonly string[]): string | null =>
-  description !== null && protectedValues.some((value) => containsProtected(description, value)) ? null : description;
+  description !== null && (protectedValues.some((value) => containsProtected(description, value)) || AUTHORSHIP_CLAIM.test(description))
+    ? null : description;

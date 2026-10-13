@@ -13,7 +13,7 @@ const collectStackMetadata = typeof metadataModule.collectStackMetadata === "fun
   ? metadataModule.collectStackMetadata as (...args: any[]) => Promise<any>
   : async (): Promise<never> => { throw new Error("STACK_METADATA_NOT_IMPLEMENTED"); };
 
-const profilePath = new URL("../profiles/local-real-rounds.v3.json", import.meta.url);
+const profilePath = new URL("../profiles/local-real-rounds.v4.json", import.meta.url);
 const runtimeDirectory = new URL("../stack/", import.meta.url);
 const lockPath = new URL("uv.lock", runtimeDirectory);
 const pythonPath = new URL(".python-version", runtimeDirectory);
@@ -162,10 +162,12 @@ describe("Stack metadata worker bridge", () => {
         rowLimit: 1,
         perBlobByteLimit: 262_144,
         requestLimit: CAPACITY_CEILINGS.requestCount,
-        networkByteLimit: 100_663_296,
+        networkByteLimit: CAPACITY_CEILINGS.stackMetadataBytes,
         temporaryDiskBytes: 33_554_432,
+        sample: { licenses: ["Apache-2.0", "BSD-3-Clause", "MIT"], minimumStarEvents: 1000, popularRepositories: 24,
+          rowsPerRepository: 3, ordinaryRows: 200 },
       }) + "\n",
-      stdoutByteLimit: 100_663_296,
+      stdoutByteLimit: CAPACITY_CEILINGS.stackMetadataBytes,
       stderrByteLimit: 4096,
     });
     expect(rows).toEqual([metadataRow()]);
@@ -191,10 +193,10 @@ describe("Stack metadata worker bridge", () => {
 
     expect(JSON.parse(calls[0].stdin)).toMatchObject({
       requestLimit: CAPACITY_CEILINGS.requestCount - 5,
-      networkByteLimit: 100_662_296,
+      networkByteLimit: CAPACITY_CEILINGS.stackMetadataBytes - 1000,
       temporaryDiskBytes: 33_553_408,
     });
-    expect(calls[0].stdoutByteLimit).toBe(100_662_296);
+    expect(calls[0].stdoutByteLimit).toBe(CAPACITY_CEILINGS.stackMetadataBytes - 1000);
 
     let spawns = 0;
     const exhausted = await setup({ runWorker: async () => { spawns += 1; return { exitCode: 0, stdout: ndjson(metadataRow()), stderr: new Uint8Array() }; } });
@@ -228,7 +230,7 @@ describe("Stack metadata worker bridge", () => {
       ["COUNTERS_REJECTED", lines(row, counters({ redirectsFollowed: 4 }))],
       ["COUNTERS_REJECTED", lines(row, { trailer: counters().counters })],
       ["METADATA_CAPACITY", lines(row, counters({ requests: CAPACITY_CEILINGS.requestCount + 1 }))],
-      ["METADATA_BYTES", lines(row, counters({ networkBytes: 100_663_297 }))],
+      ["METADATA_BYTES", lines(row, counters({ networkBytes: CAPACITY_CEILINGS.stackMetadataBytes + 1 }))],
       ["TEMPORARY_DISK", lines(row, counters({ peakTemporaryDiskBytes: 33_554_433 }))],
     ] as const;
     for (const [code, stdout] of cases) {
@@ -296,9 +298,10 @@ describe("Stack metadata worker bridge", () => {
 
   it("rejects unsupported configuration, limits, and blank environment before spawning", async () => {
     for (const [code, overrides] of [
-      ["CONFIGURATION_REJECTED", { configuration: "JavaScript" }],
+      ["CONFIGURATION_REJECTED", { configuration: "PHP" }],
+      ["CONFIGURATION_REJECTED", { configuration: "C-Sharp" }],
       ["LIMIT_REJECTED", { rowLimit: 0 }],
-      ["LIMIT_REJECTED", { rowLimit: 10_001 }],
+      ["LIMIT_REJECTED", { rowLimit: CAPACITY_CEILINGS.stackRowsPerLanguage + 1 }],
       ["ENVIRONMENT_REJECTED", { environment: { PATH: "/bin", HF_TOKEN: "   " } }],
       ["ENVIRONMENT_REJECTED", { environment: { PATH: "", HF_TOKEN: "external-token" } }],
     ] as const) {
@@ -375,10 +378,11 @@ describe("Stack metadata worker bridge", () => {
     })).catch((caught: unknown) => caught as Error);
     expect(error.message).toBe("WORKER_START_FAILED");
     expect(error.message).not.toMatch(/hidden|token|bearer/iu);
+    // Only the length is read before the overrun rejects, so no ceiling-sized buffer is needed.
     await expectBeforeBlob("METADATA_BYTES", {
       runWorker: async () => ({
         exitCode: 0,
-        stdout: new Uint8Array(100_663_297),
+        stdout: { byteLength: CAPACITY_CEILINGS.stackMetadataBytes + 1 } as unknown as Uint8Array,
         stderr: new Uint8Array(),
       }),
     });
@@ -421,6 +425,7 @@ describe("Stack metadata worker bridge", () => {
     });
     const second = metadataRow({
       swhBlobId: "2".repeat(40),
+      repository: "example/other",
       detectedLanguage: "TypeScript",
       path: "src/example.tsx",
     });
@@ -431,6 +436,37 @@ describe("Stack metadata worker bridge", () => {
     }));
     expect(rows.map(({ swhBlobId }: { swhBlobId: string }) => swhBlobId))
       .toEqual(["1".repeat(40), "2".repeat(40)]);
+  });
+
+  it("accepts the sample it asked for: a few files of popular repositories, one file of each other", async () => {
+    const popular = (repository: string, digit: string) =>
+      metadataRow({ repository, swhBlobId: digit.repeat(40), starEventsCount: 5000, path: `src/${digit}.py` });
+    const ordinary = (repository: string, digit: string) =>
+      metadataRow({ repository, swhBlobId: digit.repeat(40), path: `src/${digit}.py` });
+    const run = async (...rows: Record<string, unknown>[]) => {
+      const options = await setup({
+        rowLimit: 100,
+        runWorker: async () => ({ exitCode: 0, stdout: lines(...rows, counters({ rowsInspected: 100 })), stderr: new Uint8Array() }),
+      });
+      return collectStackMetadata({ ...options, profile: { ...options.profile,
+        selection: { ...options.profile.selection, popularRepositories: 2, filesPerRepository: 2, ordinaryRows: 2 } } });
+    };
+
+    await expect(run(popular("a/one", "1"), popular("a/one", "2"), popular("a/two", "3"), ordinary("b/one", "4"), ordinary("b/two", "5")))
+      .resolves.toHaveLength(5);
+    for (const rows of [
+      [popular("a/one", "1"), popular("a/two", "2"), popular("a/three", "3")],
+      [popular("a/one", "1"), popular("a/one", "2"), popular("a/one", "3")],
+      [ordinary("b/one", "1"), ordinary("b/one", "2")],
+      [ordinary("b/one", "1"), ordinary("b/two", "2"), ordinary("b/three", "3")],
+      [popular("a/one", "1"), ordinary("a/one", "2")],
+      [metadataRow({ detectedLicenses: ["GPL-3.0-only"] })],
+      [metadataRow({ detectedLicenses: ["MIT", "GPL-3.0-only"] })],
+    ]) {
+      await expect(run(...rows)).rejects.toMatchObject({ code: "SAMPLE_REJECTED" });
+    }
+    await expect(run(...Array.from({ length: 7 }, (_, index) => ordinary(`b/r${index}`, String(index)))))
+      .rejects.toMatchObject({ code: "ROW_OVERRUN" });
   });
 
   it("always invokes worker cleanup after success or rejection", async () => {

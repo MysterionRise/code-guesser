@@ -22,8 +22,18 @@ FOOTER_SUFFIX_BYTES = 64 * 1024
 PARQUET_MAGIC = b"PAR1"
 LEADING_MAGIC_BYTES = 4
 CONTENT_RANGE = re.compile(r"^bytes (\d+)-(\d+)/(\d+)$")
-SHARD_PATH = re.compile(r"^data/(Python|TypeScript|Go|Rust|Ruby)/train-\d{5}-of-\d{5}\.parquet$")
-CONFIGURATIONS = ("Python", "TypeScript", "Go", "Rust", "Ruby")
+# Each configured language and the dataset directory that holds its shards.
+DIRECTORIES = {
+    "Python": "Python", "Ruby": "Ruby", "TypeScript": "TypeScript", "JavaScript": "JavaScript",
+    "Go": "Go", "Rust": "Rust", "Java": "Java", "C#": "C-Sharp", "Kotlin": "Kotlin", "Swift": "Swift",
+    "C": "C", "C++": "C++",
+}
+CONFIGURATIONS = tuple(DIRECTORIES)
+SHARD_PATH = re.compile(
+    r"^data/(" + "|".join(re.escape(directory) for directory in DIRECTORIES.values()) + r")/train-\d{5}-of-\d{5}\.parquet$"
+)
+# Rows are decoded a batch at a time, so a full row group never becomes one list of Python objects.
+BATCH_ROWS = 8192
 
 
 class ParquetReadError(Exception):
@@ -44,7 +54,8 @@ def list_first_shard(client, configuration, token):
     """Returns the lexicographically first parquet shard path of one configuration."""
     if configuration not in CONFIGURATIONS:
         _fail("CONFIGURATION_REJECTED")
-    url = f"https://{ALLOWED_HOST}/api/datasets/{DATASET}/tree/{PINNED_REVISION}/data/{configuration}"
+    directory = DIRECTORIES[configuration]
+    url = f"https://{ALLOWED_HOST}/api/datasets/{DATASET}/tree/{PINNED_REVISION}/data/{directory}"
     response = client.get(url, headers=_headers(token, accept="application/json"))
     try:
         entries = json.loads(response.content)
@@ -55,7 +66,7 @@ def list_first_shard(client, configuration, token):
     shards = sorted(
         entry["path"] for entry in entries
         if isinstance(entry, dict) and entry.get("type") == "file" and isinstance(entry.get("path"), str)
-        and SHARD_PATH.fullmatch(entry["path"]) and entry["path"].startswith(f"data/{configuration}/")
+        and SHARD_PATH.fullmatch(entry["path"]) and entry["path"].startswith(f"data/{directory}/")
     )
     if not shards:
         _fail("SHARD_LISTING_REJECTED")
@@ -176,6 +187,7 @@ def read_rows(client, configuration, token, row_limit):
         sparse = SparseFile(total, {tail_start: tail, span_start: chunk})
         table = _parquet(lambda: pq.ParquetFile(sparse).read_row_group(index))
         needed = min(row_limit - produced, table.num_rows)
-        for record in _parquet(lambda: table.slice(0, needed).to_pylist()):
-            produced += 1
-            yield record
+        for batch in _parquet(lambda: table.slice(0, needed).to_batches(max_chunksize=BATCH_ROWS)):
+            for record in _parquet(lambda: batch.to_pylist()):  # noqa: B023 - called at once
+                produced += 1
+                yield record

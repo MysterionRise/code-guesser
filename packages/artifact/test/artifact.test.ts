@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { composeExperimentArtifact } from "../../../ops/poc/prepare/compose";
-import { composeInput } from "../../../ops/poc/prepare/testdata/v3-builders";
+import { composeInput } from "../../../ops/poc/prepare/testdata/deck-builders";
 import { artifactHash, DECK_IDS, ExperimentRecordError, parseArtifactDecks, parseExperimentArtifact, roundPoints } from "../src/index";
 
 const composed = (): any => structuredClone(composeExperimentArtifact(composeInput()).artifact);

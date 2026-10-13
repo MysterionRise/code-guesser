@@ -1,23 +1,25 @@
+import { LANGUAGE_SLUGS } from "../../../packages/artifact/src/index";
 import { createRunReport } from "./run-report";
 import { readFile } from "node:fs/promises";
 
 import { canonicalBytes, canonicalHash } from "./canonical";
 import { createCapacityMeter, type CapacityMeter } from "./capacity";
 import type { GitHubQueryClassification } from "./github-search";
-import { parseCrawlProfile, STACK_LANGUAGES, type CrawlProfile, type StackLanguage } from "./profile";
+import { parseCrawlProfile, poolSizes, STACK_LANGUAGES, type CrawlProfile, type StackLanguage } from "./profile";
 import type { PreparationDependencies } from "./index";
 
-const profilePath = new URL("../profiles/local-real-rounds.v3.json", import.meta.url);
+const profilePath = new URL("../profiles/local-real-rounds.v4.json", import.meta.url);
 
-export const hash = (digit: string): string => digit.repeat(64);
+/** A fake SHA-256 made of one repeated digit, or a repeated two-character tag. */
+export const hash = (digit: string): string => digit.repeat(64).slice(0, 64);
 export const accepted = <Value>(value: Value, digit = "a") => ({
   value,
   acceptedResponseHashes: [hash(digit)],
 });
-/** The v3 profile with pools of five, so each harness scenario stays small. */
+/** The v4 profile with a before-or-after pool of five; the Stack decks hold two rounds per language. */
 export const loadProfile = async (): Promise<CrawlProfile> => {
   const raw = JSON.parse(await readFile(profilePath, "utf8"));
-  raw.selection = { ...raw.selection, projectPool: 5, languagePool: 5, beforeAfterPool: 5 };
+  raw.selection = { ...raw.selection, beforeAfterPool: 5 };
   return parseCrawlProfile(raw);
 };
 export const classificationsFor = (
@@ -65,18 +67,18 @@ export const HARNESS_CANDIDATES: readonly HarnessCandidate[] = Object.freeze(
 );
 /** A popular row (four per language, ranked by star events) or an ordinary row. */
 export const harnessRow = (language: string, id: string, overrides: Partial<HarnessRow> = {}): HarnessRow => ({
-  id, detectedLanguage: language, repository: `${language.toLowerCase()}-org/${id}`,
+  id, detectedLanguage: language, repository: `${LANGUAGE_SLUGS[language as StackLanguage] ?? language.toLowerCase()}-org/${id}`,
   // A neutral file name: one that repeated the repository's name would rightly keep it out of a project round.
   path: `src/module${[...id].reduce((total, character, index) => total + character.charCodeAt(0) * (index + 1), 0)}.code`,
   excerpt: "value = compute(1)", starEventsCount: 0, ...overrides,
 });
 const harnessRows = (): HarnessState["rows"] => Object.fromEntries(STACK_LANGUAGES.map((language) => {
-  const lower = language.toLowerCase();
-  const popular = [0, 1, 2, 3].map((rank) => harnessRow(language, `${lower}-pop-${rank}`, { starEventsCount: 9000 - rank * 1000 }));
+  const slug = LANGUAGE_SLUGS[language];
+  const popular = [0, 1, 2, 3].map((rank) => harnessRow(language, `${slug}-pop-${rank}`, { starEventsCount: 9000 - rank * 1000 }));
   // Stable row ids put the ineligible Python row first, so the language deck must reject it and continue.
   const ordinary = language === "Python"
-    ? [harnessRow(language, "py-reject", { stableRowId: "1" }), harnessRow(language, "py", { stableRowId: "2" })]
-    : [harnessRow(language, lower)];
+    ? ["py-reject", "py", "py-2", "py-3"].map((id, index) => harnessRow(language, id, { stableRowId: String(index + 1) }))
+    : [harnessRow(language, slug), harnessRow(language, `${slug}-2`)];
   return [language, [...popular, ...ordinary]];
 })) as unknown as HarnessState["rows"];
 
@@ -167,7 +169,7 @@ const makeStackDependencies = (
     state.calls.push(`metadata:${configuration}`);
     state.dependencyMeters.push(capacity);
     capacity.recordStackRows(configuration, state.rows[configuration].length, 100);
-    return accepted(state.rows[configuration], String(5 + STACK_LANGUAGES.indexOf(configuration)));
+    return accepted(state.rows[configuration], `a${STACK_LANGUAGES.indexOf(configuration).toString(16)}`);
   },
   fetchStackBlob: async ({ row, limits, capacity }) => {
     state.calls.push(`fetch:${(row as any).id}:${limits.blobAttempts}:${limits.totalBlobBytes}`);
@@ -193,11 +195,11 @@ const makeArtifactDependencies = (
 ): Pick<PreparationDependencies, "generateProject" | "generateLanguage" | "generateBeforeAfter" | "compose"> => ({
   generateProject: ({ profile, rounds }) => {
     state.calls.push(`project:${rounds.length}:${rounds.map((round) => round.distractors.length).join(",")}`);
-    return stubDeck("PROJECT", profile.selection.projectPool);
+    return stubDeck("PROJECT", poolSizes(profile).project);
   },
   generateLanguage: ({ profile, candidates: selected }) => {
     state.calls.push(`language:${selected.length}`);
-    return stubDeck("LANGUAGE", profile.selection.languagePool);
+    return stubDeck("LANGUAGE", poolSizes(profile).language);
   },
   generateBeforeAfter: ({ profile, candidates: selected }) => {
     state.calls.push(`before-after:${selected.length}`);

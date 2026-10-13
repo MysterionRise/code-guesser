@@ -8,7 +8,7 @@ import {
 } from "./diagnostics";
 import type { GitHubQueryClassification } from "./github-search";
 import { artifactFixtures, DECK_IDS, type DeckId } from "./model";
-import { STACK_LANGUAGES, type CrawlProfile } from "./profile";
+import { STACK_LANGUAGES, poolSizes, type CrawlProfile } from "./profile";
 import { selectBeforeAfter } from "./select-github";
 import { selectStack, type ProjectSelection } from "./select-stack";
 import { addHashes, protectedValuesOf, provisionalSnapshot, repositoryScreen, safeDescription, view } from "./selection";
@@ -201,7 +201,6 @@ export const prepareLocalExperiment = async (deps: PreparationDependencies = def
     if (deps.finalizeBindings && (finalized.beforeAfterCandidates.some((candidate) => view(candidate).source?.crawlSnapshotId !== crawlSnapshotId)
       || [...finalized.projectCandidates, ...finalized.languageCandidates]
         .some((candidate) => (candidate as { crawlSnapshotId?: unknown }).crawlSnapshotId !== crawlSnapshotId))) throw new PreparationError();
-    const { projectPool, languagePool, beforeAfterPool } = loaded.profile.selection;
     const generate: Readonly<Record<DeckId, () => GeneratedRounds>> = {
       project: () => {
         // Descriptions are public; one that names any selected source's protected value is left out.
@@ -215,7 +214,7 @@ export const prepareLocalExperiment = async (deps: PreparationDependencies = def
       language: () => deps.generateLanguage({ profile: loaded.profile, candidates: finalized.languageCandidates }),
       "before-after": () => deps.generateBeforeAfter({ profile: loaded.profile, candidates: finalized.beforeAfterCandidates }),
     };
-    const expected: Readonly<Record<DeckId, number>> = { project: projectPool, language: languagePool, "before-after": beforeAfterPool };
+    const expected = poolSizes(loaded.profile);
     const decks = Object.fromEntries(published.map((id) => {
       const generated = generate[id]();
       if (generated.fixtures.length !== expected[id]) throw new PreparationError();

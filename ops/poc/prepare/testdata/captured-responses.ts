@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 
+import { LANGUAGE_SLUGS } from "../../../../packages/artifact/src/index";
 import { STACK_LANGUAGES, type CrawlProfile, type StackLanguage } from "../profile";
 import type { SelectedStackBlob } from "../stack-revalidation";
 import type { StackMetadataRow } from "../stack-metadata";
@@ -170,13 +171,23 @@ const stackCard = (): string => [
 
 const repeated = (count: number, block: (index: number) => readonly string[]): Buffer =>
   Buffer.from(Array.from({ length: count }, (_, index) => block(index).join("\n")).join("\n"));
-/** A file's code in each language, with a variant number so every file is distinct. */
+/**
+ * A file's code in each language, with a variant number so every file is distinct. Each shows syntax that sets
+ * its language apart from the look-alike, as a language round needs.
+ */
 const SOURCES: Readonly<Record<StackLanguage, (variant: number) => Readonly<{ name: string; bytes: Buffer }>>> = {
-  Python: (variant) => ({ name: `module_${variant}.py`, bytes: repeated(40, (index) => [`def captured_${variant}_${index}(value):`, `    adjusted = value + ${index + 7}`, "    return adjusted * 2", ""]) }),
+  Python: (variant) => ({ name: `module_${variant}.py`, bytes: repeated(30, (index) => [`def captured_${variant}_${index}(value):`, "    if value is None:", "        return 0", `    return (value + ${index + 7}) * 2`, ""]) }),
+  Ruby: (variant) => ({ name: `module_${variant}.rb`, bytes: repeated(25, (index) => [`def captured_${variant}_${index}(value)`, `  adjusted = value + ${index + 2}`, "  adjusted * 6", "end", ""]) }),
   TypeScript: (variant) => ({ name: `module-${variant}.ts`, bytes: repeated(30, (index) => [`export function captured${variant}x${index}(value: number): number {`, `  const adjusted = value + ${index + 9};`, "  return adjusted * 3;", "}", ""]) }),
+  JavaScript: (variant) => ({ name: `module-${variant}.js`, bytes: repeated(30, (index) => [`function captured${variant}x${index}(value, step) {`, `  var adjusted = value + step + ${index};`, "  return adjusted * 3;", "}", ""]) }),
   Go: (variant) => ({ name: `module_${variant}.go`, bytes: Buffer.from(["package captured", "", ...Array.from({ length: 20 }, (_, index) => `func captured${variant}x${index}(value int) int {\n\tadjusted := value + ${index + 5}\n\treturn adjusted * 4\n}\n`)].join("\n")) }),
   Rust: (variant) => ({ name: `module_${variant}.rs`, bytes: repeated(25, (index) => [`pub fn captured_${variant}_${index}(value: i64) -> i64 {`, `    let adjusted = value + ${index + 3};`, "    adjusted * 5", "}", ""]) }),
-  Ruby: (variant) => ({ name: `module_${variant}.rb`, bytes: repeated(25, (index) => [`def captured_${variant}_${index}(value)`, `  adjusted = value + ${index + 2}`, "  adjusted * 6", "end", ""]) }),
+  Java: (variant) => ({ name: `Module${variant}.java`, bytes: Buffer.concat([Buffer.from(`public class Module${variant} {\n`), repeated(25, (index) => [`    static int captured${index}(int value) {`, `        final int adjusted = value + ${index};`, "        return adjusted * 4;", "    }", ""]), Buffer.from("}\n")]) }),
+  "C#": (variant) => ({ name: `Module${variant}.cs`, bytes: Buffer.concat([Buffer.from(`public static class Module${variant}\n{\n`), repeated(25, (index) => [`    public static bool Captured${index}(int value) => value + ${index} > 3;`, ""]), Buffer.from("}\n")]) }),
+  Kotlin: (variant) => ({ name: `Module${variant}.kt`, bytes: repeated(25, (index) => [`fun captured${variant}x${index}(value: Int): Int {`, `    val adjusted = value + ${index}`, "    return adjusted * 5", "}", ""]) }),
+  Swift: (variant) => ({ name: `Module${variant}.swift`, bytes: repeated(25, (index) => [`func captured${variant}x${index}(_ value: Int) -> Int {`, `    let adjusted = value + ${index}`, "    return adjusted * 6", "}", ""]) }),
+  C: (variant) => ({ name: `module_${variant}.c`, bytes: repeated(25, (index) => [`static int captured_${variant}_${index}(int value)`, "{", "    if (value == 0) { printf(\"zero\\n\"); }", `    return value + ${index};`, "}", ""]) }),
+  "C++": (variant) => ({ name: `module_${variant}.cpp`, bytes: repeated(25, (index) => [`int Captured${variant}::step${index}(int value) {`, `    return std::max(value, ${index});`, "}", ""]) }),
 };
 
 /** Commits per query: six refactors across the first three searches, every subject usable as a hint. */
@@ -212,16 +223,18 @@ export const createCapturedResponses = (
         html_url: `https://github.com/${source.repository}` },
     })) });
   });
-  // Per language: four popular repositories (the project deck's answer and decoys), then one ordinary file.
+  // Per language: four popular repositories (the project deck's two answers and two decoys), then two ordinary files.
   const languages = STACK_LANGUAGES.map((language, languageIndex) => {
-    const lower = language.toLowerCase();
+    const slug = LANGUAGE_SLUGS[language];
     const popular = [0, 1, 2, 3].map((rank) => {
       const source = SOURCES[language](rank);
-      return addStackFile(http, languageIndex * 10 + rank, `famous-${lower}/project-${rank}`, language, `lib/${source.name}`, source.bytes, 8000 - rank * 1000);
+      return addStackFile(http, languageIndex * 10 + rank, `famous-${slug}/project-${rank}`, language, `lib/${source.name}`, source.bytes, 8000 - rank * 1000);
     });
-    const ordinarySource = SOURCES[language](9);
-    const ordinary = addStackFile(http, languageIndex * 10 + 9, `everyday-${lower}/tools`, language, `src/${ordinarySource.name}`, ordinarySource.bytes, 3);
-    return [language, [...popular, ordinary]] as const;
+    const ordinary = ["tools", "kit"].map((name, offset) => {
+      const source = SOURCES[language](8 + offset);
+      return addStackFile(http, languageIndex * 10 + 8 + offset, `everyday-${slug}/${name}`, language, `src/${source.name}`, source.bytes, 3);
+    });
+    return [language, [...popular, ...ordinary]] as const;
   });
   return Object.freeze({
     http,

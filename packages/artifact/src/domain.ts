@@ -12,13 +12,22 @@ export const MODE_KINDS: Readonly<Record<FixtureKind, DeckId>> = Object.freeze({
 });
 export const ARTIFACT_SCHEMA_VERSION = "local-experiment-artifact.v3";
 export const CONTENT_CLASS = "LOCAL_UNREVIEWED_EXPERIMENT";
-export const PROFILE_VERSION = "local-real-rounds.v3";
+export const PROFILE_VERSION = "local-real-rounds.v4";
 /** A session deals this many rounds from a deck's pool. */
 export const ROUNDS_PER_SESSION = 5;
 /** A deck's pool holds at least one session's rounds and at most this many. */
 export const MAXIMUM_POOL_SIZE = 40;
-export const STACK_LANGUAGES = Object.freeze(["Python", "TypeScript", "Go", "Rust", "Ruby"] as const);
+/** The Stack v2 languages the decks draw from, in look-alike pairs: each pair's two languages share a lot of syntax. */
+export const STACK_LANGUAGES = Object.freeze([
+  "Python", "Ruby", "TypeScript", "JavaScript", "Go", "Rust", "Java", "C#", "Kotlin", "Swift", "C", "C++",
+] as const);
 export type StackLanguage = typeof STACK_LANGUAGES[number];
+/** Each language and the look-alike it is paired with; a language round always offers both. */
+export const LANGUAGE_PAIRS: readonly (readonly [StackLanguage, StackLanguage])[] = Object.freeze([
+  ["Python", "Ruby"], ["TypeScript", "JavaScript"], ["Go", "Rust"], ["Java", "C#"], ["Kotlin", "Swift"], ["C", "C++"],
+].map((pair) => Object.freeze(pair as [StackLanguage, StackLanguage])));
+/** Project and language decks hold this many rounds per language; the language deck's option design needs exactly two. */
+export const ROUNDS_PER_LANGUAGE = 2;
 /** Options per round: four for project and language rounds, two for before-or-after rounds. */
 export const CANDIDATE_COUNTS: Readonly<Record<FixtureKind, number>> = Object.freeze({ PROJECT: 4, LANGUAGE: 4, BEFORE_AFTER: 2 });
 /** Before-or-after answers, in pane order: the first names pane A as the later version. */
@@ -29,7 +38,8 @@ export const BEFORE_AFTER_CANDIDATE_IDS = Object.freeze([
 export const PANE_LABELS = Object.freeze(["A", "B"] as const);
 /** Identifier slugs for every language a language round may offer. */
 export const LANGUAGE_SLUGS: Readonly<Record<StackLanguage, string>> = Object.freeze({
-  Python: "python", TypeScript: "typescript", Go: "go", Rust: "rust", Ruby: "ruby",
+  Python: "python", Ruby: "ruby", TypeScript: "typescript", JavaScript: "javascript", Go: "go", Rust: "rust",
+  Java: "java", "C#": "csharp", Kotlin: "kotlin", Swift: "swift", C: "c", "C++": "cpp",
 });
 
 /**

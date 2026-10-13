@@ -45,7 +45,7 @@ const treeIdentity = (entries: readonly { path: string; mode: string; type: stri
 const rootEntries = [{ path, mode: "100644", type: "blob", sha: blob }];
 const rootTree = treeIdentity(rootEntries);
 const profile = async () => parseCrawlProfile(JSON.parse(await readFile(
-  new URL("../profiles/local-real-rounds.v3.json", import.meta.url), "utf8",
+  new URL("../profiles/local-real-rounds.v4.json", import.meta.url), "utf8",
 )));
 
 const row = (overrides: Record<string, unknown> = {}) => {
@@ -253,7 +253,7 @@ describe("Stack candidate GitHub revalidation", () => {
       },
     })));
     expect(output).toMatchObject({
-      profileVersion: "local-real-rounds.v3",
+      profileVersion: "local-real-rounds.v4",
       crawlSnapshotId: "f".repeat(64),
       excerptHash: sha256(content.toString("utf8").replace(/\n+$/u, "")),
       stableRowId: row().stableRowId,

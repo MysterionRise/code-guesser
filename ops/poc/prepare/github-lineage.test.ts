@@ -79,7 +79,7 @@ const blobResponse = (sha: string, bytes: Uint8Array): Record<string, unknown> =
 });
 
 const profile = async () => parseCrawlProfile(JSON.parse(
-  await readFile(new URL("../profiles/local-real-rounds.v3.json", import.meta.url), "utf8"),
+  await readFile(new URL("../profiles/local-real-rounds.v4.json", import.meta.url), "utf8"),
 ));
 
 const validResponses = (): ReadonlyMap<string, unknown> => new Map([

@@ -110,7 +110,7 @@ export const SCENES: readonly Scene[] = Object.freeze([
   }, Math.min(ANSWER_CHOREOGRAPHY[3] ?? 1, 1), { width: 360, maximumColors: 96 }),
   {
     id: "full-run",
-    gif: { speed: 2, framesPerSecond: 8, width: 340, maximumColors: 64 },
+    gif: { speed: 2, framesPerSecond: 8, width: 340, maximumColors: 48 },
     mp4: "codeguessr-demo",
     steps: [
       goto("/"),

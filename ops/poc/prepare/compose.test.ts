@@ -2,7 +2,7 @@ import { canonicalArtifactBytes, canonicalArtifactHash } from "./canonical";
 import { ComposeError, composeExperimentArtifact } from "./compose";
 import { artifactFixtures } from "./model";
 import { generateLanguageRounds } from "./language-rounds";
-import { composeInput, sha256, snapshotIdFor, stackCandidate } from "./testdata/v3-builders";
+import { composeInput, sha256, snapshotIdFor, stackCandidate } from "./testdata/deck-builders";
 
 const testModuleName: string = "vitest";
 const { describe, expect, it } = await import(testModuleName) as any;
@@ -12,11 +12,11 @@ const codeOf = (callback: () => unknown): string | undefined => {
 };
 
 describe("pooled experiment composition", () => {
-  it("composes project, language, and before-or-after pools of ten into one artifact", () => {
+  it("composes the project, language, and before-or-after pools into one artifact", () => {
     const composed = composeExperimentArtifact(composeInput());
     expect(composed.artifact.schemaVersion).toBe("local-experiment-artifact.v3");
     expect(composed.artifact.decks.map(({ id, fixtures, roundsPerSession }) => `${id}:${fixtures.length}:${roundsPerSession}`))
-      .toEqual(["project:10:5", "language:10:5", "before-after:10:5"]);
+      .toEqual(["project:24:5", "language:24:5", "before-after:10:5"]);
     expect(composed.artifact.decks.map(({ title }) => title)).toEqual(["Which project?", "Which language?", "Before or after?"]);
     expect(composed.artifactHash).toBe(canonicalArtifactHash(composed.artifact));
     expect(Buffer.from(composed.artifactBytes)).toEqual(Buffer.from(canonicalArtifactBytes(composed.artifact)));

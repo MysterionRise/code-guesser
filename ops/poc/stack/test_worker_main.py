@@ -43,6 +43,8 @@ class WorkerMainTests(unittest.TestCase):
             "configuration": "Rust", "revision": stream_metadata.PINNED_REVISION, "rowLimit": 10_000,
             "perBlobByteLimit": 262_144, "requestLimit": CEILINGS["requestCount"], "networkByteLimit": 96 * 1024 * 1024,
             "temporaryDiskBytes": 32 * 1024 * 1024,
+            "sample": {"licenses": ["MIT"], "minimumStarEvents": 1000, "popularRepositories": 24,
+                       "rowsPerRepository": 3, "ordinaryRows": 200},
         })
         for request, code, expected in [(valid, 0, ""), (valid.replace(f'"requestLimit": {CEILINGS["requestCount"]}', f'"requestLimit": {CEILINGS["requestCount"] + 1}'), 1, "REQUEST_LIMIT_REJECTED\n")]:
             stderr = io.StringIO()

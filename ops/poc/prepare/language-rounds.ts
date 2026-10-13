@@ -1,7 +1,9 @@
 import { canonicalHash } from "./canonical";
 import { deepFreeze, validUtcTimestamp } from "./model-validation";
 import { languageCandidateId, type ExperimentFixture } from "./model";
-import { STACK_LANGUAGES, mentionsExtension, mentionsLabel, type CrawlProfile, type StackLanguage } from "./profile";
+import { LANGUAGE_PAIRS } from "../../../packages/artifact/src/index";
+import { firstMarker, markerSignals, tellsApart } from "./language-markers";
+import { STACK_LANGUAGES, mentionsExtension, mentionsLabel, poolSizes, type CrawlProfile, type StackLanguage } from "./profile";
 import { attributionFor, fill, orderedPool, roundIdFor, sha256, shuffled, sourceRecord, type GeneratedRounds } from "./round-helpers";
 import type { RevalidatedStackCandidate } from "./stack-revalidation";
 
@@ -9,8 +11,8 @@ type Candidate = RevalidatedStackCandidate & Readonly<Record<string, unknown>>;
 type ClassifiedCandidate = Readonly<{ candidate: Candidate; language: StackLanguage }>;
 
 export class LanguageRoundsError extends Error {
-  public constructor() {
-    super("LANGUAGE_ROUNDS_REJECTED");
+  public constructor(code = "LANGUAGE_ROUNDS_REJECTED") {
+    super(code);
     this.name = "LanguageRoundsError";
   }
 }
@@ -125,6 +127,8 @@ const classify = (profile: CrawlProfile, candidate: RevalidatedStackCandidate): 
   exactStackBindings(profile, value);
   const language = languageFor(profile, value);
   rejectStackSpoilers(profile, value);
+  // Every round offers the look-alike too, so the code must show what sets its language apart.
+  if (!tellsApart(value.excerpt, language)) throw new LanguageRoundsError("LANGUAGE_PAIR_AMBIGUOUS");
   return Object.freeze({ candidate: value, language });
 };
 
@@ -133,76 +137,56 @@ export const validateLanguageCandidate = (options: Readonly<{
   candidate: RevalidatedStackCandidate;
 }>): RevalidatedStackCandidate => classify(options.profile, options.candidate).candidate;
 
-/** Syntax typical of each language, most telling first; a hint names the first one the excerpt contains. */
-const SYNTAX: Readonly<Record<StackLanguage, readonly string[]>> = Object.freeze({
-  Python: ["elif", "self.", "lambda", "def ", "None", "await "],
-  TypeScript: ["interface ", "readonly ", ": string", ": number", "=> ", "export ", "const "],
-  Go: [":=", "err != nil", "func ", "chan ", "defer ", "struct {"],
-  Rust: ["let mut ", "&self", "fn ", "impl ", "Option<", "::", "match "],
-  Ruby: ["elsif", "do |", "attr_", "def ", "nil", "end"],
-});
-const UNTELLING_SYNTAX = "the way names are declared";
-
-const blockStyle = (excerpt: string): Readonly<{ clue: string; braces: boolean }> => {
+/**
+ * How the excerpt's blocks are built, checked in the style its language uses: a C++ `public:` label ends in a
+ * colon before an indented line, yet its blocks are braces. Code whose own style does not show gets a neutral hint.
+ */
+const blockStyle = (excerpt: string, language: StackLanguage): string => {
   const lines = excerpt.split("\n");
-  if (lines.some((line, index) => /:\s*(?:#.*)?$/u.test(line) && /^\s+\S/u.test(lines[index + 1] ?? "")
-    && (lines[index + 1]!.length - lines[index + 1]!.trimStart().length) > (line.length - line.trimStart().length))) {
-    return { clue: "Blocks open with a colon and are set by indentation.", braces: false };
+  if (language === "Python") {
+    return lines.some((line, index) => /:\s*(?:#.*)?$/u.test(line) && /^\s+\S/u.test(lines[index + 1] ?? "")
+      && (lines[index + 1]!.length - lines[index + 1]!.trimStart().length) > (line.length - line.trimStart().length))
+      ? "Blocks open with a colon and are set by indentation." : "Look at how each block starts and ends.";
   }
-  if (lines.some((line) => line.trim() === "end")) return { clue: "Blocks close with a line that says end.", braces: false };
-  if (excerpt.includes("{")) return { clue: "Blocks are wrapped in braces.", braces: true };
-  return { clue: "Look at how each block starts and ends.", braces: false };
+  if (language === "Ruby") {
+    return lines.some((line) => line.trim() === "end") ? "Blocks close with a line that says end." : "Look at how each block starts and ends.";
+  }
+  return excerpt.includes("{") ? "Blocks are wrapped in braces." : "Look at how each block starts and ends.";
 };
 
-/** Two answer-free hints drawn from this excerpt: its block structure, then a piece of telling syntax. */
-const cluesFor = (profile: CrawlProfile, excerpt: string, language: StackLanguage) => {
-  const block = blockStyle(excerpt);
-  const found = SYNTAX[language].find((syntax) => excerpt.includes(syntax));
-  const syntax = found === undefined ? UNTELLING_SYNTAX : `\`${found.trim()}\``;
-  const clues = [block.clue, fill(profile.templates.language.syntaxClue, { syntax })];
+/** Two answer-free hints drawn from this excerpt: its block structure, then the syntax that sets it apart. */
+const cluesFor = (profile: CrawlProfile, excerpt: string, language: StackLanguage): readonly string[] => {
+  const found = firstMarker(excerpt, language) ?? fail();
+  const syntax = found.shown.includes("`") ? found.shown : `\`${found.shown}\``;
+  const clues = [blockStyle(excerpt, language), fill(profile.templates.language.syntaxClue, { syntax })];
   if (clues.some((clue) => STACK_LANGUAGES.some((label) => mentionsLabel(clue, label)))) fail();
-  return Object.freeze({ clues: Object.freeze(clues), syntax: found?.trim(), braces: block.braces });
-};
-
-const BRACE_LANGUAGES = new Set<StackLanguage>(["TypeScript", "Go", "Rust"]);
-const HASH_COMMENT_LANGUAGES = new Set<StackLanguage>(["Python", "Ruby"]);
-
-/** What the reveal teaches: the syntax that settles it, and a feature the excerpt shares with a wrong option. */
-const signalsFor = (excerpt: string, language: StackLanguage, options: readonly StackLanguage[], hints: ReturnType<typeof cluesFor>) => {
-  const helpful = hints.syntax === undefined
-    ? [`The file's extension and The Stack v2 both record ${language}.`]
-    : [`\`${hints.syntax}\` is typical ${language} syntax.`];
-  const others = options.filter((option) => option !== language);
-  const brace = others.find((option) => BRACE_LANGUAGES.has(option));
-  const hash = others.find((option) => HASH_COMMENT_LANGUAGES.has(option));
-  const misleading = hints.braces && brace !== undefined
-    ? `${brace} wraps blocks in braces too.`
-    : /^\s*#/mu.test(excerpt) && hash !== undefined
-      ? `${hash} starts comments with # too.`
-      : "A short excerpt can read like several languages.";
-  return Object.freeze({ helpful: Object.freeze(helpful), misleading: Object.freeze([misleading]) });
+  return Object.freeze(clues);
 };
 
 /**
- * Each round offers its answer and three of the other four languages the deck can hold, so the options never
- * name the answer. The language each round leaves out follows a balanced design: the languages are put in a
- * private order (keyed by blob identities no player sees), and a language's r-th round leaves out the language
- * r + 1 places further along. Rounds that share an answer leave out different languages, and every language is
- * left out equally often, so neither an option set nor how often an option appears points to the answer.
+ * Each round offers two look-alike pairs: its answer's pair and one more. The pairs sit in a private cycle
+ * (keyed by blob identities no player sees), and each neighbouring two make one option set, so there are as
+ * many sets as pairs. A language's first round uses the set it shares with the pair before it, its second the
+ * set it shares with the pair after it. Every set then holds four rounds whose answers are its four languages,
+ * every language appears in exactly eight rounds, and an option set never points to its answer: neither which
+ * pair holds the answer nor which of the pair it is.
  */
 const optionSets = (classified: readonly ClassifiedCandidate[]): ReadonlyMap<ClassifiedCandidate, readonly StackLanguage[]> => {
   const seed = sha256(classified.map(({ candidate }) => String(candidate.blob)).sort().join("|"));
-  const order = [...STACK_LANGUAGES].sort((left, right) => sha256(`${seed}:${left}`) < sha256(`${seed}:${right}`) ? -1 : 1);
+  const cycle = [...LANGUAGE_PAIRS].sort((left, right) => sha256(`${seed}:${left.join("|")}`) < sha256(`${seed}:${right.join("|")}`) ? -1 : 1);
+  if (cycle.length < 3) fail();
   const sets = new Map<ClassifiedCandidate, readonly StackLanguage[]>();
-  for (const language of STACK_LANGUAGES) {
-    const position = order.indexOf(language);
-    const rounds = classified.filter((entry) => entry.language === language)
-      .sort((left, right) => sha256(String(left.candidate.blob)) < sha256(String(right.candidate.blob)) ? -1 : 1);
-    rounds.forEach((entry, index) => {
-      const excluded = order[(position + (index % (order.length - 1)) + 1) % order.length]!;
-      sets.set(entry, Object.freeze(STACK_LANGUAGES.filter((option) => option !== excluded)));
-    });
-  }
+  cycle.forEach((pair, position) => {
+    const before = cycle[(position + cycle.length - 1) % cycle.length]!;
+    const after = cycle[(position + 1) % cycle.length]!;
+    for (const language of pair) {
+      const rounds = classified.filter((entry) => entry.language === language)
+        .sort((left, right) => sha256(String(left.candidate.blob)) < sha256(String(right.candidate.blob)) ? -1 : 1);
+      if (rounds.length !== 2) fail();
+      sets.set(rounds[0]!, Object.freeze([...before, ...pair]));
+      sets.set(rounds[1]!, Object.freeze([...pair, ...after]));
+    }
+  });
   return sets;
 };
 
@@ -214,29 +198,29 @@ const fixtureFor = (classified: ClassifiedCandidate, options: readonly StackLang
   const candidates = shuffled(roundId, options, (label) => label)
     .map((label) => Object.freeze({ id: languageCandidateId(label), label, detail: null }));
   const panes = Object.freeze([Object.freeze({ label: null, text: candidate.excerpt })]);
-  const hints = cluesFor(profile, candidate.excerpt, language);
-  const signals = signalsFor(candidate.excerpt, language, options, hints);
+  const clues = cluesFor(profile, candidate.excerpt, language);
+  const signals = markerSignals(candidate.excerpt, language);
   return Object.freeze({
     kind: "LANGUAGE",
     roundId,
-    roundVersion: canonicalHash({ source, panes, candidates, clues: hints.clues, prompt: template.prompt }),
+    roundVersion: canonicalHash({ source, panes, candidates, clues, prompt: template.prompt }),
     panes,
     prompt: template.prompt,
     candidates: Object.freeze(candidates),
-    clues: hints.clues,
+    clues,
     correctCandidateId: languageCandidateId(language),
     evidence: fill(template.evidence, { path: String(candidate.path), language }),
     explanation: template.explanation,
     attribution: attributionFor(source),
-    helpfulSignals: signals.helpful,
-    misleadingSignals: signals.misleading,
+    helpfulSignals: Object.freeze([signals.helpful]),
+    misleadingSignals: Object.freeze([signals.misleading]),
     source,
   });
 };
 
 export const generateLanguageRounds = (options: LanguageRoundsOptions): GeneratedRounds => {
   const { profile } = options;
-  if (options.candidates.length !== profile.selection.languagePool) fail();
+  if (options.candidates.length !== poolSizes(profile).language) fail();
   const classified = options.candidates.map((candidate) => classify(profile, candidate));
   if (new Set(classified.map(({ candidate }) => candidate.crawlSnapshotId)).size !== 1) fail();
   for (const key of profile.deduplication) {

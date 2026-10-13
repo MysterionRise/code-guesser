@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 import { STACK_REVISION } from "../limits";
 import type { CapacityMeter } from "./capacity";
-import { STACK_LANGUAGES, type CrawlProfile, type StackLanguage } from "./profile";
+import { STACK_EXTENSIONS, STACK_LANGUAGES, type CrawlProfile, type StackLanguage } from "./profile";
 
 const RUNTIME_DIRECTORY = fileURLToPath(new URL("../stack/", import.meta.url)).replace(/\/$/u, "");
 const WORKER_PATH = join(RUNTIME_DIRECTORY, "stream_metadata.py");
@@ -152,6 +152,15 @@ const validateRuntime = async (
   if (createHash("sha256").update(lock).digest("hex") !== LOCK_HASH) fail("LOCK_MISMATCH");
 };
 
+/** What the worker returns of the rows it inspects: a few files of the most-starred repositories, one of others. */
+const sampleRequest = (profile: CrawlProfile) => Object.freeze({
+  licenses: [...profile.licenses],
+  minimumStarEvents: profile.selection.minimumStarEvents,
+  popularRepositories: profile.selection.popularRepositories,
+  rowsPerRepository: profile.selection.filesPerRepository,
+  ordinaryRows: profile.selection.ordinaryRows,
+});
+
 /** The exact request the orchestrator hands the metadata worker, budgets taken from what remains. */
 export const metadataWorkerRequest = (options: StackMetadataOptions): WorkerRequest => {
   if (!(STACK_LANGUAGES as readonly string[]).includes(options.configuration)) {
@@ -184,6 +193,7 @@ export const metadataWorkerRequest = (options: StackMetadataOptions): WorkerRequ
       requestLimit,
       networkByteLimit: remaining,
       temporaryDiskBytes,
+      sample: sampleRequest(options.profile),
     })}\n`,
     stdoutByteLimit: remaining,
     stderrByteLimit: STDERR_LIMIT,
@@ -264,14 +274,10 @@ const exactRecord = (value: unknown): Record<string, unknown> => {
 const validText = (value: unknown): value is string =>
   typeof value === "string" && value.length > 0 && value.trim() === value;
 
-const EXTENSIONS: Readonly<Record<StackLanguage, readonly string[]>> = Object.freeze({
-  Python: [".py"], TypeScript: [".ts", ".tsx"], Go: [".go"], Rust: [".rs"], Ruby: [".rb"],
-});
-
 const validPath = (value: unknown, language: StackLanguage): boolean => {
   if (!validText(value) || value.startsWith("/") || value.includes("\\")) return false;
   if (value.split("/").some((part) => part === "" || part === "." || part === "..")) return false;
-  return EXTENSIONS[language].some((extension) => value.endsWith(extension));
+  return STACK_EXTENSIONS[language].some((extension) => value.endsWith(extension));
 };
 
 const validUtcDate = (value: unknown): value is string => {
@@ -336,10 +342,34 @@ interface ParsedMetadataOutput {
   readonly counters: MetadataCounters;
 }
 
+/**
+ * The rows honour the sample the worker was asked for: every licence on the allowlist, at most the asked
+ * number of popular repositories and files of each, and one file from each of at most the asked number of
+ * other repositories, no repository on both sides.
+ */
+const validateSample = (rows: readonly StackMetadataRow[], profile: CrawlProfile): void => {
+  const { minimumStarEvents, popularRepositories, filesPerRepository, ordinaryRows } = profile.selection;
+  const popular = new Map<string, number>();
+  const ordinary = new Set<string>();
+  for (const row of rows) {
+    if (row.detectedLicenses.some((license) => !profile.licenses.includes(license))) fail("SAMPLE_REJECTED");
+    if (row.starEventsCount >= minimumStarEvents) {
+      popular.set(row.repository, (popular.get(row.repository) ?? 0) + 1);
+    } else {
+      if (ordinary.has(row.repository)) fail("SAMPLE_REJECTED");
+      ordinary.add(row.repository);
+    }
+  }
+  if (popular.size > popularRepositories || ordinary.size > ordinaryRows
+    || [...popular.values()].some((count) => count > filesPerRepository)
+    || [...ordinary].some((repository) => popular.has(repository))) fail("SAMPLE_REJECTED");
+};
+
 const parseOutput = (bytes: Uint8Array, options: StackMetadataOptions): ParsedMetadataOutput => {
   if (bytes.byteLength > options.profile.capacity.stackMetadataBytes) fail("METADATA_BYTES");
   const { lines, trailer } = splitWorkerOutput(bytes);
-  if (lines.length > options.rowLimit) fail("ROW_OVERRUN");
+  const { popularRepositories, filesPerRepository, ordinaryRows } = options.profile.selection;
+  if (lines.length > Math.min(options.rowLimit, popularRepositories * filesPerRepository + ordinaryRows)) fail("ROW_OVERRUN");
   const rows = lines.map((line) => {
     try {
       const row = validateRow(JSON.parse(line), options.configuration, options.profile.capacity.perBlobBytes);
@@ -352,6 +382,7 @@ const parseOutput = (bytes: Uint8Array, options: StackMetadataOptions): ParsedMe
   });
   const ids = rows.map(({ stableRowId }) => stableRowId);
   if (new Set(ids).size !== ids.length) fail("ROW_DUPLICATE");
+  validateSample(rows, options.profile);
   const counters = parseMetadataCounters(trailer);
   // The worker inspects exactly the row ceiling it was handed; screened-out rows are inspected but not emitted.
   if (counters.rowsInspected > options.rowLimit || rows.length > counters.rowsInspected) fail("ROW_OVERRUN");

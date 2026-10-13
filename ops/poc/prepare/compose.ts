@@ -15,7 +15,7 @@ import {
   type ExperimentArtifact,
   type ExperimentFixture,
 } from "./model";
-import { STACK_LANGUAGES, mentionsLabel, type CrawlProfile } from "./profile";
+import { STACK_LANGUAGES, mentionsLabel, poolSizes, type CrawlProfile } from "./profile";
 import type { GeneratedRounds } from "./round-helpers";
 
 const SHA256 = /^[0-9a-f]{64}$/u;
@@ -65,12 +65,8 @@ const parseResponseHashes = (values: readonly string[]): readonly string[] => {
   return Object.freeze([...values]);
 };
 
-const POOL_SIZES = (profile: CrawlProfile): Readonly<Record<DeckId, number>> => ({
-  project: profile.selection.projectPool, language: profile.selection.languagePool, "before-after": profile.selection.beforeAfterPool,
-});
-
 const requireDeck = (generated: GeneratedRounds, id: DeckId, profile: CrawlProfile): void => {
-  if (generated.fixtures.length !== POOL_SIZES(profile)[id] || generated.fixtures.length < ROUNDS_PER_SESSION) fail(`DECK_SIZE_${id.toUpperCase().replace("-", "_")}`);
+  if (generated.fixtures.length !== poolSizes(profile)[id] || generated.fixtures.length < ROUNDS_PER_SESSION) fail(`DECK_SIZE_${id.toUpperCase().replace("-", "_")}`);
   if (generated.fixtures.some((fixture) => fixture.kind !== DECK_KINDS[id])) fail();
 };
 

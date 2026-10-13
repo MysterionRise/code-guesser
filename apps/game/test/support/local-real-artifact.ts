@@ -6,7 +6,7 @@
 import { createHash } from "node:crypto";
 
 import { composeExperimentArtifact } from "../../../../ops/poc/prepare/compose";
-import { composeInput } from "../../../../ops/poc/prepare/testdata/v3-builders";
+import { composeInput } from "../../../../ops/poc/prepare/testdata/deck-builders";
 
 export const canonical = (value: unknown): string => {
   if (value === null || typeof value === "boolean" || typeof value === "number") {

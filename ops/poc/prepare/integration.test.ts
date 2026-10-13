@@ -1,5 +1,6 @@
 const testModuleName: string = "vitest";
 const { describe, expect, it, vi } = await import(testModuleName) as any;
+import { STACK_LANGUAGES } from "./profile";
 import { prepareLocalExperiment } from "./index";
 import { parseRunReport } from "./run-report";
 import { canonicalArtifactHash } from "./canonical";
@@ -93,9 +94,10 @@ describe("captured two-source preparation", () => {
           expect(logs[2]).toBe("PREPARATION_COMPLETE");
         }
         const artifact = JSON.parse(new TextDecoder().decode(firstArtifact));
+        const pool = 2 * STACK_LANGUAGES.length;
         expect(artifact.decks.map(({ id, fixtures }: any) => `${id}:${fixtures.map(({ kind }: any) => kind).join(",")}`)).toEqual([
-          "project:PROJECT,PROJECT,PROJECT,PROJECT,PROJECT",
-          "language:LANGUAGE,LANGUAGE,LANGUAGE,LANGUAGE,LANGUAGE",
+          `project:${Array(pool).fill("PROJECT").join(",")}`,
+          `language:${Array(pool).fill("LANGUAGE").join(",")}`,
           "before-after:BEFORE_AFTER,BEFORE_AFTER,BEFORE_AFTER,BEFORE_AFTER,BEFORE_AFTER",
         ]);
         const outputText = [firstArtifact, ...first.reports, ...second.reports]
@@ -106,9 +108,9 @@ describe("captured two-source preparation", () => {
         ]);
         for (const canary of first.sensitiveCanaries) expect(outputText).not.toContain(canary);
         expect(liveAttempts).toEqual([]);
-        expect(first.metadataConfigurations).toEqual(["Python", "TypeScript", "Go", "Rust", "Ruby"]);
-        // One popular file per language for the project deck and one ordinary file per language for the language deck.
-        expect(first.selectedBlobRows).toHaveLength(10);
+        expect(first.metadataConfigurations).toEqual([...STACK_LANGUAGES]);
+        // Two popular files per language for the project deck and two ordinary files per language for the language deck.
+        expect(first.selectedBlobRows).toHaveLength(2 * pool);
         expect(first.requests.some((url: string) => url.includes("/search/commits"))).toBe(true);
         expect(first.requests.some((url: string) => url.includes("/git/trees/"))).toBe(true);
         expect(first.requests.some((url: string) => url.includes("/license?ref="))).toBe(true);

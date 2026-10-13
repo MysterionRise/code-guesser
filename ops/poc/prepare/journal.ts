@@ -21,7 +21,10 @@ import { canonicalBytes } from "./canonical";
 export type JournalMode = "fresh" | "resume" | "offline";
 /** `fixed` replays in resume and offline, `sequence` replays in order once discovery finished, `offline` replays offline only. */
 export type ReplayPolicy = "fixed" | "sequence" | "offline";
-/** `failure` records a deterministic provider answer such as a 404, replayed as the same error. */
+/**
+ * `failure` records a failure, replayed as the same error: `{ status }` for an HTTP answer, `{ code }` for a
+ * transport failure with no answer (a timeout), `{ exitCode, reason }` for a worker that exited with a code.
+ */
 export type JournalEncoding = "json" | "base64" | "text" | "failure";
 
 export const JOURNAL_SCHEMA = "codeguessr-run-journal.v1";
@@ -67,6 +70,19 @@ const sha256 = (bytes: Uint8Array): string => createHash("sha256").update(bytes)
 const HEX_64 = /^[0-9a-f]{64}$/u;
 const POLICIES = new Set<ReplayPolicy>(["fixed", "sequence", "offline"]);
 const ENCODINGS = new Set<JournalEncoding>(["json", "base64", "text", "failure"]);
+const FAILURE_CODE = /^[A-Z][A-Z0-9_]{0,63}$/u;
+
+const validFailure = (body: unknown): boolean => {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) return false;
+  const value = body as Record<string, unknown>;
+  switch (Object.keys(value).sort().join("|")) {
+    case "status": return Number.isSafeInteger(value.status);
+    case "code": return typeof value.code === "string" && FAILURE_CODE.test(value.code);
+    case "exitCode|reason": return Number.isSafeInteger(value.exitCode) && value.exitCode !== 0
+      && typeof value.reason === "string" && FAILURE_CODE.test(value.reason);
+    default: return false;
+  }
+};
 
 /** Replaces every string under an `email` key; nothing the preparer reads is stored there. */
 export const redactEmails = (value: unknown): unknown => {
@@ -93,7 +109,7 @@ const parseEntry = (value: unknown): JournalEntry => {
     || typeof accepted !== "string" || !HEX_64.test(accepted) || !Number.isSafeInteger(byteLength) || (byteLength as number) < 0
     || !ENCODINGS.has(encoding as JournalEncoding) || typeof storedSha256 !== "string"
     || ((encoding === "base64" || encoding === "text") && typeof body !== "string")
-    || (encoding === "failure" && !Number.isSafeInteger((body as { status?: unknown } | null)?.status))) return fail("JOURNAL_CORRUPT");
+    || (encoding === "failure" && !validFailure(body))) return fail("JOURNAL_CORRUPT");
   let actual: string;
   try { actual = sha256(storedBytes(encoding as JournalEncoding, body)); } catch { return fail("JOURNAL_CORRUPT"); }
   if (actual !== storedSha256) fail("JOURNAL_CORRUPT");
@@ -120,7 +136,13 @@ export const openJournal = (options: Readonly<{ mode: JournalMode; path: string 
   for (const entry of loaded.entries) {
     if (entry.policy === "sequence") {
       if (options.mode === "offline" || loaded.discoveryComplete) sequences.set(entry.key, [...(sequences.get(entry.key) ?? []), entry]);
-    } else if (!fixed.has(entry.key) && (entry.policy === "fixed" || options.mode === "offline")) fixed.set(entry.key, entry);
+    } else if (entry.policy === "fixed" || options.mode === "offline") {
+      // A recorded answer outranks a failure kept for offline replay only (a timeout the run then retried).
+      const known = fixed.get(entry.key);
+      if (known === undefined || (known.policy === "offline" && known.encoding === "failure" && entry.policy === "fixed")) {
+        fixed.set(entry.key, entry);
+      }
+    }
   }
   const cursors = new Map<string, number>();
   const kept: JournalEntry[] = [];

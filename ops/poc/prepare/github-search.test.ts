@@ -14,7 +14,7 @@ const crawlGitHubCommitSearch = typeof searchModule.crawlGitHubCommitSearch === 
   ? searchModule.crawlGitHubCommitSearch as (...args: any[]) => Promise<any>
   : async (): Promise<never> => { throw new Error("GITHUB_SEARCH_NOT_IMPLEMENTED"); };
 
-const profilePath = new URL("../profiles/local-real-rounds.v3.json", import.meta.url);
+const profilePath = new URL("../profiles/local-real-rounds.v4.json", import.meta.url);
 const shaFor = (value: number): string => value.toString(16).padStart(40, "0");
 const searchItem = (
   commit: string,

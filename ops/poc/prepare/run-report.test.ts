@@ -1,3 +1,4 @@
+import { STACK_LANGUAGES } from "./profile";
 import { ExperimentRecordError, parseExperimentArtifact } from "./model";
 import { createRunReport, parseRunReport, RunReportError } from "./run-report";
 
@@ -11,7 +12,7 @@ const successReport = () => ({
   schemaVersion: "local-experiment-run.v3",
   executionId: "11111111-1111-4111-8111-111111111111",
   observedAt: "2026-07-31T12:00:00.000Z",
-  profileVersion: "local-real-rounds.v3",
+  profileVersion: "local-real-rounds.v4",
   githubApiVersion: "2022-11-28",
   stackRelease: "v2.2.0",
   stackRevision: "e565caa3a78c2423bd374333a472b049eb090e47",
@@ -20,16 +21,11 @@ const successReport = () => ({
     sort: "committer-date", order: "desc", pageCeiling: 3, resultCeiling: 300,
     completeness: "COMPLETE",
   }],
-  stackConfigurations: [
-    { language: "Python", configuration: "Python", rowCeiling: 10_000, completeness: "COMPLETE" },
-    { language: "TypeScript", configuration: "TypeScript", rowCeiling: 10_000, completeness: "COMPLETE" },
-    { language: "Go", configuration: "Go", rowCeiling: 10_000, completeness: "COMPLETE" },
-    { language: "Rust", configuration: "Rust", rowCeiling: 10_000, completeness: "COMPLETE" },
-    { language: "Ruby", configuration: "Ruby", rowCeiling: 10_000, completeness: "COMPLETE" },
-  ],
+  stackConfigurations: STACK_LANGUAGES.map((language) =>
+    ({ language, configuration: language, rowCeiling: 10_000, completeness: "COMPLETE" })),
   counts: {
     requests: 18, githubPages: 3, githubResults: 12, repositoriesAdmitted: 15,
-    stackRows: { Python: 10, TypeScript: 10, Go: 10, Rust: 10, Ruby: 10 }, blobAttempts: 8, blobsRetrieved: 5,
+    stackRows: Object.fromEntries(STACK_LANGUAGES.map((language) => [language, 10])), blobAttempts: 8, blobsRetrieved: 5,
     githubRevalidations: 5, screened: 16, duplicatesRejected: 1, selected: 15,
   },
   bytes: { githubResponses: 4096, stackMetadata: 8192, stackBlobs: 1024 },

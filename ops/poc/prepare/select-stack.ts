@@ -2,8 +2,9 @@ import type { CapacitySnapshot } from "./capacity";
 import {
   DECK_SHORT, PreparationError, noteRejection, rejectCandidate, type DeckAttempts, type DeckOutcome, type DiagnosticStage, type RunState,
 } from "./diagnostics";
+import { ROUNDS_PER_LANGUAGE } from "../../../packages/artifact/src/index";
 import type { CrawlProfile, StackLanguage } from "./profile";
-import { projectRoundAllowed, type RepositoryOption } from "./project-rounds";
+import { namedByTemplates, projectRoundAllowed, type RepositoryOption } from "./project-rounds";
 import {
   addHashes, collidesWithSelected, provisionalSnapshot, revealsProtected, unreportable, view, type RepositoryScreen,
 } from "./selection";
@@ -42,10 +43,6 @@ const stackOrder = (left: unknown, right: unknown): number => {
 const starEvents = (row: unknown): number => Number((row as { starEventsCount?: unknown }).starEventsCount ?? 0);
 const languageOf = (row: unknown): unknown => view(row).detectedLanguage;
 
-/** Rounds per language: the pool split evenly, the remainder going to the first languages. */
-const shares = (pool: number, languages: readonly StackLanguage[]): ReadonlyMap<StackLanguage, number> =>
-  new Map(languages.map((language, index) => [language, Math.floor(pool / languages.length) + (index < pool % languages.length ? 1 : 0)]));
-
 /** A project round in waiting: its revalidated file, and the four repositories every round of its language offers. */
 export interface ProjectSelection extends StackSelection {
   readonly description: string | null;
@@ -57,7 +54,7 @@ interface StackDecks {
   readonly language: DeckOutcome<StackSelection>;
 }
 
-/** Ranks a language's repositories by star events, keeping each one's files in stable order. */
+/** Ranks a language's repositories by their most star events (ties by name), keeping each one's files in stable order. */
 const popularRepositories = (rows: readonly unknown[], minimumStarEvents: number): readonly Readonly<{ repository: string; rows: readonly unknown[] }>[] => {
   const byRepository = new Map<string, unknown[]>();
   for (const row of [...rows].sort(stackOrder)) {
@@ -65,17 +62,18 @@ const popularRepositories = (rows: readonly unknown[], minimumStarEvents: number
     const repository = String(view(row).repository);
     byRepository.set(repository, [...(byRepository.get(repository) ?? []), row]);
   }
+  const stars = (files: readonly unknown[]): number => Math.max(...files.map(starEvents));
   return [...byRepository].map(([repository, files]) => Object.freeze({ repository, rows: Object.freeze(files) }))
-    .sort((left, right) => starEvents(right.rows[0]) - starEvents(left.rows[0]) || (left.repository < right.repository ? -1 : 1));
+    .sort((left, right) => stars(right.rows) - stars(left.rows) || (left.repository < right.repository ? -1 : 1));
 };
 
-const FILES_PER_REPOSITORY = 3;
 const OPTIONS_PER_ROUND = 4;
 
 /**
- * Selects the two Stack decks. Project rounds come from the most popular repositories of each language,
- * one file each; every round of a language offers the same four repositories (its answers plus decoys), so
- * no option shows up more often than another. Language rounds come from any repository, in stable order.
+ * Selects the two Stack decks, two rounds per language each. Project rounds come from the most popular
+ * repositories of each language, one file each; every round of a language offers the same four repositories
+ * (its answers plus decoys), so no option shows up more often than another. Language rounds come from
+ * repositories below the popularity bar, in stable order.
  */
 export const selectStack = async (
   context: Context,
@@ -150,21 +148,30 @@ export const selectStack = async (
 
   const project = await attempt<ProjectSelection>(async () => {
     const rounds: ProjectSelection[] = [];
-    const perLanguage = shares(profile.selection.projectPool, languages);
+    // A repository is an option in one language's rounds only: one that recurred across languages (next.js has
+    // JavaScript, TypeScript, and Rust files) would appear more often than the rest and point to a decoy.
+    const offered = new Set<string>();
     for (const language of languages) {
-      const ranked = popularRepositories(rows.filter((row) => languageOf(row) === language), profile.selection.minimumStarEvents);
+      // A repository the deck's own wording names (`github/…` in "GitHub star events") can be no option.
+      const ranked = popularRepositories(rows.filter((row) => languageOf(row) === language), profile.selection.minimumStarEvents)
+        .filter(({ repository }) => {
+          if (offered.has(repository)) return false;
+          if (!namedByTemplates(profile, repository)) return true;
+          noteRejection(state, "SCREENING", new Error("PROJECT_NAMED_BY_TEMPLATE"));
+          return false;
+        });
       const answers: StackSelection[] = [];
       const answered = new Set<string>();
       for (const { repository, rows: files } of ranked) {
-        if (answers.length >= perLanguage.get(language)!) break;
-        for (const row of files.slice(0, FILES_PER_REPOSITORY)) {
+        if (answers.length >= ROUNDS_PER_LANGUAGE) break;
+        for (const row of files.slice(0, profile.selection.filesPerRepository)) {
           const selection = await tryRow(row, language, answers, (candidate) => {
             if (!projectRoundAllowed(String(view(candidate).excerpt), String(view(candidate).path), [repository])) throw new Error("PROJECT_NAME_IN_EXCERPT");
           });
           if (selection) { answers.push(selection); answered.add(repository); break; }
         }
       }
-      if (answers.length < perLanguage.get(language)!) return { skipped: DECK_SHORT };
+      if (answers.length < ROUNDS_PER_LANGUAGE) return { skipped: DECK_SHORT };
       // Decoys fill the language's four options; none may be named by any of its rounds' code or file names.
       const options: RepositoryOption[] = [];
       for (const answer of answers) {
@@ -181,6 +188,7 @@ export const selectStack = async (
         options.push({ repository, description: description.description });
       }
       if (options.length < OPTIONS_PER_ROUND) return { skipped: DECK_SHORT };
+      for (const option of options) offered.add(option.repository);
       for (const answer of answers) {
         const own = String(view(answer.candidate).repository);
         rounds.push(Object.freeze({ ...answer, description: options.find((option) => option.repository === own)!.description,
@@ -193,13 +201,12 @@ export const selectStack = async (
   const projectRepositories = new Set((project.candidates ?? []).map(({ candidate }) => String(view(candidate).repository)));
   const language = await attempt<StackSelection>(async () => {
     const rounds: StackSelection[] = [];
-    const perLanguage = shares(profile.selection.languagePool, languages);
     for (const configured of languages) {
-      const ordered = rows.filter((row) => languageOf(row) === configured
+      const ordered = rows.filter((row) => languageOf(row) === configured && starEvents(row) < profile.selection.minimumStarEvents
         && !projectRepositories.has(String(view(row).repository))).sort(stackOrder);
       const deck: StackSelection[] = [];
       for (const row of ordered) {
-        if (deck.length >= perLanguage.get(configured)!) break;
+        if (deck.length >= ROUNDS_PER_LANGUAGE) break;
         if (rounds.some(({ candidate }) => view(candidate).repository === view(row).repository)) {
           noteRejection(state, "DEDUPLICATION", new Error("REPOSITORY_REPEATED"));
           continue;
@@ -207,7 +214,7 @@ export const selectStack = async (
         const selection = await tryRow(row, configured, rounds, (candidate) => { deps.validateLanguageCandidate({ ...context, candidate }); });
         if (selection) deck.push(selection);
       }
-      if (deck.length < perLanguage.get(configured)!) return { skipped: DECK_SHORT };
+      if (deck.length < ROUNDS_PER_LANGUAGE) return { skipped: DECK_SHORT };
       rounds.push(...deck);
     }
     return { candidates: Object.freeze(rounds) };

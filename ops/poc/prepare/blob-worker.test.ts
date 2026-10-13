@@ -8,7 +8,7 @@ import { blobWorkerRequest, fetchSelectedBlob, parseBlobWorkerOutput, type BlobW
 const testModuleName: string = "vitest";
 const { describe, expect, it } = await import(testModuleName) as any;
 
-const profilePath = new URL("../profiles/local-real-rounds.v3.json", import.meta.url);
+const profilePath = new URL("../profiles/local-real-rounds.v4.json", import.meta.url);
 const runtimeDirectory = new URL("../stack/", import.meta.url).pathname.replace(/\/$/u, "");
 const workerPath = `${runtimeDirectory}/fetch_blob.py`;
 const row = {

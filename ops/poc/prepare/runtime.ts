@@ -5,8 +5,8 @@ import type { CapacityMeter } from "./capacity";
 import { decodeEntry, type ReplayPolicy, type RunJournal } from "./journal";
 import type { CrawlProfile } from "./profile";
 import type { RequestInput } from "./request-policy";
-import { createRetryController, RUN_RETRY_LIMIT, type RetryController } from "./retry";
-import { createBoundedTransport, statusError, TransportError, type BoundedTransport } from "./transport";
+import { createRetryController, RetryRequestError, RUN_RETRY_LIMIT, type RetryController } from "./retry";
+import { codeError, createBoundedTransport, statusError, TransportError, type BoundedTransport, type TransportErrorCode } from "./transport";
 import type { Context, Environment, StageResult } from "./types";
 
 export interface Runtime {
@@ -98,7 +98,10 @@ export const createPreparationRuntime = (
     const recorded = journal?.take(key, policy);
     const lease = capacity.beginRequest();
     try {
-      if (recorded?.encoding === "failure") throw statusError(input, (recorded.body as { status: number }).status);
+      if (recorded?.encoding === "failure") {
+        const failure = recorded.body as { status?: number; code?: string };
+        throw failure.status !== undefined ? statusError(input, failure.status) : codeError(input, failure.code as TransportErrorCode);
+      }
       let value: unknown;
       let accepted: string;
       let byteLength: number;
@@ -127,10 +130,16 @@ export const createPreparationRuntime = (
       return value;
     } catch (error) {
       lease.release();
-      const status = recorded ? undefined : deterministicStatus(input, error);
-      if (status !== undefined) {
-        const body = { status };
-        journal?.record({ key, policy, sha256: sha256(canonicalBytes(body)), byteLength: 0, encoding: "failure", body });
+      // A retryable failure (a timeout, a 5xx) is recorded as what it wrapped; an offline replay fails at once
+      // instead of waiting to retry, and rejects the same candidate the live run rejected.
+      const failure = error instanceof RetryRequestError && error.cause instanceof TransportError ? error.cause : error;
+      if (!recorded && failure instanceof TransportError && policy !== "sequence") {
+        // A deterministic answer (missing, gone) replays on resume too. Any other failure, such as a timeout
+        // or a refused request, replays only offline: a resumed run retries it, an offline one reproduces it.
+        const deterministic = deterministicStatus(input, failure) !== undefined;
+        const body = failure.status !== undefined ? { status: failure.status } : { code: failure.code };
+        journal?.record({ key, policy: deterministic ? policy : "offline", sha256: sha256(canonicalBytes(body)), byteLength: 0,
+          encoding: "failure", body });
       }
       throw error;
     }
