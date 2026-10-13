@@ -1,8 +1,13 @@
+import { mkdtempSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
+import { fetchSelectedBlob } from "./blob-worker";
 import { canonicalHash } from "./canonical";
 import { CapacityError, createCapacityMeter } from "./capacity";
 import { GitHubSearchError } from "./github-search";
+import { openJournal } from "./journal";
 import { HARNESS_CANDIDATES, accepted, classificationsFor, harnessRow, hash, loadProfile, makeHarness } from "./command-test-harness";
 import {
   CURATED_REPOSITORIES, CURATED_SECTION, FIX_SECTION, OUTPUT_SECTION, curatedFiles, fixHarnessData, loadCuratedProfile, outputFiles, sha256,
@@ -11,8 +16,10 @@ import { LANGUAGE_SLUGS } from "../../../packages/artifact/src/index";
 import { STACK_LANGUAGES, parseCrawlProfile } from "./profile";
 import { RetryError } from "./retry";
 import { createRunReport } from "./run-report";
-import { StackMetadataError } from "./stack-metadata";
+import { workerStage } from "./runtime";
+import { collectStackMetadata, StackMetadataError, type StackMetadataRow } from "./stack-metadata";
 import { TransportError } from "./transport";
+import { journaledWorker } from "./worker-journal";
 import {
   prepareLocalExperiment,
   projectPreparationEnvironment,
@@ -66,6 +73,12 @@ const searchWith = (queryClassifications: unknown): PreparationDependencies["sea
   candidates: HARNESS_CANDIDATES,
   queryClassifications,
 } as any, "2");
+/** An offline journal that holds nothing, so every worker output the run asks it for is a miss. */
+const emptyOfflineJournal = () => {
+  const path = join(mkdtempSync(join(tmpdir(), "codeguessr-offline-")), "run.jsonl");
+  openJournal({ mode: "fresh", path }).finish();
+  return openJournal({ mode: "offline", path });
+};
 
 describe("local experiment preparation command", () => {
 /** Marker lines only; the failure-site line is asserted separately. */
@@ -843,15 +856,35 @@ const logLines = (calls: readonly string[]): string[] =>
     ]);
   });
 
-  it("fails the run, publishing nothing, when an offline replay lacks a candidate's response", async () => {
+  it("fails the run, publishing nothing, when an offline replay lacks a selected blob's worker output", async () => {
+    // The real worker bridge over a real offline journal: the miss is the journal's own error, not a faked chain.
+    const offline = emptyOfflineJournal();
+    const spawned: unknown[] = [];
     const harness = await makeHarness({
-      fetchStackBlob: async () => {
-        throw new RetryError("RETRY_SIGNAL_MISSING", Object.assign(new Error("JOURNAL_MISS"), { code: "JOURNAL_MISS" }));
-      },
+      fetchStackBlob: ({ row, limits, capacity }) => workerStage(() => fetchSelectedBlob({ row: row as StackMetadataRow, limits,
+        environment: { PATH: "/bin" }, capacity, runWorker: journaledWorker(offline, async (request) => { spawned.push(request); throw new Error("WORKER_SPAWNED"); }, "code") })),
     });
     await expect(prepareLocalExperiment(harness.dependencies)).rejects.toThrow("PREPARATION_FAILED");
+    expect(spawned).toEqual([]);
     expect(harness.published).toEqual([]);
+    // The first miss ends the run: no later row is tried, so a replay can never publish a different Stack deck.
+    expect(harness.calls.filter((call) => call.startsWith("revalidate:"))).toEqual([]);
     expect(logLines(harness.calls)[0]).toBe("log:PREPARATION_STAGE_FAILED BLOB_RETRIEVAL JOURNAL_MISS none");
+  });
+
+  it("fails the run at Stack metadata, naming the miss, when an offline replay lacks the metadata worker's output", async () => {
+    const offline = emptyOfflineJournal();
+    const harness = await makeHarness({
+      collectStackMetadata: (options) => workerStage(() => collectStackMetadata({ profile: options.profile, capacity: options.capacity,
+        configuration: options.configuration, rowLimit: options.profile.capacity.stackRowsPerLanguage, environment: options.environment,
+        blobAccess: async () => undefined, runWorker: journaledWorker(offline, async () => { throw new Error("WORKER_SPAWNED"); }, "code") })),
+    });
+    await expect(prepareLocalExperiment(harness.dependencies)).rejects.toThrow("PREPARATION_FAILED");
+    expect(harness.calls).not.toContain("search");
+    expect(logLines(harness.calls)).toEqual([
+      "log:PREPARATION_STAGE_FAILED STACK_METADATA JOURNAL_MISS none",
+      "log:PREPARATION_FAILED",
+    ]);
   });
 
   it("publishes the decks filled before a run-wide budget ran out", async () => {
