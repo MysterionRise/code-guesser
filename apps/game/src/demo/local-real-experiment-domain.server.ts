@@ -45,11 +45,18 @@ export interface PrivateReveal {
   }>;
 }
 
+/** Why an artifact was refused: it does not match the pinned hash, or it matches but fails the current schema. */
+export type LocalRealExperimentRejection = "HASH_MISMATCH" | "SCHEMA";
+
+/** Every refusal carries this one message and no detail; an artifact refusal also carries its reason code. */
 export class LocalRealExperimentError extends Error {
-  public constructor() {
+  public readonly reason: LocalRealExperimentRejection | undefined;
+
+  public constructor(reason?: LocalRealExperimentRejection) {
     super("LOCAL_REAL_EXPERIMENT_REJECTED");
     this.name = "LocalRealExperimentError";
+    this.reason = reason;
   }
 }
 
-export const fail = (): never => { throw new LocalRealExperimentError(); };
+export const fail = (reason?: LocalRealExperimentRejection): never => { throw new LocalRealExperimentError(reason); };

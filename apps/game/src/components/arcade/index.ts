@@ -4,6 +4,8 @@ export {
   formatCompletionResult,
   projectDisplayReveal,
   projectSpoilerFreeShare,
+  roundPointsNote,
+  roundStatusText,
   transitionArcadeSession,
   type ArcadeSession,
   type AuthorizedReveal,

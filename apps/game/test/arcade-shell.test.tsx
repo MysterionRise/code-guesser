@@ -11,6 +11,8 @@ import {
   formatCompletionResult,
   projectDisplayReveal,
   projectSpoilerFreeShare,
+  roundPointsNote,
+  roundStatusText,
   transitionArcadeSession,
   type PublicModeContractInput,
 } from "../src/components/arcade/index.js";
@@ -82,12 +84,41 @@ describe("static arcade shell", () => {
     // Hint costs are visible up front and announced with the hint button.
     expect(html).toMatch(/<p class="hint-cost" id="hint-cost-round-1">Each hint lowers this round’s points: 1,000 → 800 → 500\.<\/p>/u);
     expect(html).toMatch(/<button class="hint-button"[^>]*aria-describedby="hint-cost-round-1"/u);
+    // A revealed hint is announced politely; focus handling lives in the browser tests.
+    expect(html).toMatch(/<div class="hints"[^>]*aria-live="polite"/u);
     // Long lines scroll inside a keyboard-reachable code window instead of wrapping.
-    expect(html).toMatch(/<pre class="code-window" tabindex="0" aria-label="Code excerpt">/u);
+    expect(html).toMatch(/<pre class="code-window" role="region" tabindex="0" aria-label="Code excerpt">/u);
     expect(html).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
     expect(html).not.toContain("<script>alert(1)</script>");
     expect(html).toContain("This game needs JavaScript for answers and progressive evidence.");
     expect(html).toContain('aria-live="polite"');
+  });
+
+  it("exposes the score, round progress, and hints to assistive technology without labelling generic elements", () => {
+    const html = renderToStaticMarkup(createElement(ArcadeShell, {
+      mode: createPublicModeContract(modeInput()),
+      authorizeRevealAction: async () => { throw new Error("not called during render"); },
+    }));
+    // The score is text, formatted in en-US like every other number, with a label only screen readers need.
+    expect(html).toMatch(/<span class="score"><span class="visually-hidden">Score: <\/span>0(?:<!-- -->)? pts<\/span>/u);
+    // Progress is an ordered list; the current round is the current step and says so in text.
+    expect(html).toContain('<ol class="round-track" aria-label="Round progress">');
+    expect((html.match(/<li class="round-dot[^"]*"/gu) ?? []).length).toBe(5);
+    expect((html.match(/aria-current="step"/gu) ?? []).length).toBe(1);
+    expect(html).toMatch(/<li class="round-dot current" data-round-nav="1" aria-current="step"><span aria-hidden="true">1<\/span><span class="visually-hidden">Round 1, current<\/span><\/li>/u);
+    expect(html).toContain('<span class="visually-hidden">Round 5</span>');
+    expect(html).toMatch(/<div class="hints" role="group" aria-label="Hints"/u);
+    // Every element that carries a name has a role that may be named.
+    const named = [...html.matchAll(/<([a-z]+)\b([^>]*)\baria-label="[^"]*"/gu)].map(([, tag, attributes]) => ({ tag, role: /\brole="/u.test(attributes!) }));
+    expect(named.length).toBeGreaterThan(0);
+    for (const { tag, role } of named) expect(["ol", "input", "button", "a", "nav", "section"].includes(tag!) || role, tag).toBe(true);
+  });
+
+  it("names each round on the track by its place and outcome", () => {
+    expect(roundStatusText(1, true, undefined)).toBe("Round 1, current");
+    expect(roundStatusText(1, false, true)).toBe("Round 1, correct");
+    expect(roundStatusText(2, true, false)).toBe("Round 2, current, missed");
+    expect(roundStatusText(3, false, undefined)).toBe("Round 3");
   });
 
   it("freezes a safe public mode contract without protected answers", () => {
@@ -156,6 +187,19 @@ describe("static arcade shell", () => {
     const wrongAnswer = transitionArcadeSession(mode, createArcadeSession(mode), { type: "lock-answer", candidateId: "candidate-b" });
     expect(() => transitionArcadeSession(mode, wrongAnswer, { type: "accept-reveal", reveal: displayReveal(0, 500, 2500, 1, 500) }))
       .toThrow("reveal does not match the locked answer");
+  });
+
+  it("states what each round earned and the hints it took, under the verdict in the live reveal", () => {
+    expect(roundPointsNote(1000, 0)).toBe("+1,000 points (no hints)");
+    expect(roundPointsNote(800, 1)).toBe("+800 points (1 hint)");
+    expect(roundPointsNote(250, 2)).toBe("+250 points (2 hints)");
+    expect(roundPointsNote(0, 0)).toBe("0 points (no hints)");
+    expect(roundPointsNote(0, 2)).toBe("0 points (2 hints)");
+    const shell = readFileSync(new URL("../src/components/arcade/arcade-shell.tsx", import.meta.url), "utf8");
+    const reveal = shell.slice(shell.indexOf('<div className="reveal" aria-live="polite" aria-atomic="true">'));
+    const note = reveal.indexOf("roundPointsNote(session.reveal.score, session.visibleHintCount)");
+    expect(note).toBeGreaterThan(reveal.indexOf("Nice read."));
+    expect(note).toBeLessThan(reveal.indexOf("The answer:"));
   });
 
   it("orders and caps progressive clues, then locks exactly one answer", () => {
@@ -254,6 +298,7 @@ describe("static arcade shell", () => {
     expect(session.status).toBe("complete");
     expect(session.roundIndex).toBe(4);
     expect(session.correctRounds).toBe(5);
+    expect(session.outcomes).toEqual([true, true, true, true, true]);
     const share = projectSpoilerFreeShare(session.result!, session.correctRounds, "Which language?");
     expect(share).toEqual({ text: "CodeGuessr · Which language? · 5/5 correct · 5,000/5,000", score: 5000, rounds: 5, correct: 5 });
     expect(JSON.stringify(share)).not.toMatch(/candidate|answer|evidence|excerpt/iu);
@@ -262,12 +307,27 @@ describe("static arcade shell", () => {
     expect(formatCompletionResult(session.result!, session.correctRounds, "Which language?"))
       .toBe("Run complete — 5,000 points, 5 of 5 correct. Share: CodeGuessr · Which language? · 5/5 correct · 5,000/5,000.");
 
-    const restarted = transitionArcadeSession(
-      mode,
-      session,
-      { type: "restart" } as unknown as Parameters<typeof transitionArcadeSession>[2],
-    );
-    expect(restarted).toEqual(createArcadeSession(mode));
+  });
+
+  it("never replays revealed rounds: a finished run takes no further action, and unknown actions are refused", () => {
+    const mode = createPublicModeContract(modeInput());
+    const restart = { type: "restart" } as unknown as Parameters<typeof transitionArcadeSession>[2];
+    let session = createArcadeSession(mode);
+    session = transitionArcadeSession(mode, session, { type: "lock-answer", candidateId: "candidate-a" });
+    session = transitionArcadeSession(mode, session, { type: "accept-reveal", reveal: displayReveal(0, 1000, 5000, 1) });
+    // A revealed round would otherwise fall through to the next-round transition.
+    expect(() => transitionArcadeSession(mode, session, restart)).toThrow("unsupported session action");
+    for (let index = 1; index < 5; index += 1) {
+      session = transitionArcadeSession(mode, session, { type: "next-round" });
+      session = transitionArcadeSession(mode, session, { type: "lock-answer", candidateId: "candidate-a" });
+      session = transitionArcadeSession(mode, session, {
+        type: "accept-reveal",
+        reveal: displayReveal(index, (index + 1) * 1000, 5000, index + 1),
+      });
+    }
+    expect(session.status).toBe("complete");
+    expect(() => transitionArcadeSession(mode, session, restart)).toThrow("the run is already complete");
+    expect(() => transitionArcadeSession(mode, session, { type: "next-round" })).toThrow("the run is already complete");
   });
 
   it("rejects canonically duplicated round and candidate identifiers", () => {
@@ -285,14 +345,16 @@ describe("static arcade shell", () => {
     expect(contract.rounds[0]!.mode.candidates[0]!.candidateId).toBe("candidate-a");
   });
 
-  it("keeps excluded country attribution out and exposes demo errors and replay", () => {
+  it("keeps excluded country attribution out and exposes demo errors and a fresh deal, never a replay", () => {
     const page = readFileSync(new URL("../src/app/page.tsx", import.meta.url), "utf8");
     const layout = readFileSync(new URL("../src/app/layout.tsx", import.meta.url), "utf8");
     const shell = readFileSync(new URL("../src/components/arcade/arcade-shell.tsx", import.meta.url), "utf8");
     expect(`${page}\n${layout}`).not.toMatch(/country|code-location|where did this code come from|finland|brazil|japan|germany|india/iu);
     expect(existsSync(new URL("../src/app/actions.ts", import.meta.url))).toBe(true);
     expect(shell).toContain('role="alert"');
-    expect(shell).toContain("Play again");
+    expect(shell).not.toContain("Play again");
+    expect(shell).not.toMatch(/type: "restart"/u);
+    expect(shell).toMatch(/<a className="primary-action" href=\{newGameHref\}>Deal new rounds<\/a>/u);
     expect(shell).toContain("Choose another deck");
   });
 });
