@@ -69,8 +69,8 @@ export default async function Page({ searchParams }: PageProps) {
             <h1 id="empty-state-title">No rounds are ready yet</h1>
             <p>The decks are prepared from real open-source code before play, and this copy has none to serve.</p>
             <p className="operator-note">
-              For the operator: run <code>pnpm prepare:poc</code>, verify the new artifact, and pin its hash. The
-              current artifact is missing, from an older format, or does not match its pinned hash.
+              For the operator: run <code>pnpm prepare:poc</code>, which writes the artifact and its pinned hash
+              together. The current artifact is missing, from an older format, or does not match its pinned hash.
             </p>
           </section>
         )
