@@ -50,7 +50,7 @@ describe("deck leakage", () => {
 
   // #77: three panes still echo their own option's name or description (`Aws::SQS`, `Utility`, `React.Component`);
   // replacing them needs files the journal does not hold.
-  it.fails.runIf(deck("project") !== undefined)("project panes share no telling words with any option (#77)", () => {
+  it.runIf(deck("project") !== undefined).fails("project panes share no telling words with any option (#77)", () => {
     const { fixtures } = deck("project")!;
     expect(accuracy(fixtures, paneOverlapSolver)).toBeLessThanOrEqual(chance(fixtures[0]!) + TOLERANCE);
   });
@@ -85,7 +85,7 @@ describe("deck leakage", () => {
 
   // #78: two functions (`xor_swap`, `reverse_letters`) return a rearrangement of their input whichever call a round
   // shows; replacing them needs files the journal does not hold.
-  it.fails.runIf(deck("output") !== undefined)("an output that rearranges the call's own arguments is no better a guess (#78)", () => {
+  it.runIf(deck("output") !== undefined).fails("an output that rearranges the call's own arguments is no better a guess (#78)", () => {
     const fixtures = deck("output")!.fixtures.filter((fixture) => !fixture.candidates.every(({ label }) => Number.isFinite(Number(label))));
     expect(accuracy(fixtures, (fixture, label) => transformsArguments(fixture, label) ? 1 : 0)).toBeLessThanOrEqual(chance(fixtures[0]!) + TOLERANCE);
   });
