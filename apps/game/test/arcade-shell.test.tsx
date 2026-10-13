@@ -11,6 +11,7 @@ import {
   formatCompletionResult,
   projectDisplayReveal,
   projectSpoilerFreeShare,
+  roundPointsNote,
   transitionArcadeSession,
   type PublicModeContractInput,
 } from "../src/components/arcade/index.js";
@@ -156,6 +157,19 @@ describe("static arcade shell", () => {
     const wrongAnswer = transitionArcadeSession(mode, createArcadeSession(mode), { type: "lock-answer", candidateId: "candidate-b" });
     expect(() => transitionArcadeSession(mode, wrongAnswer, { type: "accept-reveal", reveal: displayReveal(0, 500, 2500, 1, 500) }))
       .toThrow("reveal does not match the locked answer");
+  });
+
+  it("states what each round earned and the hints it took, under the verdict in the live reveal", () => {
+    expect(roundPointsNote(1000, 0)).toBe("+1,000 points (no hints)");
+    expect(roundPointsNote(800, 1)).toBe("+800 points (1 hint)");
+    expect(roundPointsNote(250, 2)).toBe("+250 points (2 hints)");
+    expect(roundPointsNote(0, 0)).toBe("0 points (no hints)");
+    expect(roundPointsNote(0, 2)).toBe("0 points (2 hints)");
+    const shell = readFileSync(new URL("../src/components/arcade/arcade-shell.tsx", import.meta.url), "utf8");
+    const reveal = shell.slice(shell.indexOf('<div className="reveal" aria-live="polite" aria-atomic="true">'));
+    const note = reveal.indexOf("roundPointsNote(session.reveal.score, session.visibleHintCount)");
+    expect(note).toBeGreaterThan(reveal.indexOf("Nice read."));
+    expect(note).toBeLessThan(reveal.indexOf("The answer:"));
   });
 
   it("orders and caps progressive clues, then locks exactly one answer", () => {

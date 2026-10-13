@@ -173,6 +173,10 @@ export function formatCompletionResult(result: EntertainmentResultProjection, co
   return `Run complete — ${points(result.score)} points, ${correctRounds} of ${result.completedRounds} correct. Share: ${share.text}.`;
 }
 
+/** What one round earned and the hints it took, as its reveal states it: "+800 points (1 hint)" or "0 points (no hints)". */
+export const roundPointsNote = (score: number, hintsUsed: number): string =>
+  `${score > 0 ? "+" : ""}${points(score)} points (${hintsUsed === 0 ? "no hints" : hintsUsed === 1 ? "1 hint" : `${hintsUsed} hints`})`;
+
 /** The round's own points after zero, one, and two hints. */
 export const hintCostNote = (values: readonly number[]): string =>
   `Each hint lowers this round’s points: ${values.map(points).join(" → ")}.`;
@@ -362,6 +366,7 @@ export function ArcadeShell({ mode, authorizeRevealAction, chooseAnotherDeckHref
           {session.reveal && (
             <>
               <h2 ref={revealHeading} tabIndex={-1}>{session.reveal.correct ? "Nice read." : "Not this time."}</h2>
+              <p className="round-points">{roundPointsNote(session.reveal.score, session.visibleHintCount)}</p>
               <p className="answer-line">The answer: <strong>{round.mode.candidates.find(({ candidateId }) => candidateId === session.reveal!.answerCandidateId)?.label}</strong></p>
               <p>{session.reveal.evidence}</p>
               <p>{session.reveal.explanation}</p>

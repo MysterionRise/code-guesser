@@ -82,3 +82,4 @@ noscript { display: block; padding: 12px; margin-bottom: 16px; background: #522;
 .reveal .completion-actions button, .primary-action { display: inline-block; margin: 0; }
 .primary-action { border-radius: 12px; padding: 14px 20px; background: #baff65; color: #07120f; font-weight: 900; text-decoration: none; }
 .reveal .secondary-action { padding: 12px 18px; border: 2px solid #baff65; background: transparent; color: #baff65; }
+.round-points { margin: 0 0 8px; font-weight: 800; font-variant-numeric: tabular-nums; }

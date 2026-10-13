@@ -17,20 +17,23 @@ const points = (value: number): string => value.toLocaleString("en-US");
 
 const currentRound = async (page: Page): Promise<string> => (await page.locator(".game-card").getAttribute("data-round-id"))!;
 
-/** Answers all five rounds right and returns the dealt round ids in play order. */
-const answerRounds = async (page: Page, firstRoundHint: boolean): Promise<string[]> => {
+/** Answers all five rounds right, checks each reveal states its points, and returns the dealt round ids in play order. */
+const answerRounds = async (page: Page, full: number, firstRoundHint: boolean): Promise<string[]> => {
   const dealt: string[] = [];
   for (let index = 0; index < 5; index += 1) {
     if (index > 0) await page.getByRole("button", { name: "Next round" }).click();
     await expect(page.getByText(`Round ${index + 1} of 5`)).toBeVisible();
     await expect(page.locator(".reveal small")).toHaveCount(0);
-    if (index === 0 && firstRoundHint) await page.getByRole("button", { name: "Reveal hint 1" }).click();
+    const hinted = index === 0 && firstRoundHint;
+    if (hinted) await page.getByRole("button", { name: "Reveal hint 1" }).click();
     const roundId = await currentRound(page);
     dealt.push(roundId);
     const answer = answers.get(roundId)!;
     await page.getByLabel(answer, { exact: true }).check();
     await page.getByRole("button", { name: "Lock in answer" }).click();
     await expect(page.getByRole("heading", { name: "Nice read." })).toBeVisible();
+    await expect(page.locator(".reveal .round-points"))
+      .toHaveText(hinted ? `+${points(full * 0.8)} points (1 hint)` : `+${points(full)} points (no hints)`);
     await expect(page.locator(".candidate.correct")).toContainText(answer);
     await expect(page.locator(".reveal small")).toBeVisible();
   }
@@ -60,7 +63,7 @@ for (const deck of artifact.decks) {
     await expect(page.getByText(/Local unreviewed experiment/)).toBeVisible();
     if (deck.id === "before-after") await expect(page.locator("figcaption")).toHaveText(["Version A", "Version B"]);
 
-    const first = await answerRounds(page, true);
+    const first = await answerRounds(page, full, true);
     const hinted = full * 0.8 + 4 * full;
     await expect(page.getByLabel(/Score/)).toHaveText(`${points(hinted)} pts`);
     await expect(page.getByText(new RegExp(`Run complete — ${points(hinted)} points`, "u"))).toBeVisible();
@@ -74,7 +77,7 @@ for (const deck of artifact.decks) {
     await expect(page.getByText("Round 1 of 5")).toBeVisible();
     await expect(page.getByLabel(/Score/)).toHaveText("0 pts");
     await expect(page.getByRole("heading", { name: /Nice read\.|Not this time\./u })).toHaveCount(0);
-    const second = await answerRounds(page, false);
+    const second = await answerRounds(page, full, false);
     // Five rounds dealt in the same order again is at most a one-in-30,240 chance, even from the ten-round pool.
     expect(second).not.toEqual(first);
     await expect(page.getByText(new RegExp(`Run complete — ${points(5 * full)} points`, "u"))).toBeVisible();
@@ -91,6 +94,7 @@ test("a deck query parameter preselects the deck, and a wrong answer scores zero
   await page.getByLabel(wrongAnswers.get(round)!, { exact: true }).check();
   await page.getByRole("button", { name: "Lock in answer" }).click();
   await expect(page.getByRole("heading", { name: "Not this time." })).toBeVisible();
+  await expect(page.locator(".reveal .round-points")).toHaveText("0 points (no hints)");
   await expect(page.getByLabel(/Score/)).toHaveText("0 pts");
   await expect(page.locator(".candidate.missed")).toContainText(wrongAnswers.get(round)!);
   await expect(page.locator(".candidate.correct")).toContainText(answers.get(round)!);
