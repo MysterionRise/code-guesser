@@ -63,12 +63,14 @@ gate: changing queries, retries, ceilings, deck rules, or running
   page load deals five rounds from the deck's pool; `dealSession` in
   `apps/game/src/demo/local-real-experiment.server.ts` does it server-side.
 - The committed artifact `apps/game/src/demo/generated/local-real-rounds.json`
-  came from the 2026-10-13 v5 run (1,859 of 3,000 requests).
+  came from the 2026-10-13 v5 run (1,859 of 3,000 requests), rebuilt
+  `--offline` with the algorithm and fix leak fixes (#76, #79).
   - Its canonical SHA-256
-    `1427cf105672682d0dd89ff7a1d7975b9001f939f0dcbefc0126c79160e8459a` is
+    `8f542bd92942174e67e79249896a31d4f9a3ecdbbc31d882f26722b0967a5535` is
     pinned in `apps/game/src/demo/local-real-experiment.pin.server.ts`; the
     preparer writes the pin.
-  - Evidence: `docs/review/evidence/2026-10-13-v5-six-decks-run.md`.
+  - Evidence: `docs/review/evidence/2026-10-13-v5-six-decks-run.md` and
+    `docs/review/evidence/2026-10-13-v5-leak-fixes-offline.md`.
   - The run's journal is in `ops/poc/stack/tmp/journal/run.jsonl` on this
     machine, so `STACK_V2_ACKNOWLEDGED_USABLE_REVISION=… pnpm prepare:poc
     --offline` rebuilds it byte for byte with no network.
