@@ -209,6 +209,20 @@ Every run journals the responses it accepts. Two flags reuse that journal:
 Replayed responses count against the same budgets as live ones, so an offline
 run predicts what a live run would spend.
 
+Both flags need a journal from an earlier live run on the same machine. The
+journal holds provider bodies (API responses and the code the run fetched), so
+it is gitignored and never committed. A fresh clone has none, and both flags
+fail there with `JOURNAL_MISSING`.
+
+A fresh run starts an empty journal and writes it over `run.jsonl` when it
+ends, even when it fails. That replaces the journal that rebuilds the
+committed artifact offline, so copy it aside first; it stays in the ignored
+directory, and copying it back restores it:
+
+```bash
+cp ops/poc/stack/tmp/journal/run.jsonl ops/poc/stack/tmp/journal/run.backup.jsonl
+```
+
 The journal also keeps failures:
 
 - **Deterministic GitHub answers** such as 404s replay on resume and offline.

@@ -74,6 +74,11 @@ gate: changing queries, retries, ceilings, deck rules, or running
   - The run's journal is in `ops/poc/stack/tmp/journal/run.jsonl` on this
     machine, so `STACK_V2_ACKNOWLEDGED_USABLE_REVISION=… pnpm prepare:poc
     --offline` rebuilds it byte for byte with no network.
+  - The journal holds provider bodies, so it is gitignored and never
+    committed; a fresh clone has none, and `--offline` or `--resume` fails
+    with `JOURNAL_MISSING`. A fresh `pnpm prepare:poc` writes its own journal
+    over `run.jsonl` when it ends, even when it fails, so copy `run.jsonl`
+    aside before one.
 - Done so far:
   - **Phase 0:** diagnostics, retries, yield, and UI quick wins.
   - **Phase 1:**
@@ -133,9 +138,10 @@ or adding a source not named in the research note.
 
 Iterate on deck rules with
 `STACK_V2_ACKNOWLEDGED_USABLE_REVISION=e565caa3a78c2423bd374333a472b049eb090e47 pnpm prepare:poc --offline`
-(no token); use `--resume` when a change needs responses the journal lacks.
+(no token, but it needs the local journal above); use `--resume` when a
+change needs responses the journal lacks.
 
-Live run:
+Live run (copy `run.jsonl` aside first, because a fresh run replaces it):
 
 ```bash
 HF_TOKEN="$(cat ~/.cache/huggingface/token)" \
