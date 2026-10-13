@@ -10,6 +10,7 @@ import type { GitHubQueryClassification } from "./github-search";
 import { artifactFixtures, DECK_IDS, type DeckId } from "./model";
 import { STACK_LANGUAGES, poolSizes, type CrawlProfile } from "./profile";
 import { selectAlgorithm, type AlgorithmSelection } from "./select-algorithm";
+import { selectOutput, type OutputSelection } from "./select-output";
 import { selectBeforeAfter } from "./select-github";
 import { selectStack, type ProjectSelection } from "./select-stack";
 import { addHashes, protectedValuesOf, provisionalSnapshot, repositoryScreen, safeDescription, view } from "./selection";
@@ -191,15 +192,22 @@ export const prepareLocalExperiment = async (deps: PreparationDependencies = def
     tracker.enter("BLOB_RETRIEVAL");
     const stack = await selectStack(context, deps, hashes, metadata, state, screenRepository, attempt, () => beforeAfter.candidates ?? []);
     // Curated decks run last, so a run-wide budget they spend can skip only them.
+    const earlierDecks = (): readonly unknown[] => [...(beforeAfter.candidates ?? []),
+      ...[...(stack.project.candidates ?? []), ...(stack.language.candidates ?? [])].map(({ candidate }) => candidate)];
     let algorithm: DeckOutcome<AlgorithmSelection> | undefined;
+    let output: DeckOutcome<OutputSelection> | undefined;
     if (loaded.profile.curated?.algorithm) {
       tracker.enter("CURATED_FILES");
-      algorithm = await selectAlgorithm(context, deps, hashes, state, attempt, () => [...(beforeAfter.candidates ?? []),
-        ...[...(stack.project.candidates ?? []), ...(stack.language.candidates ?? [])].map(({ candidate }) => candidate)]);
+      algorithm = await selectAlgorithm(context, deps, hashes, state, attempt, earlierDecks);
+    }
+    if (loaded.profile.curated?.output) {
+      tracker.enter("CURATED_FILES");
+      output = await selectOutput(context, deps, hashes, state, attempt, () => [...earlierDecks(), ...(algorithm?.candidates ?? [])]);
     }
     tracker.enter("SELECTION");
     const outcomes: Readonly<Partial<Record<DeckId, DeckOutcome>>> = {
       project: stack.project, language: stack.language, "before-after": beforeAfter, ...(algorithm ? { algorithm } : {}),
+      ...(output ? { output } : {}),
     };
     const published = publishedDecks(deps, state, outcomes);
     const crawlSnapshotId = provisionalSnapshot(profileHash, hashes);
@@ -215,6 +223,7 @@ export const prepareLocalExperiment = async (deps: PreparationDependencies = def
         .some((candidate) => (candidate as { crawlSnapshotId?: unknown }).crawlSnapshotId !== crawlSnapshotId))) throw new PreparationError();
     // A curated file's source is built from the selection itself, so binding it to the final snapshot needs no request.
     const algorithmCandidates = (algorithm?.candidates ?? []).map((selection) => Object.freeze({ ...selection, crawlSnapshotId }));
+    const outputCandidates = (output?.candidates ?? []).map((selection) => Object.freeze({ ...selection, crawlSnapshotId }));
     const generate: Readonly<Record<DeckId, () => GeneratedRounds>> = {
       project: () => {
         // Descriptions are public; one that names any selected source's protected value is left out.
@@ -228,6 +237,7 @@ export const prepareLocalExperiment = async (deps: PreparationDependencies = def
       language: () => deps.generateLanguage({ profile: loaded.profile, candidates: finalized.languageCandidates }),
       "before-after": () => deps.generateBeforeAfter({ profile: loaded.profile, candidates: finalized.beforeAfterCandidates }),
       algorithm: () => deps.generateAlgorithm({ profile: loaded.profile, candidates: algorithmCandidates }),
+      output: () => deps.generateOutput({ profile: loaded.profile, candidates: outputCandidates }),
     };
     const expected = poolSizes(loaded.profile);
     const decks = Object.fromEntries(published.map((id) => {

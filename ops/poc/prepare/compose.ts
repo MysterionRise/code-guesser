@@ -163,7 +163,8 @@ const crawlSnapshot = (profile: CrawlProfile, profileHash: string, acceptedRespo
 const TEMPLATE_KEYS = Object.freeze({ project: "project", language: "language", "before-after": "beforeAfter" } as const);
 /** A deck's title and description: from the shared templates, or from the curated section that configures it. */
 const deckTemplate = (profile: CrawlProfile, id: DeckId): Readonly<{ title: string; description: string }> =>
-  id === "algorithm" ? profile.curated?.algorithm?.templates ?? fail() : profile.templates[TEMPLATE_KEYS[id]];
+  id === "algorithm" ? profile.curated?.algorithm?.templates ?? fail()
+    : id === "output" ? profile.curated?.output?.templates ?? fail() : profile.templates[TEMPLATE_KEYS[id]];
 
 /** The curated repositories' pins and the algorithms a round may offer, in the snapshot so the parser can check rounds. */
 const curatedSnapshot = (profile: CrawlProfile) => {

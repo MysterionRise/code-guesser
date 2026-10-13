@@ -98,6 +98,16 @@ export interface AlgorithmFamily {
   readonly note: string;
   readonly algorithms: readonly AlgorithmEntry[];
 }
+/** The output deck: functions of one Python repository whose doctests record what a call returns. */
+export interface OutputDeck {
+  readonly rounds: number;
+  readonly repository: string;
+  /** Top-level directories whose files are read, in an order fixed by hash. */
+  readonly directories: readonly string[];
+  /** At most this many files are read; most hold no function a round can ask about. */
+  readonly fileReads: number;
+  readonly templates: Readonly<{ title: string; description: string; prompt: string; evidence: string; explanation: string }>;
+}
 export interface CuratedProfile {
   readonly repositories: readonly CuratedRepository[];
   readonly algorithm?: Readonly<{
@@ -105,10 +115,15 @@ export interface CuratedProfile {
     templates: Readonly<{ title: string; description: string; prompt: string; evidence: string; explanation: string }>;
     families: readonly AlgorithmFamily[];
   }>;
+  readonly output?: OutputDeck;
 }
 
 /** Options per algorithm round: one whole family. */
 export const ALGORITHM_FAMILY_SIZE = 4;
+/** Options per output round; the answer's rank among them cycles through all four across the pool. */
+export const OUTPUT_OPTIONS = 4;
+/** The most files an output deck may read. */
+export const OUTPUT_FILE_READS_MAXIMUM = 240;
 
 /** Rounds in each deck's pool; a session deals five of them. A deck the profile does not configure holds none. */
 export const poolSizes = (profile: CrawlProfile): Readonly<Record<DeckId, number>> => Object.freeze({
@@ -116,6 +131,7 @@ export const poolSizes = (profile: CrawlProfile): Readonly<Record<DeckId, number
   language: ROUNDS_PER_LANGUAGE * profile.stack.configurations.length,
   "before-after": profile.selection.beforeAfterPool,
   algorithm: profile.curated?.algorithm?.rounds ?? 0,
+  output: profile.curated?.output?.rounds ?? 0,
 });
 
 export class CrawlProfileError extends Error {
@@ -339,12 +355,8 @@ const parseAlgorithmEntry = (value: unknown, repositories: ReadonlySet<string>):
 const namesAny = (copy: string, algorithms: readonly AlgorithmEntry[]): boolean =>
   algorithms.some(({ label, names }) => [label, ...names].map(foldName).some((name) => foldName(copy).includes(name)));
 
-const parseCurated = (value: unknown): CuratedProfile => {
-  const keys = isRecord(value) && Object.hasOwn(value, "algorithm") ? ["repositories", "algorithm"] : ["repositories"];
-  const curated = exactRecord(value, keys);
-  const repositories = parseCuratedRepositories(curated.repositories);
-  if (!keys.includes("algorithm")) return Object.freeze({ repositories });
-  const algorithm = exactRecord(curated.algorithm, ["rounds", "templates", "families"]);
+const parseAlgorithmDeck = (value: unknown, repositories: readonly CuratedRepository[]): NonNullable<CuratedProfile["algorithm"]> => {
+  const algorithm = exactRecord(value, ["rounds", "templates", "families"]);
   const rounds = integer(algorithm.rounds);
   if (rounds % ALGORITHM_FAMILY_SIZE !== 0 || rounds < 8 || rounds > 40) fail();
   const templates = exactRecord(algorithm.templates, ["title", "description", "prompt", "evidence", "explanation"]);
@@ -365,16 +377,47 @@ const parseCurated = (value: unknown): CuratedProfile => {
   if (new Set(families.map(({ id }) => id)).size !== families.length || new Set(all.map(({ id }) => id)).size !== all.length
     || new Set(all.map(({ label }) => label)).size !== all.length) fail();
   return Object.freeze({
-    repositories,
-    algorithm: Object.freeze({
-      rounds,
-      templates: Object.freeze({
-        title: text(templates.title), description: text(templates.description), prompt: placeholderText(templates.prompt, []),
-        evidence: placeholderText(templates.evidence, ["path", "repository", "name"]),
-        explanation: placeholderText(templates.explanation, []),
-      }),
-      families: Object.freeze(families),
+    rounds,
+    templates: Object.freeze({
+      title: text(templates.title), description: text(templates.description), prompt: placeholderText(templates.prompt, []),
+      evidence: placeholderText(templates.evidence, ["path", "repository", "name"]),
+      explanation: placeholderText(templates.explanation, []),
     }),
+    families: Object.freeze(families),
+  });
+};
+
+const parseOutputDeck = (value: unknown, repositories: readonly CuratedRepository[]): OutputDeck => {
+  const deck = exactRecord(value, ["rounds", "repository", "directories", "fileReads", "templates"]);
+  const rounds = integer(deck.rounds);
+  if (rounds % OUTPUT_OPTIONS !== 0 || rounds < 8 || rounds > 40) fail();
+  const repository = text(deck.repository);
+  // Doctests are Python's; the repository must be one of the curated pins.
+  if (repositories.find((known) => known.repository === repository)?.language !== "Python") fail();
+  const directories = uniqueTexts(deck.directories);
+  if (directories.some((directory) => !/^[A-Za-z0-9_]+$/u.test(directory))) fail();
+  const fileReads = integer(deck.fileReads);
+  if (fileReads < rounds || fileReads > OUTPUT_FILE_READS_MAXIMUM) fail();
+  const templates = exactRecord(deck.templates, ["title", "description", "prompt", "evidence", "explanation"]);
+  return Object.freeze({
+    rounds, repository, directories, fileReads,
+    templates: Object.freeze({
+      title: text(templates.title), description: text(templates.description), prompt: placeholderText(templates.prompt, []),
+      evidence: placeholderText(templates.evidence, ["path", "repository", "call", "output"]),
+      explanation: placeholderText(templates.explanation, []),
+    }),
+  });
+};
+
+/** The curated pins, and each deck built from them that the profile configures. */
+const parseCurated = (value: unknown): CuratedProfile => {
+  const decks = (["algorithm", "output"] as const).filter((key) => isRecord(value) && Object.hasOwn(value, key));
+  const curated = exactRecord(value, ["repositories", ...decks]);
+  const repositories = parseCuratedRepositories(curated.repositories);
+  return Object.freeze({
+    repositories,
+    ...(decks.includes("algorithm") ? { algorithm: parseAlgorithmDeck(curated.algorithm, repositories) } : {}),
+    ...(decks.includes("output") ? { output: parseOutputDeck(curated.output, repositories) } : {}),
   });
 };
 

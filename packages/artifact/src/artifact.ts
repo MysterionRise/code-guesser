@@ -1,5 +1,6 @@
 import {
   ALGORITHM_SOURCE_KEYS,
+  OUTPUT_SOURCE_KEYS,
   ARTIFACT_SCHEMA_VERSION,
   BEFORE_AFTER_CANDIDATE_IDS,
   CANDIDATE_COUNTS,
@@ -74,6 +75,42 @@ export const projectCandidateId = (repository: string): string =>
   `local-experiment.project.${rawHash(repository).slice(0, 16)}.v3`;
 export const languageCandidateId = (label: string): string =>
   `local-experiment.language.${LANGUAGE_SLUGS[label as StackLanguage] ?? fail()}.v3`;
+export const outputCandidateId = (label: string): string => `local-experiment.output.${rawHash(label).slice(0, 16)}.v3`;
+/** The kind of value a doctest output shows, so a round's options all look alike. */
+export const outputShape = (output: string): string => {
+  if (/^-?\d+$/u.test(output)) return "int";
+  if (/^-?(?:\d+\.\d*|\.\d+|\d+(?:\.\d*)?e[+-]?\d+|inf|nan)$/u.test(output)) return "float";
+  if (/^(?:True|False)$/u.test(output)) return "bool";
+  if (output === "None") return "none";
+  if (/^(?:'[^']*'|"[^"]*")$/u.test(output)) return "str";
+  return { "[": "list", "(": "tuple", "{": "mapping" }[output[0] ?? ""] ?? "other";
+};
+/**
+ * Output options in the order a code-blind solver would rank them: by value when every option is a number,
+ * otherwise by length and then text. An output deck spreads its answers evenly over these ranks.
+ */
+export const outputOrder = (labels: readonly string[]): readonly string[] => {
+  const numeric = labels.every((label) => Number.isFinite(Number(label)) && label.trim().length > 0);
+  return [...labels].sort((left, right) => numeric
+    ? Number(left) - Number(right) || (left < right ? -1 : 1)
+    : left.length - right.length || (left < right ? -1 : left > right ? 1 : 0));
+};
+/** Output options in plain text order, the other fixed preference a code-blind solver might have. */
+export const textOrder = (labels: readonly string[]): readonly string[] => [...labels].sort();
+/** The orders an output deck balances its answers over. */
+export const OUTPUT_ORDERS: readonly ((labels: readonly string[]) => readonly string[])[] = Object.freeze([outputOrder, textOrder]);
+/**
+ * Whether a call's result repeats one of its own arguments (`digital_root(9)` gives `9`): guessing the echo would
+ * answer such a round without reading the function, so no round asks about one.
+ */
+export const echoesArgument = (call: string, output: string): boolean => {
+  const argumentsText = call.slice(call.indexOf("("));
+  const text = /^'(.*)'$/u.exec(output)?.[1];
+  if (text !== undefined) return argumentsText.includes(`'${text}'`) || argumentsText.includes(`"${text}"`);
+  return new RegExp(`(?<![\\w.-])${escape(output)}(?![\\w.])`, "u").test(argumentsText);
+};
+/** A hint that works one decoy: `call → output`. */
+export const OUTPUT_HINT = " → ";
 export const algorithmCandidateId = (id: string): string =>
   /^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(id) ? `local-experiment.algorithm.${id}.v3` : fail();
 /** A name as code would spell it once case and separators are dropped: `Merge sort`, `merge_sort`, `MergeSort` all fold to `mergesort`. */
@@ -197,8 +234,33 @@ const validateAlgorithm = ({ snapshot, panes, prompt, candidates, clues, correct
   }
 };
 
+/**
+ * The pane is a function and one call of it, the last and only `>>>` line; the options are four outputs of one
+ * shape; and each hint works a decoy (`call → output`), never the answer.
+ */
+const validateOutput = ({ panes, candidates, clues, correctCandidateId, source }: Semantics): void => {
+  if (candidates.some(({ id, label }) => id !== outputCandidateId(label))) fail();
+  const correct = candidates.find(({ id }) => id === correctCandidateId) ?? fail();
+  if (new Set(candidates.map(({ label }) => outputShape(label))).size !== 1) fail();
+  const code = panes[0]!.text;
+  const lines = code.split("\n");
+  const call = text(source.call);
+  const name = text(source.functionName);
+  if (source.excerptHash !== rawHash(code) || lines.at(-1) !== `>>> ${call}` || lines.at(-2) !== ""
+    || lines.filter((line) => line.trimStart().startsWith(">>>")).length !== 1
+    || !call.startsWith(`${name}(`) || !new RegExp(`^def ${escape(name)}\\b`, "mu").test(code) || echoesArgument(call, correct.label)) fail();
+  const worked = clues.map((clue) => {
+    const [hintCall, output, extra] = clue.split(OUTPUT_HINT);
+    if (extra !== undefined || hintCall === undefined || output === undefined || !hintCall.startsWith(`${name}(`) || hintCall === call) fail();
+    return output!;
+  });
+  if (new Set(worked).size !== worked.length
+    || worked.some((output) => output === correct.label || !candidates.some(({ label }) => label === output))) fail();
+};
+
 const VALIDATORS: Readonly<Record<FixtureKind, (semantics: Semantics) => void>> = Object.freeze({
   PROJECT: validateProject, LANGUAGE: validateLanguage, BEFORE_AFTER: validateBeforeAfter, ALGORITHM: validateAlgorithm,
+  OUTPUT: validateOutput,
 });
 
 /** Where each kind's source comes from, and the check that binds it to this snapshot. */
@@ -207,6 +269,7 @@ const SOURCE_VALIDATORS: Readonly<Record<FixtureKind, (value: unknown, snapshot:
   LANGUAGE: (value: unknown, snapshot: Snapshot) => validateStackSource(value, snapshot.id, snapshot.stack),
   BEFORE_AFTER: (value: unknown, snapshot: Snapshot) => validateLineageSource(value, snapshot.id, snapshot.queryIds),
   ALGORITHM: (value: unknown, snapshot: Snapshot) => validateCuratedSource(value, ALGORITHM_SOURCE_KEYS, snapshot.id, snapshot.pins),
+  OUTPUT: (value: unknown, snapshot: Snapshot) => validateCuratedSource(value, OUTPUT_SOURCE_KEYS, snapshot.id, snapshot.pins),
 });
 
 /** Rules a whole deck must keep beyond its rounds' own. */
@@ -215,6 +278,18 @@ const DECK_RULES: Readonly<Partial<Record<DeckId, (fixtures: readonly ParsedFixt
   "before-after": (fixtures: readonly ParsedFixture[]) => {
     const aLater = fixtures.filter(({ correctCandidateId }) => correctCandidateId === BEFORE_AFTER_CANDIDATE_IDS[0]).length;
     if (Math.abs(2 * aLater - fixtures.length) > 1) fail();
+  },
+  // In the shown order (numeric, else by length) and in text order, every rank holds the answer equally often, so no
+  // extreme and no fixed position finds it more often than chance.
+  output: (fixtures: readonly ParsedFixture[]) => {
+    for (const order of OUTPUT_ORDERS) {
+      const ranks = [0, 0, 0, 0];
+      for (const fixture of fixtures) {
+        const answer = fixture.candidates.find(({ id }) => id === fixture.correctCandidateId)!.label;
+        ranks[order(fixture.candidates.map(({ label }) => label)).indexOf(answer)]! += 1;
+      }
+      if (Math.max(...ranks) - Math.min(...ranks) > 1) fail();
+    }
   },
 });
 

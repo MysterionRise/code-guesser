@@ -40,6 +40,8 @@ export interface GitReader {
   commit(sha: string): Promise<CommitRecord>;
   /** The blob at `path` under `rootTree`, walked one verified tree at a time. */
   resolvePath(rootTree: string, path: string): Promise<Readonly<{ mode: GitMode; blob: string }>>;
+  /** The files directly inside the directory at `path` under `rootTree`, from verified trees. */
+  listFiles(rootTree: string, path: string): Promise<readonly string[]>;
   blob(sha: string): Promise<Uint8Array>;
 }
 
@@ -142,6 +144,17 @@ export const gitReader = (
     return fail("PATH");
   };
 
+  const listFiles = async (rootTree: string, path: string): Promise<readonly string[]> => {
+    let current = rootTree;
+    for (const segment of path.split("/")) {
+      if (!/^(?!\.{1,2}$)[^/\\\0]+$/u.test(segment)) fail("PATH");
+      const entry = (await tree(current)).find(({ path: name }) => name === segment) ?? fail("PATH");
+      if (entry.type !== "tree" || entry.mode !== "040000") fail("PATH");
+      current = entry.sha;
+    }
+    return Object.freeze((await tree(current)).filter(({ type }) => type === "blob").map(({ path: name }) => `${path}/${name}`).sort());
+  };
+
   const blob = async (sha: string): Promise<Uint8Array> => {
     const response = record(await githubGet(options, `${api}/git/blobs/${sha}`));
     if (response.sha !== sha || response.url !== `${api}/git/blobs/${sha}`
@@ -153,5 +166,5 @@ export const gitReader = (
     return bytes;
   };
 
-  return Object.freeze({ api, web, commit, resolvePath, blob });
+  return Object.freeze({ api, web, commit, resolvePath, listFiles, blob });
 };

@@ -54,6 +54,19 @@ describe("deck leakage", () => {
     }
   });
 
+  it.runIf(deck("output") !== undefined)("output answers fill every rank in shown and text order, so no fixed position or extreme finds them", () => {
+    const { fixtures } = deck("output")!;
+    const limit = chance(fixtures[0]!) + TOLERANCE;
+    const position = (index: number) => (fixture: ParsedFixture, label: string) =>
+      fixture.candidates.findIndex((option) => option.label === label) === index ? 1 : 0;
+    const textRank = (index: number) => (fixture: ParsedFixture, label: string) =>
+      [...fixture.candidates.map((option) => option.label)].sort().indexOf(label) === index ? 1 : 0;
+    for (const solver of [sameOptionsSolver(fixtures), frequencySolver(fixtures), raritySolver(fixtures), alphabeticalSolver,
+      ...[0, 1, 2, 3].flatMap((index) => [position(index), textRank(index)])]) {
+      expect(accuracy(fixtures, solver)).toBeLessThanOrEqual(limit);
+    }
+  });
+
   it.runIf(deck("before-after") !== undefined)("the later version is not found by always picking one pane", () => {
     const { fixtures } = deck("before-after")!;
     const limit = chance(fixtures[0]!) + TOLERANCE;
