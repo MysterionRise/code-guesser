@@ -31,7 +31,7 @@ import {
   type StackLanguage,
 } from "./domain";
 import { fail } from "./errors";
-import { pinKey, validateCuratedSource, validateLineageSource, validateStackSource, type StackIdentity } from "./source";
+import { pinKey, validateCuratedSource, validateFixSource, validateLineageSource, validateStackSource, type StackIdentity } from "./source";
 import {
   canonicalHash,
   codeText,
@@ -111,6 +111,39 @@ export const echoesArgument = (call: string, output: string): boolean => {
 };
 /** A hint that works one decoy: `call → output`. */
 export const OUTPUT_HINT = " → ";
+/** A fix round's options name lines of its pane, counted from one. */
+export const fixCandidateId = (line: number): string => `local-experiment.fix.line-${line}.v3`;
+export const fixLineLabel = (line: number): string => `Line ${line}`;
+/** The first hint of a fix round: what kind of change the fix made, never where. */
+export const FIX_CHANGE_HINTS = Object.freeze({
+  OPERATOR: "The fix changes an operator or a comparison.",
+  LITERAL: "The fix changes a number, a string, or another literal value.",
+  NAME: "The fix changes a name: a method, a variable, a type, or a keyword.",
+  STRUCTURE: "The fix adds, removes, or rearranges part of an expression.",
+} as const);
+/**
+ * The orders a fix deck balances its answers over, each ranking a round's option lines: by position; by distance
+ * from the pane's middle line, nearest first; and by length, shortest first. Ties go to the earlier line.
+ */
+export const FIX_ORDERS: readonly ((lines: readonly number[], pane: readonly string[]) => readonly number[])[] = Object.freeze([
+  (lines: readonly number[]) => [...lines].sort((left, right) => left - right),
+  (lines: readonly number[], pane: readonly string[]) => [...lines].sort((left, right) =>
+    Math.abs(2 * left - pane.length - 1) - Math.abs(2 * right - pane.length - 1) || left - right),
+  (lines: readonly number[], pane: readonly string[]) => [...lines].sort((left, right) =>
+    pane[left - 1]!.trim().length - pane[right - 1]!.trim().length || left - right),
+]);
+/**
+ * How many more answers than an equal share one rank may hold, per fix order. Position and centrality are exact;
+ * a bug's line is often the longest near it, so length allows a tenth of the deck more, which keeps a solver that
+ * always picks the longest (or shortest) line within ten points of chance.
+ */
+export const fixSlack = (rounds: number): readonly number[] => Object.freeze([0, 0, Math.floor(rounds / 10)]);
+/** The answer's rank in each fix order. */
+export const fixRanks = (answer: number, lines: readonly number[], pane: readonly string[]): readonly number[] =>
+  FIX_ORDERS.map((order) => order(lines, pane).indexOf(answer));
+/** The second hint of a fix round: the answer and one other option, in line order. */
+export const fixPairHint = (first: number, second: number): string =>
+  `It is line ${Math.min(first, second)} or line ${Math.max(first, second)}.`;
 export const algorithmCandidateId = (id: string): string =>
   /^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(id) ? `local-experiment.algorithm.${id}.v3` : fail();
 /** A name as code would spell it once case and separators are dropped: `Merge sort`, `merge_sort`, `MergeSort` all fold to `mergesort`. */
@@ -163,6 +196,8 @@ interface Snapshot {
   readonly pins: ReadonlySet<string>;
   /** The algorithms an algorithm round may offer, by id. */
   readonly algorithms: ReadonlyMap<string, CuratedAlgorithm>;
+  /** The bug datasets fix rounds come from, by id. */
+  readonly datasets: ReadonlySet<string>;
 }
 
 type Semantics = Readonly<{
@@ -258,9 +293,29 @@ const validateOutput = ({ panes, candidates, clues, correctCandidateId, source }
     || worked.some((output) => output === correct.label || !candidates.some(({ label }) => label === output))) fail();
 };
 
+/**
+ * Options name four non-blank lines of the pane in line order; the answer is the line the fix changed, counted
+ * from the pane's first line; the first hint names the change's kind and the second the answer and one option.
+ */
+const validateFix = ({ panes, candidates, clues, correctCandidateId, source }: Semantics): void => {
+  const lines = panes[0]!.text.split("\n");
+  const numbers = candidates.map(({ id, label }) => {
+    const line = Number(/^Line ([1-9][0-9]*)$/u.exec(label)?.[1] ?? fail());
+    if (id !== fixCandidateId(line) || line > lines.length || lines[line - 1]!.trim().length === 0) fail();
+    return line;
+  });
+  if (numbers.some((line, index) => index > 0 && line <= numbers[index - 1]!)) fail();
+  const answer = Number(source.changedLine) - Number(source.windowStart) + 1;
+  if (correctCandidateId !== fixCandidateId(answer) || source.excerptHash !== rawHash(panes[0]!.text)) fail();
+  if (!(Object.values(FIX_CHANGE_HINTS) as readonly string[]).includes(clues[0]!)) fail();
+  const pair = /^It is line ([1-9][0-9]*) or line ([1-9][0-9]*)\.$/u.exec(clues[1]!) ?? fail();
+  const named = [Number(pair[1]), Number(pair[2])];
+  if (named[0]! >= named[1]! || !named.includes(answer) || named.some((line) => !numbers.includes(line))) fail();
+};
+
 const VALIDATORS: Readonly<Record<FixtureKind, (semantics: Semantics) => void>> = Object.freeze({
   PROJECT: validateProject, LANGUAGE: validateLanguage, BEFORE_AFTER: validateBeforeAfter, ALGORITHM: validateAlgorithm,
-  OUTPUT: validateOutput,
+  OUTPUT: validateOutput, FIX: validateFix,
 });
 
 /** Where each kind's source comes from, and the check that binds it to this snapshot. */
@@ -270,6 +325,7 @@ const SOURCE_VALIDATORS: Readonly<Record<FixtureKind, (value: unknown, snapshot:
   BEFORE_AFTER: (value: unknown, snapshot: Snapshot) => validateLineageSource(value, snapshot.id, snapshot.queryIds),
   ALGORITHM: (value: unknown, snapshot: Snapshot) => validateCuratedSource(value, ALGORITHM_SOURCE_KEYS, snapshot.id, snapshot.pins),
   OUTPUT: (value: unknown, snapshot: Snapshot) => validateCuratedSource(value, OUTPUT_SOURCE_KEYS, snapshot.id, snapshot.pins),
+  FIX: (value: unknown, snapshot: Snapshot) => validateFixSource(value, snapshot.id, snapshot.datasets),
 });
 
 /** Rules a whole deck must keep beyond its rounds' own. */
@@ -290,6 +346,17 @@ const DECK_RULES: Readonly<Partial<Record<DeckId, (fixtures: readonly ParsedFixt
       }
       if (Math.max(...ranks) - Math.min(...ranks) > 1) fail();
     }
+  },
+  // By position and by distance from the pane's middle, every rank holds the answer equally often; by length, nearly.
+  fix: (fixtures: readonly ParsedFixture[]) => {
+    const counts = FIX_ORDERS.map(() => [0, 0, 0, 0]);
+    for (const fixture of fixtures) {
+      const lines = fixture.candidates.map(({ label }) => Number(label.slice("Line ".length)));
+      const answer = lines[fixture.candidates.findIndex(({ id }) => id === fixture.correctCandidateId)]!;
+      fixRanks(answer, lines, fixture.panes[0]!.text.split("\n")).forEach((rank, order) => { counts[order]![rank]! += 1; });
+    }
+    const slack = fixSlack(fixtures.length);
+    if (counts.some((ranks, order) => Math.max(...ranks) > Math.ceil(fixtures.length / 4) + slack[order]!)) fail();
   },
 });
 
@@ -436,11 +503,26 @@ const parseAlgorithms = (value: unknown, pins: ReadonlySet<string>): ReadonlyMap
   return new Map(algorithms.map((algorithm) => [algorithm.id, algorithm]));
 };
 
-const parseCurated = (value: unknown): Pick<Snapshot, "pins" | "algorithms"> => {
-  const keys = typeof value === "object" && value !== null && Object.hasOwn(value, "algorithms") ? ["pins", "algorithms"] : ["pins"];
-  const curated = record(value, keys);
+/** Bug datasets at pinned commits, in id order: `{id, repository, commit}`. */
+const parseDatasets = (value: unknown): ReadonlySet<string> => {
+  const ids = (Array.isArray(value) ? value : fail()).map((entry: unknown) => {
+    const dataset = record(entry, ["id", "repository", "commit"]);
+    if (!REPOSITORY.test(text(dataset.repository))) fail();
+    gitId(dataset.commit);
+    return text(dataset.id);
+  });
+  if (ids.length === 0 || ids.some((id, index) => index > 0 && id <= ids[index - 1]!)) fail();
+  return new Set(ids);
+};
+const parseCurated = (value: unknown): Pick<Snapshot, "pins" | "algorithms" | "datasets"> => {
+  const optional = ["algorithms", "datasets"].filter((key) => typeof value === "object" && value !== null && Object.hasOwn(value, key));
+  const curated = record(value, ["pins", ...optional]);
   const pins = parsePins(curated.pins);
-  return Object.freeze({ pins, algorithms: keys.includes("algorithms") ? parseAlgorithms(curated.algorithms, pins) : new Map() });
+  return Object.freeze({
+    pins,
+    algorithms: optional.includes("algorithms") ? parseAlgorithms(curated.algorithms, pins) : new Map(),
+    datasets: optional.includes("datasets") ? parseDatasets(curated.datasets) : new Set<string>(),
+  });
 };
 
 const SNAPSHOT_KEYS = ["id", "profileVersion", "profileHash", "github", "stack", "acceptedResponseHashes"] as const;
@@ -460,7 +542,8 @@ const parseSnapshot = (value: unknown, profileHash: string): Snapshot => {
     || stack.configurations.join("|") !== STACK_LANGUAGES.join("|")) fail();
   validateResponseHashes(snapshot.acceptedResponseHashes, id, profileHash);
   return Object.freeze({ id, queryIds, stack: identity,
-    ...(curated ? parseCurated(snapshot.curated) : { pins: new Set<string>(), algorithms: new Map<string, CuratedAlgorithm>() }) });
+    ...(curated ? parseCurated(snapshot.curated)
+      : { pins: new Set<string>(), algorithms: new Map<string, CuratedAlgorithm>(), datasets: new Set<string>() }) });
 };
 
 export const ARTIFACT_KEYS = ["schemaVersion", "contentClass", "profileHash", "crawlSnapshot", "decks"] as const;

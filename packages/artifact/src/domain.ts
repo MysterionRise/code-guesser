@@ -1,14 +1,14 @@
 import type { JsonRecord } from "./validation";
 
 /** The decks an artifact may carry, in this order; a run publishes every deck it could fill. */
-export const DECK_IDS = Object.freeze(["project", "language", "before-after", "algorithm", "output"] as const);
+export const DECK_IDS = Object.freeze(["project", "language", "before-after", "algorithm", "output", "fix"] as const);
 export type DeckId = typeof DECK_IDS[number];
-export type FixtureKind = "PROJECT" | "LANGUAGE" | "BEFORE_AFTER" | "ALGORITHM" | "OUTPUT";
+export type FixtureKind = "PROJECT" | "LANGUAGE" | "BEFORE_AFTER" | "ALGORITHM" | "OUTPUT" | "FIX";
 export const DECK_KINDS: Readonly<Record<DeckId, FixtureKind>> = Object.freeze({
-  project: "PROJECT", language: "LANGUAGE", "before-after": "BEFORE_AFTER", algorithm: "ALGORITHM", output: "OUTPUT",
+  project: "PROJECT", language: "LANGUAGE", "before-after": "BEFORE_AFTER", algorithm: "ALGORITHM", output: "OUTPUT", fix: "FIX",
 });
 export const MODE_KINDS: Readonly<Record<FixtureKind, DeckId>> = Object.freeze({
-  PROJECT: "project", LANGUAGE: "language", BEFORE_AFTER: "before-after", ALGORITHM: "algorithm", OUTPUT: "output",
+  PROJECT: "project", LANGUAGE: "language", BEFORE_AFTER: "before-after", ALGORITHM: "algorithm", OUTPUT: "output", FIX: "fix",
 });
 export const ARTIFACT_SCHEMA_VERSION = "local-experiment-artifact.v3";
 export const CONTENT_CLASS = "LOCAL_UNREVIEWED_EXPERIMENT";
@@ -30,7 +30,7 @@ export const LANGUAGE_PAIRS: readonly (readonly [StackLanguage, StackLanguage])[
 export const ROUNDS_PER_LANGUAGE = 2;
 /** Options per round: four for every kind but before-or-after, which has two. */
 export const CANDIDATE_COUNTS: Readonly<Record<FixtureKind, number>> = Object.freeze({
-  PROJECT: 4, LANGUAGE: 4, BEFORE_AFTER: 2, ALGORITHM: 4, OUTPUT: 4,
+  PROJECT: 4, LANGUAGE: 4, BEFORE_AFTER: 2, ALGORITHM: 4, OUTPUT: 4, FIX: 4,
 });
 /** Before-or-after answers, in pane order: the first names pane A as the later version. */
 export const BEFORE_AFTER_CANDIDATE_IDS = Object.freeze([
@@ -81,6 +81,14 @@ export const CURATED_SOURCE_KEYS = [...BASE_SOURCE_KEYS, "authorCommit"] as cons
 export const ALGORITHM_SOURCE_KEYS = [...CURATED_SOURCE_KEYS, "algorithmId", "language", "functionName"] as const;
 /** An output round's file: the function it shows and the doctest call it asks about. */
 export const OUTPUT_SOURCE_KEYS = [...CURATED_SOURCE_KEYS, "functionName", "call"] as const;
+/**
+ * A fix round's file, as it stood before a one-line fix a bug dataset records. `commit` is the fix's parent, whose
+ * file the round shows; `fixCommit` changed one line of it and is credited as the author's commit. `changedLine`
+ * is that line in the file and `windowStart` the file line the pane begins with.
+ */
+export const FIX_SOURCE_KEYS = [
+  ...BASE_SOURCE_KEYS, "fixCommit", "fixBlob", "dataset", "bugId", "language", "changedLine", "windowStart",
+] as const;
 /** Identities that may not repeat within a deck. */
 export const DECK_DEDUPLICATION_KEYS = ["repository", "commit", "path", "blob", "rawContentHash", "excerptHash"] as const;
 /** Identities that may not repeat across decks; a repository may. */
@@ -95,16 +103,19 @@ export const DEDUPLICATION_KEYS_BY_KIND: Readonly<Record<FixtureKind, readonly s
   PROJECT: DECK_DEDUPLICATION_KEYS, LANGUAGE: DECK_DEDUPLICATION_KEYS, BEFORE_AFTER: DECK_DEDUPLICATION_KEYS,
   ALGORITHM: [...FILE_KEYS, "algorithmId"],
   OUTPUT: [...FILE_KEYS],
+  // A file may hold several recorded bugs; each round is its own bug and its own commit.
+  FIX: ["commit", "fixCommit", "bugId", "blob", "rawContentHash", "excerptHash"],
 });
 export const CROSS_DECK_KEYS_BY_KIND: Readonly<Record<FixtureKind, readonly string[]>> = Object.freeze({
   PROJECT: CROSS_DECK_KEYS, LANGUAGE: CROSS_DECK_KEYS, BEFORE_AFTER: CROSS_DECK_KEYS,
   ALGORITHM: ["blob", "rawContentHash", "excerptHash"],
   OUTPUT: ["blob", "rawContentHash", "excerptHash"],
+  FIX: CROSS_DECK_KEYS,
 });
 /** Each kind's panes: one unlabelled pane, or panes `A` and `B`. */
 export const PANE_LAYOUTS: Readonly<Record<FixtureKind, readonly (string | null)[]>> = Object.freeze({
   PROJECT: Object.freeze([null]), LANGUAGE: Object.freeze([null]), BEFORE_AFTER: PANE_LABELS, ALGORITHM: Object.freeze([null]),
-  OUTPUT: Object.freeze([null]),
+  OUTPUT: Object.freeze([null]), FIX: Object.freeze([null]),
 });
 /** The word an algorithm round's code shows in place of the algorithm's own name (`mystery`, `Mystery`). */
 export const MASKED_NAME = "mystery";

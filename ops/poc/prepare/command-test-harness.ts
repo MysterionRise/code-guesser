@@ -8,6 +8,7 @@ import { createCapacityMeter, type CapacityMeter } from "./capacity";
 import type { GitHubQueryClassification } from "./github-search";
 import { parseCrawlProfile, poolSizes, STACK_LANGUAGES, type CrawlProfile, type StackLanguage } from "./profile";
 import type { PreparationDependencies } from "./index";
+import type { FixHarnessData } from "./testdata/deck-builders";
 
 const profilePath = new URL("../profiles/local-real-rounds.v4.json", import.meta.url);
 
@@ -51,6 +52,7 @@ interface HarnessState {
   readonly rows: Readonly<Record<StackLanguage, readonly HarnessRow[]>>;
   /** Curated files the stub serves, as `owner/name:path` to source text. */
   readonly curatedFiles: ReadonlyMap<string, string>;
+  readonly fix: FixHarnessData | undefined;
 }
 
 export interface HarnessCandidate { readonly id: number; readonly queryId: string; readonly repository: string; readonly subject: string }
@@ -85,7 +87,7 @@ const harnessRows = (): HarnessState["rows"] => Object.fromEntries(STACK_LANGUAG
   return [language, [...popular, ...ordinary]];
 })) as unknown as HarnessState["rows"];
 
-const makeState = (profile: CrawlProfile, curatedFiles: ReadonlyMap<string, string> = new Map()): HarnessState => ({
+const makeState = (profile: CrawlProfile, curatedFiles: ReadonlyMap<string, string> = new Map(), fix?: FixHarnessData): HarnessState => ({
   profile,
   calls: [],
   dependencyMeters: [],
@@ -95,6 +97,7 @@ const makeState = (profile: CrawlProfile, curatedFiles: ReadonlyMap<string, stri
   candidates: HARNESS_CANDIDATES,
   rows: harnessRows(),
   curatedFiles,
+  fix,
 });
 
 const makeFoundationDependencies = (
@@ -169,7 +172,7 @@ const makeGitHubDependencies = (
 const makeStackDependencies = (
   state: HarnessState,
 ): Pick<PreparationDependencies, "collectStackMetadata" | "fetchStackBlob" | "revalidateStackCandidate" | "validateLanguageCandidate"
-  | "bindCuratedFile" | "listCuratedDirectory" | "readCuratedFile"> => ({
+  | "bindCuratedFile" | "listCuratedDirectory" | "readCuratedFile" | "readDatasetBugs" | "readDatasetBlob" | "bindFixCommit"> => ({
   collectStackMetadata: async ({ configuration, capacity }) => {
     state.calls.push(`metadata:${configuration}`);
     state.dependencyMeters.push(capacity);
@@ -215,13 +218,36 @@ const makeStackDependencies = (
     if (bytes.byteLength === 0) throw new Error("FILE_PATH");
     return accepted({ blob: createHash("sha1").update(bytes).digest("hex"), bytes }, "7");
   },
+  readDatasetBugs: async ({ dataset, capacity }) => {
+    state.calls.push(`bugs:${dataset.id}`);
+    state.dependencyMeters.push(capacity);
+    return accepted((state.fix?.bugs ?? []).filter((bug) => bug.dataset === dataset.id), "8");
+  },
+  readDatasetBlob: async ({ blob, capacity }) => {
+    const bug = state.fix?.bugs.find(({ patchBlob }) => patchBlob === blob);
+    state.calls.push(bug ? `patch:${bug.bug}` : `record:${blob.slice(0, 8)}`);
+    state.dependencyMeters.push(capacity);
+    const text = state.fix?.blobs.get(blob);
+    if (text === undefined) throw new Error("FIX_DATASET_BLOB");
+    return accepted(new TextEncoder().encode(text), "8");
+  },
+  bindFixCommit: async ({ pointer, capacity }) => {
+    state.calls.push(`fix:${pointer.bug}`);
+    state.dependencyMeters.push(capacity);
+    const fix = state.fix?.fixes.find(({ fixCommit }) => fixCommit === pointer.fixCommit) ?? (() => { throw new Error("FIX_PARENT"); })();
+    return accepted({ ...pointer, commit: fix.parent, buggyBlob: createHash("sha1").update(`buggy-${fix.bug}`).digest("hex"),
+      fixBlob: createHash("sha1").update(`fixed-${fix.bug}`).digest("hex"), bytes: new TextEncoder().encode(fix.text),
+      changedLine: fix.changedLine, licenseName: "MIT License", licenseSpdx: "MIT",
+      licenseFileUrl: `https://github.com/${fix.repository}/blob/${fix.parent}/LICENSE`, author: { name: "Fix Author", login: "fix-author" } }, "8");
+  },
 });
 
 const stubDeck = (kind: string, size: number) => ({ fixtures: Array.from({ length: size }, () => ({ kind })) }) as any;
 
 const makeArtifactDependencies = (
   state: HarnessState,
-): Pick<PreparationDependencies, "generateProject" | "generateLanguage" | "generateBeforeAfter" | "generateAlgorithm" | "generateOutput" | "compose"> => ({
+): Pick<PreparationDependencies, "generateProject" | "generateLanguage" | "generateBeforeAfter" | "generateAlgorithm" | "generateOutput"
+  | "generateFix" | "compose"> => ({
   generateProject: ({ profile, rounds }) => {
     state.calls.push(`project:${rounds.length}:${rounds.map((round) => round.distractors.length).join(",")}`);
     return stubDeck("PROJECT", poolSizes(profile).project);
@@ -242,9 +268,13 @@ const makeArtifactDependencies = (
     state.calls.push(`output:${selected.length}`);
     return stubDeck("OUTPUT", poolSizes(profile).output);
   },
+  generateFix: ({ profile, candidates: selected }) => {
+    state.calls.push(`fix-deck:${selected.length}`);
+    return stubDeck("FIX", poolSizes(profile).fix);
+  },
   compose: (options) => {
-    const sizes = (["project", "language", "before-after", ...(options.decks.algorithm ? ["algorithm"] as const : []),
-      ...(options.decks.output ? ["output"] as const : [])] as const).map((id) => options.decks[id]?.fixtures.length ?? 0);
+    const sizes = (["project", "language", "before-after", ...(["algorithm", "output", "fix"] as const).filter((id) => options.decks[id])] as const)
+      .map((id) => options.decks[id]?.fixtures.length ?? 0);
     state.calls.push(`compose:${sizes.join("/")}`);
     const crawlSnapshotId = canonicalHash({ profileHash: canonicalHash(options.profile),
       acceptedResponseHashes: options.acceptedResponseHashes });
@@ -254,7 +284,7 @@ const makeArtifactDependencies = (
       return { ...(fixture as object), source: { repository: `owner/repo-${index}`, commit: String(index % 10).repeat(40), path: `src/file-${index}.ts` } };
     }) });
     return { artifact: { crawlSnapshot: { id: crawlSnapshotId },
-      decks: (["project", "language", "before-after", "algorithm", "output"] as const).filter((id) => options.decks[id] !== undefined).map((id) => deck(id, options.decks[id]!)) },
+      decks: (["project", "language", "before-after", "algorithm", "output", "fix"] as const).filter((id) => options.decks[id] !== undefined).map((id) => deck(id, options.decks[id]!)) },
       artifactHash: hash("9"), artifactBytes: new Uint8Array([1]) } as any;
   },
 });
@@ -293,10 +323,10 @@ const makeOutputDependencies = (
 
 export const makeHarness = async (
   overrides: Partial<PreparationDependencies> = {},
-  options: Readonly<{ profile?: CrawlProfile; curatedFiles?: ReadonlyMap<string, string> }> = {},
+  options: Readonly<{ profile?: CrawlProfile; curatedFiles?: ReadonlyMap<string, string>; fix?: FixHarnessData }> = {},
 ): Promise<CommandHarness> => {
   const profile = options.profile ?? await loadProfile();
-  const state = makeState(profile, options.curatedFiles);
+  const state = makeState(profile, options.curatedFiles, options.fix);
   const base: PreparationDependencies = {
     ...makeFoundationDependencies(state),
     ...makeGitHubDependencies(state),

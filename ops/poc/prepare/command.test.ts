@@ -5,7 +5,7 @@ import { CapacityError, createCapacityMeter } from "./capacity";
 import { GitHubSearchError } from "./github-search";
 import { HARNESS_CANDIDATES, accepted, classificationsFor, harnessRow, hash, loadProfile, makeHarness } from "./command-test-harness";
 import {
-  CURATED_REPOSITORIES, CURATED_SECTION, OUTPUT_SECTION, curatedFiles, loadCuratedProfile, outputFiles, sha256,
+  CURATED_REPOSITORIES, CURATED_SECTION, FIX_SECTION, OUTPUT_SECTION, curatedFiles, fixHarnessData, loadCuratedProfile, outputFiles, sha256,
 } from "./testdata/deck-builders";
 import { LANGUAGE_SLUGS } from "../../../packages/artifact/src/index";
 import { STACK_LANGUAGES, parseCrawlProfile } from "./profile";
@@ -271,6 +271,38 @@ const logLines = (calls: readonly string[]): string[] =>
     expect(logLines(harness.calls)).toContain("log:PREPARATION_DECK_SKIPPED output DECK_SHORT");
     expect(logLines(harness.calls)).toContain("log:PREPARATION_DECKS project,language,before-after,algorithm");
     expect((harness.reports[0] as any).diagnostics).toContainEqual({ stage: "SCREENING", reasonCode: "OUTPUT_NO_DOCTEST", count: 1 });
+  });
+
+  it("selects a configured fix deck last: short patches in hash order, datasets taking turns, three rounds a repository", async () => {
+    const profile = loadCuratedProfile({ beforeAfterPool: 5 }, { fix: true });
+    const data = fixHarnessData();
+    const harness = await makeHarness({}, { profile, fix: data });
+    await prepareLocalExperiment(harness.dependencies);
+    expect(harness.calls.filter((call) => call.startsWith("bugs:"))).toEqual(["bugs:defects4j", "bugs:bugsinpy"]);
+    const patches = harness.calls.filter((call) => call.startsWith("patch:")).map((call) => call.slice("patch:".length));
+    // The long patch is never read; the datasets alternate, each in its own hash order.
+    expect(patches).not.toContain("Text-9");
+    const order = (dataset: string) => data.bugs.filter((bug) => bug.dataset === dataset && bug.patchSize <= 800)
+      .map(({ bug }) => bug).sort((left, right) => sha256(`${dataset}:${left}`) < sha256(`${dataset}:${right}`) ? -1 : 1);
+    const [java, python] = [order("defects4j"), order("bugsinpy")];
+    expect(patches).toEqual(java.flatMap((bug, index) => [bug, python[index]]).filter((bug): bug is string => bug !== undefined).slice(0, patches.length));
+    // The wide patch is set aside before any upstream request; the rest are confirmed upstream.
+    expect(harness.calls).not.toContain("fix:Calc-9");
+    expect(harness.calls.filter((call) => call.startsWith("fix:"))).toHaveLength(8);
+    expect(harness.calls).toContain("fix-deck:8");
+    expect(harness.calls).toContain(`compose:${STACK_POOL}/${STACK_POOL}/5/8`);
+    expect(logLines(harness.calls)).toContain("log:PREPARATION_DECKS project,language,before-after,fix");
+  });
+
+  it("skips the fix deck alone when its patch reads run out", async () => {
+    const raw = JSON.parse(await readFile(new URL("../profiles/local-real-rounds.v4.json", import.meta.url), "utf8"));
+    const narrow = parseCrawlProfile({ ...raw, selection: { ...raw.selection, beforeAfterPool: 5 },
+      curated: { repositories: CURATED_REPOSITORIES, fix: { ...FIX_SECTION, patchReads: 8 } } });
+    const harness = await makeHarness({}, { profile: narrow, fix: fixHarnessData() });
+    await prepareLocalExperiment(harness.dependencies);
+    expect(harness.calls.filter((call) => call.startsWith("patch:"))).toHaveLength(8);
+    expect(logLines(harness.calls)).toContain("log:PREPARATION_DECK_SKIPPED fix DECK_SHORT");
+    expect(logLines(harness.calls)).toContain("log:PREPARATION_DECKS project,language,before-after");
   });
 
   it("attempts no algorithm deck when the profile configures none", async () => {

@@ -4,6 +4,8 @@ import { createCapacityMeter, type CapacityMeter } from "../capacity";
 import { composeExperimentArtifact } from "../compose";
 import { generateAlgorithmRounds } from "../algorithm-rounds";
 import { generateOutputRounds } from "../output-rounds";
+import { generateFixRounds } from "../fix-rounds";
+import { bindFixCommit, readDatasetBlob, readDatasetBugs } from "../github-fixes";
 import { generateBeforeAfterRounds } from "../before-after-rounds";
 import { bindGitHubFile, listGitHubDirectory, readGitHubFile } from "../github-files";
 import { admitGitHubCandidates, describeGitHubRepository, screenGitHubRepository } from "../github-admission";
@@ -189,7 +191,8 @@ const metadataOutput = (rows: readonly StackMetadataRow[]): Uint8Array =>
 const stackLane = (
   state: CapturedDependencyState, reference: RuntimeReference,
 ): Pick<PreparationDependencies, "collectStackMetadata" | "fetchStackBlob"
-  | "revalidateStackCandidate" | "validateLanguageCandidate" | "bindCuratedFile" | "listCuratedDirectory" | "readCuratedFile"> => ({
+  | "revalidateStackCandidate" | "validateLanguageCandidate" | "bindCuratedFile" | "listCuratedDirectory" | "readCuratedFile"
+  | "readDatasetBugs" | "readDatasetBlob" | "bindFixCommit"> => ({
   collectStackMetadata: (context) => record(state, `stack-metadata-${context.configuration}`, async () => {
     state.metadataConfigurations.push(context.configuration);
     const value = await collectStackMetadata({ profile: context.profile, capacity: context.capacity,
@@ -231,6 +234,19 @@ const stackLane = (
     const runtime = runtimeOf(reference);
     return stage(runtime, () => readGitHubFile({ profile: context.profile, transport: runtime.transport, retry: runtime.retry }, context));
   }),
+  readDatasetBugs: (context) => record(state, "dataset-bugs", () => {
+    const runtime = runtimeOf(reference);
+    return stage(runtime, () => readDatasetBugs({ profile: context.profile, transport: runtime.transport, retry: runtime.retry }, context.dataset));
+  }),
+  readDatasetBlob: (context) => record(state, "dataset-blob", () => {
+    const runtime = runtimeOf(reference);
+    return stage(runtime, () => readDatasetBlob({ profile: context.profile, transport: runtime.transport, retry: runtime.retry }, context));
+  }),
+  bindFixCommit: (context) => record(state, "fix-commit", () => {
+    const runtime = runtimeOf(reference);
+    return stage(runtime, () => bindFixCommit({ profile: context.profile, profileHash: context.profileHash,
+      transport: runtime.transport, retry: runtime.retry }, context.pointer));
+  }),
 });
 
 const finalizeLane = (
@@ -254,13 +270,15 @@ const finalizeLane = (
 });
 
 const outputLane = (state: CapturedDependencyState): Pick<PreparationDependencies,
-  "generateProject" | "generateLanguage" | "generateBeforeAfter" | "generateAlgorithm" | "generateOutput" | "compose" | "createReport" | "stageReport"
+  "generateProject" | "generateLanguage" | "generateBeforeAfter" | "generateAlgorithm" | "generateOutput" | "generateFix" | "compose"
+  | "createReport" | "stageReport"
   | "publishArtifact" | "now" | "uuid" | "log"> => ({
   generateProject: (context) => generateProjectRounds(context as any),
   generateLanguage: (context) => generateLanguageRounds(context as any),
   generateBeforeAfter: (context) => generateBeforeAfterRounds(context as any),
   generateAlgorithm: (context) => generateAlgorithmRounds(context),
   generateOutput: (context) => generateOutputRounds(context),
+  generateFix: (context) => generateFixRounds(context),
   compose: composeExperimentArtifact,
   createReport: createRunReport,
   stageReport: async (report) => {

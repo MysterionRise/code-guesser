@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 
 import { CAPACITY_CEILINGS, CrawlProfileError, parseCrawlProfile, poolSizes } from "./profile";
-import { CURATED_REPOSITORIES, OUTPUT_SECTION } from "./testdata/deck-builders";
+import { CURATED_REPOSITORIES, FIX_SECTION, OUTPUT_SECTION } from "./testdata/deck-builders";
 
 const profilePath = new URL("../profiles/local-real-rounds.v4.json", import.meta.url);
 const testModuleName: string = "vitest";
@@ -36,7 +36,7 @@ describe("local crawl profile v4", () => {
       beforeAfterPool: 10, minimumStarEvents: 1000, popularRepositories: 24, filesPerRepository: 3, ordinaryRows: 200,
     });
     // The v4 profile reads no curated repositories, so it configures no algorithm deck.
-    expect(poolSizes(profile)).toEqual({ project: 24, language: 24, "before-after": 10, algorithm: 0, output: 0 });
+    expect(poolSizes(profile)).toEqual({ project: 24, language: 24, "before-after": 10, algorithm: 0, output: 0, fix: 0 });
     expect(profile.curated).toBeUndefined();
   });
 
@@ -47,6 +47,8 @@ describe("local crawl profile v4", () => {
     expect(profile.curated!.algorithm!.families).toHaveLength(8);
     expect(poolSizes(profile).algorithm).toBe(24);
     expect(poolSizes(profile).output).toBe(24);
+    expect(poolSizes(profile).fix).toBe(24);
+    expect(profile.curated!.fix!.datasets.map(({ projects }) => projects.length)).toEqual([15, 13]);
     expect(profile.curated!.output!.directories).toHaveLength(6);
     for (const mutate of [
       (value: any) => { value.algorithm.families[0].algorithms[0].idea = "Unlike insertion sort, it swaps neighbours."; },
@@ -75,6 +77,23 @@ describe("local crawl profile v4", () => {
       { templates: { ...OUTPUT_SECTION.templates, evidence: "The docstring in {path} records {call}." } },
     ]) {
       rejects({ ...(await validProfile()), curated: { ...curated, output: { ...OUTPUT_SECTION, ...change } } });
+    }
+  });
+
+  it("accepts a fix deck over two bug datasets, and rejects one it could not fill fairly", async () => {
+    const curated = { repositories: CURATED_REPOSITORIES, fix: FIX_SECTION };
+    const profile = parseCrawlProfile({ ...(await validProfile()), curated });
+    expect(profile.curated!.fix!.datasets.map(({ id }) => id)).toEqual(["defects4j", "bugsinpy"]);
+    expect(poolSizes(profile).fix).toBe(8);
+    const dataset = FIX_SECTION.datasets[0]!;
+    for (const change of [
+      { rounds: 10 }, { patchReads: 7 }, { patchReads: 241 }, { perRepository: 5 },
+      { datasets: [{ ...dataset, id: "swe-bench" }] }, { datasets: [dataset, dataset] }, { datasets: [{ ...dataset, commit: "main" }] },
+      { datasets: [{ ...dataset, projects: [] }] }, { datasets: [{ ...dataset, projects: [{ name: "Calc", repository: "calc/calc", language: "Cobol" }] }] },
+      { datasets: [{ ...dataset, projects: [dataset.projects[0], dataset.projects[0]] }] },
+      { templates: { ...FIX_SECTION.templates, evidence: "{dataset} records bug {bug}." } },
+    ]) {
+      rejects({ ...(await validProfile()), curated: { ...curated, fix: { ...FIX_SECTION, ...change } } });
     }
   });
 

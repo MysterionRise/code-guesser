@@ -4,6 +4,12 @@ import { readFileSync } from "node:fs";
 import { generateAlgorithmRounds, type AlgorithmCandidate } from "../algorithm-rounds";
 import { doctestFunctions, roundExamples } from "../doctest-parse";
 import { balancedAnswers, generateOutputRounds, outputPane, type OutputCandidate } from "../output-rounds";
+import { generateFixRounds, type FixCandidate } from "../fix-rounds";
+import { changeKind, fixWindows } from "../fix-window";
+import type { DatasetBug } from "../github-fixes";
+import { fixSlack } from "../model";
+import { balancedChoice } from "../round-helpers";
+import { FIX_WINDOW_LINES } from "../select-fix";
 import { generateBeforeAfterRounds } from "../before-after-rounds";
 import { algorithmWindow, labelWords } from "../function-windows";
 import { canonicalBytes, canonicalHash } from "../canonical";
@@ -240,6 +246,7 @@ export const composeInput = (
       // A profile with a curated section adds the decks it configures.
       ...(profile.curated?.algorithm ? { algorithm: generateAlgorithmRounds({ profile, candidates: algorithmCandidates(profile, snapshotId) }) } : {}),
       ...(profile.curated?.output ? { output: generateOutputRounds({ profile, candidates: outputCandidates(profile, snapshotId) }) } : {}),
+      ...(profile.curated?.fix ? { fix: generateFixRounds({ profile, candidates: fixCandidates(profile, snapshotId) }) } : {}),
     },
     candidates,
   };
@@ -286,11 +293,11 @@ export const CURATED_SECTION = Object.freeze({
 /** The deck profile with the curated section: it configures an eight-round algorithm deck. */
 export const loadCuratedProfile = (
   selection: Readonly<Record<string, number>> = {},
-  decks: Readonly<{ algorithm?: boolean; output?: boolean }> = { algorithm: true },
+  decks: Readonly<{ algorithm?: boolean; output?: boolean; fix?: boolean }> = { algorithm: true },
 ): CrawlProfile => {
   const raw = JSON.parse(readFileSync(new URL("../../profiles/local-real-rounds.v4.json", import.meta.url), "utf8"));
   const curated = { repositories: CURATED_REPOSITORIES, ...(decks.algorithm ? { algorithm: CURATED_SECTION.algorithm } : {}),
-    ...(decks.output ? { output: OUTPUT_SECTION } : {}) };
+    ...(decks.output ? { output: OUTPUT_SECTION } : {}), ...(decks.fix ? { fix: FIX_SECTION } : {}) };
   return parseCrawlProfile({ ...raw, selection: { ...raw.selection, ...selection }, curated: structuredClone(curated) });
 };
 
@@ -391,3 +398,131 @@ export const algorithmCandidates = (profile: CrawlProfile, snapshotId: string): 
       excerpt: window.excerpt, excerptHash: sha256(window.excerpt), functionName: window.functionName, crawlSnapshotId: snapshotId,
     });
   }));
+
+/** An eight-round fix deck over two small Java projects (as Defects4J) and two Python projects (as BugsInPy). */
+export const FIX_SECTION = Object.freeze({
+  rounds: 8,
+  datasets: [
+    { id: "defects4j", repository: "bugs/d4j", commit: sha1("d4j-pin"), projects: [
+      { name: "Calc", repository: "calc/calc", language: "Java" }, { name: "Text", repository: "text/text", language: "Java" },
+    ] },
+    { id: "bugsinpy", repository: "bugs/bip", commit: sha1("bip-pin"), projects: [
+      { name: "kit", repository: "kit/kit", language: "Python" }, { name: "tool", repository: "tool/tool", language: "Python" },
+    ] },
+  ],
+  patchReads: 20,
+  perRepository: 3,
+  templates: {
+    title: "Spot the fix",
+    description: "Read code just before a real one-line bug fix and pick the line the fix changed.",
+    prompt: "Which line did the fix change?",
+    evidence: "{dataset} records bug {bug} in {repository}; the fix changed line {line} of this excerpt.",
+    explanation: "The answer is the one line the upstream fix commit changed in this file.",
+  },
+});
+
+/** One synthetic bug: the file before its fix, the line the fix changed, and the dataset's record of it. */
+export interface SyntheticFix {
+  readonly dataset: "defects4j" | "bugsinpy";
+  readonly project: string;
+  readonly bug: string;
+  readonly repository: string;
+  readonly language: "Java" | "Python";
+  readonly path: string;
+  readonly text: string;
+  readonly changedLine: number;
+  readonly buggyLine: string;
+  readonly fixedLine: string;
+  readonly parent: string;
+  readonly fixCommit: string;
+  readonly patch: string;
+}
+
+/** Lengths of the lines around a synthetic fix, alternately shorter and longer than the changed line's. */
+const FILLER_OFFSETS = [-10, 8, -6, 4, -3, 10, -8, 6, -4, 3, -12, 12, -2, 2] as const;
+/**
+ * A 27-line file whose line 14 is `changed` and whose other lines are filler assignments, alternately shorter and
+ * longer than it, so a window can place the changed line at any rank by position, centrality, and length.
+ */
+const syntheticFile = (language: "Java" | "Python", changed: string): string => Array.from({ length: 27 }, (_, index) => {
+  if (index === 13) return changed;
+  const length = changed.trim().length + FILLER_OFFSETS[index % FILLER_OFFSETS.length]!;
+  const name = `s${String(index + 1).padStart(2, "0")}`;
+  return language === "Java" ? `        String ${name} = "${"a".repeat(Math.max(1, length - 16))}";` : `    ${name} = "${"a".repeat(Math.max(1, length - 8))}"`;
+}).join("\n");
+/** A unified diff of one changed line; Defects4J's run from fixed to buggy, BugsInPy's from buggy to fixed. */
+const linePatch = (path: string, line: number, before: string, after: string, direction: "forward" | "reverse"): string => {
+  const [removed, added] = direction === "forward" ? [before, after] : [after, before];
+  return [`diff --git a/${path} b/${path}`, "index 1111111..2222222 100644", `--- a/${path}`, `+++ b/${path}`,
+    `@@ -${line - 1},3 +${line - 1},3 @@`, " context above", `-${removed}`, `+${added}`, " context below", ""].join("\n");
+};
+
+/** Twelve one-line bugs, three per repository, and their files before the fix. */
+export const syntheticFixes = (): readonly SyntheticFix[] => [
+  ...(["Calc", "Text"] as const).flatMap((project, projectIndex) => [1, 2, 3].map((id) => {
+    const name = `${project}${id}`;
+    const path = `src/${project.toLowerCase()}/${name}.java`;
+    const factor = 10 + id + projectIndex * 10;
+    const buggyLine = `        total = total + step * ${factor};`;
+    const fixedLine = `        total = total + step * ${factor + 1};`;
+    return { dataset: "defects4j" as const, project, bug: `${project}-${id}`, repository: `${project.toLowerCase()}/${project.toLowerCase()}`,
+      language: "Java" as const, path, text: syntheticFile("Java", buggyLine), changedLine: 14, buggyLine, fixedLine,
+      parent: sha1(`parent-${name}`), fixCommit: sha1(`fix-${name}`), patch: linePatch(path, 14, buggyLine, fixedLine, "reverse") };
+  })),
+  ...(["kit", "tool"] as const).flatMap((project, projectIndex) => [1, 2, 3].map((id) => {
+    const name = `${project}${id}`;
+    const path = `${project}/${name}.py`;
+    const offset = 10 + id + projectIndex * 10;
+    const buggyLine = `    offset = len(result) + ${offset}`;
+    const fixedLine = `    offset = len(result) - ${offset}`;
+    return { dataset: "bugsinpy" as const, project, bug: `${project}-${id}`, repository: `${project}/${project}`,
+      language: "Python" as const, path, text: syntheticFile("Python", buggyLine), changedLine: 14, buggyLine, fixedLine,
+      parent: sha1(`parent-${name}`), fixCommit: sha1(`fix-${name}`), patch: linePatch(path, 14, buggyLine, fixedLine, "forward") };
+  })),
+];
+
+/** What the harness serves for the fix deck: the bugs each dataset lists, the blobs they point to, and each fix upstream. */
+export interface FixHarnessData {
+  readonly bugs: readonly DatasetBug[];
+  readonly blobs: ReadonlyMap<string, string>;
+  readonly fixes: readonly SyntheticFix[];
+}
+export const fixHarnessData = (): FixHarnessData => {
+  const fixes = syntheticFixes();
+  const blobs = new Map<string, string>();
+  const blobOf = (text: string): string => { const id = sha1(`blob ${text}`); blobs.set(id, text); return id; };
+  const table = (project: string) => blobOf(["bug.id,revision.id.buggy,revision.id.fixed,report.id,report.url",
+    ...fixes.filter((fix) => fix.project === project).map((fix) => `${fix.bug.split("-")[1]},${fix.parent},${fix.fixCommit},R-1,https://example.org/R-1`),
+    `9,${sha1("w")},${sha1("x")},R-9,https://example.org/R-9`, ""].join("\n"));
+  const tables = new Map(["Calc", "Text"].map((project) => [project, table(project)]));
+  const bugs: DatasetBug[] = fixes.map((fix) => ({
+    dataset: fix.dataset, project: fix.project, bug: fix.bug, patchBlob: blobOf(fix.patch), patchSize: fix.patch.length,
+    revisionsBlob: fix.dataset === "defects4j" ? tables.get(fix.project)!
+      : blobOf(`python_version="3.8.3"\nbuggy_commit_id="${fix.parent.slice(0, 7)}"\nfixed_commit_id="${fix.fixCommit}"\ntest_file="tests/test_${fix.project}.py"\n`),
+  }));
+  // A patch that changes two lines, read and set aside, and one too long to read at all.
+  const wide = `${fixes[0]!.patch}-    second line\n+    second line changed\n`;
+  bugs.push({ dataset: "defects4j", project: "Calc", bug: "Calc-9", patchBlob: blobOf(wide), patchSize: wide.length, revisionsBlob: tables.get("Calc")! });
+  bugs.push({ dataset: "defects4j", project: "Text", bug: "Text-9", patchBlob: sha1("never-read"), patchSize: 5_000, revisionsBlob: tables.get("Text")! });
+  return { bugs, blobs, fixes };
+};
+
+/** Bound fix candidates for the small profile: four per dataset, windows chosen so the answers balance. */
+export const fixCandidates = (profile: CrawlProfile, snapshotId: string): readonly FixCandidate[] => {
+  const fixes = syntheticFixes();
+  const chosen = [...fixes.filter(({ dataset }) => dataset === "defects4j").slice(0, 4), ...fixes.filter(({ dataset }) => dataset === "bugsinpy").slice(0, 4)];
+  const windows = chosen.map((fix) => fixWindows(fix.text, fix.changedLine, `${fix.dataset}:${fix.bug}`, FIX_WINDOW_LINES));
+  const choices = balancedChoice(windows.map((options) => options.map(({ ranks }) => ranks)), 4, fixSlack(chosen.length))!;
+  return chosen.map((fix, index) => {
+    const window = windows[index]![choices[index]!]!;
+    return Object.freeze({
+      dataset: fix.dataset, bugId: fix.bug, repository: fix.repository, language: fix.language, commit: fix.parent,
+      fixCommit: fix.fixCommit, path: fix.path, blob: sha1(`buggy-${fix.bug}`), fixBlob: sha1(`fixed-${fix.bug}`),
+      rawContentHash: sha256(fix.text), licenseName: "MIT License", licenseSpdx: "MIT",
+      licenseFileUrl: `https://github.com/${fix.repository}/blob/${fix.parent}/LICENSE`, authorName: "Fix Author", authorLogin: "fix-author",
+      buggyLine: fix.buggyLine, fixedLine: fix.fixedLine, changedLine: fix.changedLine, changeKind: changeKind(fix.buggyLine, fix.fixedLine),
+      windowStart: window.windowStart, answer: window.answer, decoys: window.decoys, excerpt: window.excerpt,
+      excerptHash: sha256(window.excerpt), crawlSnapshotId: snapshotId,
+    });
+  });
+};

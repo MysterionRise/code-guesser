@@ -5,6 +5,8 @@ import { fileURLToPath } from "node:url";
 
 import { generateAlgorithmRounds } from "./algorithm-rounds";
 import { generateOutputRounds } from "./output-rounds";
+import { generateFixRounds } from "./fix-rounds";
+import { bindFixCommit, readDatasetBlob, readDatasetBugs } from "./github-fixes";
 import { generateBeforeAfterRounds } from "./before-after-rounds";
 import { publishArtifact } from "./artifact-store";
 import { fetchSelectedBlob } from "./blob-worker";
@@ -176,6 +178,19 @@ export const defaultDependencies = (options: DependencyOptions = { journal: "fre
     const runtime = runtimeOf(options);
     return stage(runtime, () => listGitHubDirectory({ profile: options.profile, transport: runtime.transport, retry: runtime.retry }, options));
   },
+  readDatasetBugs: (options) => {
+    const runtime = runtimeOf(options);
+    return stage(runtime, () => readDatasetBugs({ profile: options.profile, transport: runtime.transport, retry: runtime.retry }, options.dataset));
+  },
+  readDatasetBlob: (options) => {
+    const runtime = runtimeOf(options);
+    return stage(runtime, () => readDatasetBlob({ profile: options.profile, transport: runtime.transport, retry: runtime.retry }, options));
+  },
+  bindFixCommit: (options) => {
+    const runtime = runtimeOf(options);
+    return stage(runtime, () => bindFixCommit({ profile: options.profile, profileHash: options.profileHash,
+      transport: runtime.transport, retry: runtime.retry }, options.pointer));
+  },
   readCuratedFile: (options) => {
     const runtime = runtimeOf(options);
     return stage(runtime, () => readGitHubFile({ profile: options.profile, transport: runtime.transport, retry: runtime.retry }, options));
@@ -200,6 +215,7 @@ export const defaultDependencies = (options: DependencyOptions = { journal: "fre
   generateBeforeAfter: (options) => generateBeforeAfterRounds(options as Parameters<typeof generateBeforeAfterRounds>[0]),
   generateAlgorithm: (options) => generateAlgorithmRounds(options),
   generateOutput: (options) => generateOutputRounds(options),
+  generateFix: (options) => generateFixRounds(options),
   compose: composeExperimentArtifact,
   createReport: createRunReport,
   stageReport,

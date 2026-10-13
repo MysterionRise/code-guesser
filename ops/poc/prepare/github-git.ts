@@ -27,11 +27,13 @@ export interface CommitRecord {
   readonly stats: unknown;
 }
 
-interface TreeEntry {
+export interface TreeEntry {
   readonly path: string;
   readonly mode: string;
   readonly type: string;
   readonly sha: string;
+  /** A blob's size as GitHub reports it: a hint for choosing what to read, never verified by the tree's hash. */
+  readonly size?: number;
 }
 
 export interface GitReader {
@@ -42,6 +44,10 @@ export interface GitReader {
   resolvePath(rootTree: string, path: string): Promise<Readonly<{ mode: GitMode; blob: string }>>;
   /** The files directly inside the directory at `path` under `rootTree`, from verified trees. */
   listFiles(rootTree: string, path: string): Promise<readonly string[]>;
+  /** The entries directly inside the directory at `path` (`""` for the root) under `rootTree`, from verified trees. */
+  entries(rootTree: string, path: string): Promise<readonly TreeEntry[]>;
+  /** Every entry under a tree, with full paths, from one listing whose every subtree is checked against its hash. */
+  recursiveTree(sha: string): Promise<readonly TreeEntry[]>;
   blob(sha: string): Promise<Uint8Array>;
 }
 
@@ -108,22 +114,47 @@ export const gitReader = (
     });
   };
 
-  const tree = async (sha: string): Promise<readonly TreeEntry[]> => {
-    const response = record(await githubGet(options, `${api}/git/trees/${sha}`));
+  /** One tree listing's entries, each checked for shape, URL, and kind; a listing cut short is rejected. */
+  const listing = async (sha: string, recursive: boolean): Promise<readonly TreeEntry[]> => {
+    const response = record(await githubGet(options, `${api}/git/trees/${sha}${recursive ? "?recursive=1" : ""}`));
     const treeValues = response.tree;
     if (response.sha !== sha || response.url !== `${api}/git/trees/${sha}` || response.truncated !== false) fail("TREE");
     const treeEntries: unknown[] = Array.isArray(treeValues) ? treeValues : fail("TREE");
     const entries: readonly TreeEntry[] = treeEntries.map((value: unknown) => {
       const item = record(value);
-      const entry = Object.freeze({ path: text(item.path), mode: text(item.mode), type: text(item.type), sha: gitId(item.sha) });
+      const size = item.type === "blob" && Number.isSafeInteger(item.size) && (item.size as number) >= 0 ? { size: item.size as number } : {};
+      const entry = Object.freeze({ path: text(item.path), mode: text(item.mode), type: text(item.type), sha: gitId(item.sha), ...size });
       if (item.url !== `${api}/git/${entry.type}s/${entry.sha}`) fail("TREE");
       const regular = entry.type === "blob" && (entry.mode === "100644" || entry.mode === "100755");
       const directory = entry.type === "tree" && entry.mode === "040000";
       if (!regular && !directory) fail("TREE");
       return entry;
     });
-    if (new Set(entries.map(({ path }) => path)).size !== entries.length || treeHash(entries) !== sha) fail("TREE");
+    if (new Set(entries.map(({ path }) => path)).size !== entries.length) fail("TREE");
     return Object.freeze(entries);
+  };
+
+  const tree = async (sha: string): Promise<readonly TreeEntry[]> => {
+    const entries = await listing(sha, false);
+    if (entries.some(({ path }) => path.includes("/")) || treeHash(entries) !== sha) fail("TREE");
+    return entries;
+  };
+
+  const recursiveTree = async (sha: string): Promise<readonly TreeEntry[]> => {
+    const entries = await listing(sha, true);
+    // Group every entry under its directory, then require each directory's entries to hash to that directory.
+    const children = new Map<string, TreeEntry[]>([["", []]]);
+    for (const entry of entries) {
+      if (entry.type === "tree") children.set(entry.path, children.get(entry.path) ?? []);
+    }
+    for (const entry of entries) {
+      const slash = entry.path.lastIndexOf("/");
+      const parent = slash < 0 ? "" : entry.path.slice(0, slash);
+      (children.get(parent) ?? fail("TREE")).push({ ...entry, path: entry.path.slice(slash + 1) });
+    }
+    const directories = entries.filter(({ type }) => type === "tree");
+    if (treeHash(children.get("")!) !== sha || directories.some((entry) => treeHash(children.get(entry.path)!) !== entry.sha)) fail("TREE");
+    return entries;
   };
 
   const resolvePath = async (rootTree: string, path: string): Promise<Readonly<{ mode: GitMode; blob: string }>> => {
@@ -144,16 +175,19 @@ export const gitReader = (
     return fail("PATH");
   };
 
-  const listFiles = async (rootTree: string, path: string): Promise<readonly string[]> => {
+  const entries = async (rootTree: string, path: string): Promise<readonly TreeEntry[]> => {
     let current = rootTree;
-    for (const segment of path.split("/")) {
+    for (const segment of path === "" ? [] : path.split("/")) {
       if (!/^(?!\.{1,2}$)[^/\\\0]+$/u.test(segment)) fail("PATH");
       const entry = (await tree(current)).find(({ path: name }) => name === segment) ?? fail("PATH");
       if (entry.type !== "tree" || entry.mode !== "040000") fail("PATH");
       current = entry.sha;
     }
-    return Object.freeze((await tree(current)).filter(({ type }) => type === "blob").map(({ path: name }) => `${path}/${name}`).sort());
+    return tree(current);
   };
+
+  const listFiles = async (rootTree: string, path: string): Promise<readonly string[]> =>
+    Object.freeze((await entries(rootTree, path)).filter(({ type }) => type === "blob").map(({ path: name }) => `${path}/${name}`).sort());
 
   const blob = async (sha: string): Promise<Uint8Array> => {
     const response = record(await githubGet(options, `${api}/git/blobs/${sha}`));
@@ -166,5 +200,5 @@ export const gitReader = (
     return bytes;
   };
 
-  return Object.freeze({ api, web, commit, resolvePath, listFiles, blob });
+  return Object.freeze({ api, web, commit, resolvePath, listFiles, entries, recursiveTree, blob });
 };

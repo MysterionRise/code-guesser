@@ -11,6 +11,7 @@ import { artifactFixtures, DECK_IDS, type DeckId } from "./model";
 import { STACK_LANGUAGES, poolSizes, type CrawlProfile } from "./profile";
 import { selectAlgorithm, type AlgorithmSelection } from "./select-algorithm";
 import { selectOutput, type OutputSelection } from "./select-output";
+import { selectFix, type FixSelection } from "./select-fix";
 import { selectBeforeAfter } from "./select-github";
 import { selectStack, type ProjectSelection } from "./select-stack";
 import { addHashes, protectedValuesOf, provisionalSnapshot, repositoryScreen, safeDescription, view } from "./selection";
@@ -204,10 +205,16 @@ export const prepareLocalExperiment = async (deps: PreparationDependencies = def
       tracker.enter("CURATED_FILES");
       output = await selectOutput(context, deps, hashes, state, attempt, () => [...earlierDecks(), ...(algorithm?.candidates ?? [])]);
     }
+    let fix: DeckOutcome<FixSelection> | undefined;
+    if (loaded.profile.curated?.fix) {
+      tracker.enter("CURATED_FILES");
+      fix = await selectFix(context, deps, hashes, state, attempt,
+        () => [...earlierDecks(), ...(algorithm?.candidates ?? []), ...(output?.candidates ?? [])]);
+    }
     tracker.enter("SELECTION");
     const outcomes: Readonly<Partial<Record<DeckId, DeckOutcome>>> = {
       project: stack.project, language: stack.language, "before-after": beforeAfter, ...(algorithm ? { algorithm } : {}),
-      ...(output ? { output } : {}),
+      ...(output ? { output } : {}), ...(fix ? { fix } : {}),
     };
     const published = publishedDecks(deps, state, outcomes);
     const crawlSnapshotId = provisionalSnapshot(profileHash, hashes);
@@ -224,6 +231,7 @@ export const prepareLocalExperiment = async (deps: PreparationDependencies = def
     // A curated file's source is built from the selection itself, so binding it to the final snapshot needs no request.
     const algorithmCandidates = (algorithm?.candidates ?? []).map((selection) => Object.freeze({ ...selection, crawlSnapshotId }));
     const outputCandidates = (output?.candidates ?? []).map((selection) => Object.freeze({ ...selection, crawlSnapshotId }));
+    const fixCandidates = (fix?.candidates ?? []).map((selection) => Object.freeze({ ...selection, crawlSnapshotId }));
     const generate: Readonly<Record<DeckId, () => GeneratedRounds>> = {
       project: () => {
         // Descriptions are public; one that names any selected source's protected value is left out.
@@ -238,6 +246,7 @@ export const prepareLocalExperiment = async (deps: PreparationDependencies = def
       "before-after": () => deps.generateBeforeAfter({ profile: loaded.profile, candidates: finalized.beforeAfterCandidates }),
       algorithm: () => deps.generateAlgorithm({ profile: loaded.profile, candidates: algorithmCandidates }),
       output: () => deps.generateOutput({ profile: loaded.profile, candidates: outputCandidates }),
+      fix: () => deps.generateFix({ profile: loaded.profile, candidates: fixCandidates }),
     };
     const expected = poolSizes(loaded.profile);
     const decks = Object.fromEntries(published.map((id) => {

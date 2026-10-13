@@ -907,5 +907,173 @@
       "evidence": "The docstring in {path} of {repository} records {call} as {output}; the repository's tests run every docstring example.",
       "explanation": "The answer is the result the function's own doctest records, which the repository's CI checks. The code is the function as it stands at the pinned commit, without its docstring and comments; nothing here ran it."
     }
+  },
+  "fix": {
+    "rounds": 24,
+    "datasets": [
+      {
+        "id": "defects4j",
+        "repository": "rjust/defects4j",
+        "commit": "8c16da8230843cdc918eaf4ddb449637f02b83c6",
+        "projects": [
+          {
+            "name": "Cli",
+            "repository": "apache/commons-cli",
+            "language": "Java"
+          },
+          {
+            "name": "Closure",
+            "repository": "google/closure-compiler",
+            "language": "Java"
+          },
+          {
+            "name": "Codec",
+            "repository": "apache/commons-codec",
+            "language": "Java"
+          },
+          {
+            "name": "Collections",
+            "repository": "apache/commons-collections",
+            "language": "Java"
+          },
+          {
+            "name": "Compress",
+            "repository": "apache/commons-compress",
+            "language": "Java"
+          },
+          {
+            "name": "Csv",
+            "repository": "apache/commons-csv",
+            "language": "Java"
+          },
+          {
+            "name": "Gson",
+            "repository": "google/gson",
+            "language": "Java"
+          },
+          {
+            "name": "JacksonCore",
+            "repository": "FasterXML/jackson-core",
+            "language": "Java"
+          },
+          {
+            "name": "JacksonDatabind",
+            "repository": "FasterXML/jackson-databind",
+            "language": "Java"
+          },
+          {
+            "name": "Jsoup",
+            "repository": "jhy/jsoup",
+            "language": "Java"
+          },
+          {
+            "name": "JxPath",
+            "repository": "apache/commons-jxpath",
+            "language": "Java"
+          },
+          {
+            "name": "Lang",
+            "repository": "apache/commons-lang",
+            "language": "Java"
+          },
+          {
+            "name": "Math",
+            "repository": "apache/commons-math",
+            "language": "Java"
+          },
+          {
+            "name": "Mockito",
+            "repository": "mockito/mockito",
+            "language": "Java"
+          },
+          {
+            "name": "Time",
+            "repository": "JodaOrg/joda-time",
+            "language": "Java"
+          }
+        ]
+      },
+      {
+        "id": "bugsinpy",
+        "repository": "soarsmu/BugsInPy",
+        "commit": "11c5f1eea954a42132cfd06bf257766a7963e0fd",
+        "projects": [
+          {
+            "name": "PySnooper",
+            "repository": "cool-RR/PySnooper",
+            "language": "Python"
+          },
+          {
+            "name": "black",
+            "repository": "psf/black",
+            "language": "Python"
+          },
+          {
+            "name": "cookiecutter",
+            "repository": "cookiecutter/cookiecutter",
+            "language": "Python"
+          },
+          {
+            "name": "fastapi",
+            "repository": "fastapi/fastapi",
+            "language": "Python"
+          },
+          {
+            "name": "httpie",
+            "repository": "httpie/cli",
+            "language": "Python"
+          },
+          {
+            "name": "keras",
+            "repository": "keras-team/keras",
+            "language": "Python"
+          },
+          {
+            "name": "luigi",
+            "repository": "spotify/luigi",
+            "language": "Python"
+          },
+          {
+            "name": "pandas",
+            "repository": "pandas-dev/pandas",
+            "language": "Python"
+          },
+          {
+            "name": "sanic",
+            "repository": "sanic-org/sanic",
+            "language": "Python"
+          },
+          {
+            "name": "scrapy",
+            "repository": "scrapy/scrapy",
+            "language": "Python"
+          },
+          {
+            "name": "spacy",
+            "repository": "explosion/spaCy",
+            "language": "Python"
+          },
+          {
+            "name": "thefuck",
+            "repository": "nvbn/thefuck",
+            "language": "Python"
+          },
+          {
+            "name": "tornado",
+            "repository": "tornadoweb/tornado",
+            "language": "Python"
+          }
+        ]
+      }
+    ],
+    "patchReads": 240,
+    "perRepository": 3,
+    "templates": {
+      "title": "Spot the fix",
+      "description": "Read code just before a real one-line bug fix, and pick the line the fix changed.",
+      "prompt": "Which line did the fix change?",
+      "evidence": "{dataset} records bug {bug} in {repository}, with a test that fails before the fix; the fix changed line {line} of this excerpt.",
+      "explanation": "The answer is the one line the upstream fix commit changed in this file, which the bug dataset records and its tests confirm."
+    }
   }
 }

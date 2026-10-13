@@ -112,8 +112,15 @@ Three new decks, one pull request each, from
    `balancedAnswers` in `output-rounds.ts` picks answers so they fill every
    rank in both shown and text order, and never repeat an argument. Its
    go-live section is in the same `curated-section.json`.
-4. Spot the fix (`fix`): Defects4J and BugsInPy one-line fixes, with a
-   line-number gutter in the game.
+4. Done, staged: Spot the fix (`fix`). `github-fixes.ts` lists each
+   dataset's bugs from verified trees (BugsInPy's through one recursive
+   listing whose every subtree is hash-checked). It confirms each one-line fix
+   upstream: one parent, a one-line diff equal to the dataset's, the licence
+   at the parent, and a human author. `fix-window.ts` offers every window;
+   `balancedChoice` in `round-helpers.ts` picks one per round so the answers
+   balance by position and centrality, and within ten points by length. Its
+   go-live section is in `curated-section.json`. The game still needs the
+   line-number gutter.
 5. Game UX for six decks, then the go-live run on profile v5.
 
 Keep the committed profile and artifact unchanged until the go-live pull
@@ -209,6 +216,14 @@ Selection diagnostics are expected screening outcomes, not faults:
 - `OUTPUT_NO_DOCTEST`: a file with no function a round can ask about (most
   files). `OUTPUT_RANKS_UNBALANCED`: no choice of answers fills every rank in
   both orders, so the output deck is skipped.
+- `FIX_PATCH_WIDE`: a dataset patch that changes more than one line (most).
+  `FIX_CHANGE`, `FIX_DIFF`, `FIX_PARENT`: the upstream fix commit changes
+  more of the file, differs from the dataset's line, or is a merge.
+  `ADMISSION_LICENSE_SHAPE` here is usually an old commit whose licence file
+  GitHub cannot identify. `FIX_RANKS_UNBALANCED`: no choice of windows
+  balances the deck.
+- `ADMISSION_AUTHOR_CONTACT`: an author recorded under an email address,
+  which is never published.
 
 ## Commands
 

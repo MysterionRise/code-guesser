@@ -67,6 +67,21 @@ describe("deck leakage", () => {
     }
   });
 
+  it.runIf(deck("fix") !== undefined)("fix answers take every position, centrality, and nearly every length rank equally", () => {
+    const { fixtures } = deck("fix")!;
+    const limit = chance(fixtures[0]!) + TOLERANCE;
+    const lineOf = (label: string) => Number(label.slice("Line ".length));
+    const paneOf = (fixture: ParsedFixture) => fixture.panes[0]!.text.split("\n");
+    const solvers = [
+      ...[0, 1, 2, 3].map((index) => (fixture: ParsedFixture, label: string) => fixture.candidates.findIndex((option) => option.label === label) === index ? 1 : 0),
+      (fixture: ParsedFixture, label: string) => -Math.abs(2 * lineOf(label) - paneOf(fixture).length - 1),
+      (fixture: ParsedFixture, label: string) => Math.abs(2 * lineOf(label) - paneOf(fixture).length - 1),
+      (fixture: ParsedFixture, label: string) => paneOf(fixture)[lineOf(label) - 1]!.trim().length,
+      (fixture: ParsedFixture, label: string) => -paneOf(fixture)[lineOf(label) - 1]!.trim().length,
+    ];
+    for (const solver of solvers) expect(accuracy(fixtures, solver)).toBeLessThanOrEqual(limit);
+  });
+
   it.runIf(deck("before-after") !== undefined)("the later version is not found by always picking one pane", () => {
     const { fixtures } = deck("before-after")!;
     const limit = chance(fixtures[0]!) + TOLERANCE;
