@@ -226,8 +226,8 @@ Selection diagnostics are expected screening outcomes, not faults:
   `ADMISSION_LICENSE_SHAPE` here is usually an old commit whose licence file
   GitHub cannot identify. `FIX_RANKS_UNBALANCED`: no choice of windows
   balances the deck.
-- `ADMISSION_AUTHOR_CONTACT`: an author recorded under an email address,
-  which is never published.
+- `ADMISSION_AUTHOR_CONTACT`, `REVALIDATION_AUTHOR_CONTACT`: an author
+  recorded under an email address, which is never published.
 
 ## Commands
 
