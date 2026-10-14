@@ -1,4 +1,4 @@
-import { authorizeLocalExperimentReveal } from "./actions";
+import { authorizeLocalExperimentReveal, revealLocalExperimentHint } from "./actions";
 import { ArtifactUnavailable } from "../demo/artifact-unavailable";
 import { DemoArcade } from "../demo/demo-arcade";
 import {
@@ -45,14 +45,15 @@ function DeckChooser({ decks }: { readonly decks: readonly LocalRealDeck[] }) {
   );
 }
 
-/** A fresh five-round session from the deck's pool, dealt on every visit. */
+/** A fresh five-round game from the deck's pool, dealt on every visit; the server holds its progress. */
 function DealtSession({ deck }: { readonly deck: LocalRealDeck }) {
   const loaded = activeLocalRealExperiment();
   if (!loaded.ok) return null;
-  const mode = loaded.experiment.dealSession(deck.id);
+  const { mode, sessionToken } = loaded.experiment.dealGame(deck.id);
   return (
-    <DemoArcade key={mode.sessionContractVersionId} mode={mode} deckTitle={deck.title}
-      authorizeRevealAction={authorizeLocalExperimentReveal} chooseAnotherDeckHref="/" newGameHref={`/?deck=${deck.id}`} />
+    <DemoArcade key={sessionToken} mode={mode} sessionToken={sessionToken} deckTitle={deck.title}
+      authorizeRevealAction={authorizeLocalExperimentReveal} revealHintAction={revealLocalExperimentHint}
+      chooseAnotherDeckHref="/" newGameHref={`/?deck=${deck.id}`} />
   );
 }
 

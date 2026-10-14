@@ -1,5 +1,6 @@
 export {
   ArcadeShell,
+  SESSION_ENDED_MESSAGE,
   createArcadeSession,
   formatCompletionResult,
   projectDisplayReveal,
@@ -9,7 +10,11 @@ export {
   transitionArcadeSession,
   type ArcadeSession,
   type AuthorizedReveal,
+  type GameRefusal,
+  type HintRequest,
+  type HintResponse,
   type RevealRequest,
+  type RevealResponse,
 } from "./arcade-shell";
 export {
   ArcadeShellRuleError,

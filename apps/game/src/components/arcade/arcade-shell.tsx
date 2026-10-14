@@ -3,14 +3,23 @@
 import * as React from "react";
 import { ArcadeShellRuleError, optionLine, requirePublicText as required, type PublicModeContract, type RoundModeKind } from "./mode-contract";
 
+/** Locks in an answer for the round being played; the server reads progress, hints, and score from its own token. */
 export interface RevealRequest {
+  sessionToken: string;
   roundId: string;
   candidateId: string;
-  roundVersionId: string;
-  completedRounds: number;
-  currentScore: number;
-  cluesUsed: number;
 }
+
+/** Buys the next hint of the round being played. */
+export interface HintRequest {
+  sessionToken: string;
+  roundId: string;
+}
+
+/** Why the server would not act: it cannot continue this game, or the request does not fit the game's state. */
+export type GameRefusal = Readonly<{ ok: false; reason: "SESSION_ENDED" | "REJECTED" }>;
+export type RevealResponse = Readonly<{ ok: true; reveal: AuthorizedReveal; sessionToken: string }> | GameRefusal;
+export type HintResponse = Readonly<{ ok: true; hint: string; sessionToken: string }> | GameRefusal;
 
 export interface AuthorizedReveal {
   roundId: string;
@@ -38,6 +47,8 @@ export interface EntertainmentResultProjection {
 export interface ArcadeSession {
   readonly roundIndex: number;
   readonly visibleHintCount: number;
+  /** The current round's bought hints, in order; always `visibleHintCount` long. */
+  readonly hints: readonly string[];
   readonly lockedCandidateId: string | null;
   readonly reveal: AuthorizedReveal | null;
   readonly score: number;
@@ -50,14 +61,14 @@ export interface ArcadeSession {
 }
 
 export type ArcadeSessionAction =
-  | { type: "reveal-hint" }
+  | { type: "reveal-hint"; label: string }
   | { type: "lock-answer"; candidateId: string }
   | { type: "accept-reveal"; reveal: AuthorizedReveal }
   | { type: "next-round" };
 
 
 export function createArcadeSession(_mode: PublicModeContract): ArcadeSession {
-  return Object.freeze({ roundIndex: 0, visibleHintCount: 0, lockedCandidateId: null,
+  return Object.freeze({ roundIndex: 0, visibleHintCount: 0, hints: Object.freeze([]), lockedCandidateId: null,
     reveal: null, score: 0, completedRounds: 0, correctRounds: 0, outcomes: Object.freeze([]), result: null, status: "playing" });
 }
 
@@ -113,7 +124,9 @@ export function transitionArcadeSession(
   const round = mode.rounds[session.roundIndex]!;
   if (action.type === "reveal-hint") {
     if (session.lockedCandidateId !== null || session.reveal !== null) throw new ArcadeShellRuleError("clues are unavailable after answer lock");
-    return Object.freeze({ ...session, visibleHintCount: Math.min(session.visibleHintCount + 1, round.mode.clues.length) });
+    if (session.visibleHintCount >= round.mode.clues.length) return session;
+    const hints = Object.freeze([...session.hints, required(action.label, "hint")]);
+    return Object.freeze({ ...session, visibleHintCount: hints.length, hints });
   }
   if (action.type === "lock-answer") {
     if (session.lockedCandidateId !== null) throw new ArcadeShellRuleError("an answer is already locked for this round");
@@ -149,7 +162,7 @@ export function transitionArcadeSession(
   if (action.type !== "next-round") throw new ArcadeShellRuleError("unsupported session action");
   if (session.reveal === null) throw new ArcadeShellRuleError("the current round must reveal before navigation");
   if (session.roundIndex >= mode.rounds.length - 1) throw new ArcadeShellRuleError("there is no next round");
-  return Object.freeze({ ...session, roundIndex: session.roundIndex + 1, visibleHintCount: 0,
+  return Object.freeze({ ...session, roundIndex: session.roundIndex + 1, visibleHintCount: 0, hints: Object.freeze([]),
     lockedCandidateId: null, reveal: null });
 }
 
@@ -202,9 +215,15 @@ const linkedAttribution = (attribution: string): React.ReactNode[] => attributio
     ? <a key={index} href={part} rel="noreferrer noopener" target="_blank">{part}</a>
     : part);
 
+/** What the player sees when the server can no longer continue this game, for example after it restarts. */
+export const SESSION_ENDED_MESSAGE = "This game can’t continue. Deal new rounds to keep playing.";
+
 interface ArcadeShellProps {
   mode: PublicModeContract;
-  authorizeRevealAction: (request: RevealRequest) => Promise<AuthorizedReveal>;
+  /** The server's signed hold on this game's progress; every hint and answer returns the next one. */
+  sessionToken: string;
+  authorizeRevealAction: (request: RevealRequest) => Promise<RevealResponse>;
+  revealHintAction: (request: HintRequest) => Promise<HintResponse>;
   /** When set, completion also links back to the deck chooser. */
   chooseAnotherDeckHref?: string;
   /** When set, completion links to a freshly dealt game from the same deck. */
@@ -213,8 +232,12 @@ interface ArcadeShellProps {
   deckTitle?: string;
 }
 
-export function ArcadeShell({ mode, authorizeRevealAction, chooseAnotherDeckHref, newGameHref, deckTitle }: ArcadeShellProps) {
+export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealHintAction, chooseAnotherDeckHref, newGameHref, deckTitle }: ArcadeShellProps) {
   const [session, setSession] = React.useState(() => createArcadeSession(mode));
+  const token = React.useRef(sessionToken);
+  const hintPending = React.useRef(false);
+  const [hintError, setHintError] = React.useState<string | null>(null);
+  const [ended, setEnded] = React.useState(false);
   const [selection, setSelection] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -266,24 +289,45 @@ export function ArcadeShell({ mode, authorizeRevealAction, chooseAnotherDeckHref
   };
 
   const submit = async () => {
-    if (selection === "" || session.reveal !== null || busy) return;
+    if (selection === "" || session.reveal !== null || busy || ended || hintPending.current) return;
     setBusy(true);
     setError(null);
     try {
-      const result = projectDisplayReveal(await authorizeRevealAction({
-        roundId: round.roundId,
-        candidateId: selection,
-        roundVersionId: round.roundVersionId,
-        completedRounds: session.completedRounds,
-        currentScore: session.score,
-        cluesUsed: session.visibleHintCount,
-      }));
+      const response = await authorizeRevealAction({ sessionToken: token.current, roundId: round.roundId, candidateId: selection });
+      if (!response.ok) {
+        if (response.reason === "SESSION_ENDED") setEnded(true);
+        else setError("Couldn’t check that answer. Try again.");
+        return;
+      }
+      const result = projectDisplayReveal(response.reveal);
       const locked = transitionArcadeSession(mode, session, { type: "lock-answer", candidateId: selection });
       setSession(transitionArcadeSession(mode, locked, { type: "accept-reveal", reveal: result }));
+      token.current = response.sessionToken;
     } catch {
       setError("Couldn’t check that answer. Try again.");
     } finally {
       setBusy(false);
+    }
+  };
+
+  // The button stays enabled while its hint loads, so keyboard focus is never dropped; a second press waits.
+  const requestHint = async () => {
+    if (hintPending.current || busy || ended || session.lockedCandidateId !== null) return;
+    hintPending.current = true;
+    setHintError(null);
+    try {
+      const response = await revealHintAction({ sessionToken: token.current, roundId: round.roundId });
+      if (!response.ok) {
+        if (response.reason === "SESSION_ENDED") setEnded(true);
+        else setHintError("Couldn’t get that hint. Try again.");
+        return;
+      }
+      setSession((current) => transitionArcadeSession(mode, current, { type: "reveal-hint", label: response.hint }));
+      token.current = response.sessionToken;
+    } catch {
+      setHintError("Couldn’t get that hint. Try again.");
+    } finally {
+      hintPending.current = false;
     }
   };
 
@@ -292,6 +336,7 @@ export function ArcadeShell({ mode, authorizeRevealAction, chooseAnotherDeckHref
     setSelection("");
     setFocusedCandidate(null);
     setError(null);
+    setHintError(null);
   };
 
   return (
@@ -344,12 +389,13 @@ export function ArcadeShell({ mode, authorizeRevealAction, chooseAnotherDeckHref
         {/* Keyed by round, so a new round's hints arrive in a fresh live region instead of being announced. */}
         <div className="hints" role="group" aria-label="Hints" aria-live="polite" key={round.roundId}>
           {round.mode.clues.map((clue, index) => index < session.visibleHintCount
-            ? <p className="hint" key={clue.order} tabIndex={-1} ref={index === session.visibleHintCount - 1 ? latestHint : undefined}>{clue.label}</p>
+            ? <p className="hint" key={clue.order} tabIndex={-1} ref={index === session.visibleHintCount - 1 ? latestHint : undefined}>{session.hints[index]}</p>
             : index === session.visibleHintCount
-              ? <button className="hint-button" type="button" key={clue.order} ref={hintButton} aria-describedby={`hint-cost-${round.roundId}`} disabled={busy || session.lockedCandidateId !== null} onClick={() => setSession((current) => transitionArcadeSession(mode, current, { type: "reveal-hint" }))}>
+              ? <button className="hint-button" type="button" key={clue.order} ref={hintButton} aria-describedby={`hint-cost-${round.roundId}`} disabled={busy || ended || session.lockedCandidateId !== null} onClick={requestHint}>
                   Reveal hint {clue.order}
                 </button>
               : null)}
+          {hintError && <p className="demo-error" role="alert">{hintError}</p>}
         </div>
 
         <fieldset disabled={session.reveal !== null || busy}>
@@ -386,10 +432,15 @@ export function ArcadeShell({ mode, authorizeRevealAction, chooseAnotherDeckHref
           </div>
         </fieldset>
 
-        <button className="answer-button" type="button" ref={answerButton} disabled={selection === "" || session.reveal !== null || busy} onClick={submit}>
+        <button className="answer-button" type="button" ref={answerButton} disabled={selection === "" || session.reveal !== null || busy || ended} onClick={submit}>
           {busy ? "Checking…" : "Lock in answer"}
         </button>
         {error && <p className="demo-error" role="alert">{error}</p>}
+        {ended && (
+          <p className="demo-error" role="alert">
+            {SESSION_ENDED_MESSAGE}{newGameHref && <> <a href={newGameHref}>Deal new rounds</a></>}
+          </p>
+        )}
 
         <div className="reveal" aria-live="polite" aria-atomic="true">
           {session.reveal && (

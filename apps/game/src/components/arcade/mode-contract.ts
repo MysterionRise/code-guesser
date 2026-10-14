@@ -1,5 +1,6 @@
 export interface Candidate { candidateId: string; label: string; detail: string | null }
-export interface PublicClue { order: 1 | 2; label: string }
+/** A hint's place in its round; its text stays on the server until the player buys it. */
+export interface PublicClue { order: 1 | 2 }
 export interface Pane { label: string | null; text: string }
 export type RoundModeKind = "project" | "language" | "before-after" | "algorithm" | "output" | "fix";
 const ROUND_KINDS: readonly RoundModeKind[] = ["project", "language", "before-after", "algorithm", "output", "fix"];
@@ -70,7 +71,8 @@ export function createPublicModeContract(input: PublicModeContractInput): Public
     })));
     const clues = Object.freeze(mode.clues.map((clue, index) => {
       if (clue.order !== index + 1) throw new ArcadeShellRuleError("clues must be consecutively ordered");
-      return Object.freeze({ order: clue.order, label: requirePublicText(clue.label, "clue label") });
+      if (Object.keys(clue).length !== 1) throw new ArcadeShellRuleError("a public clue carries only its order");
+      return Object.freeze({ order: clue.order });
     }));
     // Code keeps its own whitespace: the first line's indentation, and the lines a fix round's options count.
     const panes = Object.freeze(round.content.panes.map((pane) => {

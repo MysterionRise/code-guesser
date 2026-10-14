@@ -104,6 +104,14 @@ wrong hash, or is from an older format, the page says so and offers no rounds.
 After preparing, rebuild and restart the game: the build compiles in the pin,
 and a running server keeps the artifact it first read.
 
+The server keeps score. Each game's progress travels as a token the server
+signs, and hints and answers go through server actions. A round takes one
+answer, the score and hint count are the server's own, and a hint's text
+reaches the browser only once it is bought. Without
+`CODEGUESSR_SESSION_SECRET` (at least 32 characters) the server signs with a
+random secret, so a restart ends the games in progress: the page then asks
+the player to deal new rounds.
+
 For a production-mode local run:
 
 ```bash

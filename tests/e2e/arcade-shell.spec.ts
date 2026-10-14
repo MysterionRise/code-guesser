@@ -3,7 +3,10 @@ import { resolve } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 
 // The browser never learns the answers; the test runner reads the generated artifact on the Node side.
-interface ArtifactFixture { roundId: string; candidates: { id: string; label: string }[]; correctCandidateId: string }
+interface ArtifactFixture {
+  roundId: string; prompt: string; panes: { text: string }[]; candidates: { id: string; label: string; detail: string | null }[];
+  correctCandidateId: string; clues: string[];
+}
 interface ArtifactDeck { id: string; title: string; description: string; fixtures: ArtifactFixture[] }
 const artifact = JSON.parse(readFileSync(resolve(process.cwd(), "apps/game/src/demo/generated/local-real-rounds.json"), "utf8")) as { decks: ArtifactDeck[] };
 const answers = new Map(artifact.decks.flatMap((deck) => deck.fixtures.map((fixture) =>
@@ -105,6 +108,48 @@ test("a deck query parameter preselects the deck, and a wrong answer scores zero
   await expect(page.getByText(`The answer: ${answers.get(round)!}`)).toBeVisible();
   await page.getByRole("link", { name: "All decks" }).click();
   await expect(page.getByRole("heading", { level: 1, name: "Pick a deck" })).toBeVisible();
+});
+
+test("a dealt page carries no hint text until the player buys a hint", async ({ page }) => {
+  // Each hint's longest run free of characters HTML or the page's serialized props would escape.
+  const plain = (text: string): string => (text.match(/[^&<>"'\\\n]{10,}/gu) ?? []).sort((left, right) => right.length - left.length)[0] ?? "";
+  for (const deck of artifact.decks) {
+    const html = await (await page.request.get(`/?deck=${deck.id}`)).text();
+    // The shell renders in the browser; its props, the dealt session included, travel in the page's flight data.
+    expect(html).toContain("sessionToken");
+    // A hint may quote what the round already shows, such as the call an output round asks about.
+    const shown = deck.fixtures.flatMap(({ prompt, panes, candidates }) =>
+      [prompt, ...panes.map(({ text }) => text), ...candidates.flatMap(({ label, detail }) => [label, detail ?? ""])]).join("\n");
+    const fragments = deck.fixtures.flatMap(({ clues }) => clues.map(plain)).filter((fragment) => fragment !== "" && !shown.includes(fragment));
+    expect(fragments.length).toBeGreaterThan(deck.fixtures.length);
+    for (const fragment of fragments) expect(html).not.toContain(fragment);
+  }
+  await page.goto("/?deck=project");
+  await expect(page.getByText("Round 1 of 5")).toBeVisible();
+  const round = await currentRound(page);
+  await page.getByRole("button", { name: "Reveal hint 1" }).click();
+  await expect(page.locator(".hints .hint")).toHaveText([artifact.decks[0]!.fixtures.find(({ roundId }) => roundId === round)!.clues[0]!]);
+});
+
+test("a game the server can no longer continue says so and offers a fresh deal", async ({ page }) => {
+  await page.goto("/?deck=language");
+  await expect(page.getByText("Round 1 of 5")).toBeVisible();
+  // A token from a restarted server, or one edited in the browser, fails its signature.
+  await page.route("**/*", (route) => {
+    const body = route.request().postData();
+    return body?.includes("sessionToken")
+      ? route.continue({ postData: body.replace(/"sessionToken":"[^"]*"/u, '"sessionToken":"ended.game"') })
+      : route.continue();
+  });
+  await page.getByRole("button", { name: "Reveal hint 1" }).click();
+  const alert = page.getByRole("main").getByRole("alert");
+  await expect(alert).toHaveText("This game can’t continue. Deal new rounds to keep playing. Deal new rounds");
+  await expect(page.locator(".hints .hint")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Lock in answer" })).toBeDisabled();
+  await page.unrouteAll();
+  await alert.getByRole("link", { name: "Deal new rounds" }).click();
+  await expect(page.getByText("Round 1 of 5")).toBeVisible();
+  await expect(page.getByRole("main").getByRole("alert")).toHaveCount(0);
 });
 
 test("each visit deals rounds from the deck's pool", async ({ page }) => {

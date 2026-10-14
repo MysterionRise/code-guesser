@@ -32,7 +32,7 @@ const modeInput = (): PublicModeContractInput => ({
       calibrationVersionId: `calibration-${index + 1}`,
       prompt: "Which language is this?",
       candidates: [{ candidateId: "candidate-a", label: "Option A", detail: null }, { candidateId: "candidate-b", label: "Option B", detail: null }],
-      clues: [{ order: 1 as const, label: "First public hint" }, { order: 2 as const, label: "Second public hint" }],
+      clues: [{ order: 1 as const }, { order: 2 as const }],
     },
     points: [1000, 800, 500] as [number, number, number],
     versions: {
@@ -43,6 +43,12 @@ const modeInput = (): PublicModeContractInput => ({
     },
   })),
 });
+
+const unusedActions = {
+  sessionToken: "signed-session-token",
+  authorizeRevealAction: async (): Promise<never> => { throw new Error("not called during render"); },
+  revealHintAction: async (): Promise<never> => { throw new Error("not called during render"); },
+};
 
 describe("static arcade shell", () => {
   it("numbers a fix round's lines, shows each option's line of code, and keeps the code's own whitespace", () => {
@@ -55,7 +61,7 @@ describe("static arcade shell", () => {
     expect(mode.rounds[0]!.content.panes[0]!.text).toBe(pane);
     const html = renderToStaticMarkup(createElement(ArcadeShell, {
       mode,
-      authorizeRevealAction: async () => { throw new Error("not called during render"); },
+      ...unusedActions,
     }));
     expect(html).toContain('aria-label="Code excerpt with numbered lines"');
     expect((html.match(/<span class="line-number" aria-hidden="true">/gu) ?? []).length).toBe(4);
@@ -71,7 +77,7 @@ describe("static arcade shell", () => {
     const mode = createPublicModeContract(modeInput());
     const html = renderToStaticMarkup(createElement(ArcadeShell, {
       mode,
-      authorizeRevealAction: async () => { throw new Error("not called during render"); },
+      ...unusedActions,
     }));
 
     expect((html.match(/data-round-nav=/gu) ?? []).length).toBe(5);
@@ -97,7 +103,7 @@ describe("static arcade shell", () => {
   it("exposes the score, round progress, and hints to assistive technology without labelling generic elements", () => {
     const html = renderToStaticMarkup(createElement(ArcadeShell, {
       mode: createPublicModeContract(modeInput()),
-      authorizeRevealAction: async () => { throw new Error("not called during render"); },
+      ...unusedActions,
     }));
     // The score is text, formatted in en-US like every other number, with a label only screen readers need.
     expect(html).toMatch(/<span class="score"><span class="visually-hidden">Score: <\/span>0(?:<!-- -->)? pts<\/span>/u);
@@ -136,7 +142,7 @@ describe("static arcade shell", () => {
     expect(() => createPublicModeContract({ ...modeInput(), rounds: modeInput().rounds.slice(0, 4) }))
       .toThrowError(new ArcadeShellRuleError("a session deals exactly five rounds"));
     const input = modeInput();
-    input.rounds[0]!.mode.clues.push({ order: 3 as 2, label: "Third hint" });
+    input.rounds[0]!.mode.clues.push({ order: 3 as 2 });
     expect(() => createPublicModeContract(input)).toThrow("a round may expose at most two clues");
   });
 
@@ -167,7 +173,7 @@ describe("static arcade shell", () => {
     input.rounds[0]!.mode.candidates[0]!.detail = "A short public note";
     const html = renderToStaticMarkup(createElement(ArcadeShell, {
       mode: createPublicModeContract(input),
-      authorizeRevealAction: async () => { throw new Error("not called during render"); },
+      ...unusedActions,
     }));
     expect(html).toContain('<div class="code-panes compare">');
     expect(html).toContain("<figcaption>Version A</figcaption>");
@@ -205,16 +211,27 @@ describe("static arcade shell", () => {
   it("orders and caps progressive clues, then locks exactly one answer", () => {
     const mode = createPublicModeContract(modeInput());
     let session = createArcadeSession(mode);
-    session = transitionArcadeSession(mode, session, { type: "reveal-hint" });
+    expect(() => transitionArcadeSession(mode, session, { type: "reveal-hint", label: " " })).toThrow("hint must not be blank");
+    session = transitionArcadeSession(mode, session, { type: "reveal-hint", label: "First bought hint" });
     expect(session.visibleHintCount).toBe(1);
-    session = transitionArcadeSession(mode, session, { type: "reveal-hint" });
-    session = transitionArcadeSession(mode, session, { type: "reveal-hint" });
+    session = transitionArcadeSession(mode, session, { type: "reveal-hint", label: "Second bought hint" });
+    session = transitionArcadeSession(mode, session, { type: "reveal-hint", label: "A third the round does not have" });
     expect(session.visibleHintCount).toBe(2);
+    expect(session.hints).toEqual(["First bought hint", "Second bought hint"]);
     session = transitionArcadeSession(mode, session, { type: "lock-answer", candidateId: "candidate-a" });
     expect(session.lockedCandidateId).toBe("candidate-a");
     expect(() => transitionArcadeSession(mode, session, { type: "lock-answer", candidateId: "candidate-b" }))
       .toThrow("an answer is already locked for this round");
-    expect(() => transitionArcadeSession(mode, session, { type: "reveal-hint" })).toThrow("clues are unavailable after answer lock");
+    expect(() => transitionArcadeSession(mode, session, { type: "reveal-hint", label: "Late" })).toThrow("clues are unavailable after answer lock");
+    session = transitionArcadeSession(mode, session, { type: "accept-reveal", reveal: displayReveal(0, 500, 5000, 1, 500) });
+    expect(transitionArcadeSession(mode, session, { type: "next-round" }).hints).toEqual([]);
+  });
+
+  it("carries no hint text in the public contract", () => {
+    const input = modeInput();
+    (input.rounds[0]!.mode.clues[0] as unknown as Record<string, string>).label = "A hint shipped up front";
+    expect(() => createPublicModeContract(input)).toThrow("a public clue carries only its order");
+    expect(JSON.stringify(createPublicModeContract(modeInput()).rounds[0]!.mode.clues)).toBe('[{"order":1},{"order":2}]');
   });
 
   it("withholds reveal until an answer is accepted and projects display-safe evidence only", () => {
@@ -246,7 +263,7 @@ describe("static arcade shell", () => {
 
   it("binds round and cumulative score to the shell's accepted clue state", () => {
     const mode = createPublicModeContract(modeInput());
-    let session = transitionArcadeSession(mode, createArcadeSession(mode), { type: "reveal-hint" });
+    let session = transitionArcadeSession(mode, createArcadeSession(mode), { type: "reveal-hint", label: "First bought hint" });
     session = transitionArcadeSession(mode, session, { type: "lock-answer", candidateId: "candidate-a" });
     expect(() => transitionArcadeSession(mode, session, {
       type: "accept-reveal",

@@ -61,8 +61,15 @@ gate: changing queries, retries, ceilings, deck rules, or running
 - The game plays profile `ops/poc/profiles/local-real-rounds.v5.json` and
   artifact schema `local-experiment-artifact.v4` from the root-route deck
   chooser (`/?deck=project|language|before-after|algorithm|output|fix`). A
-  page load deals five rounds from the deck's pool; `dealSession` in
+  page load deals five rounds from the deck's pool; `dealGame` in
   `apps/game/src/demo/local-real-experiment.server.ts` does it server-side.
+- The server holds each game's progress (#96): `dealGame` seals it in a signed
+  token (`local-real-experiment-session.server.ts`), and the hint and answer
+  server actions take one step each. A ledger refuses an older token, so a
+  round takes one answer, and score and hint counts are the server's. Hint
+  text never ships with the page. `CODEGUESSR_SESSION_SECRET` (32+ chars)
+  keeps games alive across restarts; without it each process makes a random
+  secret.
 - The committed artifact `apps/game/src/demo/generated/local-real-rounds.json`
   came from the 2026-10-13 v5 run (1,859 of 3,000 requests), rebuilt
   `--offline` with the algorithm and fix leak fixes (#76, #79).

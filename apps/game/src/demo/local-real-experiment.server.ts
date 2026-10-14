@@ -2,7 +2,11 @@ import "server-only";
 
 import type {
   AuthorizedReveal,
+  GameRefusal,
+  HintRequest,
+  HintResponse,
   RevealRequest,
+  RevealResponse,
 } from "../components/arcade/arcade-shell";
 import {
   createPublicModeContract,
@@ -23,6 +27,14 @@ import {
   type ParsedFixture,
   type PrivateReveal,
 } from "./local-real-experiment-domain.server";
+import {
+  SessionRefusal,
+  advanceGame,
+  newGameId,
+  recordStep,
+  sealGame,
+  type GameState,
+} from "./local-real-experiment-session.server";
 import {
   canonicalHash,
   deepFreeze,
@@ -47,11 +59,23 @@ export interface LocalRealExperiment {
   readonly privateReveals: Readonly<Record<string, PrivateReveal>>;
   /** Five rounds drawn at random from the deck's pool, each four-option round's options in a fresh order. */
   readonly dealSession: (deckId: DeckId, random?: () => number) => PublicModeContract;
-  readonly createReveal: (request: RevealRequest) => AuthorizedReveal;
+  /** A dealt session and the signed token that holds its progress on the server's terms. */
+  readonly dealGame: (deckId: DeckId, random?: () => number, now?: number) => DealtGame;
+  /** The next hint of the round being played, which lowers what a right answer scores. */
+  readonly revealHint: (request: HintRequest, now?: number) => HintResponse;
+  /** Locks in one answer for the round being played and reveals it, scored from the server's own state. */
+  readonly answer: (request: RevealRequest, now?: number) => RevealResponse;
+}
+
+export interface DealtGame {
+  readonly mode: PublicModeContract;
+  readonly sessionToken: string;
 }
 
 interface DerivedRound {
   readonly publicRound: PublicRoundInput;
+  /** Hint text stays on the server until a player buys it; the public round carries only each hint's place. */
+  readonly hints: readonly string[];
   readonly privateReveal: PrivateReveal;
 }
 
@@ -69,12 +93,13 @@ const pointsFor = (fixture: ParsedFixture): [number, number, number] => {
 
 const deriveRound = (fixture: ParsedFixture, artifact: JsonRecord): DerivedRound => {
   const candidates = fixture.candidates.map(({ id, label, detail }) => ({ candidateId: id, label, detail }));
-  const clues = fixture.clues.map((label, index) => ({ order: index + 1 as 1 | 2, label }));
+  const hints = Object.freeze([...fixture.clues]);
+  const clues = hints.map((_, index) => ({ order: index + 1 as 1 | 2 }));
   const panes = fixture.panes.map(({ label, text }) => ({ label, text }));
   const versions = {
     // Order-free, so a session's shuffled options keep the round's version.
     candidateSet: canonicalHash([...candidates].sort((left, right) => left.candidateId < right.candidateId ? -1 : 1)),
-    clueSet: canonicalHash(clues),
+    clueSet: canonicalHash(hints.map((label, index) => ({ order: index + 1, label }))),
     scoring: SCORING,
     rules: canonicalHash({ kind: fixture.kind, prompt: fixture.prompt, semantics: RULE_SEMANTICS[fixture.kind] }),
   };
@@ -112,7 +137,7 @@ const deriveRound = (fixture: ParsedFixture, artifact: JsonRecord): DerivedRound
       reveal: canonicalHash({ explanation: fixture.explanation, attribution: fixture.attribution, correctCandidateId: fixture.correctCandidateId }),
     }),
   });
-  return Object.freeze({ publicRound, privateReveal });
+  return Object.freeze({ publicRound, hints, privateReveal });
 };
 
 const deriveDecks = (parsedDecks: readonly ParsedDeck[], artifact: JsonRecord): readonly DerivedDeck[] =>
@@ -154,57 +179,77 @@ const dealFrom = (derived: DerivedDeck, artifact: JsonRecord, random: () => numb
   });
 };
 
-/** Whether a total is a sum of exactly `completedRounds` round scores from this points table. */
-const scoreIsReachable = (score: number, completedRounds: number, points: readonly number[]): boolean => {
-  let reachable = new Set([0]);
-  for (let round = 0; round < completedRounds; round += 1) {
-    reachable = new Set([...reachable].flatMap((subtotal) => [0, ...points].map((value) => subtotal + value)));
+const REJECTED: GameRefusal = Object.freeze({ ok: false, reason: "REJECTED" });
+const SESSION_ENDED: GameRefusal = Object.freeze({ ok: false, reason: "SESSION_ENDED" });
+
+/** A request's own fields, when it has exactly these and each is a non-empty string; anything else is refused. */
+const strings = (value: unknown, keys: readonly string[]): Readonly<Record<string, string>> | null => {
+  try {
+    const request = record(value, keys);
+    return keys.every((key) => typeof request[key] === "string" && (request[key] as string).length > 0)
+      ? request as Record<string, string> : null;
+  } catch {
+    return null;
   }
-  return reachable.has(score);
+};
+
+/**
+ * Runs one game transition and maps refusals to what the browser may learn: a token this server cannot continue
+ * ends the session, and anything else that does not fit the game's state is rejected without detail.
+ */
+const transact = <Result>(
+  token: string,
+  artifactHash: string,
+  now: number,
+  transition: (state: GameState) => { next: GameState; result: Result },
+): Readonly<{ ok: true; result: Result; sessionToken: string }> | GameRefusal => {
+  try {
+    const { result, token: sessionToken } = advanceGame(token, artifactHash, now, transition);
+    return Object.freeze({ ok: true, result, sessionToken });
+  } catch (error) {
+    return error instanceof SessionRefusal && error.reason === "SESSION_ENDED" ? SESSION_ENDED : REJECTED;
+  }
+};
+
+/** The round being played, when the request names it; a finished game has none. */
+const currentRound = (rounds: ReadonlyMap<string, DerivedRound>, state: GameState, roundId: string): DerivedRound => {
+  if (state.roundIndex >= ROUNDS_PER_SESSION || state.roundIds[state.roundIndex] !== roundId) fail();
+  return rounds.get(roundId) ?? fail();
 };
 
 const revealFor = (
-  decks: readonly DerivedDeck[],
-  privateReveals: Readonly<Record<string, PrivateReveal>>,
+  round: DerivedRound,
+  state: GameState,
+  candidateId: string,
   artifactHash: string,
-  value: RevealRequest,
-): AuthorizedReveal => {
-  const request = record(value, ["roundId", "roundVersionId", "candidateId", "completedRounds", "currentScore", "cluesUsed"]);
-  if (!Number.isInteger(request.completedRounds) || (request.completedRounds as number) < 0
-    || (request.completedRounds as number) >= ROUNDS_PER_SESSION) fail();
-  const completed = request.completedRounds as number;
-  // The deck comes from the round's identity; the score and clue checks apply within it.
-  const derived = decks.find(({ rounds }) => rounds.some(({ publicRound }) => publicRound.roundId === request.roundId)) ?? fail();
-  const round = derived.rounds.find(({ publicRound }) => publicRound.roundId === request.roundId)!.publicRound;
-  if (request.roundVersionId !== round.roundVersionId
-    || !round.mode.candidates.some(({ candidateId }) => candidateId === request.candidateId)
-    || !Number.isInteger(request.cluesUsed) || (request.cluesUsed as number) < 0
-    || (request.cluesUsed as number) > round.mode.clues.length
-    || !Number.isSafeInteger(request.currentScore) || (request.currentScore as number) < 0
-    || !scoreIsReachable(request.currentScore as number, completed, round.points)) fail();
-  const reveal = privateReveals[round.roundId] ?? fail();
-  const correct = request.candidateId === reveal.correctCandidateId;
-  const roundScore = correct ? round.points[request.cluesUsed as number] ?? fail() : 0;
-  const completedRounds = completed + 1;
-  return deepFreeze({
-    roundId: round.roundId,
-    roundVersionId: round.roundVersionId,
-    correct,
-    answerCandidateId: reveal.correctCandidateId,
-    score: roundScore,
-    evidence: reveal.evidence,
-    explanation: reveal.explanation,
-    attribution: reveal.attribution,
-    helpfulSignals: reveal.helpfulSignals,
-    misleadingSignals: reveal.misleadingSignals,
-    versions: reveal.versions,
-    result: Object.freeze({
-      score: (request.currentScore as number) + roundScore,
-      attainableMaximum: ROUNDS_PER_SESSION * round.points[0],
-      completedRounds,
-      resultVersionId: `local-experiment:${artifactHash}:round-${completedRounds}`,
+): { next: GameState; result: AuthorizedReveal } => {
+  const { publicRound, privateReveal: reveal } = round;
+  if (!publicRound.mode.candidates.some((candidate) => candidate.candidateId === candidateId)) fail();
+  const correct = candidateId === reveal.correctCandidateId;
+  const roundScore = correct ? publicRound.points[state.hints] ?? fail() : 0;
+  const next: GameState = { ...state, step: state.step + 1, roundIndex: state.roundIndex + 1, hints: 0, score: state.score + roundScore };
+  return {
+    next,
+    result: deepFreeze({
+      roundId: publicRound.roundId,
+      roundVersionId: publicRound.roundVersionId,
+      correct,
+      answerCandidateId: reveal.correctCandidateId,
+      score: roundScore,
+      evidence: reveal.evidence,
+      explanation: reveal.explanation,
+      attribution: reveal.attribution,
+      helpfulSignals: reveal.helpfulSignals,
+      misleadingSignals: reveal.misleadingSignals,
+      versions: reveal.versions,
+      result: Object.freeze({
+        score: next.score,
+        attainableMaximum: ROUNDS_PER_SESSION * publicRound.points[0],
+        completedRounds: next.roundIndex,
+        resultVersionId: `local-experiment:${artifactHash}:round-${next.roundIndex}`,
+      }),
     }),
-  });
+  };
 };
 
 /** The pinned hash, when the artifact matches it; a pin that is not a hash, or an artifact that does not match it, is a hash mismatch. */
@@ -230,21 +275,43 @@ export const createLocalRealExperiment = (
     const privateReveals = deepFreeze(Object.fromEntries(decks.flatMap(({ rounds }) =>
       rounds.map(({ privateReveal }) => [privateReveal.roundId, privateReveal]))));
     if (Object.keys(privateReveals).length !== decks.reduce((total, { rounds }) => total + rounds.length, 0)) fail();
+    const rounds = new Map(decks.flatMap((derived) => derived.rounds.map((round) => [round.publicRound.roundId, round] as const)));
+    const dealSession = (deckId: DeckId, random: () => number = Math.random) => {
+      const derived = decks.find(({ deck }) => deck.id === deckId) ?? fail();
+      return dealFrom(derived, artifact, random);
+    };
     return Object.freeze({
       kind: "LOCAL_UNREVIEWED_EXPERIMENT",
       artifactHash: expectedArtifactHash,
       decks: Object.freeze(decks.map(({ deck }) => deck)),
       privateReveals,
-      dealSession: (deckId: DeckId, random: () => number = Math.random) => {
-        const derived = decks.find(({ deck }) => deck.id === deckId) ?? fail();
-        return dealFrom(derived, artifact, random);
+      dealSession,
+      dealGame: (deckId: DeckId, random: () => number = Math.random, now = Date.now()) => {
+        const mode = dealSession(deckId, random);
+        const state: GameState = {
+          version: 1, gameId: newGameId(), artifactHash: expectedArtifactHash, deck: deckId,
+          roundIds: mode.rounds.map(({ roundId }) => roundId), step: 0, roundIndex: 0, hints: 0, score: 0, dealtAt: now,
+        };
+        const sessionToken = sealGame(state);
+        recordStep(state, now);
+        return Object.freeze({ mode, sessionToken });
       },
-      createReveal: (request: RevealRequest) => {
-        try {
-          return revealFor(decks, privateReveals, expectedArtifactHash, request);
-        } catch {
-          return fail();
-        }
+      revealHint: (value: HintRequest, now = Date.now()): HintResponse => {
+        const request = strings(value, ["sessionToken", "roundId"]);
+        if (request === null) return REJECTED;
+        const outcome = transact(request.sessionToken!, expectedArtifactHash, now, (state) => {
+          const round = currentRound(rounds, state, request.roundId!);
+          const hint = round.hints[state.hints] ?? fail();
+          return { next: { ...state, step: state.step + 1, hints: state.hints + 1 }, result: hint };
+        });
+        return outcome.ok ? Object.freeze({ ok: true, hint: outcome.result, sessionToken: outcome.sessionToken }) : outcome;
+      },
+      answer: (value: RevealRequest, now = Date.now()): RevealResponse => {
+        const request = strings(value, ["sessionToken", "roundId", "candidateId"]);
+        if (request === null) return REJECTED;
+        const outcome = transact(request.sessionToken!, expectedArtifactHash, now, (state) =>
+          revealFor(currentRound(rounds, state, request.roundId!), state, request.candidateId!, expectedArtifactHash));
+        return outcome.ok ? Object.freeze({ ok: true, reveal: outcome.result, sessionToken: outcome.sessionToken }) : outcome;
       },
     });
   } catch {
