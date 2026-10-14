@@ -12,8 +12,8 @@ export const DESIGN_LABELS: Readonly<Record<Design, string>> = Object.freeze({
   host: "Host chat",
 });
 
-/** Designs built so far; the visualizer (#115) and the host chat (#104) join as they land. */
-export const READY_DESIGNS: readonly Design[] = Object.freeze(["catalog", "composer"]);
+/** Designs built so far; the host chat (#104) joins when it lands. */
+export const READY_DESIGNS: readonly Design[] = Object.freeze(["catalog", "composer", "visualizer"]);
 
 /** A ready design by name, or null. */
 export const readyDesign = (value: unknown): Design | null =>

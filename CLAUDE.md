@@ -113,9 +113,9 @@ gate: changing queries, retries, ceilings, deck rules, or running
     calls=<n> in=<tokens> out=<tokens>`, `GENUI_RENDER_REJECTED <component>
     <check>`, `GENUI_STREAM_FAILED <status>`.
   - Designs (#114, Phase 2 of #109): with `GENUI_ENABLED=1`, `?design=`
-    picks `catalog` (the default), `composer`, or `off`, and a "Designs" nav
-    switches between them. `genui/designs.ts` lists them; `visualizer` (#115)
-    and `host` (#104) join as they land.
+    picks `catalog` (the default), `composer`, `visualizer`, or `off`, and a
+    "Designs" nav switches between them. `genui/designs.ts` lists them;
+    `host` (#104) joins when it lands.
   - The composer (`genui/composer-spec.ts`, `genui/composer-view.tsx`) lets
     the model lay out the whole post-lock panel as a json-render spec. The
     spec is a tree of 14 blocks: stack, row, card, details, heading, text,
@@ -125,6 +125,20 @@ gate: changing queries, retries, ceilings, deck rules, or running
     - `parseComposerSpec` checks it on the server and again in the browser.
     - A refused panel gets one repair round, told which check failed.
     - Live, a composed panel costs about $0.0012 (7K tokens in, 1K out).
+  - The visualizer (#115, `genui/visualizer-spec.ts`, `visualizer-view.tsx`)
+    lets the model write one small HTML page that shows the round's code at
+    work. It runs in an iframe with `sandbox="allow-scripts"` (opaque origin)
+    and a CSP of `default-src 'none'` put ahead of the model's markup: no
+    network, storage, or game access.
+    - `parseVisualizer` refuses external URLs, links, meta, base, frames,
+      forms, network and storage APIs, parent, top, or location access, and
+      pages over 40 KB. It matches access patterns, not words.
+    - An e2e page spells its escapes in pieces to pass those checks, and the
+      sandbox still stops it.
+    - Live: 11–16 s, about 2–3K output tokens (about $0.0015).
+  - Composer and visualizer requests keep only the first panel or page
+    (`ONE_ONLY`) and ask for `parallel_tool_calls: false`; live, Haiku
+    sometimes wrote several pages at once.
   - Live check, with each explain about $0.0007:
     `docs/review/evidence/2026-10-14-genui-live-check.md`. Run it locally
     with `GENUI_ENABLED=1 OPENROUTER_API_KEY="$(cat ~/.config/openrouter/key)"`.

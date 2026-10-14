@@ -1,0 +1,64 @@
+import { describe, expect, it } from "vitest";
+
+import { VISUALIZER_CSP, VisualizerRejected, parseVisualizer, visualizerDocument } from "../src/genui/visualizer-spec";
+
+const page = (html: string) => ({ title: "Insertion sort, step by step", summary: "Each step moves one item into place.", html });
+const codeOf = (value: unknown): string => {
+  try { parseVisualizer(value); } catch (error) { return error instanceof VisualizerRejected ? error.code : "OTHER"; }
+  return "PASSED";
+};
+
+describe("visualizer pages (#115)", () => {
+  it("passes a self-contained page, including words like top, open, and location", () => {
+    const html = `<style>.box{margin-top:8px;position:relative;top:2px}</style><p>The top of the heap is the largest item.
+<button id="b">Open the next step</button></p><p id="s">The location of the bug is line 4.</p>
+<script>let n=0;document.getElementById("b").onclick=()=>{n+=1;document.getElementById("s").textContent="Step "+n;};</script>`;
+    expect(codeOf(page(html))).toBe("PASSED");
+    expect(parseVisualizer(page(html)).html).toBe(html);
+  });
+
+  it("refuses pages that reach beyond themselves", () => {
+    for (const [html, code] of [
+      [`<img src="https://example.test/x.png">`, "HTML_URL"],
+      [`<script src="//cdn.example.test/x.js"></script>`, "HTML_URL"],
+      [`<p>javascript:alert(1)</p>`, "HTML_URL"],
+      [`<meta http-equiv="refresh" content="0">`, "HTML_TAG"],
+      [`<base href="/">`, "HTML_TAG"],
+      [`<iframe></iframe>`, "HTML_TAG"],
+      [`<form><input></form>`, "HTML_TAG"],
+      [`<a href="#x">x</a>`, "HTML_TAG"],
+      [`<script>fetch("/api")</script>`, "HTML_NETWORK"],
+      [`<script>new WebSocket("x")</script>`, "HTML_NETWORK"],
+      [`<script>navigator.sendBeacon("x")</script>`, "HTML_NETWORK"],
+      [`<script>new Worker("w.js")</script>`, "HTML_NETWORK"],
+      [`<script>import("./x.js")</script>`, "HTML_NETWORK"],
+      [`<script>localStorage.setItem("k","v")</script>`, "HTML_STORAGE"],
+      [`<script>document.cookie="a=b"</script>`, "HTML_STORAGE"],
+      [`<script>window.parent.document.body</script>`, "HTML_ESCAPE"],
+      [`<script>top.location="x"</script>`, "HTML_ESCAPE"],
+      [`<script>location.href="x"</script>`, "HTML_ESCAPE"],
+      [`<script>window.open("x")</script>`, "HTML_ESCAPE"],
+      [`<script>postMessage("x","*")</script>`, "HTML_ESCAPE"],
+      [`<style>@import "x.css";</style>`, "HTML_CSS_IMPORT"],
+      [`<style>body{background:url(x.png)}</style>`, "HTML_CSS_IMPORT"],
+      ["x".repeat(40_001), "HTML_SIZE"],
+      ["   ", "HTML_EMPTY"],
+    ] as const) expect(codeOf(page(html)), html.slice(0, 50)).toBe(code);
+  });
+
+  it("refuses unsafe titles and summaries, and any other shape", () => {
+    expect(codeOf({ ...page("<p>x</p>"), title: "See https://example.test" })).toBe("TITLE");
+    expect(codeOf({ ...page("<p>x</p>"), summary: "" })).toBe("SUMMARY");
+    expect(codeOf({ ...page("<p>x</p>"), extra: true })).toBe("SHAPE");
+    expect(codeOf("<p>x</p>")).toBe("SHAPE");
+  });
+
+  it("puts a CSP with no network ahead of the model's markup", () => {
+    const document = visualizerDocument("<p>hello</p>");
+    expect(document.indexOf("Content-Security-Policy")).toBeLessThan(document.indexOf("<p>hello</p>"));
+    for (const directive of ["default-src 'none'", "connect-src 'none'", "form-action 'none'", "base-uri 'none'", "frame-src 'none'"]) {
+      expect(VISUALIZER_CSP).toContain(directive);
+    }
+    expect(VISUALIZER_CSP).not.toMatch(/https?:|\*/u);
+  });
+});

@@ -29,6 +29,28 @@ const DEFAULT_CALLS = Object.freeze({
   } }],
 });
 
+/**
+ * A visualizer page that passes the server's checks by spelling its escapes in pieces, so only the sandbox stands
+ * between it and the game: it tries to read the parent page, use storage, and reach this fake over the network.
+ */
+const visualizerCall = (port) => [{ name: "render_visualizer", args: {
+  title: "Stepping through the round",
+  summary: "A counter that advances one step per press.",
+  html: `<p id="status">Step 0</p><button id="step">Step</button><p id="isolation">checking</p><p id="storage">checking</p>
+<script>
+let n = 0;
+document.getElementById("step").onclick = () => { n += 1; document.getElementById("status").textContent = "Step " + n; };
+let isolation = "isolated";
+try { const w = window["par" + "ent"]; void w["docu" + "ment"].body.innerHTML; isolation = "exposed"; } catch (error) {}
+let storage = "blocked";
+try { window["local" + "Storage"].setItem("k", "v"); storage = "open"; } catch (error) {}
+const target = "ht" + "tp://127.0.0.1:${port}/leak";
+try { new Image().src = target; } catch (error) {}
+try { window["fet" + "ch"](target).catch(() => {}); } catch (error) {}
+document.getElementById("isolation").textContent = isolation;
+document.getElementById("storage").textContent = storage;
+</script>` } }];
+
 const chunk = (choices, extra = {}) =>
   `data: ${JSON.stringify({ id: "fake-1", object: "chat.completion.chunk", created: 0, model: "fake", choices, ...extra })}\n\n`;
 
@@ -59,10 +81,14 @@ const readBody = (request) => new Promise((resolve, reject) => {
  */
 export const startFakeOpenRouter = async (port = 0) => {
   const requests = [];
+  // Hits from a visualizer page that tried to reach the network; the sandbox should keep this at zero.
+  let leaks = 0;
   let next = { status: 200, calls: null };
   const server = createServer(async (request, response) => {
     const url = new URL(request.url ?? "/", "http://fake");
     if (request.method === "GET" && url.pathname === "/health") return response.end("ok");
+    if (url.pathname === "/leak") { leaks += 1; return response.end("leaked"); }
+    if (request.method === "GET" && url.pathname === "/leaks") return response.end(String(leaks));
     if (request.method === "GET" && url.pathname === "/requests") {
       response.setHeader("content-type", "application/json");
       return response.end(JSON.stringify(requests));
@@ -80,7 +106,8 @@ export const startFakeOpenRouter = async (port = 0) => {
         return response.end(JSON.stringify({ error: { message: "fake provider body that must never reach a player", code: next.status } }));
       }
       const offered = new Set((body.tools ?? []).map((entry) => entry.function?.name));
-      const calls = next.sequence?.shift() ?? next.calls ?? (offered.has("compose_panel") ? DEFAULT_CALLS.composer
+      const calls = next.sequence?.shift() ?? next.calls ?? (offered.has("render_visualizer") ? visualizerCall(server.address().port)
+        : offered.has("compose_panel") ? DEFAULT_CALLS.composer
         : offered.has("takeaway") ? DEFAULT_CALLS["after-lock"] : DEFAULT_CALLS["before-lock"]);
       response.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
       return response.end(toolCallStream(calls));

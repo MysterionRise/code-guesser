@@ -139,8 +139,9 @@ describe("the generative-UI route (#101)", () => {
     expect((await post({ ...valid, sessionToken: "forged.token" })).status).toBe(410);
     expect((await post({ ...valid, roundId: mode.rounds[1]!.roundId })).status).toBe(403);
     expect((await post({ ...valid, design: "shiny" })).status).toBe(400);
-    // The visualizer and host designs are not built yet, and the composer exists only after the lock.
-    expect((await post({ ...valid, design: "visualizer" })).status).toBe(400);
+    // The host design is not built yet; the composer and the visualizer exist only after the lock.
+    expect((await post({ ...valid, design: "host" })).status).toBe(400);
+    expect((await post({ ...valid, design: "visualizer" })).status).toBe(403);
     const composerTooEarly = await post({ ...valid, design: "composer" });
     expect(composerTooEarly.status).toBe(403);
     expect(await composerTooEarly.json()).toEqual({ reason: "PHASE" });
@@ -219,6 +220,39 @@ describe("the generative-UI route (#101)", () => {
     expect(repaired).toContain('"type":"tool-output-error"');
     expect(repaired).toContain('"type":"tool-output-available"');
     expect(fake.requests).toHaveLength(2);
+  });
+
+  it("lets the visualizer write a sandboxed page after the lock, checked before it streams", async () => {
+    const { round, token } = game(true);
+    const response = await post({ sessionToken: token, roundId: round.roundId, design: "visualizer", messages: [userMessage("Visualize this round.")] });
+    expect(response.status).toBe(200);
+    const stream = await response.text();
+    expect(stream).toContain('"type":"tool-output-available"');
+    expect(stream).toContain("Stepping through the round");
+    const [request] = fake.requests;
+    expect(request.body.tools.map((entry: any) => entry.function.name)).toEqual(["render_visualizer"]);
+    expect(request.body.max_tokens).toBe(9000);
+    expect(request.body.parallel_tool_calls).toBe(false);
+
+    // A model that writes two pages at once has the second refused, so only the first is ever shown.
+    const twoPages = [
+      { name: "render_visualizer", args: { title: "First", summary: "The first page.", html: "<p>first</p>" } },
+      { name: "render_visualizer", args: { title: "Second", summary: "The second page.", html: "<p>second</p>" } },
+    ];
+    fake.control({ calls: twoPages });
+    const both = await (await post({ sessionToken: token, roundId: round.roundId, design: "visualizer", messages: [userMessage("Visualize this round.")] })).text();
+    expect(both.split('"type":"tool-output-available"').length - 1).toBe(1);
+    expect(both).toContain('"title":"First"');
+    expect(logged.mock.calls.map(([line]) => line)).toEqual(["GENUI_RENDER_REJECTED render_visualizer ONE_ONLY"]);
+    logged.mockClear();
+
+    fake.control({ calls: [{ name: "render_visualizer", args: { title: "Leaky", summary: "Tries the network.", html: "<script>fetch('/x')</script>" } }] });
+    const refused = await (await post({ sessionToken: token, roundId: round.roundId, design: "visualizer", messages: [userMessage("Visualize this round.")] })).text();
+    expect(refused).not.toContain("tool-output-available");
+    expect(logged.mock.calls.map(([line]) => line)).toEqual([
+      "GENUI_RENDER_REJECTED render_visualizer HTML_NETWORK",
+      "GENUI_RENDER_REJECTED render_visualizer HTML_NETWORK",
+    ]);
   });
 
   it("drops a render call that fails the catalog, and hides provider failures behind a code", async () => {

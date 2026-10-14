@@ -461,7 +461,7 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
               <p>Helpful signals: {session.reveal.helpfulSignals.join(" · ")}</p>
               <p>Misleading signals: {session.reveal.misleadingSignals.join(" · ")}</p>
               <small>{linkedAttribution(session.reveal.attribution)}</small>
-              {genuiDesign && (genuiDesign === "catalog" || genuiDesign === "composer") && (
+              {genuiDesign && genuiDesign !== "host" && (
                 <React.Suspense fallback={null}>
                   <GenuiPanel key={round.roundId} design={genuiDesign} roundId={round.roundId} phase="after-lock" panes={round.content.panes}
                     pick={{ label: labelOf(session.lockedCandidateId), correct: session.reveal.correct }}
