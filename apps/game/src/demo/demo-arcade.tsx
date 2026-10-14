@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 
-import type { AuthorizedReveal, RevealRequest } from "../components/arcade";
+import type { HintRequest, HintResponse, RevealRequest, RevealResponse } from "../components/arcade";
 import type { PublicModeContract } from "../components/arcade/mode-contract";
 
 const ArcadeShell = dynamic(
@@ -12,7 +12,9 @@ const ArcadeShell = dynamic(
 
 interface DemoArcadeProps {
   readonly mode: PublicModeContract;
-  readonly authorizeRevealAction: (request: RevealRequest) => Promise<AuthorizedReveal>;
+  readonly sessionToken: string;
+  readonly authorizeRevealAction: (request: RevealRequest) => Promise<RevealResponse>;
+  readonly revealHintAction: (request: HintRequest) => Promise<HintResponse>;
   readonly chooseAnotherDeckHref?: string;
   readonly newGameHref?: string;
   readonly deckTitle?: string;

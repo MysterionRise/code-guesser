@@ -18,18 +18,19 @@ const rejects = (value: unknown) => expect(() => create(value, hashValue(value))
 const fixtureOf = (value: any, deck: number, round = 0): any => value.decks[deck].fixtures[round];
 /** A deterministic source of randomness, so a test deals a known session. */
 const seeded = (seed: number) => () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
-const requestFor = (experiment: any, mode: any, round = 0, overrides: Record<string, unknown> = {}) => {
-  const publicRound = mode.rounds[round];
-  return {
-    roundId: publicRound.roundId,
-    roundVersionId: publicRound.roundVersionId,
-    candidateId: experiment.privateReveals[publicRound.roundId].correctCandidateId,
-    completedRounds: round,
-    currentScore: 0,
-    cluesUsed: 0,
-    ...overrides,
-  };
-};
+const NOW = 1_800_000_000_000;
+const right = (experiment: any, round: any): string => experiment.privateReveals[round.roundId].correctCandidateId;
+const wrong = (experiment: any, round: any): string =>
+  round.mode.candidates.find(({ candidateId }: any) => candidateId !== right(experiment, round)).candidateId;
+/** Answers the round being played, and returns the server's response. */
+const answer = (experiment: any, token: string, round: any, candidateId = right(experiment, round), now = NOW) =>
+  experiment.answer({ sessionToken: token, roundId: round.roundId, candidateId }, now);
+const hint = (experiment: any, token: string, round: any, now = NOW) =>
+  experiment.revealHint({ sessionToken: token, roundId: round.roundId }, now);
+/** The state a token carries, read the way any client could. */
+const payloadOf = (token: string): any => JSON.parse(Buffer.from(token.split(".")[0]!, "base64url").toString("utf8"));
+const withPayload = (token: string, payload: unknown): string =>
+  `${Buffer.from(JSON.stringify(payload), "utf8").toString("base64url")}.${token.split(".")[1]}`;
 
 describe("server-only local real experiment authority v3", () => {
   it("keeps every production source in the local-real authority set at 500 lines or fewer", () => {
@@ -102,11 +103,17 @@ describe("server-only local real experiment authority v3", () => {
     expect(beforeAfter.points).toEqual([500, 400, 250]);
   });
 
-  it("keeps protected fields out of every dealt session, allowing repository names only as project labels", () => {
+  it("keeps protected fields and hint text out of every dealt game, allowing repository names only as project labels", () => {
     const input = artifact();
     const experiment = create(input);
-    const publicText = JSON.stringify(DECKS.map((id) => experiment.dealSession(id, seeded(2))));
+    const publicText = JSON.stringify(DECKS.map((id) => {
+      const { mode, sessionToken } = experiment.dealGame(id, seeded(2), NOW);
+      return { mode, session: payloadOf(sessionToken) };
+    }));
     expect(publicText).not.toMatch(/correctCandidateId|answerCandidateId|privateReveals|evidence|explanation|attribution|"source"/iu);
+    for (const fixture of input.decks.flatMap((deck: any) => deck.fixtures)) {
+      for (const clue of fixture.clues) expect(publicText).not.toContain(JSON.stringify(clue).slice(1, -1));
+    }
     const projectLabels = new Set(input.decks[0].fixtures.flatMap((fixture: any) => fixture.candidates.map(({ label }: any) => label)));
     for (const fixture of input.decks.flatMap((deck: any) => deck.fixtures)) {
       if (!projectLabels.has(fixture.source.repository)) expect(publicText).not.toContain(fixture.source.repository);
@@ -192,52 +199,101 @@ describe("server-only local real experiment authority v3", () => {
     rejects(sameRound);
   });
 
-  it("scores a reveal from its round's points table and accepts rounds in any dealt order", () => {
+  it("scores each answer from the server's own hint count and running score", () => {
     const experiment = create();
     for (const id of DECKS) {
-      const mode = experiment.dealSession(id, seeded(11));
+      const { mode, sessionToken } = experiment.dealGame(id, seeded(11), NOW);
       const points = mode.rounds[0].points;
-      const first = experiment.createReveal(requestFor(experiment, mode, 0, { cluesUsed: 1 }));
-      expect(first.correct).toBe(true);
-      expect(first.answerCandidateId).toBe(experiment.privateReveals[mode.rounds[0].roundId].correctCandidateId);
-      expect(first.score).toBe(points[1]);
-      expect(first.result).toEqual({ score: points[1], attainableMaximum: 5 * points[0], completedRounds: 1, resultVersionId: expect.stringMatching(/^local-experiment:/u) });
-      const second = experiment.createReveal(requestFor(experiment, mode, 1, { currentScore: points[1] }));
-      expect(second.result.score).toBe(points[1] + points[0]);
-      expect(second.attribution).toContain("github.com");
-      expect(Object.isFrozen(second)).toBe(true);
-      const wrong = experiment.createReveal(requestFor(experiment, mode, 2, {
-        currentScore: points[1] + points[0],
-        candidateId: mode.rounds[2].mode.candidates.find(({ candidateId }: any) => candidateId !== experiment.privateReveals[mode.rounds[2].roundId].correctCandidateId).candidateId,
-      }));
-      expect(wrong.correct).toBe(false);
-      expect(wrong.score).toBe(0);
+      const bought = hint(experiment, sessionToken, mode.rounds[0]);
+      expect(bought).toEqual({ ok: true, hint: expect.any(String), sessionToken: expect.any(String) });
+      const fixtures = artifact().decks[DECKS.indexOf(id)].fixtures;
+      expect(bought.hint).toBe(fixtures.find(({ roundId }: any) => roundId === mode.rounds[0].roundId).clues[0]);
+      const first = answer(experiment, bought.sessionToken, mode.rounds[0]);
+      expect(first.ok).toBe(true);
+      expect(first.reveal.correct).toBe(true);
+      expect(first.reveal.answerCandidateId).toBe(right(experiment, mode.rounds[0]));
+      expect(first.reveal.score).toBe(points[1]);
+      expect(first.reveal.result).toEqual({ score: points[1], attainableMaximum: 5 * points[0], completedRounds: 1, resultVersionId: expect.stringMatching(/^local-experiment:/u) });
+      const second = answer(experiment, first.sessionToken, mode.rounds[1]);
+      expect(second.reveal.result.score).toBe(points[1] + points[0]);
+      expect(second.reveal.attribution).toContain("github.com");
+      expect(Object.isFrozen(second.reveal)).toBe(true);
+      const missed = answer(experiment, second.sessionToken, mode.rounds[2], wrong(experiment, mode.rounds[2]));
+      expect(missed.reveal.correct).toBe(false);
+      expect(missed.reveal.score).toBe(0);
+      expect(missed.reveal.result.score).toBe(points[1] + points[0]);
+      expect(payloadOf(missed.sessionToken)).toMatchObject({ roundIndex: 3, hints: 0, score: points[1] + points[0], step: 4 });
     }
   });
 
-  it("rejects malformed reveal requests without returning protected data", () => {
+  it("gives each round's hints in order, two at most, from the server", () => {
+    const input = artifact();
+    const experiment = create(input);
+    const { mode, sessionToken } = experiment.dealGame("project", seeded(4), NOW);
+    const fixture = input.decks[0].fixtures.find(({ roundId }: any) => roundId === mode.rounds[0].roundId);
+    const first = hint(experiment, sessionToken, mode.rounds[0]);
+    const second = hint(experiment, first.sessionToken, mode.rounds[0]);
+    expect([first.hint, second.hint]).toEqual(fixture.clues);
+    expect(hint(experiment, second.sessionToken, mode.rounds[0])).toEqual({ ok: false, reason: "REJECTED" });
+    expect(answer(experiment, second.sessionToken, mode.rounds[0]).reveal.score).toBe(mode.rounds[0].points[2]);
+  });
+
+  it("takes one answer per round and refuses replayed, forged, foreign, expired, and finished games", () => {
     const experiment = create();
-    const mode = experiment.dealSession("language", seeded(5));
-    const valid = requestFor(experiment, mode, 0);
+    const { mode, sessionToken } = experiment.dealGame("language", seeded(5), NOW);
+    const first = answer(experiment, sessionToken, mode.rounds[0], wrong(experiment, mode.rounds[0]));
+    expect(first.ok).toBe(true);
+    // The token from before the answer is spent: the round cannot be answered again, nor a hint bought on it.
+    expect(answer(experiment, sessionToken, mode.rounds[0])).toEqual({ ok: false, reason: "REJECTED" });
+    expect(hint(experiment, sessionToken, mode.rounds[0])).toEqual({ ok: false, reason: "REJECTED" });
+    // Only the round being played may be answered.
+    expect(answer(experiment, first.sessionToken, mode.rounds[0])).toEqual({ ok: false, reason: "REJECTED" });
+    expect(answer(experiment, first.sessionToken, mode.rounds[2])).toEqual({ ok: false, reason: "REJECTED" });
+
+    const forged = withPayload(first.sessionToken, { ...payloadOf(first.sessionToken), score: 4000 });
+    expect(answer(experiment, forged, mode.rounds[1])).toEqual({ ok: false, reason: "SESSION_ENDED" });
+    expect(answer(experiment, "not-a-token", mode.rounds[1])).toEqual({ ok: false, reason: "SESSION_ENDED" });
+    const foreign = create(curatedArtifact());
+    expect(foreign.answer({ sessionToken: first.sessionToken, roundId: mode.rounds[1].roundId, candidateId: right(experiment, mode.rounds[1]) }, NOW))
+      .toEqual({ ok: false, reason: "SESSION_ENDED" });
+    expect(answer(experiment, first.sessionToken, mode.rounds[1], right(experiment, mode.rounds[1]), NOW + 6 * 60 * 60 * 1000 + 1))
+      .toEqual({ ok: false, reason: "SESSION_ENDED" });
+
+    let token = first.sessionToken;
+    for (let index = 1; index < 5; index += 1) token = answer(experiment, token, mode.rounds[index]).sessionToken;
+    expect(payloadOf(token)).toMatchObject({ roundIndex: 5, step: 5 });
+    expect(answer(experiment, token, mode.rounds[4])).toEqual({ ok: false, reason: "REJECTED" });
+    expect(hint(experiment, token, mode.rounds[4])).toEqual({ ok: false, reason: "REJECTED" });
+  });
+
+  it("continues a game the ledger has forgotten from its latest token, as after a restart with the same secret", async () => {
+    const experiment = create();
+    const { mode, sessionToken } = experiment.dealGame("project", seeded(6), NOW);
+    const session = await import("../src/demo/local-real-experiment-session.server");
+    session.forgetAllGames();
+    expect(answer(experiment, sessionToken, mode.rounds[0]).ok).toBe(true);
+  });
+
+  it("rejects malformed requests without returning protected data", () => {
+    const experiment = create();
+    const { mode, sessionToken } = experiment.dealGame("language", seeded(5), NOW);
+    const valid = { sessionToken, roundId: mode.rounds[0].roundId, candidateId: right(experiment, mode.rounds[0]) };
     const invalid = [
       { ...valid, unexpected: true },
       { ...valid, roundId: "unknown-round" },
-      { ...valid, roundVersionId: "stale" },
       { ...valid, candidateId: "unknown" },
       { ...valid, candidateId: experiment.dealSession("project", seeded(5)).rounds[0].mode.candidates[0].candidateId },
-      { ...valid, cluesUsed: 3 },
-      { ...valid, currentScore: 1 },
-      { ...valid, completedRounds: 5 },
+      { ...valid, sessionToken: 7 },
+      { roundId: valid.roundId, candidateId: valid.candidateId },
+      null,
     ];
     for (const value of invalid) {
-      let serialized = "";
-      try {
-        experiment.createReveal(value);
-      } catch (error) {
-        serialized = JSON.stringify(error instanceof Error ? error.message : error);
-      }
-      expect(serialized).toMatch(/LOCAL_REAL_EXPERIMENT_REJECTED/u);
-      expect(serialized).not.toMatch(/github\.com|Author/iu);
+      const response = experiment.answer(value, NOW);
+      expect(response.ok).toBe(false);
+      expect(JSON.stringify(response)).not.toMatch(/github\.com|Author|correct/iu);
     }
+    expect(experiment.revealHint({ ...valid }, NOW)).toEqual({ ok: false, reason: "REJECTED" });
+    // None of those spent the game: the valid request still answers the round.
+    expect(experiment.answer(valid, NOW).ok).toBe(true);
   });
 });
