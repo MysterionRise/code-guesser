@@ -4,6 +4,8 @@ const nodeExecutable = JSON.stringify(process.execPath);
 // E2E_PORT moves the local dev server off 3000 when something else already listens there.
 const port = Number(process.env.E2E_PORT ?? 3000);
 const baseURL = `http://127.0.0.1:${port}`;
+// Generative UI (#101) runs against a local stand-in for OpenRouter on the next port, never the real service.
+export const FAKE_OPENROUTER_PORT = port + 1;
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -13,13 +15,27 @@ export default defineConfig({
   use: {
     headless: true,
   },
-  webServer: {
-    command: `${nodeExecutable} node_modules/next/dist/bin/next dev --hostname 127.0.0.1 --port ${port}`,
-    cwd: "apps/game",
-    url: baseURL,
-    timeout: 300_000,
-    reuseExistingServer: false,
-  },
+  webServer: [
+    {
+      command: `${nodeExecutable} tests/e2e/fake-openrouter.mjs`,
+      env: { FAKE_OPENROUTER_PORT: String(FAKE_OPENROUTER_PORT) },
+      url: `http://127.0.0.1:${FAKE_OPENROUTER_PORT}/health`,
+      timeout: 30_000,
+      reuseExistingServer: false,
+    },
+    {
+      command: `${nodeExecutable} node_modules/next/dist/bin/next dev --hostname 127.0.0.1 --port ${port}`,
+      cwd: "apps/game",
+      env: {
+        GENUI_ENABLED: "1",
+        OPENROUTER_API_KEY: "e2e-fake-key",
+        OPENROUTER_BASE_URL: `http://127.0.0.1:${FAKE_OPENROUTER_PORT}/api/v1`,
+      },
+      url: baseURL,
+      timeout: 300_000,
+      reuseExistingServer: false,
+    },
+  ],
   projects: [
     {
       name: "provenance-accessibility",
@@ -38,7 +54,7 @@ export default defineConfig({
     },
     {
       name: "arcade",
-      testMatch: /(?:arcade-shell|accessibility-local)\.spec\.ts/,
+      testMatch: /(?:arcade-shell|accessibility-local|genui)\.spec\.ts/,
       use: { baseURL },
     },
   ],

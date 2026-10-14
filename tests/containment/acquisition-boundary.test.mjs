@@ -71,7 +71,13 @@ test("browser and gameplay dependency surfaces exclude acquisition capabilities"
     ...filesUnder(join(root, "packages", "artifact", "src")),
   ];
   assertContainsNoFingerprint(participantSources, "participant dependency surface");
-  assert.equal(participantSources.some((path) => /(?:^|\/)(?:route|middleware|instrumentation)\.[cm]?[jt]sx?$/u.test(path)), false);
+  // Generative UI's guarded route (#101) is the one server endpoint; it is off unless enabled and reads round data
+  // only through the answer-lock guard.
+  const routes = participantSources.filter((path) => /(?:^|\/)(?:route|middleware|instrumentation)\.[cm]?[jt]sx?$/u.test(path));
+  assert.deepEqual(routes.map((path) => relative(root, path)), ["apps/game/src/app/api/genui/route.ts"]);
+  const genuiRoute = read(routes[0]);
+  assert.match(genuiRoute, /process\.env\.GENUI_ENABLED !== "1"/u);
+  assert.match(genuiRoute, /experiment\.modelContext\(/u);
   assert.equal(participantSources.some((path) => /\bfetch\s*\(/u.test(read(path))), false);
 
   const contentPackage = JSON.parse(read(join(root, "packages", "content", "package.json")));
@@ -104,6 +110,19 @@ test("public attribution can enter the browser only through authorized reveal", 
     assert.doesNotMatch(read(path), /"licenseSpdx"\s*:/iu);
     assert.doesNotMatch(read(path), /crawlSnapshot|correctCandidateId|"attribution"\s*:|LOCAL_UNREVIEWED_EXPERIMENT|parentExcerptHash|starEventsCount/u);
   }
+});
+
+test("the model provider's key and address never reach the browser", () => {
+  const providerFingerprints = [/OPENROUTER_API_KEY/u, /openrouter\.ai/iu, /sk-or-/u, /GENUI_ENABLED/u];
+  const clientFiles = filesUnder(join(built, "static")).filter((path) => textExtensions.has(extname(path)));
+  assert.ok(clientFiles.length > 0, "production build emitted no client files");
+  for (const path of clientFiles) {
+    for (const fingerprint of providerFingerprints) {
+      assert.doesNotMatch(read(path), fingerprint, `${fingerprint} reached the browser through ${relative(root, path)}`);
+    }
+  }
+  const model = read(join(game, "src", "genui", "model.server.ts"));
+  assert.match(model, /^import "server-only";/u);
 });
 
 test("production artifacts, manifests, telemetry and routes contain no acquisition runtime", () => {

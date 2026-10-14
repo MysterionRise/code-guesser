@@ -85,3 +85,16 @@ noscript { display: block; padding: 12px; margin-bottom: 16px; background: #522;
 .reveal .secondary-action { padding: 12px 18px; border: 2px solid #baff65; background: transparent; color: #baff65; }
 .round-points { margin: 0 0 8px; font-weight: 800; font-variant-numeric: tabular-nums; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
+.genui-panel { margin: 18px 0; padding: 16px 18px; border: 1px solid #2b5043; border-radius: 14px; background: #0b1c16; }
+.genui-panel h3 { margin: 0 0 10px; color: #cdeada; font-size: 1rem; }
+.genui-panel h4 { margin: 12px 0 4px; color: #cdeada; font-size: .92rem; }
+.genui-status { margin: 8px 0 0; color: #9fbcae; }
+.genui-host, .genui-takeaway { margin: 10px 0 0; }
+.genui-code { margin: 12px 0 0; }
+.genui-code figcaption { margin-bottom: 6px; color: #9fbcae; font-size: .88rem; }
+.code-line.genui-helpful { background: #1d3a24; box-shadow: inset 3px 0 0 #baff65; }
+.code-line.genui-misleading { background: #3a2a1d; box-shadow: inset 3px 0 0 #ffb86b; }
+.genui-notes { margin: 0; padding-left: 1.4em; color: #cdeada; }
+.genui-comparison { margin-top: 12px; width: 100%; border-collapse: collapse; }
+.genui-comparison caption { text-align: left; color: #9fbcae; font-size: .88rem; margin-bottom: 6px; }
+.genui-comparison th, .genui-comparison td { padding: 6px 8px; border-top: 1px solid #2b5043; text-align: left; vertical-align: top; }

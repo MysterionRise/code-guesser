@@ -112,6 +112,26 @@ reaches the browser only once it is bought. Without
 random secret, so a restart ends the games in progress: the page then asks
 the player to deal new rounds.
 
+### Generative UI (experimental)
+
+Off by default. With `GENUI_ENABLED=1` and an OpenRouter key, a revealed round
+offers an **Explainer**: a model annotates the code, lists the signals that
+pointed to the answer and away from it, and gives a one-line takeaway.
+
+```bash
+GENUI_ENABLED=1 OPENROUTER_API_KEY=… pnpm --filter @codeguessr/game dev
+```
+
+- `OPENROUTER_MODEL` picks the model (default `anthropic/claude-haiku-5.5`).
+- Set spend limits on the OpenRouter key itself. When the key is refused, the
+  explainer steps aside and the game plays on.
+- The model never sees a round's code before you answer, and it can only
+  render a fixed set of components whose contents the server checks.
+- Requests ask OpenRouter for providers that neither store nor train on
+  prompts.
+- The browser tests and unit tests use a local stand-in for OpenRouter, so
+  they need no key.
+
 For a production-mode local run:
 
 ```bash
