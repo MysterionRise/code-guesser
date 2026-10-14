@@ -133,3 +133,36 @@ test("the host chats during the round without the code, sells the next hint on r
   await page.getByRole("button", { name: "Next round" }).click();
   await expect(page.getByRole("complementary", { name: "Host" }).locator(".host-turn")).toHaveCount(0);
 });
+
+test("the host recovers from a refused paste, shows a plain-text reply, and keeps keyboard focus in its input", async ({ page, request }) => {
+  await page.goto("/?deck=language&design=host");
+  await expect(page.getByText("Round 1 of 5")).toBeVisible();
+  const round = (await page.locator(".game-card").getAttribute("data-round-id"))!;
+  const pasted = fixtures.get(round)!.panes[0]!.text.split("\n").find((line) => line.trim().length >= 12)!.trim();
+  const host = page.getByRole("complementary", { name: "Host" });
+  const input = host.getByLabel("Ask the host");
+  await input.fill(`What language is ${pasted}`);
+  await input.press("Enter");
+  await expect(host.getByRole("alert")).toHaveText("The host can’t look at code before you lock in. Ask without pasting it.");
+  await expect(host.locator(".host-turn.player")).toHaveCount(0);
+  await expect(input).toBeFocused();
+  // The refused message left the history, so the next question goes through.
+  await request.post(`${fake}/control`, { data: { text: "Happy to help with the rules!" } });
+  await input.fill("How do hints work?");
+  await input.press("Enter");
+  await expect(host.locator(".host-turn.host .genui-host")).toHaveText("Happy to help with the rules!");
+  await expect(host.getByRole("alert")).toHaveCount(0);
+  await expect(input).toBeFocused();
+  const recorded = await (await request.get(`${fake}/requests`)).json() as { body: { messages: unknown[] } }[];
+  expect(JSON.stringify(recorded.at(-1)!.body.messages)).not.toContain(pasted.slice(0, 12));
+});
+
+test("asking for an explanation moves focus to the explainer's output", async ({ page }) => {
+  await page.goto("/?deck=fix");
+  await expect(page.getByText("Round 1 of 5")).toBeVisible();
+  await answerRound(page);
+  const panel = page.getByRole("region", { name: "Explainer" });
+  await panel.getByRole("button", { name: "Explain this round" }).click();
+  await expect(panel.locator(".genui-output")).toBeFocused();
+  await expect(panel.locator(".genui-takeaway")).toBeVisible();
+});

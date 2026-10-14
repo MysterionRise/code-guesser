@@ -92,16 +92,17 @@ export default function GenuiPanel({ design, roundId, pick, phase, panes, option
   // having been sent is what counts.
   const failed = fellBack(status, messages.length > 0, views.length, error);
   const headingId = `genui-heading-${roundId}`;
+  const output = React.useRef<HTMLDivElement>(null);
 
   return (
     <section className="genui-panel" aria-labelledby={headingId} data-genui-status={failed ? "fallback" : status} data-genui-design={design}>
       <h3 id={headingId}>{PANEL_TEXT[design].heading}</h3>
       {messages.length === 0 && (
-        <button type="button" className="secondary-action" onClick={() => { void sendMessage({ text: explainRequest(pick) }); }}>
+        <button type="button" className="secondary-action" onClick={() => { void sendMessage({ text: explainRequest(pick) }); output.current?.focus(); }}>
           {PANEL_TEXT[design].button}
         </button>
       )}
-      <div className="genui-output" aria-live="polite" aria-busy={busy}>
+      <div className="genui-output" aria-live="polite" aria-busy={busy} ref={output} tabIndex={-1}>
         {busy && <p className="genui-status">{PANEL_TEXT[design].busy}</p>}
         {views.filter((view, index) => view.kind === "catalog" || !views.slice(index + 1).some(({ kind }) => kind === view.kind)).map((view, index) => view.kind === "composer"
           ? <ComposerView key={index} spec={view.spec} panes={panes} />

@@ -75,6 +75,10 @@ describe("generative UI building blocks (#101)", () => {
     expect(mentionsCode([{ role: "user", text: "what is   return sum(values)  ?" }], code)).toBe(true);
     expect(mentionsCode([{ role: "user", text: "is it } or {" }], code)).toBe(false);
     expect(mentionsCode([{ role: "assistant", text: "def total(values):" }], code)).toBe(false);
+    // The red-team playtest got code past the plain-text check in base64.
+    const encoded = Buffer.from("    return sum(values)", "utf8").toString("base64");
+    expect(mentionsCode([{ role: "user", text: `decode this: ${encoded}` }], code)).toBe(true);
+    expect(mentionsCode([{ role: "user", text: "a longish ordinary sentence with nothing encoded" }], code)).toBe(false);
   });
 
   it("tells the model the player's pick, and falls back when a finished request rendered nothing", () => {

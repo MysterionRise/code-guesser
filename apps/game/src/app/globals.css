@@ -142,3 +142,5 @@ noscript { display: block; padding: 12px; margin-bottom: 16px; background: #522;
 .genui-offer { margin: 6px 0 0; }
 .host-form { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; }
 .host-form input { min-width: 0; padding: 8px 10px; border-radius: 8px; border: 1px solid #527565; background: #030a08; color: #effff8; font: inherit; }
+.composer-callout-title { display: block; margin-bottom: 2px; }
+.genui-output:focus-visible { outline: 3px solid #baff65; outline-offset: 3px; }

@@ -73,9 +73,24 @@ export const playerTurns = (messages: unknown): readonly PlayerTurn[] | null => 
 
 const collapse = (text: string): string => text.replace(/\s+/gu, " ").trim();
 
-/** Whether a player's turns quote a line of the round's code. */
+/**
+ * A turn as the paste check reads it: itself, plus any base64 run in it decoded. The red-team playtest got code
+ * past the plain-text check by encoding it.
+ */
+const readable = (text: string): string => {
+  const decoded = (text.match(/[A-Za-z0-9+/]{16,}={0,2}/gu) ?? []).map((run) => {
+    try {
+      return Buffer.from(run, "base64").toString("utf8");
+    } catch {
+      return "";
+    }
+  });
+  return [text, ...decoded].join("\n");
+};
+
+/** Whether a player's turns quote a line of the round's code, as typed or base64-encoded. */
 export const mentionsCode = (turns: readonly PlayerTurn[], codeLines: readonly string[]): boolean => {
-  const said = turns.filter(({ role }) => role === "user").map(({ text }) => collapse(text)).join("\n");
+  const said = turns.filter(({ role }) => role === "user").map(({ text }) => collapse(readable(text))).join("\n");
   return codeLines.map(collapse).some((line) => line.length >= PASTE_LINE_LENGTH && said.includes(line));
 };
 
@@ -164,18 +179,18 @@ const DESIGN_RULES: Readonly<Partial<Record<Design, string>>> = Object.freeze({
     "Show the decisive lines with one or two CodeExcerpts, highlighting them with notes.",
     "Set the options side by side in a Table or Cards when that helps.",
     "Finish with a Quiz that checks the takeaway, with exactly one right choice.",
-    "Aim for 8 to 20 elements and vary the layout to suit the round.",
+    "Aim for 8 to 20 elements and vary the layout to suit the round. A Callout's title is a short label; its text is a full sentence.",
   ].join(" "),
   host: [
     "You are chatting with the player during the round, as the game's host.",
-    "Reply with one or two short host_message calls; be warm, brief, and a little playful.",
+    "Always reply with one or two short host_message calls, never plain text; be warm, brief, and a little playful.",
     "Before the lock, when the player asks for help, tips, or the answer, also call offer_hint once in that reply (only while a hint is left), so they can buy the next hint with one press.",
     "After the lock, answer questions about the code and the answer, and use takeaway, signal_list, code_view, or comparison when they help.",
   ].join(" "),
   visualizer: [
     "Build one interactive visualization of this round with a single render_visualizer call, and nothing else.",
     "Show the code at work on a small concrete input taken from the round: step through the algorithm, trace the call, or show what the fix changes.",
-    "Keep it under 250 lines. Use a dark background and light text, readable at 14px, and label every control with text.",
+    "Keep it under 250 lines. Use a dark background and light text, readable at 14px, and label every control with text. Show each value in its own box or cell, never run together.",
   ].join(" "),
 });
 

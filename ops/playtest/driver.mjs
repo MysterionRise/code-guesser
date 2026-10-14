@@ -8,6 +8,7 @@
  *   POST /sessions                      {name}            -> {id}
  *   POST /sessions/:id/start            {deck, design}    -> state
  *   GET  /sessions/:id/state                              -> state
+ *     (state lists the code, options, hints, reveal, any panel, quiz, or host chat, and the page's enabled actions)
  *   POST /sessions/:id/hint                               -> state  (buys the round's next hint)
  *   POST /sessions/:id/answer           {label}           -> state  (locks in an option by its label)
  *   POST /sessions/:id/explain                            -> state  (asks the explainer or visualizer, waits for it)
@@ -22,6 +23,8 @@
  *   DELETE /sessions/:id
  *
  * The driver reads only what the page shows; it never reads the artifact, so it can't tell a player the answer.
+ * An action the page can't take right now (explain before answering, a hint when none is left) returns 400 with a
+ * reason instead of waiting.
  */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
@@ -86,11 +89,25 @@ const stateOf = async (page) => {
       transcript: await page.locator(".host-turn").allInnerTexts(),
       offer: await text(page.locator(".host-chat .genui-offer button:not([disabled])")),
     } : null,
+    quiz: (await page.locator(".composer-quiz").count()) > 0 ? {
+      question: await text(page.locator(".composer-quiz legend")),
+      choices: await page.locator(".composer-quiz .composer-choice").allInnerTexts(),
+      feedback: await text(page.locator(".composer-quiz .composer-feedback")),
+    } : null,
     complete: await text(page.getByText(/^Run complete/u)),
+    // Every enabled control on the page, so a player can see what it may do next (e.g. "Deal new rounds").
+    actions: await page.locator("main button:not([disabled]), main a[href], .completion-actions a, .design-nav a, .deck-nav a")
+      .evaluateAll((items) => [...new Set(items.map((item) => item.textContent.trim()).filter(Boolean))]),
   };
 };
 
 const settle = (page) => page.waitForTimeout(400);
+
+/** An action that doesn't fit the page (chat without the host, explain before answering) is the player's mistake. */
+class Unavailable extends Error {}
+const need = async (page, selector, what) => {
+  if ((await page.locator(selector).count()) === 0) throw new Unavailable(what);
+};
 
 /** Waits for a generative panel or the host to finish: it leaves the busy state, then renders or falls back. */
 const awaitGenui = async (page, selector) => {
@@ -112,37 +129,48 @@ const actions = {
     await session.page.getByText(/^Round 1 of 5$/u).waitFor();
   },
   hint: async ({ page }) => {
+    await need(page, ".hint-button:not([disabled])", "no hint to buy: none left, or the answer is locked");
     const before = await page.locator(".hints .hint").count();
     await page.locator(".hint-button:not([disabled])").first().click();
     await page.waitForFunction((count) => document.querySelectorAll(".hints .hint").length > count, before, { timeout: 15_000 });
   },
   answer: async ({ page }, { label }) => {
+    await need(page, ".candidate input:not([disabled])", "no open round: the answer is already locked");
+    if ((await page.getByLabel(String(label), { exact: true }).count()) === 0) throw new Unavailable(`no option labelled "${label}"`);
     await page.getByLabel(label, { exact: true }).check();
     await page.getByRole("button", { name: "Lock in answer" }).click();
     await page.locator(".reveal h2").waitFor({ timeout: 15_000 });
   },
   explain: async ({ page }) => {
+    await need(page, ".genui-panel button", "nothing to explain: answer first, in the catalog, composer, or visualizer design");
     await page.locator(".genui-panel button").first().click();
     await awaitGenui(page, ".genui-panel");
   },
   chat: async ({ page }, { text: message }) => {
+    await need(page, ".host-chat", "no host here: chat needs design=host");
     await page.getByLabel("Ask the host").fill(String(message).slice(0, 500));
     await page.locator(".host-form button[type=submit]").click();
     await awaitGenui(page, ".host-chat");
   },
   "buy-offered-hint": async ({ page }) => {
+    await need(page, ".host-chat .genui-offer button:not([disabled])", "no open hint offer from the host");
     const before = await page.locator(".hints .hint").count();
     await page.locator(".host-chat .genui-offer button:not([disabled])").last().click();
     await page.waitForFunction((count) => document.querySelectorAll(".hints .hint").length > count, before, { timeout: 15_000 });
   },
   "visualizer-step": async ({ page }, { times = 1 }) => {
+    await need(page, "iframe.visualizer-frame", "no visualizer: explain first in design=visualizer");
     const step = page.frameLocator("iframe.visualizer-frame").getByRole("button", { name: /step|next/iu }).first();
     for (let index = 0; index < Math.min(Number(times) || 1, 20); index += 1) await step.click();
   },
   quiz: async ({ page }, { choice }) => {
+    await need(page, ".composer-quiz", "no quiz: explain first in design=composer");
     await page.locator(".composer-quiz").getByLabel(String(choice), { exact: true }).check();
   },
-  next: async ({ page }) => { await page.getByRole("button", { name: "Next round" }).click(); },
+  next: async ({ page }) => {
+    if ((await page.getByRole("button", { name: "Next round" }).count()) === 0) throw new Unavailable("no next round: answer first, or the game is complete");
+    await page.getByRole("button", { name: "Next round" }).click();
+  },
 };
 
 const json = (response, status, value) => {
@@ -201,6 +229,7 @@ createServer(async (request, response) => {
     log(session, action, { body, ms: Date.now() - started, state });
     return json(response, 200, state);
   } catch (error) {
+    if (error instanceof Unavailable) return json(response, 400, { error: error.message });
     const session = sessions.get(id);
     if (session) log(session, "error", { action, message: String(error).slice(0, 300) });
     return json(response, 500, { error: String(error).slice(0, 300) });

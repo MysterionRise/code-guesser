@@ -32,7 +32,8 @@ export function CatalogView({ call, panes, hint }: CatalogViewProps) {
       return (
         <p className="genui-offer">
           {props.reason as string}{" "}
-          <button type="button" className="hint-button" disabled={!hint?.label} onClick={hint?.buy}>{hint?.label ?? "No hint left"}</button>
+          {hint === undefined ? <span className="genui-status">(offer closed)</span>
+            : <button type="button" className="hint-button" disabled={!hint.label} onClick={hint.buy}>{hint.label ?? "No hint left"}</button>}
         </p>
       );
     case "takeaway":
