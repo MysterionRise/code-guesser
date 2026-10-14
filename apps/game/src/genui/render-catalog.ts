@@ -20,7 +20,8 @@ export interface CatalogComponent {
   readonly props: Readonly<Record<string, Field>>;
 }
 
-const text = (max: number, description: string): Field => ({ kind: "text", max, description });
+/** A text prop; its description states the hard limit, since a model reads descriptions more reliably than schema bounds. */
+const text = (max: number, description: string): Field => ({ kind: "text", max, description: `${description} At most ${max} characters.` });
 
 export const RENDER_CATALOG = Object.freeze({
   host_message: {

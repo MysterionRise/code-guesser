@@ -1,10 +1,11 @@
 # Reviews and plans
 
-Current state, 2026-10-13: Phases 0 to 3b are merged into `main`. The game
-plays six decks from one committed artifact (schema
+Current state, 2026-10-14: Phases 0 to 3b of the deck pipeline are merged into
+`main`. The game plays six decks from one committed artifact (schema
 `local-experiment-artifact.v4`, profile `local-real-rounds.v5`); each deck is a
 pool of 10 or 24 rounds, and a game deals five. Phase 3c is planned and waits
-on the owner's decisions.
+on the owner's decisions. Separately, the public-app track (#109) has merged
+its Phase 1.
 
 | Phase | What it did | PRs | Run record |
 | --- | --- | --- | --- |
@@ -17,6 +18,16 @@ on the owner's decisions.
 
 Phase 3b by PR: #12 curated sources, #13 algorithm deck, #14 output deck,
 #15 fix deck, #16 game UX, #17 go-live, #18 the vertical `demo.gif`.
+
+### Public app track (#109)
+
+The 2026-10-14 decision: take the game public, add generative UI, and compare
+designs with an anonymous first-party event log.
+
+| Phase | What it did | PRs | Issues |
+| --- | --- | --- | --- |
+| 1 | Server-held game state; the answer-lock guard; generative UI on the Vercel AI SDK through OpenRouter, behind `GENUI_ENABLED`; fixes from the first live check | #110, #111, #112, and this phase's completion PR | #96, #102, #101; [live check](evidence/2026-10-14-genui-live-check.md) |
+| next | Arm assignment and the event log, then the explainer and host arms and the report; hardening before launch | planned | #106, #107, #103, #104, #108; #97–#100 |
 
 - [Architecture](../architecture.md): the flow from preparation to play, the
   artifact's shape, and a glossary.

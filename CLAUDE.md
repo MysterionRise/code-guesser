@@ -44,7 +44,8 @@ gate: changing queries, retries, ceilings, deck rules, or running
   language shard, or a repository archive. The Stack v2 stays pinned to
   revision `e565caa3a78c2423bd374333a472b049eb090e47` unless deliberately moved.
 - Credentials come only from standard stores (`~/.cache/huggingface/token`,
-  `gh auth token`) through the environment. Never log or commit tokens,
+  `gh auth token`, and for generative UI `~/.config/openrouter/key`, mode
+  0600) through the environment. Never log or commit tokens,
   provider bodies, contact data, private email, or source excerpts from failed
   diagnostics.
 - Gameplay never touches the network; it plays the frozen local artifact. The
@@ -104,6 +105,16 @@ gate: changing queries, retries, ceilings, deck rules, or running
   - Tests use `tests/e2e/fake-openrouter.mjs`, never the real service:
     Playwright starts it on `E2E_PORT + 1`, and `apps/game/test/genui.test.ts`
     runs it in-process.
+  - Requests turn reasoning off (`reasoning: { enabled: false }`): Claude
+    Haiku 5.5 thinks by default and, on the first live check, spent the whole
+    output budget on it. After-lock code goes to the model as numbered lines,
+    and the panel tells it the player's pick.
+  - The server logs codes only: `GENUI_FINISHED <phase> <finishReason>
+    calls=<n> in=<tokens> out=<tokens>`, `GENUI_RENDER_REJECTED <component>
+    <check>`, `GENUI_STREAM_FAILED <status>`.
+  - Live check, with each explain about $0.0007:
+    `docs/review/evidence/2026-10-14-genui-live-check.md`. Run it locally
+    with `GENUI_ENABLED=1 OPENROUTER_API_KEY="$(cat ~/.config/openrouter/key)"`.
 - The committed artifact `apps/game/src/demo/generated/local-real-rounds.json`
   came from the 2026-10-13 v5 run (1,859 of 3,000 requests), rebuilt
   `--offline` with the algorithm and fix leak fixes (#76, #79).

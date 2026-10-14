@@ -32,7 +32,8 @@ export interface BeforeLockContext extends RoundBasics {
 export interface AfterLockContext extends RoundBasics {
   readonly phase: "after-lock";
   readonly hints: readonly string[];
-  readonly code: readonly Readonly<{ label: string | null; text: string }>[];
+  /** Each pane's lines as "<number>: <code>", counted from 1, so a model can point at a line without counting. */
+  readonly code: readonly Readonly<{ label: string | null; lines: readonly string[] }>[];
   readonly answer: string;
   readonly evidence: string;
   readonly explanation: string;
@@ -71,6 +72,10 @@ export interface RoundProgress {
   readonly phase: RoundPhase;
 }
 
+/** A pane's lines, each prefixed with its 1-based number, the numbering the game and `code_view` use. */
+export const numberedLines = (text: string): readonly string[] =>
+  Object.freeze(text.split("\n").map((line, index) => `${index + 1}: ${line}`));
+
 /** The round as the model may see it in this phase; the before-lock context is built from public fields alone. */
 export const roundContext = (source: RoundSource, progress: RoundProgress): RoundContext => {
   const basics: RoundBasics = {
@@ -96,7 +101,7 @@ export const roundContext = (source: RoundSource, progress: RoundProgress): Roun
     ...basics,
     phase: "after-lock",
     hints: Object.freeze([...source.hints]),
-    code: Object.freeze(source.panes.map(({ label, text }) => Object.freeze({ label, text }))),
+    code: Object.freeze(source.panes.map(({ label, text }) => Object.freeze({ label, lines: numberedLines(text) }))),
     answer: answer.label,
     evidence: source.reveal.evidence,
     explanation: source.reveal.explanation,
@@ -120,7 +125,10 @@ const PHASE_RULES: Readonly<Record<RoundPhase, readonly string[]>> = Object.free
   ],
   "after-lock": [
     "The player has answered this round, so you may now discuss its code, the answer, and why.",
+    "You do not know which option the player picked or whether they were right unless they tell you; never assume either.",
+    "To explain the round, call takeaway, signal_list, and code_view, and comparison when the options are worth setting side by side. Use host_message only for one short remark. Every text has a hard length limit, stated in its tool; keep well under it.",
     "Keep to what the data shows. Name options by their labels exactly as given.",
+    "Code lines are numbered from 1 within each pane, as \"<number>: <code>\"; use those numbers in code_view, and pane 2 for a second version.",
   ],
 });
 
