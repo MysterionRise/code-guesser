@@ -70,6 +70,18 @@ gate: changing queries, retries, ceilings, deck rules, or running
   text never ships with the page. `CODEGUESSR_SESSION_SECRET` (32+ chars)
   keeps games alive across restarts; without it each process makes a random
   secret.
+- The answer-lock guard (#102) is the only path from round data to a model:
+  - `modelContext` on the experiment reads the sealed game, and
+    `apps/game/src/genui/round-context.server.ts` builds the round's context.
+    Before the lock that is deck, prompt, option labels, bought hints and
+    score; after it, the code and the reveal too.
+  - `modelInput` wraps the round as escaped JSON inside `<round_data>`, under
+    a system rule that it is data and never instructions.
+  - A model may render only `apps/game/src/genui/render-catalog.ts`
+    components, checked by `parseRenderCall`.
+  - `apps/game/test/answer-lock.test.ts` checks every committed round, an
+    injection fixture, and that only `genui/model.server.ts` may import a
+    model client.
 - The committed artifact `apps/game/src/demo/generated/local-real-rounds.json`
   came from the 2026-10-13 v5 run (1,859 of 3,000 requests), rebuilt
   `--offline` with the algorithm and fix leak fixes (#76, #79).

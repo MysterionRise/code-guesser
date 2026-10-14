@@ -31,10 +31,13 @@ import {
   SessionRefusal,
   advanceGame,
   newGameId,
+  readGame,
   recordStep,
   sealGame,
   type GameState,
 } from "./local-real-experiment-session.server";
+import type { RenderLimits } from "../genui/render-catalog";
+import { roundContext, type RoundContext } from "../genui/round-context.server";
 import {
   canonicalHash,
   deepFreeze,
@@ -65,7 +68,21 @@ export interface LocalRealExperiment {
   readonly revealHint: (request: HintRequest, now?: number) => HintResponse;
   /** Locks in one answer for the round being played and reveals it, scored from the server's own state. */
   readonly answer: (request: RevealRequest, now?: number) => RevealResponse;
+  /**
+   * What a model may learn about a round of this game (#102): the round being played before its answer is
+   * locked, or any round already answered. Later rounds are refused.
+   */
+  readonly modelContext: (request: ModelContextRequest, now?: number) => ModelContextResponse;
 }
+
+export interface ModelContextRequest {
+  readonly sessionToken: string;
+  readonly roundId: string;
+}
+
+export type ModelContextResponse =
+  | Readonly<{ ok: true; context: RoundContext; limits: RenderLimits }>
+  | GameRefusal;
 
 export interface DealtGame {
   readonly mode: PublicModeContract;
@@ -207,8 +224,34 @@ const transact = <Result>(
     const { result, token: sessionToken } = advanceGame(token, artifactHash, now, transition);
     return Object.freeze({ ok: true, result, sessionToken });
   } catch (error) {
-    return error instanceof SessionRefusal && error.reason === "SESSION_ENDED" ? SESSION_ENDED : REJECTED;
+    return refusalFor(error);
   }
+};
+
+const refusalFor = (error: unknown): GameRefusal =>
+  error instanceof SessionRefusal && error.reason === "SESSION_ENDED" ? SESSION_ENDED : REJECTED;
+
+/** The guard's context for one round of a game, from the server's own copy of the round. */
+const contextFor = (round: DerivedRound, deckTitle: string, state: GameState, index: number): ModelContextResponse => {
+  const { publicRound, hints, privateReveal } = round;
+  const phase = index < state.roundIndex ? "after-lock" : "before-lock";
+  const context = roundContext({
+    deck: deckTitle,
+    prompt: publicRound.mode.prompt,
+    options: publicRound.mode.candidates,
+    points: publicRound.points,
+    panes: publicRound.content.panes,
+    hints,
+    reveal: privateReveal,
+  }, { round: index + 1, rounds: ROUNDS_PER_SESSION, score: state.score, hintsBought: phase === "before-lock" ? state.hints : 0, phase });
+  return Object.freeze({
+    ok: true,
+    context,
+    limits: Object.freeze({
+      paneLineCounts: Object.freeze(publicRound.content.panes.map(({ text }) => text.split("\n").length)),
+      optionLabels: Object.freeze(publicRound.mode.candidates.map(({ label }) => label)),
+    }),
+  });
 };
 
 /** The round being played, when the request names it; a finished game has none. */
@@ -276,6 +319,7 @@ export const createLocalRealExperiment = (
       rounds.map(({ privateReveal }) => [privateReveal.roundId, privateReveal]))));
     if (Object.keys(privateReveals).length !== decks.reduce((total, { rounds }) => total + rounds.length, 0)) fail();
     const rounds = new Map(decks.flatMap((derived) => derived.rounds.map((round) => [round.publicRound.roundId, round] as const)));
+    const deckTitles = new Map(decks.flatMap(({ deck, rounds: deckRounds }) => deckRounds.map(({ publicRound }) => [publicRound.roundId, deck.title] as const)));
     const dealSession = (deckId: DeckId, random: () => number = Math.random) => {
       const derived = decks.find(({ deck }) => deck.id === deckId) ?? fail();
       return dealFrom(derived, artifact, random);
@@ -312,6 +356,21 @@ export const createLocalRealExperiment = (
         const outcome = transact(request.sessionToken!, expectedArtifactHash, now, (state) =>
           revealFor(currentRound(rounds, state, request.roundId!), state, request.candidateId!, expectedArtifactHash));
         return outcome.ok ? Object.freeze({ ok: true, reveal: outcome.result, sessionToken: outcome.sessionToken }) : outcome;
+      },
+      modelContext: (value: ModelContextRequest, now = Date.now()): ModelContextResponse => {
+        const request = strings(value, ["sessionToken", "roundId"]);
+        if (request === null) return REJECTED;
+        let state: GameState;
+        try {
+          state = readGame(request.sessionToken, expectedArtifactHash, now);
+        } catch (error) {
+          return refusalFor(error);
+        }
+        const index = state.roundIds.indexOf(request.roundId!);
+        const round = rounds.get(request.roundId!);
+        // The round being played, or one already answered; never a round still to come.
+        if (index < 0 || index > state.roundIndex || round === undefined) return REJECTED;
+        return contextFor(round, deckTitles.get(request.roundId!)!, state, index);
       },
     });
   } catch {

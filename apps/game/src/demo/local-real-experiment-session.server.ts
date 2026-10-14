@@ -137,6 +137,15 @@ export const recordStep = (state: GameState, now: number, capacity = LEDGER_CAPA
   }
 };
 
+/** The game a token holds, when it is the game's latest step; reading it changes nothing. */
+export const readGame = (token: unknown, artifactHash: string, now: number): GameState => {
+  const state = openGame(token, artifactHash, now);
+  const known = ledger().get(state.gameId);
+  // A game the ledger has forgotten (a restart, or capacity) continues from its token.
+  if (known !== undefined && known.step !== state.step) throw new SessionRefusal("STALE_STEP");
+  return state;
+};
+
 /**
  * Opens a token, refuses it if the game has already taken a later step, applies one transition, and records it.
  * Nothing here awaits, so two requests carrying the same token cannot both pass the check.
@@ -147,10 +156,7 @@ export const advanceGame = <Result>(
   now: number,
   transition: (state: GameState) => { next: GameState; result: Result },
 ): { result: Result; token: string } => {
-  const state = openGame(token, artifactHash, now);
-  const known = ledger().get(state.gameId);
-  // A game the ledger has forgotten (a restart, or capacity) continues from its token.
-  if (known !== undefined && known.step !== state.step) throw new SessionRefusal("STALE_STEP");
+  const state = readGame(token, artifactHash, now);
   const { next, result } = transition(state);
   if (next.gameId !== state.gameId || next.step !== state.step + 1) throw new Error("GAME_TRANSITION_INVALID");
   const sealed = sealGame(next);
