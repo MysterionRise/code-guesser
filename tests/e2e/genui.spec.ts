@@ -100,6 +100,12 @@ test("the visualizer runs the model's page in a sandbox that can't reach the gam
   await expect(inside.locator("#storage")).toHaveText("blocked");
   await inside.getByRole("button", { name: "Step" }).click();
   await expect(inside.locator("#status")).toHaveText("Step 1");
+  // The frame fits its page: the game's own reporter sets its height, so a short page gets no empty box.
+  await expect.poll(async () => frame.evaluate((element) => element.getBoundingClientRect().height)).toBeLessThan(480);
+  // ...and holds it: a report that fed back into itself would grow the frame on every resize.
+  const settled = await frame.evaluate((element) => element.getBoundingClientRect().height);
+  await page.waitForTimeout(1000);
+  expect(await frame.evaluate((element) => element.getBoundingClientRect().height)).toBe(settled);
   await page.waitForTimeout(500);
   expect(await (await request.get(`${fake}/leaks`)).text()).toBe("0");
   await expect(page.getByRole("button", { name: "Next round" })).toBeEnabled();
@@ -129,7 +135,8 @@ test("the host chats during the round without the code, sells the next hint on r
   await host.getByRole("button", { name: "Send" }).click();
   await expect(host.locator(".genui-takeaway")).toHaveText("Takeaway: Read the keywords before the punctuation.");
   const after = await (await request.get(`${fake}/requests`)).json() as { body: { tools: { function: { name: string } }[] } }[];
-  expect(after.at(-1)!.body.tools.map(({ function: { name } }) => name)).toContain("code_view");
+  // After the lock the host answers in chat-sized pieces, not with the explainer's code views and tables.
+  expect(after.at(-1)!.body.tools.map(({ function: { name } }) => name)).toEqual(["host_message", "takeaway", "signal_list"]);
   await page.getByRole("button", { name: "Next round" }).click();
   await expect(page.getByRole("complementary", { name: "Host" }).locator(".host-turn")).toHaveCount(0);
 });

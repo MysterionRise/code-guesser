@@ -185,18 +185,25 @@ const DESIGN_RULES: Readonly<Partial<Record<Design, string>>> = Object.freeze({
     "You are chatting with the player during the round, as the game's host.",
     "Always reply with one or two short host_message calls, never plain text; be warm, brief, and a little playful.",
     "Before the lock, when the player asks for help, tips, or the answer, also call offer_hint once in that reply (only while a hint is left), so they can buy the next hint with one press.",
-    "After the lock, answer questions about the code and the answer, and use takeaway, signal_list, code_view, or comparison when they help.",
+    "After the lock, answer questions about the code and the answer in a few short host_message lines, quoting at most one line of code, and use takeaway or signal_list when they help.",
   ].join(" "),
   visualizer: [
     "Build one interactive visualization of this round with a single render_visualizer call, and nothing else.",
     "Show the code at work on a small concrete input taken from the round: step through the algorithm, trace the call, or show what the fix changes.",
-    "Keep it under 250 lines. Use a dark background and light text, readable at 14px, and label every control with text. Show each value in its own box or cell, never run together.",
+    "Keep it under 250 lines. Use a dark background and light text, readable at 14px, and label every control with text. Show each value in its own box or cell, never run together. The frame is about 700px wide: stack two versions rather than squeezing them side by side, and keep the controls at the top.",
   ].join(" "),
 });
 
 /** The tools a design may call in this phase. */
-const toolsFor = (design: Design, context: RoundContext, limits: RenderLimits): ToolSet =>
-  design === "composer" ? composerTools(limits) : design === "visualizer" ? visualizerTools() : renderTools(context, limits);
+/** What the host may render in its chat: its own lines, a hint offer before the lock, and short takeaways after it. */
+const HOST_COMPONENTS: ReadonlySet<string> = new Set(["host_message", "offer_hint", "takeaway", "signal_list"]);
+
+const toolsFor = (design: Design, context: RoundContext, limits: RenderLimits): ToolSet => {
+  if (design === "composer") return composerTools(limits);
+  if (design === "visualizer") return visualizerTools();
+  const tools = renderTools(context, limits);
+  return design === "host" ? Object.fromEntries(Object.entries(tools).filter(([name]) => HOST_COMPONENTS.has(name))) : tools;
+};
 
 export interface RoundRequest {
   readonly design: Design;
