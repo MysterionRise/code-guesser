@@ -25,3 +25,4 @@ ops/poc/stack/**/*.py[cod]
 
 # Demo recorder screencasts (encoded media is tracked)
 docs/media/.work/
+ops/playtest/tmp/
