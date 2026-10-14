@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import type { GenuiPanelProps } from "../../genui/genui-panel";
 import { ArcadeShellRuleError, optionLine, requirePublicText as required, type PublicModeContract, type RoundModeKind } from "./mode-contract";
 
 /** Locks in an answer for the round being played; the server reads progress, hints, and score from its own token. */
@@ -215,6 +216,9 @@ const linkedAttribution = (attribution: string): React.ReactNode[] => attributio
     ? <a key={index} href={part} rel="noreferrer noopener" target="_blank">{part}</a>
     : part);
 
+/** Generative UI's panel, fetched only when the server turns it on, so the static game never loads it. */
+const GenuiPanel = React.lazy(() => import("../../genui/genui-panel")) as React.ComponentType<GenuiPanelProps>;
+
 /** What the player sees when the server can no longer continue this game, for example after it restarts. */
 export const SESSION_ENDED_MESSAGE = "This game can’t continue. Deal new rounds to keep playing.";
 
@@ -230,11 +234,14 @@ interface ArcadeShellProps {
   newGameHref?: string;
   /** When set, the share line names the deck. */
   deckTitle?: string;
+  /** When set, a revealed round offers the generative-UI explainer (#101); the server decides with `GENUI_ENABLED`. */
+  genuiEnabled?: boolean;
 }
 
-export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealHintAction, chooseAnotherDeckHref, newGameHref, deckTitle }: ArcadeShellProps) {
+export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealHintAction, chooseAnotherDeckHref, newGameHref, deckTitle, genuiEnabled }: ArcadeShellProps) {
   const [session, setSession] = React.useState(() => createArcadeSession(mode));
   const token = React.useRef(sessionToken);
+  const currentToken = React.useCallback(() => token.current, []);
   const hintPending = React.useRef(false);
   const [hintError, setHintError] = React.useState<string | null>(null);
   const [ended, setEnded] = React.useState(false);
@@ -453,6 +460,12 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
               <p>Helpful signals: {session.reveal.helpfulSignals.join(" · ")}</p>
               <p>Misleading signals: {session.reveal.misleadingSignals.join(" · ")}</p>
               <small>{linkedAttribution(session.reveal.attribution)}</small>
+              {genuiEnabled && (
+                <React.Suspense fallback={null}>
+                  <GenuiPanel key={round.roundId} roundId={round.roundId} phase="after-lock" panes={round.content.panes}
+                    optionLabels={round.mode.candidates.map(({ label }) => label)} sessionToken={currentToken} />
+                </React.Suspense>
+              )}
               {session.status !== "complete"
                 ? <button type="button" onClick={next}>Next round</button>
                 : <>

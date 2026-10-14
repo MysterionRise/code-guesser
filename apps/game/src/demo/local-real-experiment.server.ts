@@ -81,7 +81,16 @@ export interface ModelContextRequest {
 }
 
 export type ModelContextResponse =
-  | Readonly<{ ok: true; context: RoundContext; limits: RenderLimits }>
+  | Readonly<{
+    ok: true;
+    context: RoundContext;
+    limits: RenderLimits;
+    /**
+     * The round's code lines, for the server to refuse a player pasting the code into a chat before the lock.
+     * Never part of the context, and never sent to a model or a browser.
+     */
+    codeLines: readonly string[];
+  }>
   | GameRefusal;
 
 export interface DealtGame {
@@ -251,6 +260,7 @@ const contextFor = (round: DerivedRound, deckTitle: string, state: GameState, in
       paneLineCounts: Object.freeze(publicRound.content.panes.map(({ text }) => text.split("\n").length)),
       optionLabels: Object.freeze(publicRound.mode.candidates.map(({ label }) => label)),
     }),
+    codeLines: Object.freeze(publicRound.content.panes.flatMap(({ text }) => text.split("\n"))),
   });
 };
 

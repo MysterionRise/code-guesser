@@ -53,7 +53,7 @@ function DealtSession({ deck }: { readonly deck: LocalRealDeck }) {
   return (
     <DemoArcade key={sessionToken} mode={mode} sessionToken={sessionToken} deckTitle={deck.title}
       authorizeRevealAction={authorizeLocalExperimentReveal} revealHintAction={revealLocalExperimentHint}
-      chooseAnotherDeckHref="/" newGameHref={`/?deck=${deck.id}`} />
+      chooseAnotherDeckHref="/" newGameHref={`/?deck=${deck.id}`} genuiEnabled={process.env.GENUI_ENABLED === "1"} />
   );
 }
 

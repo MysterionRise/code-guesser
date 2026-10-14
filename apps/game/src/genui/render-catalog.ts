@@ -161,6 +161,34 @@ export const parseRenderCall = (value: unknown, phase: RoundPhase, limits: Rende
   return Object.freeze({ component: component as ComponentName, props: parsed });
 };
 
+type JsonSchema = Readonly<Record<string, unknown>>;
+
+const schemaOf = (field: Field): JsonSchema => {
+  switch (field.kind) {
+    case "text":
+      return { type: "string", minLength: 1, maxLength: field.max, description: field.description };
+    case "integer":
+      return { type: "integer", minimum: field.min, maximum: field.max, description: field.description };
+    case "choice":
+      return { type: "string", enum: [...field.values], description: field.description };
+    case "list":
+      return { type: "array", items: schemaOf(field.of), minItems: 1, maxItems: field.max, description: field.description };
+    case "object":
+      return objectSchema(field.fields, field.description);
+  }
+};
+
+const objectSchema = (fields: Readonly<Record<string, Field>>, description?: string): JsonSchema => ({
+  type: "object",
+  properties: Object.fromEntries(Object.entries(fields).map(([key, field]) => [key, schemaOf(field)])),
+  required: Object.keys(fields),
+  additionalProperties: false,
+  ...(description === undefined ? {} : { description }),
+});
+
+/** A component's props as JSON Schema, the form a model's tool definition takes; `parseRenderCall` still decides. */
+export const inputSchemaFor = (name: ComponentName): JsonSchema => objectSchema(RENDER_CATALOG[name].props);
+
 /** The components a model may call in this phase, by name. */
 export const componentsFor = (phase: RoundPhase): readonly ComponentName[] =>
   Object.freeze((Object.keys(RENDER_CATALOG) as ComponentName[]).filter((name) => (RENDER_CATALOG[name].phases as readonly RoundPhase[]).includes(phase)));

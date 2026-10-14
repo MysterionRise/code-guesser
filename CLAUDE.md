@@ -47,7 +47,11 @@ gate: changing queries, retries, ceilings, deck rules, or running
   `gh auth token`) through the environment. Never log or commit tokens,
   provider bodies, contact data, private email, or source excerpts from failed
   diagnostics.
-- Gameplay never touches the network; it plays the frozen local artifact.
+- Gameplay never touches the network; it plays the frozen local artifact. The
+  one exception is opt-in generative UI (`GENUI_ENABLED=1`, #101). Its server
+  route `apps/game/src/app/api/genui/route.ts` calls OpenRouter only through
+  the answer-lock guard, for a live game's round, and the browser never talks
+  to a model. Spend limits live on the OpenRouter key, not in the app.
 - Malformed provider data fails closed. Transient errors may be retried within
   the request budget.
 - Preserve unrelated worktree changes.
@@ -82,6 +86,24 @@ gate: changing queries, retries, ceilings, deck rules, or running
   - `apps/game/test/answer-lock.test.ts` checks every committed round, an
     injection fixture, and that only `genui/model.server.ts` may import a
     model client.
+- Generative UI's foundation (#101) runs on the Vercel AI SDK, not CopilotKit.
+  CopilotKit 1.79 shipped install analytics (Scarf), Segment telemetry, and
+  about 720 packages; the AI SDK is about 25 packages and sends nothing by
+  itself.
+  - `genui/model.server.ts` streams one step through an OpenAI-compatible
+    provider pointed at OpenRouter (`OPENROUTER_API_KEY`, `OPENROUTER_MODEL`,
+    default `anthropic/claude-haiku-5.5`, `OPENROUTER_BASE_URL`), and asks
+    for `data_collection: "deny"`. The tools are the catalog components;
+    each call is checked by `parseRenderCall` in its `execute`.
+  - Before the lock it refuses a chat turn that pastes the round's code.
+  - The panel (`genui/genui-panel.tsx`) loads lazily on a revealed round and
+    renders only checked outputs. Any failure, a 402 from a spent key
+    included, leaves the static reveal.
+  - The SDK streams a call's raw input before it is checked; nothing renders
+    it.
+  - Tests use `tests/e2e/fake-openrouter.mjs`, never the real service:
+    Playwright starts it on `E2E_PORT + 1`, and `apps/game/test/genui.test.ts`
+    runs it in-process.
 - The committed artifact `apps/game/src/demo/generated/local-real-rounds.json`
   came from the 2026-10-13 v5 run (1,859 of 3,000 requests), rebuilt
   `--offline` with the algorithm and fix leak fixes (#76, #79).

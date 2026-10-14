@@ -18,6 +18,7 @@ interface DemoArcadeProps {
   readonly chooseAnotherDeckHref?: string;
   readonly newGameHref?: string;
   readonly deckTitle?: string;
+  readonly genuiEnabled?: boolean;
 }
 
 export function DemoArcade(props: DemoArcadeProps) {

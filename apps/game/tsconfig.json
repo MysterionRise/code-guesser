@@ -8,7 +8,10 @@
       }
     ],
     "allowJs": true,
-    "esModuleInterop": true
+    "esModuleInterop": true,
+    // The AI SDK's declarations (generative UI, #101) do not pass exactOptionalPropertyTypes;
+    // the game's own sources still do.
+    "skipLibCheck": true
   },
   "include": [
     "next-env.d.ts",
