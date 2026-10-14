@@ -463,6 +463,7 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
               {genuiEnabled && (
                 <React.Suspense fallback={null}>
                   <GenuiPanel key={round.roundId} roundId={round.roundId} phase="after-lock" panes={round.content.panes}
+                    pick={{ label: labelOf(session.lockedCandidateId), correct: session.reveal.correct }}
                     optionLabels={round.mode.candidates.map(({ label }) => label)} sessionToken={currentToken} />
                 </React.Suspense>
               )}

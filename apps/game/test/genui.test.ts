@@ -18,7 +18,7 @@ vi.mock("../src/demo/local-real-experiment-loader.server", async (importOriginal
 const { POST } = await import("../src/app/api/genui/route");
 const { DEFAULT_MODEL, mentionsCode, playerTurns } = await import("../src/genui/model.server");
 const { inputSchemaFor, RENDER_CATALOG } = await import("../src/genui/render-catalog");
-const { renderCalls } = await import("../src/genui/genui-panel");
+const { explainRequest, fellBack, renderCalls } = await import("../src/genui/genui-panel");
 // @ts-expect-error The fake is plain JavaScript shared with the browser tests.
 const { startFakeOpenRouter } = await import("../../../tests/e2e/fake-openrouter.mjs");
 
@@ -63,6 +63,17 @@ describe("generative UI building blocks (#101)", () => {
     expect(mentionsCode([{ role: "user", text: "what is   return sum(values)  ?" }], code)).toBe(true);
     expect(mentionsCode([{ role: "user", text: "is it } or {" }], code)).toBe(false);
     expect(mentionsCode([{ role: "assistant", text: "def total(values):" }], code)).toBe(false);
+  });
+
+  it("tells the model the player's pick, and falls back when a finished request rendered nothing", () => {
+    expect(explainRequest()).toBe("Explain this round.");
+    expect(explainRequest({ label: "Kotlin", correct: false })).toBe("Explain this round. I picked “Kotlin”, which was wrong.");
+    expect(fellBack("ready", false, 0, undefined)).toBe(false);
+    expect(fellBack("streaming", true, 0, undefined)).toBe(false);
+    // A step cut off before any call, or whose every call was refused, adds no assistant message at all.
+    expect(fellBack("ready", true, 0, undefined)).toBe(true);
+    expect(fellBack("ready", true, 2, undefined)).toBe(false);
+    expect(fellBack("error", true, 0, new Error("GENUI_FAILED"))).toBe(true);
   });
 
   it("renders only finished tool calls that pass the catalog", () => {
@@ -146,6 +157,8 @@ describe("the generative-UI route (#101)", () => {
     expect(request.authorization).toBe("Bearer test-key-not-real");
     expect(request.body.model).toBe(DEFAULT_MODEL);
     expect(request.body.provider).toEqual({ data_collection: "deny" });
+    // Thinking would spend the output budget before any render call (seen in the first live check).
+    expect(request.body.reasoning).toEqual({ enabled: false });
     expect(request.body.tools.map((entry: any) => entry.function.name)).toEqual(["host_message"]);
     for (const line of fixture.panes.flatMap(({ text }) => text.split("\n")).map((text) => text.trim()).filter((text) => text.length >= 8)) {
       expect(seen(request).includes(JSON.stringify(line).slice(1, -1)), `code reached the model: ${line}`).toBe(false);
@@ -178,7 +191,7 @@ describe("the generative-UI route (#101)", () => {
     const body = await limited.text();
     expect(body).toContain("GENUI_FAILED");
     expect(body).not.toContain("fake provider body");
-    expect(logged.mock.calls.flat().join(" ")).toMatch(/^GENUI_STREAM_FAILED 402/u);
-    expect(logged.mock.calls.flat().join(" ")).not.toContain("fake provider body");
+    // The log names the refused check and the provider's status; never the model's text or the provider's body.
+    expect(logged.mock.calls.map(([line]) => line)).toEqual(["GENUI_RENDER_REJECTED takeaway PROPS_TEXT_UNSAFE", "GENUI_STREAM_FAILED 402"]);
   });
 });

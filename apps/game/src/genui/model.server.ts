@@ -3,7 +3,7 @@ import "server-only";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { jsonSchema, stepCountIs, streamText, tool, type ModelMessage, type ToolSet } from "ai";
 
-import { RENDER_CATALOG, componentsFor, inputSchemaFor, parseRenderCall, type RenderLimits } from "./render-catalog";
+import { RENDER_CATALOG, RenderCallRejected, componentsFor, inputSchemaFor, parseRenderCall, type RenderLimits } from "./render-catalog";
 import { modelInput, type RoundContext } from "./round-context.server";
 
 /**
@@ -14,7 +14,8 @@ import { modelInput, type RoundContext } from "./round-context.server";
 
 export const DEFAULT_MODEL = "anthropic/claude-haiku-5.5";
 export const DEFAULT_BASE_URL = "https://openrouter.ai/api/v1";
-const MAX_OUTPUT_TOKENS = 700;
+/** Room for two or three render calls; reasoning is off, so none of it goes to thinking. */
+const MAX_OUTPUT_TOKENS = 1_200;
 const TIMEOUT_MS = 20_000;
 /** Turns of chat the model sees, and how long one may be. */
 export const MAX_TURNS = 8;
@@ -65,7 +66,15 @@ const renderTools = (context: RoundContext, limits: RenderLimits): ToolSet => Ob
   componentsFor(context.phase).map((name) => [name, tool({
     description: RENDER_CATALOG[name].description,
     inputSchema: jsonSchema<Record<string, unknown>>(inputSchemaFor(name) as never),
-    execute: async (input: Record<string, unknown>) => parseRenderCall({ component: name, props: input }, context.phase, limits).props,
+    execute: async (input: Record<string, unknown>) => {
+      try {
+        return parseRenderCall({ component: name, props: input }, context.phase, limits).props;
+      } catch (error) {
+        // The code names the component and the failed check, never the text.
+        if (error instanceof RenderCallRejected) console.error(`GENUI_RENDER_REJECTED ${name} ${error.code}`);
+        throw error;
+      }
+    },
   })]),
 );
 
@@ -91,8 +100,14 @@ export const streamRound = ({ context, limits, codeLines, turns, signal }: Round
     baseURL: process.env.OPENROUTER_BASE_URL ?? DEFAULT_BASE_URL,
     apiKey,
     includeUsage: true,
-    // Route only to providers that neither store nor train on prompts.
-    transformRequestBody: (body) => ({ ...body, provider: { data_collection: "deny" } }),
+    transformRequestBody: (body) => ({
+      ...body,
+      // Route only to providers that neither store nor train on prompts.
+      provider: { data_collection: "deny" },
+      // Rendering a few short components needs no thinking. With it on (Claude Haiku 5.5 thinks by default), the
+      // first live check spent the whole output budget on reasoning and returned nothing.
+      reasoning: { enabled: false },
+    }),
   });
   const { system, data } = modelInput(context);
   const messages: ModelMessage[] = [
@@ -112,6 +127,10 @@ export const streamRound = ({ context, limits, codeLines, turns, signal }: Round
     onError: ({ error }) => {
       const status = isRecord(error) && typeof error.statusCode === "number" ? error.statusCode : "NETWORK";
       console.error(`GENUI_STREAM_FAILED ${status}`);
+    },
+    // Counts and codes only: how the step ended, how many render calls it made, and the tokens it used.
+    onFinish: ({ finishReason, toolCalls, totalUsage }) => {
+      console.info(`GENUI_FINISHED ${context.phase} ${finishReason} calls=${toolCalls.length} in=${totalUsage.inputTokens ?? "?"} out=${totalUsage.outputTokens ?? "?"}`);
     },
   });
   return result.toUIMessageStreamResponse({ onError: () => "GENUI_FAILED", headers: { "cache-control": "no-store" } });

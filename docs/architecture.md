@@ -29,13 +29,15 @@ PREPARATION TIME: pnpm prepare:poc, run by hand on one machine
       v
   apps/game/src/demo/generated/local-real-rounds.json       (committed)
   apps/game/src/demo/local-real-experiment.pin.server.ts    (committed hash)
-=========================== no network below this line ===========================
+========== no network below this line, except opt-in generative UI ==========
 PLAY TIME: the Next.js server on localhost, and the player's browser
   local-real-experiment-loader.server.ts: read the artifact once per process
       -> createLocalRealExperiment: canonical hash = pin? parse with packages/artifact
-      -> page.tsx: the deck chooser, or dealSession(deck): five rounds, no answers
-      -> browser: hints and a guess
-      -> actions.ts: authorizeLocalExperimentReveal -> createReveal: answer, score, reveal
+      -> page.tsx: the deck chooser, or dealGame(deck): five rounds and a signed session token
+      -> browser: buys hints (revealLocalExperimentHint) and locks in a guess
+      -> actions.ts: authorizeLocalExperimentReveal -> answer: scored from the token, reveal
+      -> GENUI_ENABLED=1 only: app/api/genui/route.ts -> modelContext (answer-lock guard)
+             -> genui/model.server.ts -> OpenRouter -> checked render calls -> Explainer
 ```
 
 ## Preparation
@@ -81,16 +83,31 @@ PLAY TIME: the Next.js server on localhost, and the player's browser
    `local-real-experiment.server.ts` checks the artifact's canonical SHA-256
    against `TRUSTED_ARTIFACT_HASH` and parses it with `packages/artifact`. A
    missing or rejected artifact leaves the page in its empty state.
-7. **Deal.** On each page load, `dealSession` takes five rounds at random from
-   the deck's pool and reshuffles the options of four-option rounds, except
-   fix rounds. The browser receives only the public round: panes, prompt,
-   options, hints, and points. The answer and the reveal text stay on the
-   server.
-8. **Reveal.** The server action `authorizeLocalExperimentReveal` in
-   `apps/game/src/app/actions.ts` calls `createReveal`. It checks the round
-   and its version, the chosen option, the hints used, and that the claimed
-   score is reachable, then returns whether the guess was right, the answer,
-   the round score, and the reveal text.
+7. **Deal.** On each page load, `dealGame` takes five rounds at random from the
+   deck's pool and reshuffles the options of four-option rounds, except fix
+   rounds.
+   - The browser receives only the public round: panes, prompt, options, each
+     hint's place (not its text), and points. The answer, the hint text, and
+     the reveal text stay on the server.
+   - The game's progress (round, hints bought, score) travels as a token the
+     server signs (`local-real-experiment-session.server.ts`).
+8. **Hints and reveal.** Two server actions in `apps/game/src/app/actions.ts`
+   each take one step of the game and return the next token:
+   - `revealLocalExperimentHint` returns the next hint's text;
+   - `authorizeLocalExperimentReveal` locks in one answer and scores it from
+     the server's own hint count and running score.
+   A ledger refuses an older token for a game that has moved on, so a round
+   takes one answer. A token the server cannot continue ends the game with a
+   prompt to deal new rounds.
+9. **Generative UI (opt-in).** With `GENUI_ENABLED=1`, a revealed round offers
+   an Explainer through `app/api/genui/route.ts`, the game's only network path
+   at play time.
+   - The route needs the game's live token. It reads the round only through
+     the answer-lock guard (`modelContext`, `genui/round-context.server.ts`):
+     before the lock, no code; after it, the code and the reveal.
+   - `genui/model.server.ts` asks OpenRouter for one step whose only tools are
+     the components in `genui/render-catalog.ts`. Every call is checked before
+     it renders.
 
 ## The artifact
 
@@ -129,13 +146,13 @@ Beyond the shape, the parser checks:
 | Deck | `decks[]`, `id` | One of six game modes: `project`, `language`, `before-after`, `algorithm`, `output`, `fix` (`DECK_IDS`). |
 | Pool | `decks[].fixtures` | All of a deck's rounds, from 5 to 40 (`MAXIMUM_POOL_SIZE`). |
 | Round | `fixtures[]` | One question. The code calls it a fixture. |
-| Session, game | `dealSession`, `roundsPerSession` | Five rounds dealt at random from one pool. |
+| Session, game | `dealGame`, `roundsPerSession` | Five rounds dealt at random from one pool, with a signed token that holds the game's progress on the server's terms. |
 | Kind | `fixtures[].kind` | The round type: `PROJECT`, `LANGUAGE`, `BEFORE_AFTER`, `ALGORITHM`, `OUTPUT`, or `FIX`. Each deck holds one kind (`DECK_KINDS`). |
 | Pane | `fixtures[].panes[]` | A block of code the round shows: `{ label, text }`. Before-or-after rounds have panes `A` and `B`; the others have one unlabelled pane. |
 | Window | `source.excerptHash`; `code-windows.ts` | The stretch of whole lines a pane shows, cut from a file within the profile's `screening` limits (at most 18 lines and 4,096 bytes), usually past the imports. |
 | Option | `candidates[]` | A possible answer: `{ id, label, detail }`. Four per round, two for before-or-after. Only project options carry a `detail`, the repository description. |
 | Answer | `correctCandidateId` | The right option's id. It never reaches the browser before the guess. |
-| Hint | `clues[]` | Two per round. Each one used lowers the round's points. |
+| Hint | `clues[]` | Two per round. Each one bought lowers the round's points; its text reaches the browser only when bought. |
 | Reveal | `evidence`, `explanation`, `attribution`, `helpfulSignals`, `misleadingSignals` | What the player sees after a guess: where the code came from, why the answer is right, and what pointed toward it or away from it. |
 | Source | `fixtures[].source` | The round's provenance: repository, commit, path, blob, licence, author, and `discoverySource`. Its protected values (`PROTECTED_SOURCE_KEYS`) may not appear in public text. |
 | Discovery source | `source.discoverySource` | How the source was found: `GITHUB_COMMIT_SEARCH`, `STACK_V2`, `CURATED_GITHUB`, or `CURATED_DATASET`. |
