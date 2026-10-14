@@ -252,7 +252,7 @@ const contextFor = (round: DerivedRound, deckTitle: string, state: GameState, in
     panes: publicRound.content.panes,
     hints,
     reveal: privateReveal,
-  }, { round: index + 1, rounds: ROUNDS_PER_SESSION, score: state.score, hintsBought: phase === "before-lock" ? state.hints : 0, phase });
+  }, { round: index + 1, rounds: ROUNDS_PER_SESSION, score: state.score, hintsBought: phase === "before-lock" ? state.hints : state.hintsByRound[index] ?? 0, phase });
   return Object.freeze({
     ok: true,
     context,
@@ -280,7 +280,10 @@ const revealFor = (
   if (!publicRound.mode.candidates.some((candidate) => candidate.candidateId === candidateId)) fail();
   const correct = candidateId === reveal.correctCandidateId;
   const roundScore = correct ? publicRound.points[state.hints] ?? fail() : 0;
-  const next: GameState = { ...state, step: state.step + 1, roundIndex: state.roundIndex + 1, hints: 0, score: state.score + roundScore };
+  const next: GameState = {
+    ...state, step: state.step + 1, roundIndex: state.roundIndex + 1, hints: 0, hintsByRound: [...state.hintsByRound, state.hints],
+    score: state.score + roundScore,
+  };
   return {
     next,
     result: deepFreeze({
@@ -344,7 +347,7 @@ export const createLocalRealExperiment = (
         const mode = dealSession(deckId, random);
         const state: GameState = {
           version: 1, gameId: newGameId(), artifactHash: expectedArtifactHash, deck: deckId,
-          roundIds: mode.rounds.map(({ roundId }) => roundId), step: 0, roundIndex: 0, hints: 0, score: 0, dealtAt: now,
+          roundIds: mode.rounds.map(({ roundId }) => roundId), step: 0, roundIndex: 0, hints: 0, hintsByRound: [], score: 0, dealtAt: now,
         };
         const sessionToken = sealGame(state);
         recordStep(state, now);

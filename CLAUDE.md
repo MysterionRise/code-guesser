@@ -142,6 +142,29 @@ gate: changing queries, retries, ceilings, deck rules, or running
     - After the lock it discusses the code with the catalog components.
     - Its earlier `host_message` replies go back as its own turns.
     - Live, it declined every request for the answer before the lock.
+  - Agent playtests (#116): `ops/playtest/driver.mjs` keeps real browser
+    sessions on the game behind a small JSON API, and `ops/playtest/README.md`
+    is the protocol: five Claude Haiku persona players and two Claude Sonnet
+    judges, run as Claude Code subagents. Run 1
+    (`docs/review/evidence/2026-10-14-agent-playtest.md`, $0.05 of
+    OpenRouter):
+    - found no answer leak in 41 red-team attempts;
+    - ranked the visualizer best for explaining and the catalog best for
+      UX;
+    - drove the fixes now in place:
+      - the token records hints bought per round (`hintsByRound`); after
+        the lock the model sees only `boughtHints` and the options'
+        `optionDetails`;
+      - the context's score is named `totalScore`, and the composer's
+        Meter is gone;
+      - the host after the lock gets host_message, takeaway, and
+        signal_list only; its plain-text replies render; a refused paste
+        leaves its history;
+      - the paste check decodes base64;
+      - the visualizer frame sizes itself from a game-owned height
+        reporter;
+      - focus moves to the explainer output.
+    - Open: #120 (model per design), #121 (page length), #122 (run 2).
   - Composer and visualizer requests keep only the first panel or page
     (`ONE_ONLY`) and ask for `parallel_tool_calls: false`; live, Haiku
     sometimes wrote several pages at once.

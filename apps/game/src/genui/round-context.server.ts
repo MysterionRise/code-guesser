@@ -32,8 +32,10 @@ export interface BeforeLockContext extends RoundBasics {
 
 export interface AfterLockContext extends RoundBasics {
   readonly phase: "after-lock";
-  /** The round's hints; the player may not have bought any of them. */
-  readonly roundHints: readonly string[];
+  /** The hints the player bought for this round, and no others. */
+  readonly boughtHints: readonly string[];
+  /** Each option's label and the description the player saw beside it, if any. */
+  readonly optionDetails: readonly Readonly<{ label: string; detail: string | null }>[];
   /** Each pane's lines as "<number>: <code>", counted from 1, so a model can point at a line without counting. */
   readonly code: readonly Readonly<{ label: string | null; lines: readonly string[] }>[];
   readonly answer: string;
@@ -50,7 +52,7 @@ export type RoundContext = BeforeLockContext | AfterLockContext;
 export interface RoundSource {
   readonly deck: string;
   readonly prompt: string;
-  readonly options: readonly Readonly<{ candidateId: string; label: string }>[];
+  readonly options: readonly Readonly<{ candidateId: string; label: string; detail?: string | null }>[];
   readonly points: readonly number[];
   readonly panes: readonly Readonly<{ label: string | null; text: string }>[];
   readonly hints: readonly string[];
@@ -69,7 +71,7 @@ export interface RoundProgress {
   readonly round: number;
   readonly rounds: number;
   readonly score: number;
-  /** Hints bought for this round so far; only meaningful before the lock. */
+  /** Hints bought for this round: so far, before the lock; in all, after it. */
   readonly hintsBought: number;
   readonly phase: RoundPhase;
 }
@@ -102,7 +104,8 @@ export const roundContext = (source: RoundSource, progress: RoundProgress): Roun
   return Object.freeze({
     ...basics,
     phase: "after-lock",
-    roundHints: Object.freeze([...source.hints]),
+    boughtHints: Object.freeze(source.hints.slice(0, progress.hintsBought)),
+    optionDetails: Object.freeze(source.options.map(({ label, detail }) => Object.freeze({ label, detail: detail ?? null }))),
     code: Object.freeze(source.panes.map(({ label, text }) => Object.freeze({ label, lines: numberedLines(text) }))),
     answer: answer.label,
     evidence: source.reveal.evidence,
@@ -132,7 +135,8 @@ const PHASE_RULES: Readonly<Record<RoundPhase, readonly string[]>> = Object.free
     "You do not know which option the player picked or whether they were right unless they tell you; never assume either.",
     "To explain the round, call takeaway, signal_list, and code_view, and comparison when the options are worth setting side by side. Use host_message only for one short remark. Every text has a hard length limit, stated in its tool; keep well under it.",
     "Keep to what the data shows. Name options by their labels exactly as given.",
-    "The player may not have bought the round's hints; never say they saw one.",
+    "The player saw only the hints in boughtHints; never mention any other hint.",
+    "Cite only what the player could see: the code, the options and their descriptions in optionDetails, their bought hints, and the reveal. Never describe an option differently from its description, and never cite file names or facts that appear in none of these unless the reveal states them.",
     "Code lines are numbered from 1 within each pane, as \"<number>: <code>\"; use those numbers in code_view, and pane 2 for a second version.",
   ],
 });

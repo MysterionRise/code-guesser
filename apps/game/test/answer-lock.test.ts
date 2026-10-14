@@ -85,7 +85,9 @@ describe("answer-lock guard (#102)", () => {
           expect(after.context.phase).toBe("after-lock");
           expect(after.context.code).toEqual(fixture.panes.map(({ label, text }) => ({ label, lines: text.split("\n").map((line, at) => `${at + 1}: ${line}`) })));
           expect(after.context.answer).toBe(fixture.candidates.find(({ id }) => id === fixture.correctCandidateId)!.label);
-          expect(after.context.roundHints).toEqual(fixture.clues);
+          // After the lock the model sees the hints the player bought for this round, and no others.
+          expect(after.context.boughtHints).toEqual(fixture.clues.slice(0, index % 3));
+          expect(after.context.optionDetails.map(({ label }: any) => label).sort()).toEqual(round.mode.candidates.map(({ label }: any) => label).sort());
           expect(after.limits.paneLineCounts).toEqual(fixture.panes.map(({ text }) => text.split("\n").length));
           seen.add(round.roundId);
         }
