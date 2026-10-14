@@ -18,7 +18,7 @@ vi.mock("../src/demo/local-real-experiment-loader.server", async (importOriginal
 const { POST } = await import("../src/app/api/genui/route");
 const { DEFAULT_MODEL, mentionsCode, playerTurns } = await import("../src/genui/model.server");
 const { inputSchemaFor, RENDER_CATALOG } = await import("../src/genui/render-catalog");
-const { explainRequest, fellBack, renderCalls } = await import("../src/genui/genui-panel");
+const { explainRequest, fellBack, renderViews } = await import("../src/genui/genui-panel");
 // @ts-expect-error The fake is plain JavaScript shared with the browser tests.
 const { startFakeOpenRouter } = await import("../../../tests/e2e/fake-openrouter.mjs");
 
@@ -78,7 +78,7 @@ describe("generative UI building blocks (#101)", () => {
 
   it("renders only finished tool calls that pass the catalog", () => {
     const limits = { paneLineCounts: [3], optionLabels: ["Python", "Ruby"] };
-    const calls = renderCalls([
+    const calls = renderViews([
       { id: "u", role: "user", parts: [{ type: "text", text: "Explain" }] },
       { id: "a", role: "assistant", parts: [
         { type: "text", text: "Free text is never rendered." },
@@ -88,7 +88,7 @@ describe("generative UI building blocks (#101)", () => {
         { type: "tool-raw_html", toolCallId: "4", state: "output-available", input: {}, output: { html: "<b>" } },
       ] },
     ] as never, "after-lock", limits);
-    expect(calls).toEqual([{ component: "takeaway", props: { text: "Indentation matters." } }]);
+    expect(calls).toEqual([{ kind: "catalog", call: { component: "takeaway", props: { text: "Indentation matters." } } }]);
   });
 });
 
@@ -119,10 +119,10 @@ describe("the generative-UI route (#101)", () => {
   it("is off unless enabled, and needs a key before it calls anyone", async () => {
     const { round, token } = game(true);
     vi.stubEnv("GENUI_ENABLED", "");
-    expect((await post({ sessionToken: token, roundId: round.roundId, messages: [userMessage("Explain this round.")] })).status).toBe(404);
+    expect((await post({ sessionToken: token, roundId: round.roundId, design: "catalog", messages: [userMessage("Explain this round.")] })).status).toBe(404);
     vi.stubEnv("GENUI_ENABLED", "1");
     vi.stubEnv("OPENROUTER_API_KEY", "");
-    const response = await post({ sessionToken: token, roundId: round.roundId, messages: [userMessage("Explain this round.")] });
+    const response = await post({ sessionToken: token, roundId: round.roundId, design: "catalog", messages: [userMessage("Explain this round.")] });
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual({ reason: "GENUI_UNAVAILABLE" });
     vi.stubEnv("OPENROUTER_API_KEY", "test-key-not-real");
@@ -131,25 +131,31 @@ describe("the generative-UI route (#101)", () => {
 
   it("refuses requests that are not one live game's round", async () => {
     const { mode, round, token } = game(false);
-    const valid = { sessionToken: token, roundId: round.roundId, messages: [userMessage("Hi")] };
+    const valid = { sessionToken: token, roundId: round.roundId, design: "catalog", messages: [userMessage("Hi")] };
     expect((await post("{not json")).status).toBe(400);
     expect((await post({ ...valid, extra: true })).status).toBe(400);
     expect((await post("x".repeat(40_000))).status).toBe(413);
     expect((await post({ ...valid, messages: [] })).status).toBe(400);
     expect((await post({ ...valid, sessionToken: "forged.token" })).status).toBe(410);
     expect((await post({ ...valid, roundId: mode.rounds[1]!.roundId })).status).toBe(403);
+    expect((await post({ ...valid, design: "shiny" })).status).toBe(400);
+    // The visualizer and host designs are not built yet, and the composer exists only after the lock.
+    expect((await post({ ...valid, design: "visualizer" })).status).toBe(400);
+    const composerTooEarly = await post({ ...valid, design: "composer" });
+    expect(composerTooEarly.status).toBe(403);
+    expect(await composerTooEarly.json()).toEqual({ reason: "PHASE" });
     expect(fake.requests).toHaveLength(0);
   });
 
   it("before the lock, sends no code, offers only the host's message, and refuses pasted code", async () => {
     const { round, fixture, token } = game(false);
     const pasted = fixture.panes[0]!.text.split("\n").find((line) => line.trim().length >= 12)!;
-    const refused = await post({ sessionToken: token, roundId: round.roundId, messages: [userMessage(`which language is ${pasted}`)] });
+    const refused = await post({ sessionToken: token, roundId: round.roundId, design: "catalog", messages: [userMessage(`which language is ${pasted}`)] });
     expect(refused.status).toBe(422);
     expect(await refused.json()).toEqual({ reason: "PASTED_CODE" });
     expect(fake.requests).toHaveLength(0);
 
-    const response = await post({ sessionToken: token, roundId: round.roundId, messages: [userMessage("Which one is it?")] });
+    const response = await post({ sessionToken: token, roundId: round.roundId, design: "catalog", messages: [userMessage("Which one is it?")] });
     expect(response.status).toBe(200);
     expect(await response.text()).toContain("Hints cost points. Good luck!");
     expect(fake.requests).toHaveLength(1);
@@ -168,7 +174,7 @@ describe("the generative-UI route (#101)", () => {
 
   it("after the lock, sends the code and streams checked render calls", async () => {
     const { round, fixture, token } = game(true);
-    const response = await post({ sessionToken: token, roundId: round.roundId, messages: [userMessage("Explain this round.")] });
+    const response = await post({ sessionToken: token, roundId: round.roundId, design: "catalog", messages: [userMessage("Explain this round.")] });
     expect(response.status).toBe(200);
     const stream = await response.text();
     expect(stream).toContain('"output":{"text":"Read the keywords before the punctuation."}');
@@ -178,16 +184,53 @@ describe("the generative-UI route (#101)", () => {
     expect(seen(request)).toContain(JSON.stringify(fixture.panes[0]!.text.split("\n")[0]!.trim()).slice(1, -1).replace(/</gu, "\\\\u003c"));
   });
 
+  it("lets the composer lay out a whole panel after the lock, checked before it streams", async () => {
+    const { round, token } = game(true);
+    const response = await post({ sessionToken: token, roundId: round.roundId, design: "composer", messages: [userMessage("Explain this round.")] });
+    expect(response.status).toBe(200);
+    const stream = await response.text();
+    expect(stream).toContain('"type":"tool-output-available"');
+    expect(stream).toContain('"root":"panel"');
+    const [request] = fake.requests;
+    expect(request.body.tools.map((entry: any) => entry.function.name)).toEqual(["compose_panel"]);
+    expect(request.body.messages[0].content).toMatch(/single compose_panel call/u);
+
+    // A refused panel gets one repair round, where the model learns which check failed; a second refusal ends it.
+    const unsafe = { name: "compose_panel", args: { root: "panel", elements: [
+      { id: "panel", type: "Stack", props: { gap: "small" }, children: ["note"] },
+      { id: "note", type: "Text", props: { text: "Read more at https://example.test" } },
+    ] } };
+    fake.control({ calls: [unsafe] });
+    const refused = await (await post({ sessionToken: token, roundId: round.roundId, design: "composer", messages: [userMessage("Explain this round.")] })).text();
+    expect(refused).toContain('"errorText":"GENUI_FAILED"');
+    expect(refused).not.toContain("tool-output-available");
+    expect(logged.mock.calls.map(([line]) => line)).toEqual([
+      "GENUI_RENDER_REJECTED compose_panel SCHEMA elements.1.props.text",
+      "GENUI_RENDER_REJECTED compose_panel SCHEMA elements.1.props.text",
+    ]);
+    expect(fake.requests).toHaveLength(2);
+    const retry = JSON.stringify(fake.requests[1].body.messages);
+    expect(retry).toContain("COMPOSER_SPEC_REJECTED SCHEMA elements.1.props.text: UNSAFE_TEXT. Fix this and call compose_panel again.");
+    expect(retry.split("example.test").length - 1).toBe(1);
+
+    fake.control({ sequence: [[unsafe]] });
+    logged.mockClear();
+    const repaired = await (await post({ sessionToken: token, roundId: round.roundId, design: "composer", messages: [userMessage("Explain this round.")] })).text();
+    expect(repaired).toContain('"type":"tool-output-error"');
+    expect(repaired).toContain('"type":"tool-output-available"');
+    expect(fake.requests).toHaveLength(2);
+  });
+
   it("drops a render call that fails the catalog, and hides provider failures behind a code", async () => {
     const { round, token } = game(true);
     fake.control({ calls: [{ name: "takeaway", args: { text: "Claim it at https://example.test" } }] });
-    const unsafe = await (await post({ sessionToken: token, roundId: round.roundId, messages: [userMessage("Explain this round.")] })).text();
+    const unsafe = await (await post({ sessionToken: token, roundId: round.roundId, design: "catalog", messages: [userMessage("Explain this round.")] })).text();
     // The SDK streams a call's raw input as it arrives; only a checked output is ever rendered, and this one has none.
     expect(unsafe).toContain('{"type":"tool-output-error","toolCallId":"call_0","errorText":"GENUI_FAILED"}');
     expect(unsafe).not.toContain("tool-output-available");
 
     fake.control({ status: 402 });
-    const limited = await post({ sessionToken: token, roundId: round.roundId, messages: [userMessage("Explain this round.")] });
+    const limited = await post({ sessionToken: token, roundId: round.roundId, design: "catalog", messages: [userMessage("Explain this round.")] });
     const body = await limited.text();
     expect(body).toContain("GENUI_FAILED");
     expect(body).not.toContain("fake provider body");

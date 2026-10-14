@@ -122,6 +122,11 @@ pointed to the answer and away from it, and gives a one-line takeaway.
 GENUI_ENABLED=1 OPENROUTER_API_KEY=… pnpm --filter @codeguessr/game dev
 ```
 
+- `?design=` picks the design, and a "Designs" nav switches between them:
+  - `catalog` (the default) fills five fixed components;
+  - `composer` lets the model lay out the whole panel from 14 building
+    blocks, ending in a quiz;
+  - `off` plays the static game.
 - `OPENROUTER_MODEL` picks the model (default `anthropic/claude-haiku-5.5`).
 - Set spend limits on the OpenRouter key itself. When the key is refused, the
   explainer steps aside and the game plays on.

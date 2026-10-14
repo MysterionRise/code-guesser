@@ -112,6 +112,19 @@ gate: changing queries, retries, ceilings, deck rules, or running
   - The server logs codes only: `GENUI_FINISHED <phase> <finishReason>
     calls=<n> in=<tokens> out=<tokens>`, `GENUI_RENDER_REJECTED <component>
     <check>`, `GENUI_STREAM_FAILED <status>`.
+  - Designs (#114, Phase 2 of #109): with `GENUI_ENABLED=1`, `?design=`
+    picks `catalog` (the default), `composer`, or `off`, and a "Designs" nav
+    switches between them. `genui/designs.ts` lists them; `visualizer` (#115)
+    and `host` (#104) join as they land.
+  - The composer (`genui/composer-spec.ts`, `genui/composer-view.tsx`) lets
+    the model lay out the whole post-lock panel as a json-render spec. The
+    spec is a tree of 14 blocks: stack, row, card, details, heading, text,
+    callout, code excerpt, list, table, badge, meter, divider, and quiz.
+    - Elements may carry only type, props and children: no state, actions,
+      visibility, repeats, or expressions.
+    - `parseComposerSpec` checks it on the server and again in the browser.
+    - A refused panel gets one repair round, told which check failed.
+    - Live, a composed panel costs about $0.0012 (7K tokens in, 1K out).
   - Live check, with each explain about $0.0007:
     `docs/review/evidence/2026-10-14-genui-live-check.md`. Run it locally
     with `GENUI_ENABLED=1 OPENROUTER_API_KEY="$(cat ~/.config/openrouter/key)"`.

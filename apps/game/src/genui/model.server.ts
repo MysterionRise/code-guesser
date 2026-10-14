@@ -1,8 +1,10 @@
 import "server-only";
 
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
-import { jsonSchema, stepCountIs, streamText, tool, type ModelMessage, type ToolSet } from "ai";
+import { jsonSchema, stepCountIs, streamText, tool, type ModelMessage, type StopCondition, type ToolSet } from "ai";
 
+import { COMPOSER_TOOL_DESCRIPTION, ComposerRejected, composerInputSchema, parseComposerSpec } from "./composer-spec";
+import type { Design } from "./designs";
 import { RENDER_CATALOG, RenderCallRejected, componentsFor, inputSchemaFor, parseRenderCall, type RenderLimits } from "./render-catalog";
 import { modelInput, type RoundContext } from "./round-context.server";
 
@@ -14,9 +16,18 @@ import { modelInput, type RoundContext } from "./round-context.server";
 
 export const DEFAULT_MODEL = "anthropic/claude-haiku-5.5";
 export const DEFAULT_BASE_URL = "https://openrouter.ai/api/v1";
-/** Room for two or three render calls; reasoning is off, so none of it goes to thinking. */
-const MAX_OUTPUT_TOKENS = 1_200;
+/** Room for a few render calls or one composed panel; reasoning is off, so none of it goes to thinking. */
+const MAX_OUTPUT_TOKENS = 2_500;
 const TIMEOUT_MS = 20_000;
+/** A composed panel is one long call, and may take a repair round. */
+const COMPOSER_TIMEOUT_MS = 45_000;
+
+/**
+ * One step, except that a composed panel the checks refused gets one repair round: the model sees which check
+ * failed and calls again. The run stops as soon as a panel passes.
+ */
+const stopFor = (design: Design): StopCondition<ToolSet> | StopCondition<ToolSet>[] => design !== "composer" ? stepCountIs(1)
+  : [stepCountIs(2), ({ steps }) => steps.at(-1)?.content.some((part) => part.type === "tool-result") ?? false];
 /** Turns of chat the model sees, and how long one may be. */
 export const MAX_TURNS = 8;
 export const MAX_TURN_LENGTH = 500;
@@ -78,7 +89,40 @@ const renderTools = (context: RoundContext, limits: RenderLimits): ToolSet => Ob
   })]),
 );
 
+/** The composer lays out the whole panel in one call (#114). */
+const composerTools = (limits: RenderLimits): ToolSet => ({
+  compose_panel: tool({
+    description: COMPOSER_TOOL_DESCRIPTION,
+    inputSchema: jsonSchema<Record<string, unknown>>(composerInputSchema() as never),
+    execute: async (input: Record<string, unknown>) => {
+      try {
+        return parseComposerSpec(input, limits);
+      } catch (error) {
+        if (error instanceof ComposerRejected) console.error(`GENUI_RENDER_REJECTED compose_panel ${error.code}`);
+        throw error;
+      }
+    },
+  }),
+});
+
+/** What each design asks of the model, on top of the guard's own rules. */
+const DESIGN_RULES: Readonly<Partial<Record<Design, string>>> = Object.freeze({
+  composer: [
+    "Design one explainer panel for this round with a single compose_panel call, and nothing else.",
+    "Lead with a short verdict: a Callout or a Heading and Text.",
+    "Show the decisive lines with one or two CodeExcerpts, highlighting them with notes.",
+    "Set the options side by side in a Table or Cards when that helps.",
+    "Finish with a Quiz that checks the takeaway, with exactly one right choice.",
+    "Aim for 8 to 20 elements and vary the layout to suit the round.",
+  ].join(" "),
+});
+
+/** The tools a design may call in this phase. */
+const toolsFor = (design: Design, context: RoundContext, limits: RenderLimits): ToolSet =>
+  design === "composer" ? composerTools(limits) : renderTools(context, limits);
+
 export interface RoundRequest {
+  readonly design: Design;
   readonly context: RoundContext;
   readonly limits: RenderLimits;
   readonly codeLines: readonly string[];
@@ -91,7 +135,7 @@ export interface RoundRequest {
  * is not configured or the player pasted the round's code before the lock. Provider errors never reach the
  * browser or the log beyond a code.
  */
-export const streamRound = ({ context, limits, codeLines, turns, signal }: RoundRequest): Response | GenuiRefusal => {
+export const streamRound = ({ design, context, limits, codeLines, turns, signal }: RoundRequest): Response | GenuiRefusal => {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (apiKey === undefined || apiKey.length === 0) return "GENUI_UNAVAILABLE";
   if (context.phase === "before-lock" && mentionsCode(turns, codeLines)) return "PASTED_CODE";
@@ -109,7 +153,8 @@ export const streamRound = ({ context, limits, codeLines, turns, signal }: Round
       reasoning: { enabled: false },
     }),
   });
-  const { system, data } = modelInput(context);
+  const { system: rules, data } = modelInput(context);
+  const system = DESIGN_RULES[design] === undefined ? rules : `${rules}\n${DESIGN_RULES[design]}`;
   const messages: ModelMessage[] = [
     { role: "user", content: data },
     ...turns.map(({ role, text }): ModelMessage => ({ role, content: text })),
@@ -118,11 +163,11 @@ export const streamRound = ({ context, limits, codeLines, turns, signal }: Round
     model: provider.chatModel(process.env.OPENROUTER_MODEL ?? DEFAULT_MODEL),
     system,
     messages,
-    tools: renderTools(context, limits),
-    stopWhen: stepCountIs(1),
+    tools: toolsFor(design, context, limits),
+    stopWhen: stopFor(design),
     maxOutputTokens: MAX_OUTPUT_TOKENS,
     maxRetries: 1,
-    timeout: TIMEOUT_MS,
+    timeout: design === "composer" ? COMPOSER_TIMEOUT_MS : TIMEOUT_MS,
     ...(signal === undefined ? {} : { abortSignal: signal }),
     onError: ({ error }) => {
       const status = isRecord(error) && typeof error.statusCode === "number" ? error.statusCode : "NETWORK";
@@ -130,7 +175,7 @@ export const streamRound = ({ context, limits, codeLines, turns, signal }: Round
     },
     // Counts and codes only: how the step ended, how many render calls it made, and the tokens it used.
     onFinish: ({ finishReason, toolCalls, totalUsage }) => {
-      console.info(`GENUI_FINISHED ${context.phase} ${finishReason} calls=${toolCalls.length} in=${totalUsage.inputTokens ?? "?"} out=${totalUsage.outputTokens ?? "?"}`);
+      console.info(`GENUI_FINISHED ${design} ${context.phase} ${finishReason} calls=${toolCalls.length} in=${totalUsage.inputTokens ?? "?"} out=${totalUsage.outputTokens ?? "?"}`);
     },
   });
   return result.toUIMessageStreamResponse({ onError: () => "GENUI_FAILED", headers: { "cache-control": "no-store" } });

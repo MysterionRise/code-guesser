@@ -4,6 +4,7 @@ import dynamic from "next/dynamic";
 
 import type { HintRequest, HintResponse, RevealRequest, RevealResponse } from "../components/arcade";
 import type { PublicModeContract } from "../components/arcade/mode-contract";
+import type { Design } from "../genui/designs";
 
 const ArcadeShell = dynamic(
   () => import("../components/arcade/arcade-shell").then((module) => module.ArcadeShell),
@@ -18,7 +19,7 @@ interface DemoArcadeProps {
   readonly chooseAnotherDeckHref?: string;
   readonly newGameHref?: string;
   readonly deckTitle?: string;
-  readonly genuiEnabled?: boolean;
+  readonly genuiDesign?: Design;
 }
 
 export function DemoArcade(props: DemoArcadeProps) {
