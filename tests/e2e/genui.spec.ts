@@ -104,3 +104,32 @@ test("the visualizer runs the model's page in a sandbox that can't reach the gam
   expect(await (await request.get(`${fake}/leaks`)).text()).toBe("0");
   await expect(page.getByRole("button", { name: "Next round" })).toBeEnabled();
 });
+
+test("the host chats during the round without the code, sells the next hint on request, and talks code after the lock", async ({ page, request }) => {
+  await page.goto("/?deck=project&design=host");
+  await expect(page.getByText("Round 1 of 5")).toBeVisible();
+  const host = page.getByRole("complementary", { name: "Host" });
+  await expect(host).toContainText("The host hasn’t seen the code and can’t tell you the answer.");
+  await host.getByLabel("Ask the host").fill("Any tips?");
+  await host.getByRole("button", { name: "Send" }).click();
+  await expect(host.locator(".host-turn.player")).toHaveText("You: Any tips?");
+  await expect(host.locator(".genui-host")).toHaveText("I can't see the code yet, but I can cheer you on.");
+  const offer = host.getByRole("button", { name: "Buy hint 1 (−200 pts)" });
+  await offer.click();
+  await expect(page.locator(".hints .hint")).toHaveCount(1);
+  await expect(host.getByRole("button", { name: "Buy hint 2 (−300 pts)" })).toBeVisible();
+  const before = await (await request.get(`${fake}/requests`)).json() as { body: { tools: { function: { name: string } }[] } }[];
+  expect(before[0]!.body.tools.map(({ function: { name } }) => name)).toEqual(["host_message", "offer_hint"]);
+
+  await answerRound(page);
+  await expect(page.locator(".reveal .round-points")).toHaveText("+800 points (1 hint)");
+  await expect(host).toContainText("The round is over: ask about the code.");
+  await expect(host.getByRole("button", { name: /Buy hint/u })).toHaveCount(0);
+  await host.getByLabel("Ask the host").fill("Why was that the answer?");
+  await host.getByRole("button", { name: "Send" }).click();
+  await expect(host.locator(".genui-takeaway")).toHaveText("Takeaway: Read the keywords before the punctuation.");
+  const after = await (await request.get(`${fake}/requests`)).json() as { body: { tools: { function: { name: string } }[] } }[];
+  expect(after.at(-1)!.body.tools.map(({ function: { name } }) => name)).toContain("code_view");
+  await page.getByRole("button", { name: "Next round" }).click();
+  await expect(page.getByRole("complementary", { name: "Host" }).locator(".host-turn")).toHaveCount(0);
+});

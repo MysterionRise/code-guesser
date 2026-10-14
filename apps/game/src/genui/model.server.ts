@@ -56,9 +56,14 @@ export const playerTurns = (messages: unknown): readonly PlayerTurn[] | null => 
   const turns: PlayerTurn[] = [];
   for (const message of messages) {
     if (!isRecord(message) || (message.role !== "user" && message.role !== "assistant") || !Array.isArray(message.parts)) return null;
-    const text = message.parts
-      .filter((part): part is { type: "text"; text: string } => isRecord(part) && part.type === "text" && typeof part.text === "string")
-      .map(({ text: partText }) => partText).join("\n").trim();
+    // The host's earlier replies are its own host_message calls; they go back as its turns, so a chat stays coherent.
+    const text = message.parts.flatMap((part): string[] => {
+      if (!isRecord(part)) return [];
+      if (part.type === "text" && typeof part.text === "string") return [part.text];
+      if (message.role === "assistant" && part.type === "tool-host_message" && part.state === "output-available"
+        && isRecord(part.output) && typeof part.output.text === "string") return [part.output.text];
+      return [];
+    }).join("\n").trim();
     if (message.role === "user" && (text.length === 0 || text.length > MAX_TURN_LENGTH)) return null;
     if (text.length > 0) turns.push(Object.freeze({ role: message.role, text: text.slice(0, MAX_TURN_LENGTH * 2) }));
   }
@@ -160,6 +165,12 @@ const DESIGN_RULES: Readonly<Partial<Record<Design, string>>> = Object.freeze({
     "Set the options side by side in a Table or Cards when that helps.",
     "Finish with a Quiz that checks the takeaway, with exactly one right choice.",
     "Aim for 8 to 20 elements and vary the layout to suit the round.",
+  ].join(" "),
+  host: [
+    "You are chatting with the player during the round, as the game's host.",
+    "Reply with one or two short host_message calls; be warm, brief, and a little playful.",
+    "Before the lock, when the player asks for help, tips, or the answer, also call offer_hint once in that reply (only while a hint is left), so they can buy the next hint with one press.",
+    "After the lock, answer questions about the code and the answer, and use takeaway, signal_list, code_view, or comparison when they help.",
   ].join(" "),
   visualizer: [
     "Build one interactive visualization of this round with a single render_visualizer call, and nothing else.",

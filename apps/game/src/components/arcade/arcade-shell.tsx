@@ -3,6 +3,7 @@
 import * as React from "react";
 import type { Design } from "../../genui/designs";
 import type { GenuiPanelProps } from "../../genui/genui-panel";
+import type { HostChatProps } from "../../genui/host-chat";
 import { ArcadeShellRuleError, optionLine, requirePublicText as required, type PublicModeContract, type RoundModeKind } from "./mode-contract";
 
 /** Locks in an answer for the round being played; the server reads progress, hints, and score from its own token. */
@@ -219,6 +220,7 @@ const linkedAttribution = (attribution: string): React.ReactNode[] => attributio
 
 /** Generative UI's panel, fetched only when the server turns it on, so the static game never loads it. */
 const GenuiPanel = React.lazy(() => import("../../genui/genui-panel")) as React.ComponentType<GenuiPanelProps>;
+const HostChat = React.lazy(() => import("../../genui/host-chat")) as React.ComponentType<HostChatProps>;
 
 /** What the player sees when the server can no longer continue this game, for example after it restarts. */
 export const SESSION_ENDED_MESSAGE = "This game can’t continue. Deal new rounds to keep playing.";
@@ -482,6 +484,17 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
           )}
         </div>
       </section>
+      {genuiDesign === "host" && (
+        <React.Suspense fallback={null}>
+          <HostChat key={round.roundId} roundId={round.roundId} phase={session.reveal ? "after-lock" : "before-lock"}
+            panes={round.content.panes} optionLabels={round.mode.candidates.map(({ label }) => label)} sessionToken={currentToken}
+            hint={{
+              label: session.lockedCandidateId !== null || session.visibleHintCount >= round.mode.clues.length ? null
+                : `Buy hint ${session.visibleHintCount + 1} (−${points(round.points[session.visibleHintCount]! - round.points[session.visibleHintCount + 1]!)} pts)`,
+              buy: () => { void requestHint(); },
+            }} />
+        </React.Suspense>
+      )}
     </main>
   );
 }

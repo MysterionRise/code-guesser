@@ -129,6 +129,9 @@ GENUI_ENABLED=1 OPENROUTER_API_KEY=… pnpm --filter @codeguessr/game dev
   - `visualizer` lets the model write a small interactive page that steps
     through the round's code. It runs in a sandboxed frame with no network
     and no access to the game;
+  - `host` adds a chat beside the round. Before you answer, the host hasn't
+    seen the code: it explains the rules and can offer you the next hint.
+    After you answer, it talks about the code;
   - `off` plays the static game.
 - `OPENROUTER_MODEL` picks the model (default `anthropic/claude-haiku-5.5`).
 - Set spend limits on the OpenRouter key itself. When the key is refused, the

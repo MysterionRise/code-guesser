@@ -113,9 +113,8 @@ gate: changing queries, retries, ceilings, deck rules, or running
     calls=<n> in=<tokens> out=<tokens>`, `GENUI_RENDER_REJECTED <component>
     <check>`, `GENUI_STREAM_FAILED <status>`.
   - Designs (#114, Phase 2 of #109): with `GENUI_ENABLED=1`, `?design=`
-    picks `catalog` (the default), `composer`, `visualizer`, or `off`, and a
-    "Designs" nav switches between them. `genui/designs.ts` lists them;
-    `host` (#104) joins when it lands.
+    picks `catalog` (the default), `composer`, `visualizer`, `host`, or
+    `off`, and a "Designs" nav switches between them (`genui/designs.ts`).
   - The composer (`genui/composer-spec.ts`, `genui/composer-view.tsx`) lets
     the model lay out the whole post-lock panel as a json-render spec. The
     spec is a tree of 14 blocks: stack, row, card, details, heading, text,
@@ -136,6 +135,13 @@ gate: changing queries, retries, ceilings, deck rules, or running
     - An e2e page spells its escapes in pieces to pass those checks, and the
       sandbox still stops it.
     - Live: 11–16 s, about 2–3K output tokens (about $0.0015).
+  - The host (#104, `genui/host-chat.tsx`) is a chat beside the round.
+    - Before the lock it sees no code (the guard) and can call `offer_hint`.
+      That renders a buy-hint button the player presses at the round's own
+      cost; the host never buys or invents hints.
+    - After the lock it discusses the code with the catalog components.
+    - Its earlier `host_message` replies go back as its own turns.
+    - Live, it declined every request for the answer before the lock.
   - Composer and visualizer requests keep only the first panel or page
     (`ONE_ONLY`) and ask for `parallel_tool_calls: false`; live, Haiku
     sometimes wrote several pages at once.

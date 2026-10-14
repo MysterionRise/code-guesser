@@ -43,6 +43,18 @@ describe("generative UI building blocks (#101)", () => {
     expect((inputSchemaFor("code_view") as any).properties.highlights.items.properties.kind.enum).toEqual(["helpful", "misleading"]);
   });
 
+  it("gives the host its own earlier replies, and nothing else from the browser's tool parts", () => {
+    expect(playerTurns([
+      userMessage("Hi host"),
+      { id: "a1", role: "assistant", parts: [
+        { type: "tool-host_message", state: "output-available", output: { text: "Hello! Hints cost points." } },
+        { type: "tool-offer_hint", state: "output-available", output: { reason: "Stuck?" } },
+        { type: "tool-host_message", state: "input-streaming", input: { text: "half" } },
+      ] },
+      userMessage("Which one is it?"),
+    ])).toEqual([{ role: "user", text: "Hi host" }, { role: "assistant", text: "Hello! Hints cost points." }, { role: "user", text: "Which one is it?" }]);
+  });
+
   it("keeps only short text turns that end with the player's, dropping tool parts", () => {
     expect(playerTurns([userMessage("Why Python?")])).toEqual([{ role: "user", text: "Why Python?" }]);
     expect(playerTurns([
@@ -139,8 +151,7 @@ describe("the generative-UI route (#101)", () => {
     expect((await post({ ...valid, sessionToken: "forged.token" })).status).toBe(410);
     expect((await post({ ...valid, roundId: mode.rounds[1]!.roundId })).status).toBe(403);
     expect((await post({ ...valid, design: "shiny" })).status).toBe(400);
-    // The host design is not built yet; the composer and the visualizer exist only after the lock.
-    expect((await post({ ...valid, design: "host" })).status).toBe(400);
+    // The composer and the visualizer exist only after the lock.
     expect((await post({ ...valid, design: "visualizer" })).status).toBe(403);
     const composerTooEarly = await post({ ...valid, design: "composer" });
     expect(composerTooEarly.status).toBe(403);
@@ -148,7 +159,7 @@ describe("the generative-UI route (#101)", () => {
     expect(fake.requests).toHaveLength(0);
   });
 
-  it("before the lock, sends no code, offers only the host's message, and refuses pasted code", async () => {
+  it("before the lock, sends no code, offers only the host's components, and refuses pasted code", async () => {
     const { round, fixture, token } = game(false);
     const pasted = fixture.panes[0]!.text.split("\n").find((line) => line.trim().length >= 12)!;
     const refused = await post({ sessionToken: token, roundId: round.roundId, design: "catalog", messages: [userMessage(`which language is ${pasted}`)] });
@@ -158,7 +169,7 @@ describe("the generative-UI route (#101)", () => {
 
     const response = await post({ sessionToken: token, roundId: round.roundId, design: "catalog", messages: [userMessage("Which one is it?")] });
     expect(response.status).toBe(200);
-    expect(await response.text()).toContain("Hints cost points. Good luck!");
+    expect(await response.text()).toContain("I can't see the code yet, but I can cheer you on.");
     expect(fake.requests).toHaveLength(1);
     const [request] = fake.requests;
     expect(request.authorization).toBe("Bearer test-key-not-real");
@@ -166,11 +177,30 @@ describe("the generative-UI route (#101)", () => {
     expect(request.body.provider).toEqual({ data_collection: "deny" });
     // Thinking would spend the output budget before any render call (seen in the first live check).
     expect(request.body.reasoning).toEqual({ enabled: false });
-    expect(request.body.tools.map((entry: any) => entry.function.name)).toEqual(["host_message"]);
+    expect(request.body.tools.map((entry: any) => entry.function.name)).toEqual(["host_message", "offer_hint"]);
     for (const line of fixture.panes.flatMap(({ text }) => text.split("\n")).map((text) => text.trim()).filter((text) => text.length >= 8)) {
       expect(seen(request).includes(JSON.stringify(line).slice(1, -1)), `code reached the model: ${line}`).toBe(false);
     }
     expect(seen(request)).not.toContain(fixture.correctCandidateId);
+  });
+
+  it("lets the host chat before the lock with no code, offering a hint, and remember its replies", async () => {
+    const { round, fixture, token } = game(false);
+    const history = [
+      userMessage("Hi host"),
+      { id: "a1", role: "assistant", parts: [{ type: "tool-host_message", state: "output-available", output: { text: "Hello there!" } }] },
+      userMessage("Any tips?"),
+    ];
+    const response = await post({ sessionToken: token, roundId: round.roundId, design: "host", messages: history });
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain('"output":{"reason":"Stuck? A hint might point you the right way."}');
+    const [request] = fake.requests;
+    expect(request.body.tools.map((entry: any) => entry.function.name)).toEqual(["host_message", "offer_hint"]);
+    expect(request.body.messages.at(-2)).toMatchObject({ role: "assistant", content: "Hello there!" });
+    expect(request.body.messages[0].content).toMatch(/You are chatting with the player during the round/u);
+    for (const line of fixture.panes.flatMap(({ text }) => text.split("\n")).map((text) => text.trim()).filter((text) => text.length >= 8)) {
+      expect(seen(request).includes(JSON.stringify(line).slice(1, -1)), `code reached the host: ${line}`).toBe(false);
+    }
   });
 
   it("after the lock, sends the code and streams checked render calls", async () => {

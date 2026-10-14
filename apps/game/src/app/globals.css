@@ -131,3 +131,14 @@ noscript { display: block; padding: 12px; margin-bottom: 16px; background: #522;
 .genui-visualizer figcaption { margin-bottom: 6px; color: #9fbcae; font-size: .88rem; }
 .visualizer-frame { display: block; width: 100%; height: 480px; border: 1px solid #2b5043; border-radius: 12px; background: #0b1c16; }
 .visualizer-summary { margin: 8px 0 0; color: #cdeada; }
+.host-chat { margin: 18px 0 0; padding: 16px 18px; border: 1px solid #2b5043; border-radius: 14px; background: #0b1c16; }
+.host-chat h2 { margin: 0 0 4px; font-size: 1rem; color: #cdeada; }
+.host-note { margin: 0 0 10px; color: #9fbcae; font-size: .86rem; }
+.host-transcript { list-style: none; margin: 0 0 10px; padding: 0; display: grid; gap: 8px; }
+.host-turn { padding: 8px 12px; border-radius: 10px; max-width: 85%; }
+.host-turn.player { justify-self: end; background: #1d3a24; }
+.host-turn.host { justify-self: start; background: #10251d; }
+.host-turn .genui-host, .host-turn .genui-takeaway { margin: 0; }
+.genui-offer { margin: 6px 0 0; }
+.host-form { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; }
+.host-form input { min-width: 0; padding: 8px 10px; border-radius: 8px; border: 1px solid #527565; background: #030a08; color: #effff8; font: inherit; }
