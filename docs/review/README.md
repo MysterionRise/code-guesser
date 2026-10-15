@@ -1,11 +1,14 @@
 # Reviews and plans
 
-Current state, 2026-10-14: Phases 0 to 3b of the deck pipeline are merged into
+Current state, 2026-10-15: Phases 0 to 3b of the deck pipeline are merged into
 `main`. The game plays six decks from one committed artifact (schema
 `local-experiment-artifact.v4`, profile `local-real-rounds.v5`); each deck is a
-pool of 10 or 24 rounds, and a game deals five. Phase 3c is planned and waits
-on the owner's decisions. Separately, the public-app track (#109) has merged
-its Phase 1.
+pool of 10 or 24 rounds, and a game deals five. The public-app track (#109) has
+merged Phases 1 and 2. The next release is **v1.0** (milestone #4, checklist
+#130): more decks and bigger pools, a cleaner UI, visual themes as experiment
+arms, question layers generated at preparation time, and the experiment
+pipeline. Its data work replaces Phase 3c's open decisions with the ones in
+#129.
 
 | Phase | What it did | PRs | Run record |
 | --- | --- | --- | --- |
@@ -28,7 +31,7 @@ designs with an anonymous first-party event log.
 | --- | --- | --- | --- |
 | 1 | Server-held game state; the answer-lock guard; generative UI on the Vercel AI SDK through OpenRouter, behind `GENUI_ENABLED`; fixes from the first live check | #110, #111, #112, and this phase's completion PR | #96, #102, #101; [live check](evidence/2026-10-14-genui-live-check.md) |
 | 2 | Open-ended designs compared locally: a design switcher, the json-render composer, a sandboxed visualizer, and the host chat; a Claude Code agent playtest team and the fixes from its first run | #117, #118, #119, and #116's PR | #114, #115, #104, #116; [agent playtest](evidence/2026-10-14-agent-playtest.md) |
-| next | Arm assignment and the event log, then the report; hardening before launch | planned | #106, #107, #108; #97–#100 |
+| v1.0 | Arm assignment and the event log, the report, themes, question layers, the UI pass, and the v6 data run; hardening comes after | in progress | #106–#108, #125–#130; [language option sets](evidence/2026-10-15-language-pairing-offline.md) |
 
 - [Architecture](../architecture.md): the flow from preparation to play, the
   artifact's shape, and a glossary.

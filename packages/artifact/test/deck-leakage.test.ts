@@ -5,8 +5,18 @@ import { describe, expect, it } from "vitest";
 import { BEFORE_AFTER_CANDIDATE_IDS, LANGUAGE_PAIRS, parseArtifactDecks, type ParsedDeck, type ParsedFixture } from "../src/index";
 import {
   LINE_FEATURES, TOLERANCE, accuracy, alphabeticalSolver, answerOf, chance, frequencySolver, labelWordSolver, lineFeatureSolver,
-  pairLengthSolver, paneLines, paneOverlapSolver, proseLines, raritySolver, sameOptionsSolver, transformsArguments,
+  memoryPlayer, optionKey, pairLengthSolver, paneLines, paneOverlapSolver, paneSizeSolver, proseLines, raritySolver,
+  replayBaseline, sameOptionsSolver, transformsArguments,
 } from "./solvers";
+
+/** How far a remembering player may beat remembering reveals alone (#81): three points, in game two and three. */
+const MEMORY_SLACK = 0.03;
+const memoryWithinReplay = (fixtures: readonly ParsedFixture[]): void => {
+  for (const game of [2, 3]) {
+    expect(memoryPlayer(fixtures, game), `game ${game}`)
+      .toBeLessThanOrEqual(replayBaseline(fixtures.length, fixtures[0]!.candidates.length, game) + MEMORY_SLACK);
+  }
+};
 
 /**
  * Leakage: solvers that never read the code as code must do no better than chance plus ten points. Each sees what
@@ -35,6 +45,35 @@ describe("deck leakage", () => {
       return pair.every((member) => fixture.candidates.some((candidate) => candidate.label === member)) ? 1 : 0;
     };
     expect(accuracy(fixtures, lookalikeOffered)).toBeLessThanOrEqual(limit);
+  });
+
+  it.runIf(deck("language") !== undefined)("language option sets recur in at most two rounds, so remembering reveals barely helps (#81)", () => {
+    const { fixtures } = deck("language")!;
+    const counts = new Map<string, number>();
+    for (const fixture of fixtures) counts.set(optionKey(fixture), (counts.get(optionKey(fixture)) ?? 0) + 1);
+    expect(Math.max(...counts.values())).toBeLessThanOrEqual(2);
+    memoryWithinReplay(fixtures);
+    // A player who had memorised the whole pool could still avoid a repeated set's other pair, since 24 rounds over
+    // 15 possible sets must repeat some: 43.75%, where four-round sets once let it name every answer.
+    const pairOf = (label: string) => LANGUAGE_PAIRS.find((pair) => (pair as readonly string[]).includes(label))!;
+    const avoidSiblingPair = (fixture: ParsedFixture, label: string, index: number) => fixtures
+      .some((other, at) => at !== index && optionKey(other) === optionKey(fixture) && (pairOf(answerOf(other)) as readonly string[]).includes(label)) ? 0 : 1;
+    expect(accuracy(fixtures, avoidSiblingPair)).toBeLessThanOrEqual(0.4375);
+  });
+
+  it.runIf(deck("project") !== undefined)("remembering project reveals earns little beyond replaying them (#81)", () => {
+    memoryWithinReplay(deck("project")!.fixtures);
+  });
+
+  it.runIf(deck("output") !== undefined)("remembering output or fix reveals earns nothing beyond replaying them", () => {
+    memoryWithinReplay(deck("output")!.fixtures);
+    if (deck("fix") !== undefined) memoryWithinReplay(deck("fix")!.fixtures);
+  });
+
+  // #81: six families of four, each member the answer once, so three reveals in a family give the fourth away;
+  // breaking the families needs the two the profile left out, which the journal does not hold.
+  it.runIf(deck("algorithm") !== undefined).fails("remembering algorithm reveals earns little beyond replaying them (#81)", () => {
+    memoryWithinReplay(deck("algorithm")!.fixtures);
   });
 
   it.runIf(deck("project") !== undefined)("project options appear equally often, so counting them does not help", () => {
@@ -118,6 +157,16 @@ describe("deck leakage", () => {
       .toEqual([]);
     // After the second hint two options are left: picking the longer or the shorter is a coin toss.
     for (const direction of [1, -1] as const) expect(accuracy(fixtures, pairLengthSolver(direction))).toBeLessThanOrEqual(0.5 + TOLERANCE);
+  });
+
+  // #75: the newer pane is usually the bigger one (75% by lines, 80% by characters); balancing it needs commits
+  // the journal does not hold.
+  it.runIf(deck("before-after") !== undefined).fails("the newer version is not the bigger pane (#75)", () => {
+    const { fixtures } = deck("before-after")!;
+    const limit = chance(fixtures[0]!) + TOLERANCE;
+    for (const measure of [(text: string) => text.split("\n").length, (text: string) => text.length]) {
+      for (const direction of [1, -1]) expect(accuracy(fixtures, paneSizeSolver((text) => direction * measure(text)))).toBeLessThanOrEqual(limit);
+    }
   });
 
   it.runIf(deck("before-after") !== undefined)("the later version is not found by always picking one pane", () => {
