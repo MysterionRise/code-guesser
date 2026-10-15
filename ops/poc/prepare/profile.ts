@@ -1,7 +1,7 @@
 import { CAPACITY_CEILINGS, STACK_RELEASE, STACK_REVISION, type CeilingKey } from "../limits";
 import {
   AUTHORSHIP_CLAIM, MAINSTREAM_LANGUAGES, PROFILE_VERSION, ROUNDS_PER_LANGUAGE, STACK_LANGUAGES, isLanguageSelection, spellsFramework,
-  type DeckId, type StackLanguage,
+  copyNamesExercise, type DeckId, type StackLanguage,
 } from "../../../packages/artifact/src/index";
 import { isKnownFramework } from "./framework-markers";
 
@@ -210,6 +210,39 @@ export interface FrameworkDeck {
 }
 /** Options per framework round: one whole family. */
 export const FRAMEWORK_FAMILY_SIZE = 4;
+/** One exercise of "Which exercise?" (#58), found by its directory in every track. */
+export interface ExerciseEntry {
+  /** Its directory's name in every track, `exercises/practice/<id>`. */
+  readonly id: string;
+  readonly label: string;
+  /** Spellings code may name it by (`isogram`, `twofer`), matched across an identifier's words and masked. */
+  readonly names: readonly string[];
+  /** Identifiers that name it only when whole, masked. */
+  readonly symbols: readonly string[];
+  /** The first hint: what the exercise asks for, naming no exercise of its family. */
+  readonly idea: string;
+  /** The second hint: what a solution takes and gives back, naming none either. */
+  readonly detail: string;
+}
+/** Four exercises offered together; each family's rounds answer each of them equally often. */
+export interface ExerciseFamily {
+  readonly id: string;
+  /** What the reveal says the family shares, so the wrong options were tempting. */
+  readonly note: string;
+  readonly exercises: readonly ExerciseEntry[];
+}
+/** "Which exercise?" (#58): reference solutions to Exercism practice exercises, from several tracks. */
+export interface ExerciseDeck {
+  readonly rounds: number;
+  /** Rounds each exercise of a published family answers, each from a different track. */
+  readonly roundsPerExercise: number;
+  /** Each track's repository, a curated pin, and where its reference solution to `{slug}` sits. */
+  readonly tracks: readonly Readonly<{ repository: string; solution: string }>[];
+  readonly families: readonly ExerciseFamily[];
+  readonly templates: Readonly<{ title: string; description: string; prompt: string; evidence: string; explanation: string }>;
+}
+/** Options per exercise round: one whole family. */
+export const EXERCISE_FAMILY_SIZE = 4;
 
 /** The languages whose functions "Name the function" can find. */
 export const NAME_FUNCTION_LANGUAGES: readonly StackLanguage[] = Object.freeze(["Java", "Go", "Python"]);
@@ -225,6 +258,7 @@ export interface CuratedProfile {
   readonly "missing-line"?: MissingLineDeck;
   readonly "name-function"?: NameFunctionDeck;
   readonly framework?: FrameworkDeck;
+  readonly exercise?: ExerciseDeck;
 }
 
 /** Options per algorithm round: one whole family. */
@@ -255,6 +289,7 @@ export const poolSizes = (profile: CrawlProfile): Readonly<Record<DeckId, number
   "missing-line": profile.curated?.["missing-line"]?.rounds ?? 0,
   "name-function": profile.curated?.["name-function"]?.rounds ?? 0,
   framework: profile.curated?.framework?.rounds ?? 0,
+  exercise: profile.curated?.exercise?.rounds ?? 0,
 });
 
 export class CrawlProfileError extends Error {
@@ -666,6 +701,61 @@ const parseFrameworkDeck = (value: unknown, repositories: readonly CuratedReposi
   });
 };
 
+const parseExerciseEntry = (value: unknown): ExerciseEntry => {
+  const item = exactRecord(value, ["id", "label", "names", "symbols", "idea", "detail"]);
+  const id = text(item.id);
+  if (!ALGORITHM_ID.test(id)) fail();
+  const names = uniqueTexts(item.names);
+  const symbols = Array.isArray(item.symbols) ? item.symbols.map(text) : fail();
+  if (names.some((name) => !FRAMEWORK_NAME.test(name)) || symbols.some((symbol) => !IDENTIFIER.test(symbol))
+    || new Set(symbols).size !== symbols.length) fail();
+  return Object.freeze({ id, label: text(item.label), names, symbols: Object.freeze(symbols), idea: text(item.idea), detail: text(item.detail) });
+};
+
+const parseExerciseDeck = (value: unknown, repositories: readonly CuratedRepository[]): ExerciseDeck => {
+  const deck = exactRecord(value, ["rounds", "roundsPerExercise", "tracks", "families", "templates"]);
+  const rounds = integer(deck.rounds);
+  const roundsPerExercise = integer(deck.roundsPerExercise);
+  if (rounds % (EXERCISE_FAMILY_SIZE * roundsPerExercise) !== 0 || rounds < 8 || rounds > 60) fail();
+  const tracks = (Array.isArray(deck.tracks) && deck.tracks.length >= roundsPerExercise ? deck.tracks : fail()).map((entry: unknown) => {
+    const track = exactRecord(entry, ["repository", "solution"]);
+    const repository = text(track.repository);
+    if (repositories.find((known) => known.repository === repository) === undefined) fail();
+    // The exercise's directory is the truth, so the slug names it, once.
+    const solution = text(track.solution);
+    if (!solution.startsWith("exercises/practice/{slug}/") || solution.split("{slug}").length !== 2) fail();
+    safePath(solution.replace("{slug}", "slug"));
+    return Object.freeze({ repository, solution });
+  });
+  if (new Set(tracks.map(({ repository }) => repository)).size !== tracks.length) fail();
+  const families = (Array.isArray(deck.families) && deck.families.length * EXERCISE_FAMILY_SIZE * roundsPerExercise >= rounds
+    ? deck.families : fail()).map((entry: unknown) => {
+    const family = exactRecord(entry, ["id", "note", "exercises"]);
+    const id = text(family.id);
+    if (!ALGORITHM_ID.test(id)) fail();
+    const exercises = (Array.isArray(family.exercises) && family.exercises.length === EXERCISE_FAMILY_SIZE
+      ? family.exercises : fail()).map(parseExerciseEntry);
+    const note = text(family.note);
+    // A hint or note that spells an exercise of the family would answer its round, or rule an option out.
+    if ([note, ...exercises.flatMap(({ idea, detail }) => [idea, detail])].some((copy) => exercises.some((exercise) => copyNamesExercise(copy, exercise)))) fail();
+    return Object.freeze({ id, note, exercises: Object.freeze(exercises) });
+  });
+  const all = families.flatMap(({ exercises }) => exercises);
+  if (new Set(families.map(({ id }) => id)).size !== families.length || new Set(all.map(({ id }) => id)).size !== all.length
+    || new Set(all.map(({ label }) => label)).size !== all.length) fail();
+  const templates = exactRecord(deck.templates, ["title", "description", "prompt", "evidence", "explanation"]);
+  const prompt = placeholderText(templates.prompt, []);
+  if (all.some((exercise) => copyNamesExercise(prompt, exercise))) fail();
+  return Object.freeze({
+    rounds, roundsPerExercise, tracks: Object.freeze(tracks), families: Object.freeze(families),
+    templates: Object.freeze({
+      title: text(templates.title), description: text(templates.description), prompt,
+      evidence: placeholderText(templates.evidence, ["path", "repository", "name"]),
+      explanation: placeholderText(templates.explanation, []),
+    }),
+  });
+};
+
 const PROJECT_NAME = /^[A-Za-z0-9_.-]+$/u;
 const parseFixDeck = (value: unknown): FixDeck => {
   const deck = exactRecord(value, ["rounds", "datasets", "patchReads", "perRepository", "templates"]);
@@ -704,7 +794,7 @@ const parseFixDeck = (value: unknown): FixDeck => {
 
 /** The curated pins, and each deck built from them that the profile configures. */
 const parseCurated = (value: unknown): CuratedProfile => {
-  const decks = (["algorithm", "output", "fix", "missing-line", "name-function", "framework"] as const).filter((key) => isRecord(value) && Object.hasOwn(value, key));
+  const decks = (["algorithm", "output", "fix", "missing-line", "name-function", "framework", "exercise"] as const).filter((key) => isRecord(value) && Object.hasOwn(value, key));
   const curated = exactRecord(value, ["repositories", ...decks]);
   const repositories = parseCuratedRepositories(curated.repositories);
   return Object.freeze({
@@ -715,6 +805,7 @@ const parseCurated = (value: unknown): CuratedProfile => {
     ...(decks.includes("missing-line") ? { "missing-line": parseMissingLineDeck(curated["missing-line"], repositories) } : {}),
     ...(decks.includes("name-function") ? { "name-function": parseNameFunctionDeck(curated["name-function"], repositories) } : {}),
     ...(decks.includes("framework") ? { framework: parseFrameworkDeck(curated.framework, repositories) } : {}),
+    ...(decks.includes("exercise") ? { exercise: parseExerciseDeck(curated.exercise, repositories) } : {}),
   });
 };
 

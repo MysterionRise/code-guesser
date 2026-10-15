@@ -37,7 +37,7 @@ describe("local crawl profile v5", () => {
     });
     // The run profile carries the curated section: three more decks of 24 rounds.
     expect(poolSizes(profile)).toEqual({ project: 24, language: 24, "before-after": 10, algorithm: 24, output: 24, fix: 24, "missing-line": 0, "name-function": 0,
-      framework: 0 });
+      framework: 0, exercise: 0 });
     expect(profile.curated!.repositories.map(({ repository }) => repository)).toEqual(["TheAlgorithms/Python", "TheAlgorithms/Go", "TheAlgorithms/Java"]);
   });
 

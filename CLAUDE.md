@@ -343,6 +343,19 @@ gate: changing queries, retries, ceilings, deck rules, or running
         only for that exact file and only where GitHub detects none. An example is skipped when a directory on a
         file's path holds a licence file or its `package.json` declares another licence.
       - Goes live with the v6 run (#129). Dry run: `docs/review/evidence/2026-10-15-framework-dry-run.md`.
+    - **Which exercise? (#58, v1.0):** a Recognise deck of Exercism reference solutions
+      (`exercises/practice/<slug>/.meta/example.*`) from six MIT tracks: Python, Go, Rust, Ruby, JavaScript, and C#.
+      `select-exercise.ts`, `exercise-rounds.ts`, `exerciseWindow` in `function-windows.ts`, and
+      `packages/artifact/src/exercise.ts` (kind `EXERCISE`, deck `exercise`).
+      - Six families of four (`curated.exercise.families`); each exercise is answered `roundsPerExercise` times,
+        from different tracks that take turns being tried first. A solution path is its track's `solution` with
+        `{slug}`; the directory is the truth.
+      - Every option's names and label stems are masked; the window opens at a definition of the answer's own names
+        only (Go methods included), since Go's saddle-points solution opens with the matrix exercise's parser.
+      - Hints are profile copy; no hint, prompt, or note may use an option's label word (`squares`, `cipher`).
+      - `family.ts` holds the rules both family decks share: whole-family options, members spelled by word, and
+        each member answered equally often (`familyDeckRule`).
+      - Goes live with the v6 run (#129). Dry run: `docs/review/evidence/2026-10-15-exercise-dry-run.md`.
     - **Registry (#36):** `ops/poc/prepare/curated-decks.ts` lists them in
       run order (`configured`, `select`, `generate`); ids live in
       `curated-deck-ids.ts`, and a deck's profile section is keyed by its id
@@ -380,7 +393,7 @@ gate: changing queries, retries, ceilings, deck rules, or running
    (GitLab, Software Heritage) and the "Which era?" deck. It has open decisions
    (licence allowlist, accounts) to settle with the user first.
 2. The research note's backlog: guess the commit message (the user said "not
-   now"), which exercise, vulnerable or fixed.
+   now"), vulnerable or fixed.
 
 Ask before widening the licence allowlist, raising the 3,000-request ceiling,
 or adding a source not named in the research note.
@@ -505,7 +518,9 @@ when the preparer throws a code this section does not name.
     answer), `LANGUAGE_PAIRING_CONFLICT` (no cycle of second pairs keeps resembling
     pairs out of the same round), `FRAMEWORK_FAMILY_UNBALANCED` (a family's frameworks are
     not answered equally often), `FRAMEWORK_NAME_SHOWN` (a pane, prompt, or hint still
-    names a framework), `TEMPLATE_PLACEHOLDER_REJECTED`.
+    names a framework), `EXERCISE_FAMILY_UNBALANCED` (a family's exercises are not each
+    answered equally often from different tracks), `EXERCISE_NAME_SHOWN` (a pane, prompt, or
+    hint names an option), `TEMPLATE_PLACEHOLDER_REJECTED`.
 - Publication: `HASH_MISMATCH`, `INVALID_ARTIFACT`, `INVALID_HASH`, and
   `REPORT_*_FAILED` (staging, committing, rolling back, or finalizing the
   report). The previous artifact and pin stay.
@@ -608,6 +623,11 @@ add up.
   framework's idioms and none of another of its family. `FRAMEWORK_FILE_CHANGED`: the file
   bound differs from the file read. `FRAMEWORK_FAMILY_SHORT`: a family dropped whole because
   one of its frameworks found too few files.
+- `EXERCISE_WINDOW` (#58): a reference solution too short for a window (`minimumExcerptBytes`), such as
+  Go's leap year or most tracks' Two-fer. `EXERCISE_NAME_IN_CODE`: a window that still names an option after
+  masking. `EXERCISE_SCREEN`: screened bytes that differ from the bound file's. `EXERCISE_FAMILY_SHORT`:
+  a family dropped whole because one of its exercises found too few tracks. A track without the
+  exercise fails admission at its path, under `FILE_*`.
 - `FIX_PATCH_WIDE`: a dataset patch that changes more than one line (most).
   - `FIX_CLAIM`: the fix's lines, which the reveal quotes, claim something
     about authorship (#32).

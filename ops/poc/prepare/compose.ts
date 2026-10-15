@@ -19,7 +19,10 @@ import {
   type ExperimentFixture,
 } from "./model";
 import { showsFrameworkSymbol, spellsFramework } from "../../../packages/artifact/src/index";
-import { STACK_LANGUAGES, mentionsLabel, poolSizes, type AlgorithmEntry, type CrawlProfile, type FrameworkEntry } from "./profile";
+import { namesExercise } from "./exercise-rounds";
+import {
+  STACK_LANGUAGES, mentionsLabel, poolSizes, type AlgorithmEntry, type CrawlProfile, type ExerciseEntry, type FrameworkEntry,
+} from "./profile";
 import { isCuratedDeck } from "./curated-deck-ids";
 import type { GeneratedRounds } from "./round-helpers";
 
@@ -111,6 +114,7 @@ const requireOwnCandidatesAbsent = (
   fixture: ExperimentFixture,
   algorithmEntries: readonly AlgorithmEntry[],
   frameworkEntries: readonly FrameworkEntry[],
+  exerciseEntries: readonly ExerciseEntry[],
 ): void => {
   const parts = publicParts(fixture);
   const shown = [["PANES", parts.panes], ["PROMPT", parts.prompt], ["CLUES", parts.clues]] as const;
@@ -128,6 +132,10 @@ const requireOwnCandidatesAbsent = (
     // A framework round masks every framework of the deck, not only its own family's.
     if (fixture.kind === "FRAMEWORK" && frameworkEntries.some((entry) => spellsFramework(value, entry)
       || (part === "PANES" && showsFrameworkSymbol(value, entry)))) fail(`PUBLIC_CONTAINMENT_CANDIDATE_IN_${part}`);
+    if (fixture.kind === "EXERCISE" && fixture.candidates.some(({ label }) => {
+      const entry = exerciseEntries.find((known) => known.label === label);
+      return entry === undefined || namesExercise(value, [entry], part === "PANES");
+    })) fail(`PUBLIC_CONTAINMENT_CANDIDATE_IN_${part}`);
   }
 };
 
@@ -135,10 +143,11 @@ const requireOwnCandidatesAbsent = (
 const requirePublicContainment = (fixtures: readonly ExperimentFixture[], profile: CrawlProfile): void => {
   const algorithmEntries = profile.curated?.algorithm?.families.flatMap(({ algorithms }) => algorithms) ?? [];
   const frameworkEntries = profile.curated?.framework?.families.flatMap(({ frameworks }) => frameworks) ?? [];
+  const exerciseEntries = profile.curated?.exercise?.families.flatMap(({ exercises }) => exercises) ?? [];
   const shown = fixtures.map(publicParts);
   const publicText = shown.map((parts) => Object.values(parts).join("\n")).join("\n");
   for (const fixture of fixtures) {
-    requireOwnCandidatesAbsent(fixture, algorithmEntries, frameworkEntries);
+    requireOwnCandidatesAbsent(fixture, algorithmEntries, frameworkEntries, exerciseEntries);
     const protectedEntries: readonly (readonly [string, unknown])[] = [
       ["evidence", fixture.evidence], ["explanation", fixture.explanation], ["attribution", fixture.attribution],
       ...PROTECTED_SOURCE_KEYS.map((key) => [key, fixture.source[key]] as const),
@@ -193,8 +202,12 @@ const curatedSnapshot = (profile: CrawlProfile) => {
   const frameworks = profile.curated.framework?.families.flatMap((family) => family.frameworks.map((entry) => Object.freeze({
     id: entry.id, label: entry.label, family: family.id, names: entry.names, symbols: entry.symbols,
   }))).sort((left, right) => left.id < right.id ? -1 : 1);
+  const exercises = profile.curated.exercise?.families.flatMap((family) => family.exercises.map((entry) => Object.freeze({
+    id: entry.id, label: entry.label, family: family.id, names: entry.names, symbols: entry.symbols,
+  }))).sort((left, right) => left.id < right.id ? -1 : 1);
   return { curated: Object.freeze({ pins: Object.freeze(pins), ...(algorithms ? { algorithms: Object.freeze(algorithms) } : {}),
-    ...(datasets ? { datasets: Object.freeze(datasets) } : {}), ...(frameworks ? { frameworks: Object.freeze(frameworks) } : {}) }) };
+    ...(datasets ? { datasets: Object.freeze(datasets) } : {}), ...(frameworks ? { frameworks: Object.freeze(frameworks) } : {}),
+    ...(exercises ? { exercises: Object.freeze(exercises) } : {}) }) };
 };
 
 export const composeExperimentArtifact = (options: ComposeOptions): ComposedExperiment => {

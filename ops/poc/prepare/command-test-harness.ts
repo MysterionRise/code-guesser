@@ -256,6 +256,7 @@ const CURATED_STUBS = Object.freeze({
   "missing-line": { kind: "MISSING_LINE", call: "missing-line" },
   "name-function": { kind: "NAME_FUNCTION", call: "name-function" },
   framework: { kind: "FRAMEWORK", call: "framework" },
+  exercise: { kind: "EXERCISE", call: "exercise" },
 } as const);
 
 const makeArtifactDependencies = (

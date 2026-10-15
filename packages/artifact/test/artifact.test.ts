@@ -10,7 +10,7 @@ describe("shared artifact model", () => {
   it("parses the preparer's artifact, and both sides hash it the same way", () => {
     const { artifact, artifactHash: preparerHash } = composeExperimentArtifact(composeInput());
     // Curated decks need a curated profile; this one has none.
-    expect(parseArtifactDecks(artifact).map(({ id }) => id)).toEqual(DECK_IDS.filter((id) => !["algorithm", "output", "fix", "missing-line", "name-function", "framework"].includes(id)));
+    expect(parseArtifactDecks(artifact).map(({ id }) => id)).toEqual(DECK_IDS.filter((id) => !["algorithm", "output", "fix", "missing-line", "name-function", "framework", "exercise"].includes(id)));
     expect(artifactHash(artifact)).toBe(preparerHash);
     expect(Object.isFrozen(parseExperimentArtifact(structuredClone(artifact)))).toBe(true);
   });

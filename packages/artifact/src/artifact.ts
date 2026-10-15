@@ -32,11 +32,13 @@ import {
   type StackLanguage,
 } from "./domain";
 import { fail } from "./errors";
-import { frameworkDeckRule, parseFrameworks, validateFramework, type CuratedFramework } from "./framework";
+import { parseExercises, validateExercise } from "./exercise";
+import { familyDeckRule, type FamilyMember } from "./family";
+import { parseFrameworks, validateFramework, type CuratedFramework } from "./framework";
 import { missingLineDeckRule, validateMissingLine } from "./missing-line";
 import { nameFunctionDeckRule, validateNameFunction } from "./name-function";
 import {
-  pinKey, validateCuratedSource, validateFixSource, validateFrameworkSource, validateLineageSource, validateMissingLineSource, validateNameFunctionSource,
+  pinKey, validateCuratedSource, validateExerciseSource, validateFixSource, validateFrameworkSource, validateLineageSource, validateMissingLineSource, validateNameFunctionSource,
   validateStackSource, type StackIdentity,
 } from "./source";
 import {
@@ -278,6 +280,8 @@ interface Snapshot {
   readonly datasets: ReadonlySet<string>;
   /** The frameworks a framework round may offer, by id (#62). */
   readonly frameworks: ReadonlyMap<string, CuratedFramework>;
+  /** The exercises an exercise round may offer, by id (#58). */
+  readonly exercises: ReadonlyMap<string, FamilyMember>;
 }
 
 type Semantics = Readonly<{
@@ -401,6 +405,7 @@ const VALIDATORS: Readonly<Record<FixtureKind, (semantics: Semantics) => void>> 
   OUTPUT: validateOutput, FIX: validateFix, MISSING_LINE: (semantics: Semantics) => validateMissingLine(semantics),
   NAME_FUNCTION: (semantics: Semantics) => validateNameFunction(semantics),
   FRAMEWORK: (semantics: Semantics) => validateFramework({ ...semantics, frameworks: semantics.snapshot.frameworks }),
+  EXERCISE: (semantics: Semantics) => validateExercise({ ...semantics, exercises: semantics.snapshot.exercises }),
 });
 
 /** Where each kind's source comes from, and the check that binds it to this snapshot. */
@@ -414,13 +419,15 @@ const SOURCE_VALIDATORS: Readonly<Record<FixtureKind, (value: unknown, snapshot:
   MISSING_LINE: (value: unknown, snapshot: Snapshot) => validateMissingLineSource(value, snapshot.id, snapshot.pins),
   NAME_FUNCTION: (value: unknown, snapshot: Snapshot) => validateNameFunctionSource(value, snapshot.id, snapshot.pins),
   FRAMEWORK: (value: unknown, snapshot: Snapshot) => validateFrameworkSource(value, snapshot.id, snapshot.pins),
+  EXERCISE: (value: unknown, snapshot: Snapshot) => validateExerciseSource(value, snapshot.id, snapshot.pins),
 });
 
 /** Rules a whole deck must keep beyond its rounds' own. */
 const DECK_RULES: Readonly<Partial<Record<DeckId, (fixtures: readonly ParsedFixture[]) => void>>> = Object.freeze({
   "missing-line": missingLineDeckRule,
   "name-function": nameFunctionDeckRule,
-  framework: frameworkDeckRule,
+  framework: familyDeckRule,
+  exercise: familyDeckRule,
   // Pane order carries no signal: the later version is pane A in half the pool, give or take one.
   "before-after": (fixtures: readonly ParsedFixture[]) => {
     const aLater = fixtures.filter(({ correctCandidateId }) => correctCandidateId === BEFORE_AFTER_CANDIDATE_IDS[0]).length;
@@ -616,8 +623,8 @@ const parseDatasets = (value: unknown): ReadonlySet<string> => {
   if (ids.length === 0 || ids.some((id, index) => index > 0 && id <= ids[index - 1]!)) fail();
   return new Set(ids);
 };
-const parseCurated = (value: unknown): Pick<Snapshot, "pins" | "algorithms" | "datasets" | "frameworks"> => {
-  const optional = ["algorithms", "datasets", "frameworks"].filter((key) => typeof value === "object" && value !== null && Object.hasOwn(value, key));
+const parseCurated = (value: unknown): Pick<Snapshot, "pins" | "algorithms" | "datasets" | "frameworks" | "exercises"> => {
+  const optional = ["algorithms", "datasets", "frameworks", "exercises"].filter((key) => typeof value === "object" && value !== null && Object.hasOwn(value, key));
   const curated = record(value, ["pins", ...optional]);
   const pins = parsePins(curated.pins);
   return Object.freeze({
@@ -626,6 +633,8 @@ const parseCurated = (value: unknown): Pick<Snapshot, "pins" | "algorithms" | "d
     datasets: optional.includes("datasets") ? parseDatasets(curated.datasets) : new Set<string>(),
     frameworks: optional.includes("frameworks")
       ? parseFrameworks(curated.frameworks, (entry) => record(entry, ["id", "label", "family", "names", "symbols"])) : new Map(),
+    exercises: optional.includes("exercises")
+      ? parseExercises(curated.exercises, (entry) => record(entry, ["id", "label", "family", "names", "symbols"])) : new Map(),
   });
 };
 
@@ -646,7 +655,8 @@ const parseSnapshot = (value: unknown, profileHash: string): Snapshot => {
   validateResponseHashes(snapshot.acceptedResponseHashes, id, profileHash);
   return Object.freeze({ id, queryIds, stack: identity,
     ...(curated ? parseCurated(snapshot.curated)
-      : { pins: new Set<string>(), algorithms: new Map<string, CuratedAlgorithm>(), datasets: new Set<string>(), frameworks: new Map() }) });
+      : { pins: new Set<string>(), algorithms: new Map<string, CuratedAlgorithm>(), datasets: new Set<string>(), frameworks: new Map(),
+        exercises: new Map() }) });
 };
 
 export const ARTIFACT_KEYS = ["schemaVersion", "contentClass", "profileHash", "crawlSnapshot", "decks"] as const;
