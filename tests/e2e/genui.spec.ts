@@ -32,6 +32,10 @@ test("a revealed round's explainer renders the model's checked components, sent 
   await expect(panel.getByRole("heading", { name: "Pointed to the answer" })).toBeVisible();
   await expect(panel.getByRole("listitem").first()).toHaveText("The block keywords");
   await expect(panel.getByRole("button", { name: "Explain this round" })).toHaveCount(0);
+  // Once the explainer renders, the static reveal above it folds away, and opens again on request (#121).
+  await expect(page.locator(".reveal-why")).not.toHaveAttribute("open", "");
+  await page.locator(".reveal-why summary").click();
+  await expect(page.locator(".reveal-why")).toHaveAttribute("open", "");
 
   const recorded = await (await request.get(`${fake}/requests`)).json() as { body: { provider: unknown; messages: unknown[] } }[];
   expect(recorded).toHaveLength(1);

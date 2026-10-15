@@ -25,8 +25,10 @@ interface PageProps {
   readonly searchParams: Promise<Readonly<Record<string, string | string[] | undefined>>>;
 }
 
-/** The chooser; in lab mode `query` carries the tester's picks onto each deck's link. */
+/** The chooser (#126): decks grouped by what they ask; in lab mode `query` carries the tester's picks onto each link. */
 function DeckChooser({ decks, query }: { readonly decks: readonly LocalRealDeck[]; readonly query: string }) {
+  const groups = (["Recognise", "Reason"] as const).map((tag) => ({ tag, decks: decks.filter(({ id }) => (DECK_TAGS[id] ?? "Reason") === tag) }))
+    .filter(({ decks: grouped }) => grouped.length > 0);
   return (
     <main className="deck-chooser" aria-labelledby="deck-chooser-title">
       <h1 id="deck-chooser-title">Pick a deck</h1>
@@ -34,21 +36,31 @@ function DeckChooser({ decks, query }: { readonly decks: readonly LocalRealDeck[
         {deckSummary(decks.length)} Each game deals five real rounds from the deck. Read the code, take up to two hints,
         and lock in your guess.
       </p>
-      <ul className="deck-list">
-        {decks.map((deck) => (
-          <li key={deck.id}>
-            <a className="deck-card" href={`/?deck=${deck.id}${query}`}>
-              <span className="deck-title">{deck.title}</span>{" "}
-              {DECK_TAGS[deck.id] && <span className="deck-tag">{DECK_TAGS[deck.id]}</span>}{" "}
-              <span className="deck-description">{deck.description}</span>{" "}
-              <span className="deck-size">{deck.poolSize} rounds in the deck</span>
-            </a>
-          </li>
-        ))}
-      </ul>
+      {groups.map(({ tag, decks: grouped }) => (
+        <section className="deck-group" key={tag} aria-labelledby={`deck-group-${tag}`}>
+          <h2 id={`deck-group-${tag}`} className="deck-group-title">{tag}<span className="deck-group-note">{DECK_GROUP_NOTES[tag]}</span></h2>
+          <ul className="deck-list">
+            {grouped.map((deck) => (
+              <li key={deck.id}>
+                <a className="deck-card" href={`/?deck=${deck.id}${query}`}>
+                  <span className="deck-title">{deck.title}</span>{" "}
+                  <span className="deck-description">{deck.description}</span>{" "}
+                  <span className="deck-size">{deck.poolSize} rounds in the deck</span>
+                </a>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ))}
     </main>
   );
 }
+
+/** What each group of decks asks of a player. */
+const DECK_GROUP_NOTES: Readonly<Record<"Recognise" | "Reason", string>> = Object.freeze({
+  Recognise: "Tell where code comes from.",
+  Reason: "Work out what code does.",
+});
 
 /** A lab tester's picks, kept on links that deal a new game; empty outside lab mode. */
 const labQuery = (overrides: Partial<Arms>): string =>

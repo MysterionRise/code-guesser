@@ -25,6 +25,8 @@ export interface GenuiPanelProps {
   readonly sessionToken: () => string;
   /** Told when the player asks for the panel and when it falls back, for the event log (#107). */
   readonly onEvent?: (event: GenuiEvent) => void;
+  /** Told once, when the panel first shows a checked view, so the static reveal above can fold away (#121). */
+  readonly onRendered?: () => void;
 }
 
 /** The fixed request the player's button sends; free chat arrives with the host arm (#104). */
@@ -79,7 +81,7 @@ export const fellBack = (status: string, sent: boolean, rendered: number, error:
  * Generative UI's foundation (#101): one request to the server's guarded route, rendered through the catalog.
  * Any failure (no key, a refused or limited key, a timeout, a malformed call) leaves the static reveal as it is.
  */
-export default function GenuiPanel({ design, roundId, pick, phase, panes, optionLabels, sessionToken, onEvent }: GenuiPanelProps) {
+export default function GenuiPanel({ design, roundId, pick, phase, panes, optionLabels, sessionToken, onEvent, onRendered }: GenuiPanelProps) {
   const transport = React.useMemo(() => new DefaultChatTransport({
     api: "/api/genui",
     prepareSendMessagesRequest: ({ messages }) => ({ body: { sessionToken: sessionToken(), roundId, design, messages } }),
@@ -96,6 +98,13 @@ export default function GenuiPanel({ design, roundId, pick, phase, panes, option
   const failed = fellBack(status, messages.length > 0, views.length, error);
   const headingId = `genui-heading-${roundId}`;
   const output = React.useRef<HTMLDivElement>(null);
+  // The static reveal folds once, when the first checked view arrives.
+  const shown = React.useRef(false);
+  React.useEffect(() => {
+    if (views.length === 0 || shown.current) return;
+    shown.current = true;
+    onRendered?.();
+  }, [views.length, onRendered]);
   // A panel falls back at most once per round.
   const reported = React.useRef(false);
   React.useEffect(() => {

@@ -61,9 +61,25 @@ export interface ArcadeSession {
   readonly correctRounds: number;
   /** Whether each answered round was right, in play order. */
   readonly outcomes: readonly boolean[];
+  /** Each answered round as the game's summary lists it (#43), in play order. */
+  readonly history: readonly RoundRecord[];
   readonly result: EntertainmentResultProjection | null;
   readonly status: "playing" | "complete";
 }
+
+/** One answered round, as the five-round summary shows it. */
+export interface RoundRecord {
+  readonly roundId: string;
+  readonly picked: string;
+  readonly answer: string;
+  readonly correct: boolean;
+  readonly points: number;
+  readonly hints: number;
+  /** The round's source address, from its attribution, when it has one. */
+  readonly source: string | null;
+}
+
+const SOURCE_ADDRESS = /https:\/\/\S+/u;
 
 export type ArcadeSessionAction =
   | { type: "reveal-hint"; label: string; detail?: HintDetail | null }
@@ -73,7 +89,7 @@ export type ArcadeSessionAction =
 
 export function createArcadeSession(_mode: PublicModeContract): ArcadeSession {
   return Object.freeze({ roundIndex: 0, visibleHintCount: 0, hints: Object.freeze([]), hintDetails: Object.freeze([]), lockedCandidateId: null,
-    reveal: null, score: 0, completedRounds: 0, correctRounds: 0, outcomes: Object.freeze([]), result: null, status: "playing" });
+    reveal: null, score: 0, completedRounds: 0, correctRounds: 0, outcomes: Object.freeze([]), history: Object.freeze([]), result: null, status: "playing" });
 }
 
 export function projectDisplayReveal(value: unknown): AuthorizedReveal {
@@ -177,9 +193,14 @@ export function transitionArcadeSession(
     if (reveal.score !== expectedRoundScore || reveal.result.score !== session.score + expectedRoundScore) {
       throw new ArcadeShellRuleError("reveal score does not match accepted clue and session state");
     }
+    const labelOf = (candidateId: string | null) => round.mode.candidates.find((candidate) => candidate.candidateId === candidateId)?.label ?? "";
+    const record: RoundRecord = Object.freeze({
+      roundId: round.roundId, picked: labelOf(session.lockedCandidateId), answer: labelOf(reveal.answerCandidateId), correct: reveal.correct,
+      points: reveal.score, hints: session.visibleHintCount, source: SOURCE_ADDRESS.exec(reveal.attribution)?.[0] ?? null,
+    });
     return Object.freeze({ ...session, reveal, result: reveal.result,
       score: reveal.result.score, completedRounds, correctRounds: session.correctRounds + (reveal.correct ? 1 : 0),
-      outcomes: Object.freeze([...session.outcomes, reveal.correct]),
+      outcomes: Object.freeze([...session.outcomes, reveal.correct]), history: Object.freeze([...session.history, record]),
       status: completedRounds === mode.rounds.length ? "complete" : "playing" });
   }
   // A finished run is never replayed: a new game is a fresh deal from the server, so revealed rounds stay spent.

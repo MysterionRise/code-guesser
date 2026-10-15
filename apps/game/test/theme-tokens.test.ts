@@ -55,6 +55,8 @@ const TEXT_PAIRS = [
   ["win", "surface"], ["win", "panel"], ["warn", "surface"], ["warn", "panel"], ["error-text", "surface"], ["error-text", "panel"],
   ["notice-text", "notice-bg"], ["deck-notice-text", "deck-notice-bg"], ["track-text", "track-bg"],
   ["text", "player-bg"], ["text", "surface-hover"], ["text", "win-bg"], ["text", "miss-bg"],
+  // A missed round's dot, and a missed pick in the game's summary (#43).
+  ["miss", "miss-bg"], ["miss", "surface"],
 ] as const;
 
 describe("theme tokens (#125)", () => {

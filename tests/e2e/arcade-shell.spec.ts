@@ -250,3 +250,46 @@ test.describe("in a de-DE browser", () => {
     await expect(page.locator('.round-track [aria-current="step"]')).toHaveAttribute("data-round-nav", "2");
   });
 });
+
+test("a finished game lists every round in a summary that adds up, and the dots mark each right or missed (#43, #126)", async ({ page }) => {
+  await page.goto("/?deck=fix");
+  const picks: boolean[] = [];
+  for (let index = 0; index < 5; index += 1) {
+    if (index > 0) await page.getByRole("button", { name: "Next round" }).click();
+    await expect(page.getByText(`Round ${index + 1} of 5`)).toBeVisible();
+    const roundId = await currentRound(page);
+    const right = index !== 1;
+    picks.push(right);
+    await page.getByLabel((right ? answers : wrongAnswers).get(roundId)!, { exact: true }).check();
+    await page.getByRole("button", { name: "Lock in answer" }).click();
+    await expect(page.getByRole("heading", { name: right ? "Nice read." : "Not this time." })).toBeVisible();
+    // Why the answer is right opens by keyboard, and closes again.
+    if (index === 0) {
+      const why = page.locator(".reveal-why");
+      await expect(why).toHaveAttribute("open", "");
+      await why.locator("summary").focus();
+      await page.keyboard.press("Enter");
+      await expect(why).not.toHaveAttribute("open", "");
+      await page.keyboard.press("Enter");
+      await expect(why).toHaveAttribute("open", "");
+    }
+  }
+  // Each played round's dot says right or missed: by colour, by a mark, and in words.
+  await expect(page.locator(".round-dot.done.correct")).toHaveCount(3);
+  await expect(page.locator(".round-dot.done.missed")).toHaveCount(1);
+  await expect(page.locator('.round-dot[data-round-nav="2"]')).toContainText("✗");
+  await expect(page.locator('.round-dot[data-round-nav="2"] .visually-hidden')).toHaveText("Round 2, missed");
+
+  const summary = page.getByRole("region", { name: "Your game" });
+  await expect(summary.locator("tbody tr")).toHaveCount(5);
+  const rowPoints = (await summary.locator("tbody tr td:nth-child(4)").allTextContents()).map((text) => Number(text.split(" ")[0]!.replaceAll(",", "")));
+  expect(rowPoints).toHaveLength(5);
+  const total = (await score(page).textContent())!.match(/[\d,]+/u)![0]!;
+  expect(points(rowPoints.reduce((sum, value) => sum + value, 0))).toBe(total);
+  await expect(summary.locator("tfoot")).toContainText(`${total} of 5,000`);
+  await expect(summary.locator("tbody tr").nth(1)).toHaveClass(/summary-missed/u);
+  // The way on sits right under the summary, above why the last answer is right.
+  const order = await page.locator(".reveal").evaluate((reveal) =>
+    [".game-summary", ".completion-actions", ".reveal-why"].map((selector) => [...reveal.querySelectorAll("*")].indexOf(reveal.querySelector(selector)!)));
+  expect([...order].sort((left, right) => left - right)).toEqual(order);
+});
