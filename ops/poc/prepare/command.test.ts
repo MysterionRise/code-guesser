@@ -10,7 +10,7 @@ import { GitHubSearchError } from "./github-search";
 import { JournalError, openJournal } from "./journal";
 import { HARNESS_CANDIDATES, accepted, classificationsFor, harnessRow, hash, loadProfile, makeHarness } from "./command-test-harness";
 import {
-  CURATED_REPOSITORIES, CURATED_SECTION, FIX_SECTION, OUTPUT_SECTION, curatedFiles, fixHarnessData, loadCuratedProfile, outputFiles, sha256,
+  CURATED_REPOSITORIES, CURATED_SECTION, FIX_SECTION, OUTPUT_SECTION, curatedFiles, fixHarnessData, loadCuratedProfile, missingLineFiles, outputFiles, sha256,
 } from "./testdata/deck-builders";
 import { LANGUAGE_SLUGS } from "../../../packages/artifact/src/index";
 import { STACK_LANGUAGES, parseCrawlProfile } from "./profile";
@@ -378,6 +378,16 @@ const logLines = (calls: readonly string[]): string[] =>
     };
     await prepareLocalExperiment(harness.dependencies);
     expect((harness.reports[0] as any).diagnostics).toContainEqual({ stage: "SCREENING", reasonCode: "FIX_CLAIM", count: 1 });
+  });
+
+  it("selects a configured missing-line deck from the curated files no other deck shows, balanced over every rank (#57)", async () => {
+    const profile = loadCuratedProfile({ beforeAfterPool: 5 }, { "missing-line": true });
+    const harness = await makeHarness({}, { profile, curatedFiles: missingLineFiles() });
+    await prepareLocalExperiment(harness.dependencies);
+    expect(harness.calls).toContain("list:algos/python:utils");
+    expect(harness.calls.filter((call) => call.startsWith("read:algos/python:utils/"))).toHaveLength(8);
+    expect(harness.calls).toContain("missing-line:8");
+    expect(logLines(harness.calls)).toContain("log:PREPARATION_DECKS project,language,before-after,missing-line");
   });
 
   it("attempts no algorithm deck when the profile configures none", async () => {

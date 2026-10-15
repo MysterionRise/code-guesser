@@ -455,3 +455,5 @@ noscript { display: block; padding: 12px; margin-bottom: 16px; background: var(-
 @media (hover: none) and (pointer: coarse) { .keys-note { display: none; } }
 /* A phone gives the code more of its width: less padding around the card and the pane (#46). */
 @media (max-width: 600px) { .game-card { padding: 16px 12px; } .code-window { padding: 14px 10px; } .code-window.numbered { padding-left: 4px; } }
+/* A missing-line round's options are code (#57). */
+.candidate-label.code-label { font-family: var(--font-mono); font-size: .9rem; white-space: pre-wrap; overflow-wrap: anywhere; }

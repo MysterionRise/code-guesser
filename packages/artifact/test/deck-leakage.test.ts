@@ -169,6 +169,26 @@ describe("deck leakage", () => {
     }
   });
 
+  it.runIf(deck("missing-line") !== undefined)("missing-line options give no edge by text, length, or names shared with the pane (#57)", () => {
+    const { fixtures } = deck("missing-line")!;
+    const limit = chance(fixtures[0]!) + TOLERANCE;
+    const names = (text: string) => new Set((text.match(/[A-Za-z_][A-Za-z0-9_]*/gu) ?? []).filter((name) => name.length > 1));
+    const shared = (fixture: ParsedFixture, label: string) => [...names(label)].filter((name) => names(fixture.panes[0]!.text).has(name)).length;
+    for (const direction of [1, -1]) {
+      expect(accuracy(fixtures, (fixture, label) => direction * shared(fixture, label)), `shared ${direction}`).toBeLessThanOrEqual(limit);
+      expect(accuracy(fixtures, (_fixture, label) => direction * label.length), `length ${direction}`).toBeLessThanOrEqual(limit);
+      expect(accuracy(fixtures, (fixture, label) => direction * [...fixture.candidates.map((option) => option.label)].sort().indexOf(label)),
+        `text ${direction}`).toBeLessThanOrEqual(limit);
+    }
+    // After the second hint two lines are left: picking the longer is a coin toss.
+    const longerOfPair = (fixture: ParsedFixture, label: string) => {
+      const [, first, second] = /^It is either “(.+)” or “(.+)”\.$/u.exec(fixture.clues[1]!)!;
+      return label !== first && label !== second ? -1 : label.length;
+    };
+    expect(accuracy(fixtures, longerOfPair)).toBeLessThanOrEqual(0.5 + TOLERANCE);
+    memoryWithinReplay(fixtures);
+  });
+
   it.runIf(deck("before-after") !== undefined)("the later version is not found by always picking one pane", () => {
     const { fixtures } = deck("before-after")!;
     const limit = chance(fixtures[0]!) + TOLERANCE;

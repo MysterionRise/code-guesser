@@ -43,6 +43,7 @@ export const PANE_CAPTIONS: Readonly<Partial<Record<RoundModeKind, string>>> = O
   algorithm: "Its own names, and any option's name, are hidden as mystery.",
   output: "The last line is a call typed into a Python shell.",
   fix: "Lines are numbered; each option names one.",
+  "missing-line": "One line is hidden; pick the line that fills the gap.",
 });
 
 /** What the player sees when the server can no longer continue this game, for example after it restarts. */

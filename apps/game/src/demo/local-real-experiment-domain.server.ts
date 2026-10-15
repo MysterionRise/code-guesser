@@ -23,6 +23,7 @@ export const RULE_SEMANTICS: Readonly<Record<FixtureKind, string>> = Object.free
   BEFORE_AFTER: "commit-parent-lineage.v3",
   ALGORITHM: "curated-algorithm-path.v3",
   OUTPUT: "curated-doctest-output.v3",
+  MISSING_LINE: "curated-missing-line.v1",
   FIX: "dataset-one-line-fix.v3",
 });
 

@@ -1,6 +1,7 @@
 import {
   FIX_SOURCE_KEYS,
   LINEAGE_SOURCE_KEYS,
+  MISSING_LINE_SOURCE_KEYS,
   PROFILE_VERSION,
   STACK_LANGUAGES,
   STACK_SOURCE_KEYS,
@@ -87,6 +88,14 @@ export const validateCuratedSource = (
   validateBaseSource(source, snapshotId, "PATH_HISTORY", gitId(source.authorCommit));
   if (!pins.has(pinKey(text(source.repository), gitId(source.commit)))) fail();
   return source as ParsedSource;
+};
+
+/** A missing-line round's file (#57): a curated file, its language, and where its window and gap sit. */
+export const validateMissingLineSource = (value: unknown, snapshotId: string, pins: ReadonlySet<string>): ParsedSource => {
+  const source = validateCuratedSource(value, MISSING_LINE_SOURCE_KEYS, snapshotId, pins);
+  if (!(STACK_LANGUAGES as readonly unknown[]).includes(source.language)) fail();
+  if (positiveInteger(source.windowStart) > positiveInteger(source.gapLine)) fail();
+  return source;
 };
 
 /**

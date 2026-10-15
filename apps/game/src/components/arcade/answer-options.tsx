@@ -18,6 +18,8 @@ export function AnswerOptions({ round, numbered, paneLines, selection, answerCan
   readonly onSelect: (candidateId: string) => void;
   readonly onFocusCandidate: (candidateId: string | null) => void;
 }) {
+  // A missing-line round's options are lines of code, shown as code (#57).
+  const codeLabels = round.mode.kind === "missing-line";
   return (
     <fieldset disabled={disabled}>
       <legend>Choose one answer</legend>
@@ -44,7 +46,7 @@ export function AnswerOptions({ round, numbered, paneLines, selection, answerCan
                 onBlur={numbered ? () => onFocusCandidate(null) : undefined}
               />
               <span className="candidate-text">
-                <span className="candidate-label">{candidate.label}</span>
+                <span className={codeLabels ? "candidate-label code-label" : "candidate-label"}>{candidate.label}</span>
                 {detail && <span className={lineText ? "candidate-detail code-detail" : "candidate-detail"} id={detailId}>{detail}</span>}
               </span>
             </label>

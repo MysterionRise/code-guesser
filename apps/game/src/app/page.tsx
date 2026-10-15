@@ -12,13 +12,15 @@ import type { LocalRealDeck } from "../demo/local-real-experiment.server";
 import { CONTROL, FACTORS, assignArms, labMode, labOverrides, parseDisabled, type Arms, type Level } from "../experiment/arms";
 import { DESIGN_LABELS, READY_DESIGNS, type Design } from "../genui/designs";
 
-const DECK_COUNT_WORDS = ["No decks", "One deck", "Two decks", "Three decks", "Four decks", "Five decks", "Six decks"] as const;
+const DECK_COUNT_WORDS = ["No decks", "One deck", "Two decks", "Three decks", "Four decks", "Five decks", "Six decks", "Seven decks",
+  "Eight decks", "Nine decks", "Ten decks", "Eleven decks", "Twelve decks"] as const;
 /** A run publishes every deck it could fill, so the chooser counts what this artifact holds. */
 const deckSummary = (count: number): string => `${DECK_COUNT_WORDS[count] ?? `${count} decks`} to choose from.`;
 
 /** What a deck asks of a player: to recognise where code comes from, or to reason about what it does. */
 const DECK_TAGS: Readonly<Record<string, string>> = Object.freeze({
   project: "Recognise", language: "Recognise", algorithm: "Recognise", "before-after": "Reason", output: "Reason", fix: "Reason",
+  "missing-line": "Reason",
 });
 
 interface PageProps {
