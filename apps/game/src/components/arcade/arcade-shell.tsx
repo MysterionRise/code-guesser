@@ -20,6 +20,7 @@ import { CodePanes } from "./code-panes";
 import { HintBar } from "./hint-bar";
 import { optionLine, type PublicModeContract } from "./mode-contract";
 import { ArcadeHeader, RoundTrack } from "./round-header";
+import { QuestionScaffold, markedLines } from "./question-layer";
 import { RoundReveal } from "./round-reveal";
 
 /** The host design's chat, fetched only when the server turns it on, so the static game never loads it. */
@@ -55,10 +56,11 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
   const round = mode.rounds[session.roundIndex]!;
   // A fix round's options point at pane lines: the pane numbers its lines, each option shows its line's code, and
   // the line under the focused or chosen option (or, once revealed, the answer) is highlighted.
-  const numbered = round.mode.kind === "fix" && round.content.panes.length === 1;
+  // A Marker hunt layer's hint points at lines, so its round numbers them too (#128).
+  const numbered = (round.mode.kind === "fix" || round.scaffold?.design === "marker-hunt") && round.content.panes.length === 1;
   const paneLines = numbered ? round.content.panes[0]!.text.split("\n") : [];
   const labelOf = (candidateId: string | null) => round.mode.candidates.find((candidate) => candidate.candidateId === candidateId)?.label ?? "";
-  const highlighted = numbered
+  const highlighted = numbered && round.mode.kind === "fix"
     ? optionLine(labelOf(session.reveal?.answerCandidateId ?? focusedCandidate ?? (selection === "" ? null : selection)))
     : undefined;
   const roundTitle = React.useRef<HTMLHeadingElement>(null);
@@ -134,7 +136,7 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
         else setHintError("Couldn’t get that hint. Try again.");
         return;
       }
-      setSession((current) => transitionArcadeSession(mode, current, { type: "reveal-hint", label: response.hint }));
+      setSession((current) => transitionArcadeSession(mode, current, { type: "reveal-hint", label: response.hint, detail: response.detail ?? null }));
       token.current = response.sessionToken;
     } catch {
       setHintError("Couldn’t get that hint. Try again.");
@@ -160,12 +162,13 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
       <section className="game-card" aria-labelledby="round-title" data-round-id={round.roundId}>
         <p className="eyebrow">Round {session.roundIndex + 1} of {mode.rounds.length}</p>
         <h1 id="round-title" ref={roundTitle} tabIndex={-1}>{round.mode.prompt}</h1>
-        <CodePanes round={round} numbered={numbered} paneLines={paneLines} highlighted={highlighted} />
+        {round.scaffold && <QuestionScaffold scaffold={round.scaffold} />}
+        <CodePanes round={round} numbered={numbered} paneLines={paneLines} highlighted={highlighted} marked={markedLines(session.hintDetails)} />
 
-        <HintBar round={round} hints={session.hints} disabled={busy || ended || session.lockedCandidateId !== null}
+        <HintBar round={round} hints={session.hints} details={session.hintDetails} disabled={busy || ended || session.lockedCandidateId !== null}
           error={hintError} onRequest={requestHint} buttonRef={hintButton} latestHintRef={latestHint} />
 
-        <AnswerOptions round={round} numbered={numbered} paneLines={paneLines} selection={selection}
+        <AnswerOptions round={round} numbered={numbered && round.mode.kind === "fix"} paneLines={paneLines} selection={selection}
           answerCandidateId={session.reveal?.answerCandidateId ?? null} lockedCandidateId={session.lockedCandidateId}
           disabled={session.reveal !== null || busy} onSelect={setSelection} onFocusCandidate={setFocusedCandidate} />
 

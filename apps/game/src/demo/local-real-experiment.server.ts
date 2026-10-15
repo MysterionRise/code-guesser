@@ -39,6 +39,7 @@ import {
 import { CONTROL, type Arms } from "../experiment/arms";
 import type { EventSink } from "../experiment/event-store.server";
 import { elapsed, emitterFor, recordClientEvent, type ClientEventOutcome, type Emit } from "./local-real-experiment-events.server";
+import { roundHints, scaffoldOf, type RoundLayers } from "./local-real-experiment-layers.server";
 import type { RenderLimits } from "../genui/render-catalog";
 import { roundContext, type RoundContext } from "../genui/round-context.server";
 import {
@@ -104,6 +105,8 @@ export interface ModelCallOutcome {
 export interface ExperimentOptions {
   /** Where game events go; none records nothing. */
   readonly events?: EventSink | null;
+  /** Question layers by round id (#127); a game shows them when its arms say so. */
+  readonly layers?: RoundLayers;
 }
 
 export type { ClientEventOutcome } from "./local-real-experiment-events.server";
@@ -280,8 +283,10 @@ const refusalFor = (error: unknown): GameRefusal =>
   error instanceof SessionRefusal && error.reason === "SESSION_ENDED" ? SESSION_ENDED : REJECTED;
 
 /** The guard's context for one round of a game, from the server's own copy of the round. */
-const contextFor = (round: DerivedRound, deckTitle: string, state: GameState, index: number, emit: Emit): ModelContextResponse => {
-  const { publicRound, hints, privateReveal } = round;
+const contextFor = (round: DerivedRound, deckTitle: string, state: GameState, index: number, emit: Emit, layers: RoundLayers): ModelContextResponse => {
+  const { publicRound, privateReveal } = round;
+  // The hints this game sells for the round: a question layer's, when the game shows layers.
+  const hints = roundHints(publicRound.roundId, round.hints, layers, state.arms.layer === "on").map(({ text }) => text);
   const phase = index < state.roundIndex ? "after-lock" : "before-lock";
   const context = roundContext({
     deck: deckTitle,
@@ -368,6 +373,7 @@ export const createLocalRealExperiment = (
 ): LocalRealExperiment => {
   const expectedArtifactHash = pinnedHash(artifactInput, trustedArtifactHash);
   const emit = emitterFor(options.events);
+  const layers: RoundLayers = options.layers ?? new Map();
   // Anything an artifact that matches its pin then fails is the schema's.
   try {
     const artifact = record(artifactInput, ARTIFACT_KEYS);
@@ -388,7 +394,15 @@ export const createLocalRealExperiment = (
       privateReveals,
       dealSession,
       dealGame: (deckId: DeckId, random: () => number = Math.random, now = Date.now(), seal: DealSeal = { arms: CONTROL, record: true }) => {
-        const mode = dealSession(deckId, random);
+        const dealt = dealSession(deckId, random);
+        // A game that shows question layers carries each layered round's scaffold with the round (#128).
+        const mode = seal.arms.layer !== "on" || !dealt.rounds.some(({ roundId }) => layers.has(roundId)) ? dealt
+          : createPublicModeContract({ sessionContractVersionId: dealt.sessionContractVersionId, rounds: dealt.rounds.map((round) => {
+            const layer = layers.get(round.roundId);
+            return { ...round, content: { ...round.content, panes: [...round.content.panes] },
+              mode: { ...round.mode, candidates: [...round.mode.candidates], clues: [...round.mode.clues] },
+              points: [...round.points] as [number, number, number], ...(layer ? { scaffold: scaffoldOf(layer) } : {}) };
+          }) });
         const state: GameState = {
           version: 2, gameId: newGameId(), artifactHash: expectedArtifactHash, deck: deckId,
           roundIds: mode.rounds.map(({ roundId }) => roundId), step: 0, roundIndex: 0, hints: 0, hintsByRound: [], correct: 0, score: 0,
@@ -405,13 +419,14 @@ export const createLocalRealExperiment = (
         let bought: GameState | undefined;
         const outcome = transact(request.sessionToken!, expectedArtifactHash, now, (state) => {
           const round = currentRound(rounds, state, request.roundId!);
-          const hint = round.hints[state.hints] ?? fail();
+          const hint = roundHints(round.publicRound.roundId, round.hints, layers, state.arms.layer === "on")[state.hints] ?? fail();
           bought = { ...state, step: state.step + 1, hints: state.hints + 1 };
           return { next: bought, result: hint };
         });
         if (!outcome.ok) return outcome;
         emit(bought!, "hint_revealed", { round: bought!.roundIndex + 1, hint: bought!.hints, ms: elapsed(bought!.roundStartedAt, now) }, now);
-        return Object.freeze({ ok: true, hint: outcome.result, sessionToken: outcome.sessionToken });
+        const { text, detail } = outcome.result;
+        return Object.freeze({ ok: true, hint: text, ...(detail ? { detail } : {}), sessionToken: outcome.sessionToken });
       },
       answer: (value: RevealRequest, now = Date.now()): RevealResponse => {
         const request = strings(value, ["sessionToken", "roundId", "candidateId"]);
@@ -446,7 +461,7 @@ export const createLocalRealExperiment = (
         const round = rounds.get(request.roundId!);
         // The round being played, or one already answered; never a round still to come.
         if (index < 0 || index > state.roundIndex || round === undefined) return REJECTED;
-        return contextFor(round, deckTitles.get(request.roundId!)!, state, index, emit);
+        return contextFor(round, deckTitles.get(request.roundId!)!, state, index, emit, layers);
       },
       recordClientEvent: (value: unknown, now = Date.now()): ClientEventOutcome => recordClientEvent(value, expectedArtifactHash, now, emit),
     });

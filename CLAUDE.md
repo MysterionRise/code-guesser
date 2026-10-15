@@ -178,7 +178,8 @@ gate: changing queries, retries, ceilings, deck rules, or running
 - The design experiment (#106, #107; v1.0 milestone):
   - **Arms** (`apps/game/src/experiment/arms.ts`): each game draws design ×
     theme × question layer independently at deal time, by committed
-    `WEIGHTS`. The layer weighs 0 until the game shows it (#127).
+    `WEIGHTS`. Question layers exist for the algorithm and language decks
+    so far; on another deck a game drawn `layer: on` plays as `off`.
   - **Themes** (#125): Terminal (the original), Paper, Arcade, and High
     contrast. Every colour, font, and corner in `globals.css` reads a token;
     Terminal's are on `:root`, each other theme's on
@@ -235,7 +236,16 @@ gate: changing queries, retries, ceilings, deck rules, or running
     (`JOURNAL_MISS`, `OPENROUTER_KEY_MISSING`, `QUESTIONS_PROVIDER_<status>`,
     `QUESTIONS_MALFORMED`, `ARTIFACT_PIN_MISMATCH`).
   - The layers bind to the artifact, so a new artifact needs a new
-    `prepare:questions` run. The game doesn't show them yet.
+    `prepare:questions` run.
+  - In the game (`demo/local-real-experiment-layers.server.ts`): the loader
+    reads the file once and shows layers only when it matches its pin, was
+    written for this artifact, and passes the parser again; otherwise it logs
+    `QUESTION_LAYERS_UNAVAILABLE <code>` and every round plays static. A game
+    drawn `layer: on` carries each layered round's scaffold in its public
+    round (`RoundScaffold`), and its hints are the layer's, sold through the
+    same hint action with a `detail` beside the text (lines to mark, or a
+    step-through). Marker hunt rounds number their lines; the genui guard's
+    `boughtHints` are the game's own hints.
   - Evidence: `docs/review/evidence/2026-10-15-question-layers-first-build.md`.
 - The committed artifact `apps/game/src/demo/generated/local-real-rounds.json`
   came from the 2026-10-13 v5 run (1,859 of 3,000 requests), rebuilt
