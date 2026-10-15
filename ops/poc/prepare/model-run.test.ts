@@ -158,7 +158,7 @@ describe("operational run records", () => {
   it("accepts full decks of selected rounds, and no more than every deck can hold", () => {
     const sized = (selected: number) => {
       const candidate = runRecord() as Record<string, any>;
-      candidate.counts.screened = 400;
+      candidate.counts.screened = Math.max(400, selected);
       candidate.counts.selected = selected;
       candidate.result.sourceIdentities = Array.from({ length: selected }, (_, index) =>
         `owner/project@${commit((index % 10).toString(16))}:src/file-${index}.ts`);

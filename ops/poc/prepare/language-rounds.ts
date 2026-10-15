@@ -1,7 +1,7 @@
 import { canonicalHash } from "./canonical";
 import { deepFreeze, validUtcTimestamp } from "./model-validation";
 import { languageCandidateId, type ExperimentFixture } from "./model";
-import { LANGUAGE_PAIRS } from "../../../packages/artifact/src/index";
+import { LANGUAGE_PAIRS, RARE_LANGUAGES } from "../../../packages/artifact/src/index";
 import { firstMarker, markerSignals, tellsApart } from "./language-markers";
 import { STACK_LANGUAGES, mentionsExtension, mentionsLabel, poolSizes, type CrawlProfile, type StackLanguage } from "./profile";
 import { attributionFor, fill, orderedPool, roundIdFor, sha256, shuffled, sourceRecord, type GeneratedRounds } from "./round-helpers";
@@ -103,6 +103,12 @@ const containsWord = (haystack: string, needle: string): boolean => {
   return new RegExp(`(^|[^A-Za-z0-9_])${escaped}([^A-Za-z0-9_]|$)`, "iu").test(haystack);
 };
 
+/** How the rarer languages' names are spelled in code: their own name, and the ASCII forms of F#. */
+const RARE_SPELLINGS: Readonly<Partial<Record<StackLanguage, readonly string[]>>> = Object.freeze(Object.fromEntries(
+  [...RARE_LANGUAGES].map((language) => [language, language === "F#" ? ["F#", "fsharp"] : [language]])));
+const spelledIn = (text: string, word: string): boolean =>
+  new RegExp(`(?<![A-Za-z0-9_])${word.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}(?![A-Za-z0-9_])`, "iu").test(text);
+
 /** No option's name, no extension, and no source identity may appear in the code a language round shows. */
 export const rejectStackSpoilers = (profile: CrawlProfile, candidate: Candidate): void => {
   const excerpt = codeText(candidate.excerpt);
@@ -118,7 +124,11 @@ export const rejectStackSpoilers = (profile: CrawlProfile, candidate: Candidate)
   const protectedWords = [candidate.authorName, candidate.authorLogin, candidate.licenseName, candidate.licenseSpdx]
     .filter((value): value is string => typeof value === "string" && value.length > 0);
   if (protectedWords.some((value) => containsWord(excerpt, value))) fail();
-  if (STACK_LANGUAGES.some((label) => mentionsLabel(excerpt, label))) fail();
+  // The configured languages are the options; a name the profile doesn't read (`Julia` in a Python string) isn't one.
+  if (profile.stack.configurations.some(({ language }) => mentionsLabel(excerpt, language))) fail();
+  // A rarer language's name in any case (`clojure.core`, `elixir`) gives it away too; the first twelve keep the check above.
+  if (profile.stack.configurations.some(({ language }) => RARE_LANGUAGES.has(language)
+    && RARE_SPELLINGS[language]!.some((spelling) => spelledIn(excerpt, spelling)))) fail();
   if (profile.stack.configurations.some(({ extensions }) => extensions.some((extension) => mentionsExtension(excerpt, extension)))) fail();
 };
 
@@ -141,6 +151,24 @@ export const validateLanguageCandidate = (options: Readonly<{
  * How the excerpt's blocks are built, checked in the style its language uses: a C++ `public:` label ends in a
  * colon before an indented line, yet its blocks are braces. Code whose own style does not show gets a neutral hint.
  */
+const endsWithEnd = (lines: readonly string[]): string | undefined =>
+  lines.some((line) => line.trim() === "end") ? "Blocks close with a line that says end." : undefined;
+/**
+ * The rarer languages' block styles (v1.0). Each pair shares its style, so the first hint narrows to the answer's pair
+ * without settling it; maps in braces (`%{}`, `#{}`, `{:a 1}`) never read as braced blocks.
+ */
+const RARE_BLOCK_STYLES: Readonly<Partial<Record<StackLanguage, (lines: readonly string[]) => string | undefined>>> = Object.freeze({
+  Haskell: () => "Blocks are set by indentation, not braces.",
+  Elm: () => "Blocks are set by indentation, not braces.",
+  Clojure: () => "Every form is wrapped in parentheses.",
+  Racket: () => "Every form is wrapped in parentheses.",
+  Erlang: (lines: readonly string[]) => lines.some((line) => /\.\s*$/u.test(line)) ? "Clauses end with a full stop." : undefined,
+  Prolog: (lines: readonly string[]) => lines.some((line) => /\.\s*$/u.test(line)) ? "Clauses end with a full stop." : undefined,
+  Julia: endsWithEnd, MATLAB: endsWithEnd, Elixir: endsWithEnd, Crystal: endsWithEnd,
+  Ada: (lines: readonly string[]) => lines.some((line) => /^\s*end\b[^;]*;/iu.test(line)) ? "Blocks close with end and a semicolon." : undefined,
+  Pascal: (lines: readonly string[]) => lines.some((line) => /^\s*end\b[^;]*;/iu.test(line)) ? "Blocks close with end and a semicolon." : undefined,
+});
+
 const blockStyle = (excerpt: string, language: StackLanguage): string => {
   const lines = excerpt.split("\n");
   if (language === "Python") {
@@ -151,6 +179,8 @@ const blockStyle = (excerpt: string, language: StackLanguage): string => {
   if (language === "Ruby") {
     return lines.some((line) => line.trim() === "end") ? "Blocks close with a line that says end." : "Look at how each block starts and ends.";
   }
+  const rare = RARE_BLOCK_STYLES[language];
+  if (rare !== undefined) return rare(lines) ?? "Look at how each block starts and ends.";
   return excerpt.includes("{") ? "Blocks are wrapped in braces." : "Look at how each block starts and ends.";
 };
 
@@ -159,7 +189,7 @@ const cluesFor = (profile: CrawlProfile, excerpt: string, language: StackLanguag
   const found = firstMarker(excerpt, language) ?? fail();
   const syntax = found.shown.includes("`") ? found.shown : `\`${found.shown}\``;
   const clues = [blockStyle(excerpt, language), fill(profile.templates.language.syntaxClue, { syntax })];
-  if (clues.some((clue) => STACK_LANGUAGES.some((label) => mentionsLabel(clue, label)))) fail();
+  if (clues.some((clue) => profile.stack.configurations.some(({ language: label }) => mentionsLabel(clue, label)))) fail();
   return Object.freeze(clues);
 };
 
@@ -170,24 +200,46 @@ const cluesFor = (profile: CrawlProfile, excerpt: string, language: StackLanguag
  * and every pair is also the second pair in exactly four rounds. Every language then appears in exactly eight
  * rounds, and an option set appears in at most two rounds, whose answers sit in different pairs: a remembered
  * answer rules out one option of a later round at most, where a set of four rounds used to give its last one away.
+ *
+ * With more pairs (v1.0) a pair takes the four after the one it skips, so six pairs keep exactly the sets above.
+ * Some rarer pairs resemble another pair as a whole (Crystal and Elixir borrowed Ruby's syntax), and a round offering
+ * both would be decided by a family likeness, not by reading; the cycle is searched until no pair takes a pair it
+ * resembles.
  */
-const optionSets = (classified: readonly ClassifiedCandidate[]): ReadonlyMap<ClassifiedCandidate, readonly StackLanguage[]> => {
+const SECOND_PAIR_OFFSETS = Object.freeze([2, 3, 4, 5]);
+const PAIRING_ATTEMPTS = 400;
+/** Pairs that read alike as families; a round offers at most one of each. */
+const RESEMBLANCES: readonly (readonly [StackLanguage, StackLanguage])[] = Object.freeze([
+  ["Elixir", "Python"], ["Julia", "Python"], ["Haskell", "OCaml"], ["Erlang", "Elixir"],
+]);
+const resembles = (pair: readonly StackLanguage[], other: readonly StackLanguage[]): boolean =>
+  RESEMBLANCES.some(([left, right]) => (pair.includes(left) && other.includes(right)) || (pair.includes(right) && other.includes(left)));
+
+const optionSets = (classified: readonly ClassifiedCandidate[], profile: CrawlProfile)
+  : ReadonlyMap<ClassifiedCandidate, readonly StackLanguage[]> => {
   const seed = sha256(classified.map(({ candidate }) => String(candidate.blob)).sort().join("|"));
   const byHash = (key: (pair: readonly StackLanguage[]) => string) => (left: readonly StackLanguage[], right: readonly StackLanguage[]) =>
     sha256(key(left)) < sha256(key(right)) ? -1 : 1;
-  const cycle = [...LANGUAGE_PAIRS].sort(byHash((pair) => `${seed}:${pair.join("|")}`));
-  const sets = new Map<ClassifiedCandidate, readonly StackLanguage[]>();
-  cycle.forEach((pair, position) => {
-    const skipped = cycle[(position + 1) % cycle.length]!;
-    const others = cycle.filter((other) => other !== pair && other !== skipped)
-      .sort(byHash((other) => `${seed}:${pair.join("|")}:${other.join("|")}`));
-    const rounds = classified.filter((entry) => (pair as readonly string[]).includes(entry.language))
-      .sort((left, right) => sha256(String(left.candidate.blob)) < sha256(String(right.candidate.blob)) ? -1 : 1);
-    // Six pairs leave each pair exactly four others for its four rounds; any other shape would unbalance the deck.
-    if (rounds.length !== 4 || others.length !== rounds.length || pair.some((language) => rounds.filter((entry) => entry.language === language).length !== 2)) fail();
-    rounds.forEach((round, index) => sets.set(round, Object.freeze([...pair, ...others[index]!])));
-  });
-  return sets;
+  const configured = profile.stack.configurations.map(({ language }) => language);
+  const pairs = LANGUAGE_PAIRS.filter(([first]) => configured.includes(first));
+  // Six pairs leave each pair exactly four others for its four rounds; fewer could not.
+  if (pairs.length < 6) fail();
+  for (let attempt = 0; attempt < PAIRING_ATTEMPTS; attempt += 1) {
+    const salt = attempt === 0 ? seed : `${seed}:${attempt}`;
+    const cycle = [...pairs].sort(byHash((pair) => `${salt}:${pair.join("|")}`));
+    const seconds = cycle.map((_, position) => SECOND_PAIR_OFFSETS.map((offset) => cycle[(position + offset) % cycle.length]!));
+    if (cycle.some((pair, position) => seconds[position]!.some((other) => resembles(pair, other)))) continue;
+    const sets = new Map<ClassifiedCandidate, readonly StackLanguage[]>();
+    cycle.forEach((pair, position) => {
+      const others = [...seconds[position]!].sort(byHash((other) => `${seed}:${pair.join("|")}:${other.join("|")}`));
+      const rounds = classified.filter((entry) => (pair as readonly string[]).includes(entry.language))
+        .sort((left, right) => sha256(String(left.candidate.blob)) < sha256(String(right.candidate.blob)) ? -1 : 1);
+      if (rounds.length !== 4 || pair.some((language) => rounds.filter((entry) => entry.language === language).length !== 2)) fail();
+      rounds.forEach((round, index) => sets.set(round, Object.freeze([...pair, ...others[index]!])));
+    });
+    return sets;
+  }
+  throw new LanguageRoundsError("LANGUAGE_PAIRING_CONFLICT");
 };
 
 const fixtureFor = (classified: ClassifiedCandidate, options: readonly StackLanguage[], profile: CrawlProfile): ExperimentFixture => {
@@ -227,6 +279,6 @@ export const generateLanguageRounds = (options: LanguageRoundsOptions): Generate
     const values = classified.map(({ candidate }) => text(candidate[key]));
     if (new Set(values).size !== values.length) fail();
   }
-  const sets = optionSets(classified);
+  const sets = optionSets(classified, profile);
   return orderedPool(classified.map((entry) => fixtureFor(entry, sets.get(entry)!, profile)));
 };

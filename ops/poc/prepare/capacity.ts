@@ -1,6 +1,6 @@
+import { isLanguageSelection } from "../../../packages/artifact/src/index";
 import {
   CAPACITY_CEILINGS,
-  STACK_LANGUAGES,
   type CapacityLimits,
   type StackLanguage,
 } from "./profile";
@@ -107,12 +107,12 @@ const validateDimensions = (options: CapacityOptions): void => {
     || queries.some((id) => typeof id !== "string" || id.trim() !== id || id.length === 0)) {
     fail("QUERY_DIMENSIONS");
   }
-  if (options.stackLanguages.join("|") !== STACK_LANGUAGES.join("|")) fail("STACK_DIMENSIONS");
+  if (!isLanguageSelection(options.stackLanguages)) fail("STACK_DIMENSIONS");
 };
 
-const initialState = (queryIds: readonly string[]): CapacityState => ({
+const initialState = (queryIds: readonly string[], stackLanguages: readonly StackLanguage[]): CapacityState => ({
   github: Object.fromEntries(queryIds.map((id) => [id, { pages: 0, results: 0 }])),
-  stackRows: Object.fromEntries(STACK_LANGUAGES.map((language) => [language, 0])) as Record<StackLanguage, number>,
+  stackRows: Object.fromEntries(stackLanguages.map((language) => [language, 0])) as Record<StackLanguage, number>,
   stackMetadataBytes: 0,
   blobAttempts: 0,
   successfulBlobs: 0,
@@ -198,7 +198,7 @@ const createRequestLease = (state: CapacityState, limits: CapacityLimits): Reque
 export const createCapacityMeter = (options: CapacityOptions): CapacityMeter => {
   validateLimits(options.limits);
   validateDimensions(options);
-  const state = initialState(options.githubQueryIds);
+  const state = initialState(options.githubQueryIds, options.stackLanguages);
   const { limits } = options;
   return Object.freeze({
     recordGitHubPage: (queryId: string, results: number): void => {

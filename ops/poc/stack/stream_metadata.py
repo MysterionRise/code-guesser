@@ -60,6 +60,20 @@ EXTENSIONS = {
     "Swift": (".swift",),
     "C": (".c",),
     "C++": (".cpp", ".cc", ".cxx", ".hpp"),
+    "Haskell": (".hs",),
+    "Elm": (".elm",),
+    "OCaml": (".ml",),
+    "F#": (".fs",),
+    "Erlang": (".erl",),
+    "Prolog": (".pl", ".pro"),
+    "Clojure": (".clj", ".cljc"),
+    "Racket": (".rkt",),
+    "Julia": (".jl",),
+    "MATLAB": (".m",),
+    "Ada": (".adb",),
+    "Pascal": (".pas", ".pp"),
+    "Elixir": (".ex", ".exs"),
+    "Crystal": (".cr",),
 }
 HEX_40 = re.compile(r"^[0-9a-f]{40}$")
 REPOSITORY = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")

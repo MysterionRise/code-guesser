@@ -13,7 +13,7 @@ import {
   CURATED_REPOSITORIES, CURATED_SECTION, FIX_SECTION, OUTPUT_SECTION, curatedFiles, fixHarnessData, loadCuratedProfile, missingLineFiles, nameFunctionFiles, outputFiles, sha256,
 } from "./testdata/deck-builders";
 import { LANGUAGE_SLUGS } from "../../../packages/artifact/src/index";
-import { STACK_LANGUAGES, parseCrawlProfile } from "./profile";
+import { MAINSTREAM_LANGUAGES, parseCrawlProfile } from "./profile";
 import { createRetryController, RetryError } from "./retry";
 import { createRunReport } from "./run-report";
 import { workerStage } from "./runtime";
@@ -48,13 +48,13 @@ const popularRows = (language: string) => [0, 1, 2, 3].map((rank) =>
 /** A language's two default ordinary rows: the language deck's two rounds of it. */
 const ordinaryRows = (language: string) => [harnessRow(language, slugOf(language)), harnessRow(language, `${slugOf(language)}-2`)];
 const stackRowsWith = (python: readonly object[], others: Partial<Record<string, readonly object[]>> = {}) =>
-  Object.fromEntries(STACK_LANGUAGES.map((language) => [language, [...popularRows(language), ...(language === "Python" ? python
+  Object.fromEntries(MAINSTREAM_LANGUAGES.map((language) => [language, [...popularRows(language), ...(language === "Python" ? python
     : others[language] ?? ordinaryRows(language))]])) as Record<string, readonly object[]>;
 /** Two rounds per language in each Stack deck. */
-const STACK_POOL = 2 * STACK_LANGUAGES.length;
+const STACK_POOL = 2 * MAINSTREAM_LANGUAGES.length;
 const PROJECT_CALL = `project:${STACK_POOL}:${Array(STACK_POOL).fill(3).join(",")}`;
 /** Each language's ordinary rows in the default harness, in the order the language deck tries them. */
-const DEFAULT_LANGUAGE_ROWS = STACK_LANGUAGES.flatMap((language) =>
+const DEFAULT_LANGUAGE_ROWS = MAINSTREAM_LANGUAGES.flatMap((language) =>
   language === "Python" ? ["py-reject", "py", "py-2"] : [slugOf(language), `${slugOf(language)}-2`]);
 /** Captures the commit ids the before-or-after deck is generated from. */
 const beforeAfterIds = (): Readonly<{ ids: unknown[]; generate: PreparationDependencies["generateBeforeAfter"] }> => {
@@ -67,7 +67,7 @@ const beforeAfterIds = (): Readonly<{ ids: unknown[]; generate: PreparationDepen
 const metadataFrom = (rows: Record<string, readonly object[]>): PreparationDependencies["collectStackMetadata"] =>
   async ({ configuration, capacity }) => {
     capacity.recordStackRows(configuration, rows[configuration]!.length, 100);
-    return accepted(rows[configuration]!, `a${STACK_LANGUAGES.indexOf(configuration).toString(16)}`);
+    return accepted(rows[configuration]!, `a${MAINSTREAM_LANGUAGES.indexOf(configuration).toString(16)}`);
   };
 const searchWith = (queryClassifications: unknown): PreparationDependencies["searchGitHub"] => async () => accepted({
   candidates: HARNESS_CANDIDATES,
@@ -99,7 +99,7 @@ const logLines = (calls: readonly string[]): string[] =>
 
     expect(harness.calls.indexOf("preflight")).toBeLessThan(harness.calls.indexOf("metadata:Python"));
     expect(harness.calls.indexOf("metadata:Ruby")).toBeLessThan(harness.calls.indexOf("search"));
-    expect(harness.calls.filter((call) => call.startsWith("metadata:"))).toEqual(STACK_LANGUAGES.map((language) => `metadata:${language}`));
+    expect(harness.calls.filter((call) => call.startsWith("metadata:"))).toEqual(MAINSTREAM_LANGUAGES.map((language) => `metadata:${language}`));
     expect(harness.calls).toContain(PROJECT_CALL);
     expect(harness.calls).toContain(`language:${STACK_POOL}`);
     expect(harness.calls).toContain("before-after:5");
@@ -120,7 +120,7 @@ const logLines = (calls: readonly string[]): string[] =>
 
     expect(new Set(harness.dependencyMeters).size).toBe(1);
     // Two popular files per language for the project deck, then the language deck's rows in stable order.
-    const fetched = [...STACK_LANGUAGES.flatMap((language) => [0, 1].map((rank) => `${slugOf(language)}-pop-${rank}`)), ...DEFAULT_LANGUAGE_ROWS];
+    const fetched = [...MAINSTREAM_LANGUAGES.flatMap((language) => [0, 1].map((rank) => `${slugOf(language)}-pop-${rank}`)), ...DEFAULT_LANGUAGE_ROWS];
     expect(harness.calls.filter((call) => call.startsWith("fetch:"))).toEqual(
       fetched.map((id, index) => `fetch:${id}:${240 - index}:${16_777_216 - 80 * index}`));
     expect(harness.calls.filter((call) => call.startsWith("eligible:"))).toEqual(DEFAULT_LANGUAGE_ROWS.map((id) => `eligible:${id}`));
@@ -731,7 +731,7 @@ const logLines = (calls: readonly string[]): string[] =>
     const command = await import("./index") as Record<string, any>;
     const profile = await loadProfile();
     const capacity = createCapacityMeter({ limits: profile.capacity,
-      githubQueryIds: profile.github.queries.map(({ id }) => id), stackLanguages: STACK_LANGUAGES });
+      githubQueryIds: profile.github.queries.map(({ id }) => id), stackLanguages: MAINSTREAM_LANGUAGES });
     let liveRequests = 0;
     const runtime = command.createPreparationRuntime(profile, { PATH: "/bin" }, capacity,
       async () => new Response(JSON.stringify({ sequence: ++liveRequests }), {
@@ -758,7 +758,7 @@ const logLines = (calls: readonly string[]): string[] =>
     const command = await import("./index") as Record<string, any>;
     const profile = await loadProfile();
     const capacity = createCapacityMeter({ limits: profile.capacity,
-      githubQueryIds: profile.github.queries.map(({ id }) => id), stackLanguages: STACK_LANGUAGES });
+      githubQueryIds: profile.github.queries.map(({ id }) => id), stackLanguages: MAINSTREAM_LANGUAGES });
     let liveRequests = 0;
     const runtime = command.createPreparationRuntime(profile, { PATH: "/bin" }, capacity,
       async () => new Response(JSON.stringify({ sequence: ++liveRequests, items: [] }), {
@@ -861,7 +861,7 @@ const logLines = (calls: readonly string[]): string[] =>
     });
     const profile = await loadProfile();
     // Preflight, each Stack metadata configuration, search, lineage, and admission, then blobs and revalidation.
-    const acceptedResponseHashes = ["1", ...STACK_LANGUAGES.map((_, index) => `a${index.toString(16)}`), "2", "3", "4", "7", "8"].map(hash);
+    const acceptedResponseHashes = ["1", ...MAINSTREAM_LANGUAGES.map((_, index) => `a${index.toString(16)}`), "2", "3", "4", "7", "8"].map(hash);
     const expected = canonicalHash({ profileHash: canonicalHash(profile), acceptedResponseHashes });
 
     const result = await prepareLocalExperiment(harness.dependencies);

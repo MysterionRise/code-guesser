@@ -1,5 +1,5 @@
 import { generateProjectRounds, namedByTemplates, optionDetail, projectRoundAllowed, ProjectRoundsError } from "./project-rounds";
-import { STACK_LANGUAGES } from "./profile";
+import { MAINSTREAM_LANGUAGES } from "./profile";
 import { loadDeckProfile, projectRoundInputs, snapshotIdFor } from "./testdata/deck-builders";
 
 const testModuleName: string = "vitest";
@@ -20,7 +20,7 @@ describe("project rounds", () => {
       for (const { label } of fixture.candidates) counts.set(label, (counts.get(label) ?? 0) + 1);
     }
     expect(new Set(counts.values())).toEqual(new Set([2]));
-    for (const language of STACK_LANGUAGES) {
+    for (const language of MAINSTREAM_LANGUAGES) {
       const sets = fixtures.filter(({ source }) => source.configuration === language)
         .map((fixture) => fixture.candidates.map(({ label }) => label).sort().join("|"));
       expect(new Set(sets).size).toBe(1);

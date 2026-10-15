@@ -287,6 +287,28 @@ gate: changing queries, retries, ceilings, deck rules, or running
     must tell a language from its look-alike (`language-markers.ts`). Since
     #81 a pair's four rounds take four different second pairs (a derangement),
     so no option set appears in more than two rounds.
+  - **Rarer languages (v1.0, #129):** `STACK_LANGUAGES` adds seven pairs
+    (Haskell/Elm, OCaml/F#, Erlang/Prolog, Clojure/Racket, Julia/MATLAB,
+    Ada/Pascal, Elixir/Crystal) after the first twelve (`MAINSTREAM_LANGUAGES`).
+    - A profile configures whole pairs in that order (`isLanguageSelection`);
+      v5 still reads the twelve and rebuilds byte for byte. A configuration
+      with `"projectDeck": false` feeds the language deck alone, since a rare
+      language's popular repositories are mostly other languages' projects.
+    - Each has comments (`excerpt-window.ts`), preamble and definition rules
+      (`code-windows.ts`), markers and a look-alike note
+      (`language-markers.ts`), a block-style hint, and the worker's shard
+      directory and extensions. Its name in any case refuses a window.
+    - A pair takes the second pairs two to five places along a hash-ordered
+      cycle (six pairs keep the v5 sets). Pairs that read alike as families
+      (`RESEMBLANCES`: Elixir/Crystal and Julia/MATLAB with Python/Ruby,
+      Haskell/Elm with OCaml/F#, Erlang/Prolog with Elixir/Crystal) never
+      share a round; the cycle is searched until none does.
+    - The worker journal is keyed to the worker's code, so adding a language
+      orphaned v5's recorded worker outputs. On 2026-10-15 a `--resume`
+      re-recorded them (110 of 111 byte-identical; Java's rows identical, its
+      network counters not), merged into the 13 October journal; the old one
+      is `run.jsonl.before-rare-languages`.
+    - Dry run: `docs/review/evidence/2026-10-15-rare-languages-dry-run.md`.
   - **Phase 3b,** the curated decks. Each runs only when the profile carries
     its `curated` section, after the Stack and search decks.
     - **Missing line (#57, v1.0):** `missing-line-window.ts` (gaps, decoys,
@@ -464,7 +486,8 @@ when the preparer throws a code this section does not name.
     `MISSING_LINE_HINT_DECIDES` (no other option does what the answer
     does, so the first hint would pick it), `NAME_FUNCTION_RANK_UNBALANCED`,
     `NAME_FUNCTION_HINT_DECIDES` (no other name joins as many words as the
-    answer), `TEMPLATE_PLACEHOLDER_REJECTED`.
+    answer), `LANGUAGE_PAIRING_CONFLICT` (no cycle of second pairs keeps resembling
+    pairs out of the same round), `TEMPLATE_PLACEHOLDER_REJECTED`.
 - Publication: `HASH_MISMATCH`, `INVALID_ARTIFACT`, `INVALID_HASH`, and
   `REPORT_*_FAILED` (staging, committing, rolling back, or finalizing the
   report). The previous artifact and pin stay.
