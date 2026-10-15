@@ -248,10 +248,16 @@ const makeStackDependencies = (
 
 const stubDeck = (kind: string, size: number) => ({ fixtures: Array.from({ length: size }, () => ({ kind })) }) as any;
 
+/** The kind each curated deck's stub rounds carry, and the call it records (`fix-deck`, apart from the fix stubs). */
+const CURATED_STUBS = Object.freeze({
+  algorithm: { kind: "ALGORITHM", call: "algorithm" },
+  output: { kind: "OUTPUT", call: "output" },
+  fix: { kind: "FIX", call: "fix-deck" },
+} as const);
+
 const makeArtifactDependencies = (
   state: HarnessState,
-): Pick<PreparationDependencies, "generateProject" | "generateLanguage" | "generateBeforeAfter" | "generateAlgorithm" | "generateOutput"
-  | "generateFix" | "compose"> => ({
+): Pick<PreparationDependencies, "generateProject" | "generateLanguage" | "generateBeforeAfter" | "generateCurated" | "compose"> => ({
   generateProject: ({ profile, rounds }) => {
     state.calls.push(`project:${rounds.length}:${rounds.map((round) => round.distractors.length).join(",")}`);
     return stubDeck("PROJECT", poolSizes(profile).project);
@@ -264,17 +270,9 @@ const makeArtifactDependencies = (
     state.calls.push(`before-after:${selected.length}`);
     return stubDeck("BEFORE_AFTER", profile.selection.beforeAfterPool);
   },
-  generateAlgorithm: ({ profile, candidates: selected }) => {
-    state.calls.push(`algorithm:${selected.length}`);
-    return stubDeck("ALGORITHM", poolSizes(profile).algorithm);
-  },
-  generateOutput: ({ profile, candidates: selected }) => {
-    state.calls.push(`output:${selected.length}`);
-    return stubDeck("OUTPUT", poolSizes(profile).output);
-  },
-  generateFix: ({ profile, candidates: selected }) => {
-    state.calls.push(`fix-deck:${selected.length}`);
-    return stubDeck("FIX", poolSizes(profile).fix);
+  generateCurated: ({ deck, profile, candidates: selected }) => {
+    state.calls.push(`${CURATED_STUBS[deck].call}:${selected.length}`);
+    return stubDeck(CURATED_STUBS[deck].kind, poolSizes(profile)[deck]);
   },
   compose: (options) => {
     const sizes = (["project", "language", "before-after", ...(["algorithm", "output", "fix"] as const).filter((id) => options.decks[id])] as const)

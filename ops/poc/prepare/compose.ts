@@ -19,6 +19,7 @@ import {
   type ExperimentFixture,
 } from "./model";
 import { STACK_LANGUAGES, mentionsLabel, poolSizes, type AlgorithmEntry, type CrawlProfile } from "./profile";
+import { isCuratedDeck } from "./curated-deck-ids";
 import type { GeneratedRounds } from "./round-helpers";
 
 const SHA256 = /^[0-9a-f]{64}$/u;
@@ -162,11 +163,9 @@ const crawlSnapshot = (profile: CrawlProfile, profileHash: string, acceptedRespo
 });
 
 const TEMPLATE_KEYS = Object.freeze({ project: "project", language: "language", "before-after": "beforeAfter" } as const);
-/** A deck's title and description: from the shared templates, or from the curated section that configures it. */
+/** A deck's title and description: from the shared templates, or from the curated section keyed by the deck's id (#36). */
 const deckTemplate = (profile: CrawlProfile, id: DeckId): Readonly<{ title: string; description: string }> =>
-  id === "algorithm" ? profile.curated?.algorithm?.templates ?? fail()
-    : id === "output" ? profile.curated?.output?.templates ?? fail()
-      : id === "fix" ? profile.curated?.fix?.templates ?? fail() : profile.templates[TEMPLATE_KEYS[id]];
+  isCuratedDeck(id) ? profile.curated?.[id]?.templates ?? fail() : profile.templates[TEMPLATE_KEYS[id]];
 
 /** The curated repositories' pins, the algorithms a round may offer, and the bug datasets, so the parser can check rounds. */
 const curatedSnapshot = (profile: CrawlProfile) => {

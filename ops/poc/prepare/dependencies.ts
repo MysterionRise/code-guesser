@@ -3,9 +3,6 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { generateAlgorithmRounds } from "./algorithm-rounds";
-import { generateOutputRounds } from "./output-rounds";
-import { generateFixRounds } from "./fix-rounds";
 import { bindFixCommit, readDatasetBlob, readDatasetBugs } from "./github-fixes";
 import { generateBeforeAfterRounds } from "./before-after-rounds";
 import { publishArtifact } from "./artifact-store";
@@ -13,6 +10,7 @@ import { fetchSelectedBlob } from "./blob-worker";
 import { canonicalBytes } from "./canonical";
 import { createCapacityMeter } from "./capacity";
 import { composeExperimentArtifact } from "./compose";
+import { curatedDeck } from "./curated-decks";
 import { PreparationError } from "./diagnostics";
 import { admitGitHubCandidates, describeGitHubRepository, screenGitHubRepository } from "./github-admission";
 import { bindGitHubFile, listGitHubDirectory, readGitHubFile } from "./github-files";
@@ -213,9 +211,7 @@ export const defaultDependencies = (options: DependencyOptions = { journal: "fre
   generateProject: (options) => generateProjectRounds(options as Parameters<typeof generateProjectRounds>[0]),
   generateLanguage: (options) => generateLanguageRounds(options as Parameters<typeof generateLanguageRounds>[0]),
   generateBeforeAfter: (options) => generateBeforeAfterRounds(options as Parameters<typeof generateBeforeAfterRounds>[0]),
-  generateAlgorithm: (options) => generateAlgorithmRounds(options),
-  generateOutput: (options) => generateOutputRounds(options),
-  generateFix: (options) => generateFixRounds(options),
+  generateCurated: ({ deck, ...options }) => curatedDeck(deck).generate(options),
   compose: composeExperimentArtifact,
   createReport: createRunReport,
   stageReport,
