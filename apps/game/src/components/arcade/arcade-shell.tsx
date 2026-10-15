@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import type { Design } from "../../genui/designs";
 import type { GenuiPanelProps } from "../../genui/genui-panel";
 import { ArcadeShellRuleError, optionLine, requirePublicText as required, type PublicModeContract, type RoundModeKind } from "./mode-contract";
 
@@ -234,11 +235,11 @@ interface ArcadeShellProps {
   newGameHref?: string;
   /** When set, the share line names the deck. */
   deckTitle?: string;
-  /** When set, a revealed round offers the generative-UI explainer (#101); the server decides with `GENUI_ENABLED`. */
-  genuiEnabled?: boolean;
+  /** When set, a revealed round offers this generative design (#101, #114); the server decides with `GENUI_ENABLED`. */
+  genuiDesign?: Design;
 }
 
-export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealHintAction, chooseAnotherDeckHref, newGameHref, deckTitle, genuiEnabled }: ArcadeShellProps) {
+export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealHintAction, chooseAnotherDeckHref, newGameHref, deckTitle, genuiDesign }: ArcadeShellProps) {
   const [session, setSession] = React.useState(() => createArcadeSession(mode));
   const token = React.useRef(sessionToken);
   const currentToken = React.useCallback(() => token.current, []);
@@ -460,9 +461,9 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
               <p>Helpful signals: {session.reveal.helpfulSignals.join(" · ")}</p>
               <p>Misleading signals: {session.reveal.misleadingSignals.join(" · ")}</p>
               <small>{linkedAttribution(session.reveal.attribution)}</small>
-              {genuiEnabled && (
+              {genuiDesign && (genuiDesign === "catalog" || genuiDesign === "composer") && (
                 <React.Suspense fallback={null}>
-                  <GenuiPanel key={round.roundId} roundId={round.roundId} phase="after-lock" panes={round.content.panes}
+                  <GenuiPanel key={round.roundId} design={genuiDesign} roundId={round.roundId} phase="after-lock" panes={round.content.panes}
                     pick={{ label: labelOf(session.lockedCandidateId), correct: session.reveal.correct }}
                     optionLabels={round.mode.candidates.map(({ label }) => label)} sessionToken={currentToken} />
                 </React.Suspense>

@@ -13,6 +13,20 @@ const DEFAULT_CALLS = Object.freeze({
     { name: "signal_list", args: { helpful: ["The block keywords"], misleading: ["The familiar operators"] } },
   ],
   "before-lock": [{ name: "host_message", args: { text: "Hints cost points. Good luck!" } }],
+  // A small composed panel that fits any round: its excerpt is the first line, which every pane has.
+  composer: [{ name: "compose_panel", args: {
+    root: "panel",
+    elements: [
+      { id: "panel", type: "Stack", props: { gap: "medium" }, children: ["verdict", "code", "signals", "quiz"] },
+      { id: "verdict", type: "Callout", props: { tone: "tip", title: "The tell", text: "The first line already gives it away." }, children: [] },
+      { id: "code", type: "CodeExcerpt", props: { pane: 1, from: 1, to: 1, highlights: [{ line: 1, kind: "helpful", note: "Read this line first." }] }, children: [] },
+      { id: "signals", type: "List", props: { ordered: false, items: ["Keywords before punctuation", "Then the brackets"] }, children: [] },
+      { id: "quiz", type: "Quiz", props: { question: "What should you read first?", choices: [
+        { label: "The keywords", correct: true, feedback: "Keywords name the language fastest." },
+        { label: "The comments", correct: false, feedback: "Comments rarely settle it." },
+      ] }, children: [] },
+    ],
+  } }],
 });
 
 const chunk = (choices, extra = {}) =>
@@ -40,7 +54,8 @@ const readBody = (request) => new Promise((resolve, reject) => {
 
 /**
  * Starts the fake on a port (0 picks a free one). `control` sets what the next completions return: an HTTP
- * `status` to fail with, or the tool `calls` to make; `requests` holds every completion request body received.
+ * `status` to fail with, the tool `calls` to make every time, or a `sequence` of call lists, one per request;
+ * `requests` holds every completion request body received.
  */
 export const startFakeOpenRouter = async (port = 0) => {
   const requests = [];
@@ -65,7 +80,8 @@ export const startFakeOpenRouter = async (port = 0) => {
         return response.end(JSON.stringify({ error: { message: "fake provider body that must never reach a player", code: next.status } }));
       }
       const offered = new Set((body.tools ?? []).map((entry) => entry.function?.name));
-      const calls = next.calls ?? (offered.has("takeaway") ? DEFAULT_CALLS["after-lock"] : DEFAULT_CALLS["before-lock"]);
+      const calls = next.sequence?.shift() ?? next.calls ?? (offered.has("compose_panel") ? DEFAULT_CALLS.composer
+        : offered.has("takeaway") ? DEFAULT_CALLS["after-lock"] : DEFAULT_CALLS["before-lock"]);
       response.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
       return response.end(toolCallStream(calls));
     }

@@ -106,6 +106,9 @@ const reject = (code: string): never => { throw new RenderCallRejected(code); };
 // Generic types such as `Vec<i64>` stay legal.
 const UNSAFE_TEXT = /[\u0000-\u001f\u007f‪-‮⁦-⁩]|https?:\/\/|www\.|javascript:|<\/?(?:script|style|iframe|img|svg|a|object|embed|link|meta|form|input)\b/iu;
 
+/** Whether a model-written text may be shown: no control characters, bidi overrides, links, or active markup. */
+export const isSafeText = (value: string): boolean => !UNSAFE_TEXT.test(value);
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 

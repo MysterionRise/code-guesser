@@ -58,3 +58,28 @@ test("when the provider refuses, the explainer steps aside and the game plays on
   await page.getByRole("button", { name: "Next round" }).click();
   await expect(page.getByText("Round 2 of 5")).toBeVisible();
 });
+
+test("the composer design lays out its own panel, and the switcher moves between designs", async ({ page, request }) => {
+  await page.goto("/?deck=language&design=composer");
+  await expect(page.getByText("Round 1 of 5")).toBeVisible();
+  const designs = page.getByRole("navigation", { name: "Designs" });
+  await expect(designs.getByRole("link", { name: "Composer explainer" })).toHaveAttribute("aria-current", "page");
+  await answerRound(page);
+  const panel = page.getByRole("region", { name: "Explainer" });
+  await expect(panel).toHaveAttribute("data-genui-design", "composer");
+  await panel.getByRole("button", { name: "Explain this round" }).click();
+  await expect(panel.locator(".composer-callout")).toHaveText("The tell The first line already gives it away.");
+  await expect(panel.locator("figcaption")).toHaveText("Lines 1–1");
+  await expect(panel.locator(".genui-notes li")).toHaveText("Line 1, points to the answer: Read this line first.");
+  const quiz = panel.getByRole("group", { name: "What should you read first?" });
+  await quiz.getByLabel("The keywords").check();
+  await expect(quiz.locator(".composer-feedback")).toHaveText("Right. Keywords name the language fastest.");
+  const recorded = await (await request.get(`${fake}/requests`)).json() as { body: { tools: { function: { name: string } }[] } }[];
+  expect(recorded[0]!.body.tools.map(({ function: { name } }) => name)).toEqual(["compose_panel"]);
+
+  await designs.getByRole("link", { name: "Static" }).click();
+  await expect(page.getByText("Round 1 of 5")).toBeVisible();
+  await answerRound(page);
+  await expect(page.getByRole("region", { name: "Explainer" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "All decks" })).toBeVisible();
+});

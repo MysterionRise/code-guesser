@@ -98,3 +98,32 @@ noscript { display: block; padding: 12px; margin-bottom: 16px; background: #522;
 .genui-comparison { margin-top: 12px; width: 100%; border-collapse: collapse; }
 .genui-comparison caption { text-align: left; color: #9fbcae; font-size: .88rem; margin-bottom: 6px; }
 .genui-comparison th, .genui-comparison td { padding: 6px 8px; border-top: 1px solid #2b5043; text-align: left; vertical-align: top; }
+/* The deck nav pulls the next element up 16px; this nav clears it rather than covering its link. */
+.design-nav { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; width: min(980px, calc(100% - 32px)); margin: 30px auto -8px; font-size: .9rem; }
+.design-nav-label { color: #9fbcae; }
+.design-nav a { color: #cdeada; }
+.design-nav a[aria-current="page"] { color: #baff65; font-weight: 700; }
+/* Grid and flex children default to their content's width, so one long code line would widen the whole panel. */
+.composer-panel { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+.composer-stack { display: grid; grid-template-columns: minmax(0, 1fr); }
+.composer-panel *, .genui-panel { min-width: 0; }
+.composer-stack.gap-small { gap: 6px; } .composer-stack.gap-medium { gap: 12px; } .composer-stack.gap-large { gap: 20px; }
+.composer-row { display: flex; flex-wrap: wrap; gap: 12px; }
+.composer-row > * { flex: 1 1 220px; }
+.composer-card { padding: 12px 14px; border: 1px solid #2b5043; border-radius: 12px; background: #0e2119; }
+.composer-card h4, .composer-heading { margin: 0 0 6px; color: #cdeada; font-size: .95rem; }
+.composer-text { margin: 0; }
+.composer-callout { padding: 10px 12px; border-left: 4px solid #6f9283; border-radius: 8px; background: #10251d; }
+.composer-callout.tone-tip { border-left-color: #baff65; } .composer-callout.tone-warning { border-left-color: #ffb86b; }
+.composer-list { margin: 0; padding-left: 1.3em; }
+.composer-badge { display: inline-block; padding: 2px 8px; border-radius: 999px; border: 1px solid #527565; font-size: .82rem; }
+.composer-badge.tone-good { border-color: #baff65; color: #baff65; } .composer-badge.tone-bad { border-color: #ffb86b; color: #ffd2cb; }
+.composer-meter { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: center; }
+.composer-meter meter { width: 120px; }
+.composer-divider { border: 0; border-top: 1px solid #2b5043; margin: 4px 0; }
+.composer-details summary { cursor: pointer; color: #cdeada; }
+.composer-quiz { margin: 0; padding: 10px 12px; border: 1px dashed #527565; border-radius: 10px; }
+.composer-quiz legend { padding: 0 4px; color: #cdeada; }
+.composer-choice { display: block; margin: 4px 0; cursor: pointer; }
+.composer-choice.correct { color: #baff65; } .composer-choice.missed { color: #ffd2cb; }
+.composer-feedback { margin: 6px 0 0; min-height: 1.2em; }

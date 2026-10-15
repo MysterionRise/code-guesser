@@ -1,4 +1,5 @@
 import { activeLocalRealExperiment } from "../../../demo/local-real-experiment-loader.server";
+import { readyDesign } from "../../../genui/designs";
 import { playerTurns, streamRound } from "../../../genui/model.server";
 
 /**
@@ -9,7 +10,9 @@ export const dynamic = "force-dynamic";
 
 /** A request body larger than this is refused unread. */
 const MAX_BODY_LENGTH = 32_768;
-const BODY_KEYS = "messages|roundId|sessionToken";
+const BODY_KEYS = "design|messages|roundId|sessionToken";
+/** Designs that exist only once the answer is locked; the guard keeps the code from them before that. */
+const AFTER_LOCK_ONLY = new Set(["composer", "visualizer"]);
 
 const refuse = (status: number, reason: string): Response =>
   Response.json({ reason }, { status, headers: { "cache-control": "no-store" } });
@@ -30,14 +33,17 @@ export async function POST(request: Request): Promise<Response> {
     return refuse(400, "BODY_REJECTED");
   }
   const { sessionToken, roundId, messages } = body as Record<string, unknown>;
+  const design = readyDesign((body as Record<string, unknown>).design);
   if (typeof sessionToken !== "string" || typeof roundId !== "string") return refuse(400, "BODY_REJECTED");
+  if (design === null) return refuse(400, "DESIGN_REJECTED");
   const loaded = activeLocalRealExperiment();
   if (!loaded.ok) return refuse(503, "GENUI_UNAVAILABLE");
   const round = loaded.experiment.modelContext({ sessionToken, roundId });
   if (!round.ok) return refuse(round.reason === "SESSION_ENDED" ? 410 : 403, round.reason);
+  if (AFTER_LOCK_ONLY.has(design) && round.context.phase !== "after-lock") return refuse(403, "PHASE");
   const turns = playerTurns(messages);
   if (turns === null) return refuse(400, "MESSAGES_REJECTED");
-  const streamed = streamRound({ context: round.context, limits: round.limits, codeLines: round.codeLines, turns, signal: request.signal });
+  const streamed = streamRound({ design, context: round.context, limits: round.limits, codeLines: round.codeLines, turns, signal: request.signal });
   if (typeof streamed === "string") return refuse(streamed === "GENUI_UNAVAILABLE" ? 503 : 422, streamed);
   return streamed;
 }
