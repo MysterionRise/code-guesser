@@ -87,8 +87,11 @@ const codeOf = (value: unknown): string | undefined => {
   return REASON_CODE.test(value.message) ? value.message : undefined;
 };
 
+/** An error's stable code, a wrapped retry failure reporting its cause; undefined for an uncoded error. */
+export const stableCode = (error: unknown): string | undefined => codeOf(reportedFailure(error)) ?? codeOf(error);
+
 /** The stable code of a candidate rejection: a wrapped retry failure reports its transport cause instead of the wrapper. */
-const rejectionCode = (error: unknown): string => codeOf(reportedFailure(error)) ?? codeOf(error) ?? "CANDIDATE_REJECTED";
+const rejectionCode = (error: unknown): string => stableCode(error) ?? "CANDIDATE_REJECTED";
 
 export const noteRejection = (state: RunState, stage: DiagnosticStage, error: unknown): void => {
   const key = `${stage}\0${rejectionCode(error)}`;

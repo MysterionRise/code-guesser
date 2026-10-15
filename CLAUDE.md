@@ -209,6 +209,13 @@ gate: changing queries, retries, ceilings, deck rules, or running
     must tell a language from its look-alike (`language-markers.ts`).
   - **Phase 3b,** the curated decks. Each runs only when the profile carries
     its `curated` section, after the Stack and search decks.
+    - **Registry (#36):** `ops/poc/prepare/curated-decks.ts` lists them in
+      run order (`configured`, `select`, `generate`); ids live in
+      `curated-deck-ids.ts`, and a deck's profile section is keyed by its id
+      with its `templates`. The pipeline loops over the registry, and
+      generation goes through one `generateCurated` dependency. A new curated
+      deck still touches the artifact schema (`packages/artifact`) and, for
+      snapshot data, `compose.ts`.
     - **Curated files:** `github-files.ts` reads a file at a pinned commit
       through verified trees, with its licence and last human author.
       `github-fixes.ts` lists dataset bugs (BugsInPy's through one recursive
@@ -328,11 +335,17 @@ when the preparer throws a code this section does not name.
   `INCOMPLETE`, `TOTAL_CHANGED`, `ITEM_COUNT`, and `DUPLICATE` are provider
   inconsistencies; `SHAPE`, `IDENTITY`, and `DATE` are record drift;
   `RESULT_CEILING` and `PAGE_CEILING` mean a query outgrew its ceilings.
-- `PREPARATION_DECK_SKIPPED <deck> <code>`: that deck did not fill
-  (`DECK_SHORT`, or the `BUDGET_EXHAUSTED_*` budget that ran out) and was left
-  out; the others still publish, and the aggregates count it as
-  `<DECK>_DECK_SKIPPED`. `SELECTION DECK_SHORT` or `NO_DECK_FILLED` means none
-  filled.
+- `PREPARATION_DECK_SKIPPED <deck> <code>`: that deck was left out and the
+  others still publish; the aggregates count it as `SELECTION:<DECK>_DECK_SKIPPED`.
+  - In selection: it did not fill (`DECK_SHORT`, or the `BUDGET_EXHAUSTED_*`
+    budget that ran out). `SELECTION DECK_SHORT` or `NO_DECK_FILLED` means
+    none filled.
+  - In generation (#32): its generator or the parser refused it, or it
+    collided with a deck already kept, and the code is that check's (for
+    example `FIX_RANK_UNBALANCED`, `PUBLIC_CONTAINMENT_<KEY>_IN_<FIELD>`).
+    Decks are generated and composed in order, so a collision drops the later
+    deck. With every deck refused, the run fails in `GENERATION` with the
+    first code. An invariant or uncoded error is a bug and fails the run.
 - `BUDGET_EXHAUSTED_<BUDGET>`: a run-wide budget ran out (`REQUEST_COUNT`,
   `BLOB_ATTEMPTS`, `SUCCESSFUL_BLOBS`, or `TOTAL_BLOB_BYTES`). The deck being
   filled and every later deck are skipped instead of rejecting every later
@@ -435,6 +448,8 @@ add up.
   `OUTPUT_RANKS_UNBALANCED`: no choice of answers fills every rank in both
   orders, so the output deck is skipped.
 - `FIX_PATCH_WIDE`: a dataset patch that changes more than one line (most).
+  - `FIX_CLAIM`: the fix's lines, which the reveal quotes, claim something
+    about authorship (#32).
   - `FIX_CHANGE`, `FIX_DIFF`, `FIX_PARENT`: the upstream fix commit changes
     more of the file, differs from the dataset's line, or is a merge.
   - `FIX_WINDOW`: no window gives four comparable option lines.
