@@ -437,3 +437,20 @@ noscript { display: block; padding: 12px; margin-bottom: 16px; background: var(-
 .deck-group { margin: 0 0 22px; }
 .deck-group-title { margin: 0 0 10px; font-size: 1rem; letter-spacing: .12em; text-transform: uppercase; color: var(--accent); }
 .deck-group-note { margin-left: 10px; color: var(--muted); font-size: .85rem; letter-spacing: 0; text-transform: none; font-weight: 600; }
+/* Phones and keyboards (#46, #85, #71): wrapping that keeps indentation, right-to-left text per line, and key hints. */
+.code-panes { position: relative; }
+.wrap-toggle { justify-self: end; margin: 0 0 -4px; padding: 4px 10px; border: 1px solid var(--border-soft); border-radius: var(--radius-pill); background: transparent; color: var(--muted); font-size: .8rem; cursor: pointer; }
+.wrap-toggle[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
+.code-panes.compare .wrap-toggle { grid-column: 1 / -1; }
+.code-window { unicode-bidi: plaintext; text-align: left; }
+.code-window .code-line { unicode-bidi: plaintext; }
+.code-panes.wrap .code-window { white-space: pre-wrap; overflow-wrap: anywhere; overflow-x: hidden; }
+.code-panes.wrap .code-line { display: block; padding-left: calc(var(--gutter, 0px) + var(--indent, 0ch) + 2ch); text-indent: calc(-1 * (var(--gutter, 0px) + var(--indent, 0ch) + 2ch)); }
+.code-panes.wrap .numbered .code-line { --gutter: calc(3ch + 14px); }
+@media (max-width: 600px) { .code-detail { white-space: pre-wrap; overflow-wrap: anywhere; } }
+.answer-form { margin: 0; }
+.keys-note { margin: 8px 0 0; color: var(--muted); font-size: .8rem; }
+.keys-note kbd { padding: 0 5px; border: 1px solid var(--border-soft); border-radius: var(--radius-small); font: inherit; font-family: var(--font-mono); }
+@media (hover: none) and (pointer: coarse) { .keys-note { display: none; } }
+/* A phone gives the code more of its width: less padding around the card and the pane (#46). */
+@media (max-width: 600px) { .game-card { padding: 16px 12px; } .code-window { padding: 14px 10px; } .code-window.numbered { padding-left: 4px; } }

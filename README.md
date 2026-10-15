@@ -64,6 +64,10 @@ it under "Why". The round dots mark each answered round ✓ or ✗, and a
 finished game lists every round, your pick, the answer, the points, and its
 source.
 
+From the keyboard, `1` to `4` pick an option, `Enter` locks it in, `H` buys a
+hint, and `N` moves to the next round. On a phone, "Wrap lines" wraps long
+code under each line's own indentation.
+
 `/?deck=project`, `/?deck=language`, `/?deck=before-after`,
 `/?deck=algorithm`, `/?deck=output`, and `/?deck=fix` open a deck directly.
 

@@ -51,7 +51,7 @@ const unusedActions = {
 };
 
 describe("static arcade shell", () => {
-  it("numbers a fix round's lines, shows each option's line of code, and keeps the code's own whitespace", () => {
+  it("numbers a fix round's lines, shows each option's line of code, and keeps each line's own indentation", () => {
     const input = modeInput();
     const pane = "    if (x <= 1) {\n        return x;\n    }\n    return total + step;";
     const mode = createPublicModeContract({ ...input, rounds: input.rounds.map((round) => ({ ...round,
@@ -65,7 +65,9 @@ describe("static arcade shell", () => {
     }));
     expect(html).toContain('aria-label="Code excerpt with numbered lines"');
     expect((html.match(/<span class="line-number" aria-hidden="true">/gu) ?? []).length).toBe(4);
-    expect(html).toContain('data-line="4"><span class="line-number" aria-hidden="true">4</span>    return total + step;</span>');
+    // The indent every line shares is dropped for display (#85); each line keeps its own beyond it, and its number.
+    expect(html).toContain('data-line="4"><span class="line-number" aria-hidden="true">4</span>return total + step;</span>');
+    expect(html).toContain('data-line="2"><span class="line-number" aria-hidden="true">2</span>    return x;</span>');
     // Each option carries its line's code, which describes the radio for screen readers too.
     expect(html).toMatch(/aria-label="Line 1" aria-describedby="detail-round-1-line-1"/u);
     expect(html).toContain('<span class="candidate-detail code-detail" id="detail-round-1-line-1">if (x &lt;= 1) {</span>');
@@ -404,4 +406,16 @@ const displayReveal = (index: number, score: number, attainableMaximum: number, 
   helpfulSignals: ["Helpful"], misleadingSignals: ["Misleading"],
   versions: { content: `content-version-${index + 1}`, candidateSet: `candidate-set-${index + 1}`, scoring: "scoring-1", rules: "rules-1", evidence: `evidence-${index + 1}`, reveal: `reveal-${index + 1}` },
   result: { score, attainableMaximum, completedRounds, resultVersionId: `result-${completedRounds}` },
+});
+
+describe("code pane layout (#46, #85)", async () => {
+  const { commonIndent, indentWidth } = await import("../src/components/arcade/code-panes.js");
+  it("finds the indent every non-blank line shares, and each line's own width", () => {
+    expect(commonIndent(["    a", "", "      b", "    c"])).toBe("    ");
+    expect(commonIndent(["\tx", "\t\ty"])).toBe("\t");
+    expect(commonIndent(["  a", "\tb"])).toBe("");
+    expect(commonIndent(["", "  "])).toBe("");
+    expect(indentWidth("\t  x")).toBe(6);
+    expect(indentWidth("x")).toBe(0);
+  });
 });

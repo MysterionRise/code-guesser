@@ -55,6 +55,8 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [focusedCandidate, setFocusedCandidate] = React.useState<string | null>(null);
+  // Long lines scroll by default; a player can wrap them, and the choice holds across rounds (#46).
+  const [wrap, setWrap] = React.useState(false);
   const round = mode.rounds[session.roundIndex]!;
   // A fix round's options point at pane lines: the pane numbers its lines, each option shows its line's code, and
   // the line under the focused or chosen option (or, once revealed, the answer) is highlighted.
@@ -104,19 +106,46 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
     if (error !== null && !busy) answerButton.current?.focus();
   }, [error, busy]);
 
-  const submit = async () => {
-    if (selection === "" || session.reveal !== null || busy || ended || hintPending.current) return;
+  // Shortcuts (#71): 1 to 4 pick an option, H buys the next hint, N moves on. They wait while a modifier is held,
+  // and never fire from a text field, the code panes, the host chat, or a generative frame.
+  React.useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.repeat) return;
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      if (target?.closest('input:not([type="radio"]), textarea, select, [contenteditable="true"], .code-window, .host-chat, iframe')) return;
+      const key = event.key.toLowerCase();
+      if (/^[1-9]$/u.test(key) && session.reveal === null && !busy) {
+        const candidate = round.mode.candidates[Number(key) - 1];
+        if (candidate === undefined) return;
+        event.preventDefault();
+        setSelection(candidate.candidateId);
+        document.querySelector<HTMLInputElement>(`input[name="candidate-${CSS.escape(round.roundId)}"][value="${CSS.escape(candidate.candidateId)}"]`)?.focus();
+      } else if (key === "h" && session.lockedCandidateId === null && session.visibleHintCount < round.mode.clues.length) {
+        event.preventDefault();
+        void requestHint();
+      } else if (key === "n" && session.reveal !== null && session.status !== "complete") {
+        event.preventDefault();
+        next();
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  });
+
+  // `choice` is the option Enter was pressed on, which may be newer than `selection` if an arrow key just moved it.
+  const submit = async (choice: string = selection) => {
+    if (choice === "" || session.reveal !== null || busy || ended || hintPending.current) return;
     setBusy(true);
     setError(null);
     try {
-      const response = await authorizeRevealAction({ sessionToken: token.current, roundId: round.roundId, candidateId: selection });
+      const response = await authorizeRevealAction({ sessionToken: token.current, roundId: round.roundId, candidateId: choice });
       if (!response.ok) {
         if (response.reason === "SESSION_ENDED") setEnded(true);
         else setError("Couldn’t check that answer. Try again.");
         return;
       }
       const result = projectDisplayReveal(response.reveal);
-      const locked = transitionArcadeSession(mode, session, { type: "lock-answer", candidateId: selection });
+      const locked = transitionArcadeSession(mode, session, { type: "lock-answer", candidateId: choice });
       setSession(transitionArcadeSession(mode, locked, { type: "accept-reveal", reveal: result }));
       token.current = response.sessionToken;
     } catch {
@@ -168,18 +197,31 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
         <p className="eyebrow">Round {session.roundIndex + 1} of {mode.rounds.length}</p>
         <h1 id="round-title" ref={roundTitle} tabIndex={-1}>{round.mode.prompt}</h1>
         {round.scaffold && <QuestionScaffold scaffold={round.scaffold} />}
-        <CodePanes round={round} numbered={numbered} paneLines={paneLines} highlighted={highlighted} marked={markedLines(session.hintDetails)} />
+        <CodePanes round={round} numbered={numbered} paneLines={paneLines} highlighted={highlighted} marked={markedLines(session.hintDetails)}
+          wrap={wrap} onToggleWrap={() => setWrap((current) => !current)} />
 
         <HintBar round={round} hints={session.hints} details={session.hintDetails} disabled={busy || ended || session.lockedCandidateId !== null}
           error={hintError} onRequest={requestHint} buttonRef={hintButton} latestHintRef={latestHint} />
 
-        <AnswerOptions round={round} numbered={numbered && round.mode.kind === "fix"} paneLines={paneLines} selection={selection}
-          answerCandidateId={session.reveal?.answerCandidateId ?? null} lockedCandidateId={session.lockedCandidateId}
-          disabled={session.reveal !== null || busy} onSelect={setSelection} onFocusCandidate={setFocusedCandidate} />
+        {/* A form, so Enter on a chosen option locks it in (#71). */}
+        <form className="answer-form" onSubmit={(event) => { event.preventDefault(); void submit(); }}
+          onKeyDown={(event) => {
+            const target = event.target as HTMLInputElement;
+            if (event.key === "Enter" && target.matches?.('input[type="radio"]')) {
+              event.preventDefault();
+              setSelection(target.value);
+              void submit(target.value);
+            }
+          }}>
+          <AnswerOptions round={round} numbered={numbered && round.mode.kind === "fix"} paneLines={paneLines} selection={selection}
+            answerCandidateId={session.reveal?.answerCandidateId ?? null} lockedCandidateId={session.lockedCandidateId}
+            disabled={session.reveal !== null || busy} onSelect={setSelection} onFocusCandidate={setFocusedCandidate} />
 
-        <button className="answer-button" type="button" ref={answerButton} disabled={selection === "" || session.reveal !== null || busy || ended || hintLoading} onClick={submit}>
-          {busy ? "Checking…" : "Lock in answer"}
-        </button>
+          <button className="answer-button" type="submit" ref={answerButton} disabled={selection === "" || session.reveal !== null || busy || ended || hintLoading}>
+            {busy ? "Checking…" : "Lock in answer"}
+          </button>
+        </form>
+        <p className="keys-note">Keys: <kbd>1</kbd>–<kbd>{round.mode.candidates.length}</kbd> pick, <kbd>Enter</kbd> locks in, <kbd>H</kbd> buys a hint, <kbd>N</kbd> moves on.</p>
         {error && <p className="demo-error" role="alert">{error}</p>}
         {ended && (
           <p className="demo-error" role="alert">
