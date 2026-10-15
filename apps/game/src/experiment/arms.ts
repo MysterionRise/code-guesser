@@ -21,12 +21,12 @@ export type Arms = Readonly<{ [F in Factor]: Level<F> }>;
 export const CONTROL: Arms = Object.freeze({ design: "off", theme: "terminal", layer: "off" });
 
 /**
- * The committed weights. A level weighs 0 until it is built: themes arrive with #125 and the question layer with
- * #127, so until then every game draws `terminal` and `off`.
+ * The committed weights. A level weighs 0 until it is built: the question layer arrives in the game with #127, so
+ * until then every game draws `off`.
  */
 export const WEIGHTS: Readonly<{ [F in Factor]: Readonly<Record<Level<F>, number>> }> = Object.freeze({
   design: Object.freeze({ off: 1, catalog: 1, composer: 1, visualizer: 1, host: 1 }),
-  theme: Object.freeze({ terminal: 1, paper: 0, arcade: 0, contrast: 0 }),
+  theme: Object.freeze({ terminal: 1, paper: 1, arcade: 1, contrast: 1 }),
   layer: Object.freeze({ off: 1, on: 0 }),
 });
 

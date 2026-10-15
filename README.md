@@ -77,6 +77,10 @@ ten points:
   indentation, or words used once, a line of prose, and the longer line of
   the second hint's pair.
 
+Every theme passes axe's WCAG 2 A and AA rules on a round, a revealed round,
+an explainer panel, and the chooser (`tests/e2e/themes.spec.ts`), and every
+text colour reaches 4.5:1 on its background (`theme-tokens.test.ts`).
+
 A simulated player who never reads code but remembers every reveal must
 stay within three points of what replaying reveals alone earns, in games
 two and three, and no language option set appears in more than two rounds
@@ -157,7 +161,7 @@ GENUI_ENABLED=1 OPENROUTER_API_KEY=… pnpm --filter @codeguessr/game dev
 Each game draws one level of three factors when it is dealt, and the server
 seals them into the game's token:
 - **design:** off, catalog, composer, visualizer, or host;
-- **theme:** terminal (the only one built so far);
+- **theme:** Terminal (the original), Paper, Arcade, or High contrast;
 - **question layer:** off (on arrives with #127).
 
 The factors are drawn independently, so every game counts toward every
@@ -166,7 +170,7 @@ again.
 
 | Variable | Effect |
 | --- | --- |
-| `EXPERIMENT_LAB=1` | Lab mode: `?design=`, `?theme=`, and `?layer=` pick levels, and the Designs nav shows. On by default under `next dev` |
+| `EXPERIMENT_LAB=1` | Lab mode: `?design=`, `?theme=`, and `?layer=` pick levels, and the Lab bar shows design and theme switchers. On by default under `next dev` |
 | `EXPERIMENT_DISABLED` | Switches levels off, such as `design:host,design:visualizer`; their weight goes to the control level |
 | `EXPERIMENT_EVENTS_DIR` | Records the anonymous event log here, one JSON-lines file per UTC day. Unset, nothing is recorded |
 | `EXPERIMENT_SOURCE` | Tags events `agent` (playtests) or `synthetic` (tests), so they never mix with real games |

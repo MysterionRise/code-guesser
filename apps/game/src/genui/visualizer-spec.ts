@@ -60,17 +60,44 @@ export const VISUALIZER_CSP = [
   "connect-src 'none'", "media-src 'none'", "frame-src 'none'", "worker-src 'none'", "form-action 'none'", "base-uri 'none'",
 ].join("; ");
 
+/** The game's colours a visualizer page starts from, so it follows the player's theme (#125). */
+export interface VisualizerPalette {
+  readonly panel: string;
+  readonly text: string;
+  readonly border: string;
+  readonly chip: string;
+  readonly accent: string;
+  readonly focus: string;
+}
+
+/** The original Terminal colours, used until the page's own theme is read. */
+export const TERMINAL_PALETTE: VisualizerPalette = Object.freeze({
+  panel: "#0b1c16", text: "#effff8", border: "#527565", chip: "#10251d", accent: "#baff65", focus: "#baff65",
+});
+
+/** A colour as a theme token holds it: hex, or rgb()/rgba() of numbers; nothing else reaches the frame's style. */
+const COLOUR = /^(?:#[0-9a-fA-F]{3,8}|rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*(?:,\s*(?:0|1|0?\.\d+)\s*)?\))$/u;
+
+/** The palette from theme tokens as read off the page, each falling back to Terminal's when it isn't a plain colour. */
+export const paletteFrom = (read: (token: string) => string): VisualizerPalette => {
+  const pick = (token: string, fallback: string): string => { const value = read(token).trim(); return COLOUR.test(value) ? value : fallback; };
+  return Object.freeze({
+    panel: pick("--panel", TERMINAL_PALETTE.panel), text: pick("--text", TERMINAL_PALETTE.text), border: pick("--border-soft", TERMINAL_PALETTE.border),
+    chip: pick("--chip", TERMINAL_PALETTE.chip), accent: pick("--accent", TERMINAL_PALETTE.accent), focus: pick("--focus", TERMINAL_PALETTE.focus),
+  });
+};
+
 /**
  * The document the iframe loads: the CSP first, then a base style, then the model's markup, then a small script
  * of the game's own that reports the body's height (not the document's, which never drops below the frame's own
  * and would grow the frame on every report), so the frame can fit the page without an inner scroll. The model's
  * markup may not post messages itself (`parseVisualizer`); the parent only reads a clamped number.
  */
-export const visualizerDocument = (html: string): string => `<!doctype html>
+export const visualizerDocument = (html: string, palette: VisualizerPalette = TERMINAL_PALETTE): string => `<!doctype html>
 <html lang="en"><head><meta http-equiv="Content-Security-Policy" content="${VISUALIZER_CSP}"><meta charset="utf-8">
-<style>body{margin:0;padding:12px;background:#0b1c16;color:#effff8;font:14px/1.5 ui-sans-serif,system-ui,sans-serif}
-button{font:inherit;padding:6px 12px;border-radius:8px;border:1px solid #527565;background:#10251d;color:#baff65;cursor:pointer}
-button:focus-visible{outline:3px solid #baff65;outline-offset:2px}code,pre{font-family:ui-monospace,Menlo,monospace}</style>
+<style>body{margin:0;padding:12px;background:${palette.panel};color:${palette.text};font:14px/1.5 ui-sans-serif,system-ui,sans-serif}
+button{font:inherit;padding:6px 12px;border-radius:8px;border:1px solid ${palette.border};background:${palette.chip};color:${palette.accent};cursor:pointer}
+button:focus-visible{outline:3px solid ${palette.focus};outline-offset:2px}code,pre{font-family:ui-monospace,Menlo,monospace}</style>
 </head><body>${html}<script>
 (() => { const report = () => parent.postMessage({ codeguessrVisualizerHeight: document.body.getBoundingClientRect().height }, "*");
   new ResizeObserver(report).observe(document.body); report(); })();

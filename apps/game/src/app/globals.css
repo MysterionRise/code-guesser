@@ -66,6 +66,177 @@
   --radius-line: 6px;
   --radius-pill: 999px;
 }
+/* Paper: light and editorial, serif type, ink on warm paper, small corners. */
+:root:has([data-theme="paper"]) {
+  color-scheme: light;
+  --font-sans: ui-serif, Georgia, Cambria, "Times New Roman", serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  --bg: #f7f3ea;
+  --bg-glow: #ece2cc;
+  --text: #1f1b16;
+  --text-soft: #2b2620;
+  --muted: #574f45;
+  --muted-light: #574f45;
+  --subtle: #5f574c;
+  --faint: #6b6257;
+  --accent: #a23d16;
+  --on-accent: #ffffff;
+  --focus: #1d4ed8;
+  --surface: #fffdf8;
+  --surface-hover: #f4ecdc;
+  --panel: #fbf7ee;
+  --panel-card: #fffaf0;
+  --chip: #f3ebdb;
+  --code-bg: #fbf8f1;
+  --code-text: #1f1b16;
+  --border: #d6cab3;
+  --border-strong: #8f7d61;
+  --border-soft: #8f7d61;
+  --border-card: #d6cab3;
+  --border-score: #8f7d61;
+  --shadow: #3b2f1a1f;
+  --track-bg: #ebe2cf;
+  --track-text: #574f45;
+  --track-done-bg: #e6d8b8;
+  --win: #1d6136;
+  --win-bg: #e3f1e5;
+  --miss: #a1281c;
+  --miss-bg: #f8e2dd;
+  --warn: #874c00;
+  --warn-bg: #fbedd4;
+  --error-text: #8f1d14;
+  --highlight-bg: #fbe6c3;
+  --player-bg: #efe3cb;
+  --notice-bg: #fff4d6;
+  --notice-border: #c9a446;
+  --notice-text: #3f320c;
+  --deck-notice-bg: #e7eefa;
+  --deck-notice-border: #8fa8d4;
+  --deck-notice-text: #1d3557;
+  --noscript-bg: #f8d7d3;
+  --radius-card: 6px;
+  --radius-tile: 6px;
+  --radius-panel: 4px;
+  --radius-control: 4px;
+  --radius-chip: 4px;
+  --radius-small: 3px;
+  --radius-line: 2px;
+  --radius-pill: 999px;
+}
+/* Arcade: neon on deep purple, rounder corners; its glow and pulse run only without reduced motion. */
+:root:has([data-theme="arcade"]) {
+  color-scheme: dark;
+  --font-sans: "Trebuchet MS", ui-rounded, system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  --bg: #120326;
+  --bg-glow: #3b0a6b;
+  --text: #fdf4ff;
+  --text-soft: #f0dcff;
+  --muted: #cdb0f2;
+  --muted-light: #d6bdf6;
+  --subtle: #c2a4ec;
+  --faint: #a98bd4;
+  --accent: #ff4ff1;
+  --on-accent: #120326;
+  --focus: #2ef2ff;
+  --surface: #200840;
+  --surface-hover: #2f0f5c;
+  --panel: #1a0636;
+  --panel-card: #22094a;
+  --chip: #2a0d55;
+  --code-bg: #0b0118;
+  --code-text: #c9fff2;
+  --border: #4b1d8a;
+  --border-strong: #8a5ad6;
+  --border-soft: #8a5ad6;
+  --border-card: #4b1d8a;
+  --border-score: #6a35b8;
+  --shadow: #00000088;
+  --track-bg: #24094a;
+  --track-text: #c2a8ec;
+  --track-done-bg: #3d1475;
+  --win: #6bff8d;
+  --win-bg: #0f3d24;
+  --miss: #ff7a96;
+  --miss-bg: #4a0f22;
+  --warn: #ffd23f;
+  --warn-bg: #4a3a05;
+  --error-text: #ffc2d0;
+  --highlight-bg: #3b1a6b;
+  --player-bg: #3d1475;
+  --notice-bg: #2b1747;
+  --notice-border: #8e5bd6;
+  --notice-text: #f3e6ff;
+  --deck-notice-bg: #0d2a4a;
+  --deck-notice-border: #2e7bd6;
+  --deck-notice-text: #d7ecff;
+  --noscript-bg: #5a1030;
+  --radius-card: 28px;
+  --radius-tile: 22px;
+  --radius-panel: 18px;
+  --radius-control: 16px;
+  --radius-chip: 14px;
+  --radius-small: 10px;
+  --radius-line: 8px;
+  --radius-pill: 999px;
+}
+/* High contrast: white on black, yellow actions, cyan focus, solid white borders. */
+:root:has([data-theme="contrast"]) {
+  color-scheme: dark;
+  --font-sans: Inter, ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  --bg: #000000;
+  --bg-glow: #000000;
+  --text: #ffffff;
+  --text-soft: #ffffff;
+  --muted: #e6e6e6;
+  --muted-light: #e6e6e6;
+  --subtle: #dddddd;
+  --faint: #c8c8c8;
+  --accent: #ffff00;
+  --on-accent: #000000;
+  --focus: #00ffff;
+  --surface: #000000;
+  --surface-hover: #1f1f1f;
+  --panel: #000000;
+  --panel-card: #0d0d0d;
+  --chip: #000000;
+  --code-bg: #000000;
+  --code-text: #ffffff;
+  --border: #ffffff;
+  --border-strong: #ffffff;
+  --border-soft: #ffffff;
+  --border-card: #ffffff;
+  --border-score: #ffffff;
+  --shadow: #00000000;
+  --track-bg: #000000;
+  --track-text: #ffffff;
+  --track-done-bg: #333333;
+  --win: #00ff66;
+  --win-bg: #002b11;
+  --miss: #ff7070;
+  --miss-bg: #330000;
+  --warn: #ffcc00;
+  --warn-bg: #332600;
+  --error-text: #ffb3b3;
+  --highlight-bg: #333300;
+  --player-bg: #1f1f1f;
+  --notice-bg: #000000;
+  --notice-border: #ffff00;
+  --notice-text: #ffffff;
+  --deck-notice-bg: #000000;
+  --deck-notice-border: #00ffff;
+  --deck-notice-text: #ffffff;
+  --noscript-bg: #330000;
+  --radius-card: 10px;
+  --radius-tile: 10px;
+  --radius-panel: 8px;
+  --radius-control: 8px;
+  --radius-chip: 6px;
+  --radius-small: 4px;
+  --radius-line: 2px;
+  --radius-pill: 999px;
+}
 :root { color-scheme: dark; font-family: var(--font-sans); background: var(--bg); color: var(--text); }
 * { box-sizing: border-box; }
 body { margin: 0; min-height: 100vh; background: radial-gradient(circle at 80% 0%, var(--bg-glow) 0, transparent 34rem), var(--bg); }
@@ -216,3 +387,16 @@ noscript { display: block; padding: 12px; margin-bottom: 16px; background: var(-
 /* Annotated code in a generative panel wraps instead of clipping; the round's own pane above still scrolls. */
 .genui-panel .code-window, .host-chat .code-window { white-space: pre-wrap; overflow-wrap: anywhere; }
 .code-line.code-gap { color: var(--faint); padding-left: 4ch; }
+/* Arcade's flourishes: a glow on the main actions, and a pulse on the current round only without reduced motion. */
+:root:has([data-theme="arcade"]) .answer-button:not(:disabled), :root:has([data-theme="arcade"]) .primary-action { box-shadow: 0 0 18px var(--accent); }
+@media (prefers-reduced-motion: no-preference) {
+  :root:has([data-theme="arcade"]) .round-dot.current { animation: arcade-pulse 1.6s ease-in-out infinite; }
+  @keyframes arcade-pulse { 50% { box-shadow: 0 0 14px var(--accent); } }
+}
+/* High contrast: thicker option and card borders, so every control's edge is plain. */
+:root:has([data-theme="contrast"]) .candidate, :root:has([data-theme="contrast"]) .deck-card, :root:has([data-theme="contrast"]) .hint-button { border-width: 2px; }
+/* Lab mode's bar holds a row per switcher (#125); each row keeps the design nav's own look. */
+.lab-bar { display: grid; gap: 4px; width: min(980px, calc(100% - 32px)); margin: 30px auto -8px; }
+.lab-bar .design-nav { width: auto; margin: 0; }
+/* A marked line's number reads on its tinted fill too (#45: axe found Terminal's faint number on the highlight under 4.5:1). */
+.code-line.highlighted .line-number, .code-line.genui-helpful .line-number, .code-line.genui-misleading .line-number { color: var(--muted); }

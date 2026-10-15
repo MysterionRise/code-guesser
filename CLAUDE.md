@@ -178,15 +178,24 @@ gate: changing queries, retries, ceilings, deck rules, or running
 - The design experiment (#106, #107; v1.0 milestone):
   - **Arms** (`apps/game/src/experiment/arms.ts`): each game draws design ×
     theme × question layer independently at deal time, by committed
-    `WEIGHTS`. Themes and the layer weigh 0 until #125 and #127 ship.
+    `WEIGHTS`. The layer weighs 0 until the game shows it (#127).
+  - **Themes** (#125): Terminal (the original), Paper, Arcade, and High
+    contrast. Every colour, font, and corner in `globals.css` reads a token;
+    Terminal's are on `:root`, each other theme's on
+    `:root:has([data-theme="…"])`, set by the page's wrapper from the game's
+    arms (the chooser stays Terminal unless a lab tester picks one).
+    `theme-tokens.test.ts` requires every theme to define every token and
+    every text pair to reach 4.5:1; `tests/e2e/themes.spec.ts` runs axe's WCAG
+    2 A/AA rules on each theme's round, reveal, explainer, and chooser. The
+    visualizer frame starts in the theme's colours (`paletteFrom`).
     - The draw is sealed in the session token (version 2, with `arms`,
       `record`, `correct`, `roundStartedAt`), and the genui route serves only
       the sealed design (`403 DESIGN`).
     - `EXPERIMENT_DISABLED=design:host,…` switches levels off; their weight
       goes to control, which can't be switched off.
     - Lab mode (`EXPERIMENT_LAB=1`, or `next dev`) honours `?design=`,
-      `?theme=`, `?layer=` and shows the Designs nav. Playtests on
-      `next start` need it.
+      `?theme=`, `?layer=` and shows the Lab bar (design and theme
+      switchers). Playtests on `next start` need it.
   - **Event log** (`experiment/events.ts`, `experiment/event-store.server.ts`,
     `demo/local-real-experiment-events.server.ts`):
     - schema v1, one strict parser: exact keys, closed enums, bounded
