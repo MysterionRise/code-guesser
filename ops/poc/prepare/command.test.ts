@@ -10,7 +10,7 @@ import { GitHubSearchError } from "./github-search";
 import { JournalError, openJournal } from "./journal";
 import { HARNESS_CANDIDATES, accepted, classificationsFor, harnessRow, hash, loadProfile, makeHarness } from "./command-test-harness";
 import {
-  CURATED_REPOSITORIES, CURATED_SECTION, FIX_SECTION, OUTPUT_SECTION, curatedFiles, fixHarnessData, loadCuratedProfile, missingLineFiles, outputFiles, sha256,
+  CURATED_REPOSITORIES, CURATED_SECTION, FIX_SECTION, OUTPUT_SECTION, curatedFiles, fixHarnessData, loadCuratedProfile, missingLineFiles, nameFunctionFiles, outputFiles, sha256,
 } from "./testdata/deck-builders";
 import { LANGUAGE_SLUGS } from "../../../packages/artifact/src/index";
 import { STACK_LANGUAGES, parseCrawlProfile } from "./profile";
@@ -388,6 +388,16 @@ const logLines = (calls: readonly string[]): string[] =>
     expect(harness.calls.filter((call) => call.startsWith("read:algos/python:utils/"))).toHaveLength(8);
     expect(harness.calls).toContain("missing-line:8");
     expect(logLines(harness.calls)).toContain("log:PREPARATION_DECKS project,language,before-after,missing-line");
+  });
+
+  it("selects a configured name-the-function deck from every source's files in one hash order, balanced (#73)", async () => {
+    const profile = loadCuratedProfile({ beforeAfterPool: 5 }, { "name-function": true });
+    const harness = await makeHarness({}, { profile, curatedFiles: nameFunctionFiles() });
+    await prepareLocalExperiment(harness.dependencies);
+    expect(harness.calls).toContain("list:algos/go:shapes");
+    expect(harness.calls.filter((call) => call.startsWith("read:algos/go:shapes/"))).toHaveLength(8);
+    expect(harness.calls).toContain("name-function:8");
+    expect(logLines(harness.calls)).toContain("log:PREPARATION_DECKS project,language,before-after,name-function");
   });
 
   it("attempts no algorithm deck when the profile configures none", async () => {

@@ -44,6 +44,7 @@ export const PANE_CAPTIONS: Readonly<Partial<Record<RoundModeKind, string>>> = O
   output: "The last line is a call typed into a Python shell.",
   fix: "Lines are numbered; each option names one.",
   "missing-line": "One line is hidden; pick the line that fills the gap.",
+  "name-function": "The function's name is hidden as mystery; pick the name its author gave it.",
 });
 
 /** What the player sees when the server can no longer continue this game, for example after it restarts. */

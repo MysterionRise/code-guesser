@@ -296,6 +296,14 @@ gate: changing queries, retries, ceilings, deck rules, or running
       `curated["missing-line"]` turns it on; the committed v5 profile has none,
       so it goes live with the v6 run (#129). Dry run:
       `docs/review/evidence/2026-10-15-missing-line-dry-run.md`.
+    - **Name the function (#73, v1.0):** `name-function-window.ts` (functions,
+      masks, decoys, ranks, extreme scores), `select-name-function.ts`,
+      `name-function-rounds.ts`, and `packages/artifact/src/name-function.ts`
+      (kind `NAME_FUNCTION`, deck `name-function`). Its profile section
+      `curated["name-function"]` lists `sources`, each a pinned repository and
+      its directories (nested paths allowed, since directory listings are
+      flat); like missing-line it goes live with the v6 run. Dry run:
+      `docs/review/evidence/2026-10-15-name-function-dry-run.md`.
     - **Registry (#36):** `ops/poc/prepare/curated-decks.ts` lists them in
       run order (`configured`, `select`, `generate`); ids live in
       `curated-deck-ids.ts`, and a deck's profile section is keyed by its id
@@ -454,7 +462,9 @@ when the preparer throws a code this section does not name.
     `OUTPUT_ANSWER_ECHOED`, `OUTPUT_RANK_UNBALANCED`, `FIX_RANK_UNBALANCED`,
     `FIX_REPOSITORY_REPEATED`, `MISSING_LINE_RANK_UNBALANCED`,
     `MISSING_LINE_HINT_DECIDES` (no other option does what the answer
-    does, so the first hint would pick it), `TEMPLATE_PLACEHOLDER_REJECTED`.
+    does, so the first hint would pick it), `NAME_FUNCTION_RANK_UNBALANCED`,
+    `NAME_FUNCTION_HINT_DECIDES` (no other name joins as many words as the
+    answer), `TEMPLATE_PLACEHOLDER_REJECTED`.
 - Publication: `HASH_MISMATCH`, `INVALID_ARTIFACT`, `INVALID_HASH`, and
   `REPORT_*_FAILED` (staging, committing, rolling back, or finalizing the
   report). The previous artifact and pin stay.
@@ -543,6 +553,14 @@ add up.
   gaps balances the deck in text, length, and shared-name orders, so the
   deck is skipped. `MISSING_LINE_LANGUAGE`: the pinned repository's language
   has no source-file rule yet.
+- `NAME_FUNCTION_NONE` (#73): a file with no function a round can ask about
+  (most TheAlgorithms files hold one or two). A round needs a function the
+  author named, of four lines up to `functionLines`, whose masked pane names
+  no other identifier, and three other authored names the pane never spells.
+  `NAME_FUNCTION_FILE_CHANGED`: the file bound differs from the file read.
+  `NAME_FUNCTION_RANKS_UNBALANCED`: no choice balances the deck in text and
+  length order within the extreme solvers' limits, so the deck is skipped.
+  `NAME_FUNCTION_LANGUAGE`: a source's language has no source-file rule.
 - `FIX_PATCH_WIDE`: a dataset patch that changes more than one line (most).
   - `FIX_CLAIM`: the fix's lines, which the reveal quotes, claim something
     about authorship (#32).

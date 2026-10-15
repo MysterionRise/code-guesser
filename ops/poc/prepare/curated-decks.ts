@@ -3,12 +3,14 @@ import { CURATED_DECK_IDS, type CuratedDeckId } from "./curated-deck-ids";
 import type { DeckAttempts, DeckOutcome, RunState } from "./diagnostics";
 import { generateFixRounds } from "./fix-rounds";
 import { generateMissingLineRounds } from "./missing-line-rounds";
+import { generateNameFunctionRounds } from "./name-function-rounds";
 import { generateOutputRounds } from "./output-rounds";
 import type { CrawlProfile } from "./profile";
 import type { GeneratedRounds } from "./round-helpers";
 import { selectAlgorithm } from "./select-algorithm";
 import { selectFix } from "./select-fix";
 import { selectMissingLine } from "./select-missing-line";
+import { selectNameFunction } from "./select-name-function";
 import { selectOutput } from "./select-output";
 import type { Context, PreparationDependencies } from "./types";
 
@@ -63,6 +65,12 @@ export const CURATED_DECKS: readonly CuratedDeck[] = Object.freeze([
     configured: (profile) => profile.curated?.["missing-line"] !== undefined,
     select: selectMissingLine,
     generate: generateMissingLineRounds,
+  }),
+  deck({
+    id: "name-function",
+    configured: (profile) => profile.curated?.["name-function"] !== undefined,
+    select: selectNameFunction,
+    generate: generateNameFunctionRounds,
   }),
 ]);
 

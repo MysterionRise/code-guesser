@@ -138,6 +138,19 @@ export interface MissingLineDeck {
   readonly windowLines: number;
   readonly templates: Readonly<{ title: string; description: string; prompt: string; evidence: string; explanation: string }>;
 }
+/** "Name the function" (#73): functions of curated repositories' files, each name masked. */
+export interface NameFunctionDeck {
+  readonly rounds: number;
+  /** Each repository's directories (nested paths allowed) whose files are read, all in one order fixed by hash. */
+  readonly sources: readonly Readonly<{ repository: string; directories: readonly string[] }>[];
+  /** At most this many files are read, across all sources. */
+  readonly fileReads: number;
+  /** The most lines a function a round shows may span, its declaration and closing line included. */
+  readonly functionLines: number;
+  readonly templates: Readonly<{ title: string; description: string; prompt: string; evidence: string; explanation: string }>;
+}
+/** The languages whose functions "Name the function" can find. */
+export const NAME_FUNCTION_LANGUAGES: readonly StackLanguage[] = Object.freeze(["Java", "Go", "Python"]);
 export interface CuratedProfile {
   readonly repositories: readonly CuratedRepository[];
   readonly algorithm?: Readonly<{
@@ -148,6 +161,7 @@ export interface CuratedProfile {
   readonly output?: OutputDeck;
   readonly fix?: FixDeck;
   readonly "missing-line"?: MissingLineDeck;
+  readonly "name-function"?: NameFunctionDeck;
 }
 
 /** Options per algorithm round: one whole family. */
@@ -172,6 +186,7 @@ export const poolSizes = (profile: CrawlProfile): Readonly<Record<DeckId, number
   output: profile.curated?.output?.rounds ?? 0,
   fix: profile.curated?.fix?.rounds ?? 0,
   "missing-line": profile.curated?.["missing-line"]?.rounds ?? 0,
+  "name-function": profile.curated?.["name-function"]?.rounds ?? 0,
 });
 
 export class CrawlProfileError extends Error {
@@ -472,6 +487,35 @@ const parseMissingLineDeck = (value: unknown, repositories: readonly CuratedRepo
   });
 };
 
+const parseNameFunctionDeck = (value: unknown, repositories: readonly CuratedRepository[]): NameFunctionDeck => {
+  const deck = exactRecord(value, ["rounds", "sources", "fileReads", "functionLines", "templates"]);
+  const rounds = integer(deck.rounds);
+  if (rounds % 4 !== 0 || rounds < 8 || rounds > 60) fail();
+  const sources = (Array.isArray(deck.sources) && deck.sources.length > 0 && deck.sources.length <= 3 ? deck.sources : fail()).map((entry: unknown) => {
+    const item = exactRecord(entry, ["repository", "directories"]);
+    const repository = text(item.repository);
+    const pin = repositories.find((known) => known.repository === repository) ?? fail();
+    if (!NAME_FUNCTION_LANGUAGES.includes(pin.language)) fail();
+    const directories = uniqueTexts(item.directories);
+    if (directories.some((directory) => !/^[A-Za-z0-9_]+(?:\/[A-Za-z0-9_]+)*$/u.test(directory))) fail();
+    return Object.freeze({ repository, directories });
+  });
+  if (new Set(sources.map(({ repository }) => repository)).size !== sources.length) fail();
+  const fileReads = integer(deck.fileReads);
+  if (fileReads < rounds || fileReads > OUTPUT_FILE_READS_MAXIMUM) fail();
+  const functionLines = integer(deck.functionLines);
+  if (functionLines < 6 || functionLines > 30) fail();
+  const templates = exactRecord(deck.templates, ["title", "description", "prompt", "evidence", "explanation"]);
+  return Object.freeze({
+    rounds, sources: Object.freeze(sources), fileReads, functionLines,
+    templates: Object.freeze({
+      title: text(templates.title), description: text(templates.description), prompt: placeholderText(templates.prompt, []),
+      evidence: placeholderText(templates.evidence, ["path", "repository", "name"]),
+      explanation: placeholderText(templates.explanation, []),
+    }),
+  });
+};
+
 const PROJECT_NAME = /^[A-Za-z0-9_.-]+$/u;
 const parseFixDeck = (value: unknown): FixDeck => {
   const deck = exactRecord(value, ["rounds", "datasets", "patchReads", "perRepository", "templates"]);
@@ -510,7 +554,7 @@ const parseFixDeck = (value: unknown): FixDeck => {
 
 /** The curated pins, and each deck built from them that the profile configures. */
 const parseCurated = (value: unknown): CuratedProfile => {
-  const decks = (["algorithm", "output", "fix", "missing-line"] as const).filter((key) => isRecord(value) && Object.hasOwn(value, key));
+  const decks = (["algorithm", "output", "fix", "missing-line", "name-function"] as const).filter((key) => isRecord(value) && Object.hasOwn(value, key));
   const curated = exactRecord(value, ["repositories", ...decks]);
   const repositories = parseCuratedRepositories(curated.repositories);
   return Object.freeze({
@@ -519,6 +563,7 @@ const parseCurated = (value: unknown): CuratedProfile => {
     ...(decks.includes("output") ? { output: parseOutputDeck(curated.output, repositories) } : {}),
     ...(decks.includes("fix") ? { fix: parseFixDeck(curated.fix) } : {}),
     ...(decks.includes("missing-line") ? { "missing-line": parseMissingLineDeck(curated["missing-line"], repositories) } : {}),
+    ...(decks.includes("name-function") ? { "name-function": parseNameFunctionDeck(curated["name-function"], repositories) } : {}),
   });
 };
 
