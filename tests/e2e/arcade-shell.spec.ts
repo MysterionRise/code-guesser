@@ -329,7 +329,16 @@ test("on a phone no fix option's code is cut off, and wrapped lines keep their i
   const pane = page.locator(".code-window").first();
   await page.getByRole("button", { name: "Wrap lines" }).click();
   await expect(page.getByRole("button", { name: "Wrap lines" })).toHaveAttribute("aria-pressed", "true");
-  expect(await pane.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+  // Every round of the game, since a deeply indented line in any of them once pushed the pane past its edge.
+  for (let round = 1; round <= 5; round += 1) {
+    if (round > 1) {
+      await page.getByRole("group", { name: "Choose one answer" }).getByRole("radio").first().check();
+      await page.getByRole("button", { name: "Lock in answer" }).click();
+      await page.getByRole("button", { name: "Next round" }).click();
+      await expect(page.getByText(`Round ${round} of 5`)).toBeVisible();
+    }
+    expect(await pane.evaluate((element) => element.scrollWidth <= element.clientWidth + 1), `round ${round}`).toBe(true);
+  }
   // An indented line wraps under its own indentation, past its number.
   const hanging = await page.locator(".code-line").evaluateAll((lines) => lines.map((line) => ({
     indent: (line as HTMLElement).style.getPropertyValue("--indent"), padding: parseFloat(getComputedStyle(line).paddingLeft),
