@@ -373,7 +373,7 @@ describe("static arcade shell", () => {
     expect(shell).toContain('role="alert"');
     expect(shell).not.toContain("Play again");
     expect(shell).not.toMatch(/type: "restart"/u);
-    expect(shell).toMatch(/<a className="primary-action" href=\{newGameHref\}>Deal new rounds<\/a>/u);
+    expect(shell).toMatch(/<a className="primary-action" href=\{newGameHref\}.*?>Deal new rounds<\/a>/u);
     expect(shell).toContain("Choose another deck");
   });
 });

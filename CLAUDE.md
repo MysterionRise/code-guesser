@@ -112,9 +112,9 @@ gate: changing queries, retries, ceilings, deck rules, or running
   - The server logs codes only: `GENUI_FINISHED <phase> <finishReason>
     calls=<n> in=<tokens> out=<tokens>`, `GENUI_RENDER_REJECTED <component>
     <check>`, `GENUI_STREAM_FAILED <status>`.
-  - Designs (#114, Phase 2 of #109): with `GENUI_ENABLED=1`, `?design=`
-    picks `catalog` (the default), `composer`, `visualizer`, `host`, or
-    `off`, and a "Designs" nav switches between them (`genui/designs.ts`).
+  - Designs (#114, Phase 2 of #109): `catalog`, `composer`, `visualizer`,
+    `host`, or `off` (`genui/designs.ts`). Each game draws one at deal time
+    (#106); in lab mode `?design=` picks it and a "Designs" nav switches.
   - The composer (`genui/composer-spec.ts`, `genui/composer-view.tsx`) lets
     the model lay out the whole post-lock panel as a json-render spec. The
     spec is a tree of 14 blocks: stack, row, card, details, heading, text,
@@ -171,6 +171,34 @@ gate: changing queries, retries, ceilings, deck rules, or running
   - Live check, with each explain about $0.0007:
     `docs/review/evidence/2026-10-14-genui-live-check.md`. Run it locally
     with `GENUI_ENABLED=1 OPENROUTER_API_KEY="$(cat ~/.config/openrouter/key)"`.
+- The design experiment (#106, #107; v1.0 milestone):
+  - **Arms** (`apps/game/src/experiment/arms.ts`): each game draws design ×
+    theme × question layer independently at deal time, by committed
+    `WEIGHTS`. Themes and the layer weigh 0 until #125 and #127 ship.
+    - The draw is sealed in the session token (version 2, with `arms`,
+      `record`, `correct`, `roundStartedAt`), and the genui route serves only
+      the sealed design (`403 DESIGN`).
+    - `EXPERIMENT_DISABLED=design:host,…` switches levels off; their weight
+      goes to control, which can't be switched off.
+    - Lab mode (`EXPERIMENT_LAB=1`, or `next dev`) honours `?design=`,
+      `?theme=`, `?layer=` and shows the Designs nav. Playtests on
+      `next start` need it.
+  - **Event log** (`experiment/events.ts`, `experiment/event-store.server.ts`,
+    `demo/local-real-experiment-events.server.ts`):
+    - schema v1, one strict parser: exact keys, closed enums, bounded
+      numbers, so no IP, user agent, id, chat text, round content, or chosen
+      option can be stored;
+    - the server records `game_dealt`, `hint_revealed`, `round_revealed`,
+      `game_completed`, and `genui_call` itself; the browser sends
+      `game_viewed`, `deal_again`, `result_copied`, `genui_interaction`, and
+      `genui_fallback` to the beacon route `app/api/events/route.ts`
+      (1 KB, a live signed token, 60 per game);
+    - opt-in: nothing is recorded without `EXPERIMENT_EVENTS_DIR` (one JSONL
+      file per UTC day, rolled up into `totals.jsonl` after 90 days), and a
+      deal under `Sec-GPC: 1` seals `record: false`;
+    - `EXPERIMENT_SOURCE=agent|synthetic` tags playtests and tests.
+    - SQLite waits for Node 24 (#21): Node 20 has no `node:sqlite`, so the
+      store is JSONL behind the `EventStore` interface.
 - The committed artifact `apps/game/src/demo/generated/local-real-rounds.json`
   came from the 2026-10-13 v5 run (1,859 of 3,000 requests), rebuilt
   `--offline` with the algorithm and fix leak fixes (#76, #79).

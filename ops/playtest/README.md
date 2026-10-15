@@ -15,9 +15,16 @@ their accuracy and "fun" are not a real player's; the real experiment is #106–
 1. **Serve the game** with generative UI and the OpenRouter key from its standard
    store:
 
+   Lab mode (`EXPERIMENT_LAB=1`) lets players pick designs with `?design=`; a
+   production build otherwise draws each game's design at random (#106). The
+   event log is optional; `EXPERIMENT_SOURCE=agent` keeps its events apart from
+   real games.
+
    ```bash
    pnpm --filter @codeguessr/game build
-   cd apps/game && GENUI_ENABLED=1 OPENROUTER_API_KEY="$(cat ~/.config/openrouter/key)" \
+   cd apps/game && GENUI_ENABLED=1 EXPERIMENT_LAB=1 EXPERIMENT_SOURCE=agent \
+     EXPERIMENT_EVENTS_DIR="$PWD/../../ops/playtest/tmp/<run>/events" \
+     OPENROUTER_API_KEY="$(cat ~/.config/openrouter/key)" \
      node node_modules/next/dist/bin/next start --hostname 127.0.0.1 --port 3300
    ```
 

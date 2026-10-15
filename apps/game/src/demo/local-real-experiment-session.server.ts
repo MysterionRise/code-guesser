@@ -2,6 +2,7 @@ import "server-only";
 
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
+import { FACTORS, parseArms, type Arms } from "../experiment/arms";
 import { DECK_IDS, ROUNDS_PER_SESSION, type DeckId } from "./local-real-experiment-domain.server";
 
 /**
@@ -10,7 +11,7 @@ import { DECK_IDS, ROUNDS_PER_SESSION, type DeckId } from "./local-real-experime
  * score and hint count is the server's own.
  */
 export interface GameState {
-  readonly version: 1;
+  readonly version: 2;
   /** Unguessable and random per deal; it links nothing beyond this one game. */
   readonly gameId: string;
   readonly artifactHash: string;
@@ -28,8 +29,16 @@ export interface GameState {
    * (the agent playtest's explanation judge found explanations citing hints the player never bought).
    */
   readonly hintsByRound: readonly number[];
+  /** Rounds answered right so far. */
+  readonly correct: number;
   readonly score: number;
   readonly dealtAt: number;
+  /** When the round being played began: the deal, or the previous answer. Events measure time from it (#107). */
+  readonly roundStartedAt: number;
+  /** The experiment arms drawn at deal time (#106); the client can neither pick nor change them. */
+  readonly arms: Arms;
+  /** Whether this game's events are recorded: false when the browser sent `Sec-GPC: 1` at the deal. */
+  readonly record: boolean;
 }
 
 /** Why a token was refused: it is not one this server issued for a live game, or the game has already moved past it. */
@@ -48,8 +57,8 @@ export const GAME_TTL_MS = 6 * 60 * 60 * 1000;
 export const LEDGER_CAPACITY = 50_000;
 /** A configured secret must be at least this long. */
 export const MIN_SECRET_LENGTH = 32;
-const MAC_CONTEXT = "codeguessr-game-session.v1";
-const STATE_KEYS = ["artifactHash", "dealtAt", "deck", "gameId", "hints", "hintsByRound", "roundIds", "roundIndex", "score", "step", "version"];
+const MAC_CONTEXT = "codeguessr-game-session.v2";
+const STATE_KEYS = ["arms", "artifactHash", "correct", "dealtAt", "deck", "gameId", "hints", "hintsByRound", "record", "roundIds", "roundIndex", "roundStartedAt", "score", "step", "version"];
 
 interface SessionGlobals {
   secret?: Buffer;
@@ -90,7 +99,7 @@ const parseState = (value: unknown): GameState => {
   if (typeof value !== "object" || value === null || Array.isArray(value)) throw new SessionRefusal("SESSION_ENDED");
   const state = value as Record<string, unknown>;
   if (Object.keys(state).sort().join("|") !== STATE_KEYS.join("|")
-    || state.version !== 1
+    || state.version !== 2
     || typeof state.gameId !== "string" || !/^[0-9a-f]{32}$/u.test(state.gameId)
     || typeof state.artifactHash !== "string" || !/^[0-9a-f]{64}$/u.test(state.artifactHash)
     || !DECK_IDS.includes(state.deck as DeckId)
@@ -101,14 +110,20 @@ const parseState = (value: unknown): GameState => {
     || !isCount(state.hints, 2)
     || !Array.isArray(state.hintsByRound) || state.hintsByRound.length !== state.roundIndex
     || state.hintsByRound.some((count) => !isCount(count, 2))
+    || !isCount(state.correct, state.roundIndex as number)
     || !isCount(state.score, Number.MAX_SAFE_INTEGER)
-    || !isCount(state.dealtAt, Number.MAX_SAFE_INTEGER)) throw new SessionRefusal("SESSION_ENDED");
-  return Object.freeze({ ...state, roundIds: Object.freeze([...state.roundIds]), hintsByRound: Object.freeze([...(state.hintsByRound as number[])]) }) as GameState;
+    || !isCount(state.dealtAt, Number.MAX_SAFE_INTEGER)
+    || !isCount(state.roundStartedAt, Number.MAX_SAFE_INTEGER) || (state.roundStartedAt as number) < (state.dealtAt as number)
+    || parseArms(state.arms) === null
+    || typeof state.record !== "boolean") throw new SessionRefusal("SESSION_ENDED");
+  return Object.freeze({ ...state, roundIds: Object.freeze([...state.roundIds]), hintsByRound: Object.freeze([...(state.hintsByRound as number[])]),
+    arms: parseArms(state.arms)! }) as GameState;
 };
 
 /** The state as a token: its canonical JSON in base64url, a dot, and the HMAC of both under this server's secret. */
 export const sealGame = (state: GameState): string => {
-  const payload = Buffer.from(JSON.stringify(parseState(state), [...STATE_KEYS].sort()), "utf8").toString("base64url");
+  // The key list orders the JSON and applies at every depth, so it names the arms' own keys too.
+  const payload = Buffer.from(JSON.stringify(parseState(state), [...STATE_KEYS, ...Object.keys(FACTORS)].sort()), "utf8").toString("base64url");
   return `${payload}.${mac(payload).toString("base64url")}`;
 };
 

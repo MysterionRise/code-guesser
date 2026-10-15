@@ -128,9 +128,10 @@ describe("the generative-UI route (#101)", () => {
   afterEach(() => { fake.control({}); logged.mockClear(); });
   afterAll(async () => { vi.unstubAllEnvs(); logged.mockRestore(); await fake.close(); });
 
-  /** A dealt language game, with its first round answered when asked. */
-  const game = (answered: boolean) => {
-    const { mode, sessionToken } = experiment.dealGame("language", seeded(9));
+  /** A dealt language game that drew the given design (#106), with its first round answered when asked. */
+  const game = (answered: boolean, design: "catalog" | "composer" | "visualizer" | "host" = "catalog") => {
+    const { mode, sessionToken } = experiment.dealGame("language", seeded(9), Date.now(),
+      { arms: { design, theme: "terminal", layer: "off" }, record: true });
     const round = mode.rounds[0]!;
     const fixture = fixtures.get(round.roundId)!;
     const token = answered
@@ -162,11 +163,17 @@ describe("the generative-UI route (#101)", () => {
     expect((await post({ ...valid, sessionToken: "forged.token" })).status).toBe(410);
     expect((await post({ ...valid, roundId: mode.rounds[1]!.roundId })).status).toBe(403);
     expect((await post({ ...valid, design: "shiny" })).status).toBe(400);
+    // A game serves only the design it drew, so a client can't switch arms mid-game.
+    const otherDesign = await post({ ...valid, design: "host" });
+    expect(otherDesign.status).toBe(403);
+    expect(await otherDesign.json()).toEqual({ reason: "DESIGN" });
     // The composer and the visualizer exist only after the lock.
-    expect((await post({ ...valid, design: "visualizer" })).status).toBe(403);
-    const composerTooEarly = await post({ ...valid, design: "composer" });
-    expect(composerTooEarly.status).toBe(403);
-    expect(await composerTooEarly.json()).toEqual({ reason: "PHASE" });
+    for (const design of ["visualizer", "composer"] as const) {
+      const early = game(false, design);
+      const tooEarly = await post({ ...valid, sessionToken: early.token, roundId: early.round.roundId, design });
+      expect(tooEarly.status).toBe(403);
+      expect(await tooEarly.json()).toEqual({ reason: "PHASE" });
+    }
     expect(fake.requests).toHaveLength(0);
   });
 
@@ -196,7 +203,7 @@ describe("the generative-UI route (#101)", () => {
   });
 
   it("lets the host chat before the lock with no code, offering a hint, and remember its replies", async () => {
-    const { round, fixture, token } = game(false);
+    const { round, fixture, token } = game(false, "host");
     const history = [
       userMessage("Hi host"),
       { id: "a1", role: "assistant", parts: [{ type: "tool-host_message", state: "output-available", output: { text: "Hello there!" } }] },
@@ -227,7 +234,7 @@ describe("the generative-UI route (#101)", () => {
   });
 
   it("lets the composer lay out a whole panel after the lock, checked before it streams", async () => {
-    const { round, token } = game(true);
+    const { round, token } = game(true, "composer");
     const response = await post({ sessionToken: token, roundId: round.roundId, design: "composer", messages: [userMessage("Explain this round.")] });
     expect(response.status).toBe(200);
     const stream = await response.text();
@@ -264,7 +271,7 @@ describe("the generative-UI route (#101)", () => {
   });
 
   it("lets the visualizer write a sandboxed page after the lock, checked before it streams", async () => {
-    const { round, token } = game(true);
+    const { round, token } = game(true, "visualizer");
     const response = await post({ sessionToken: token, roundId: round.roundId, design: "visualizer", messages: [userMessage("Visualize this round.")] });
     expect(response.status).toBe(200);
     const stream = await response.text();

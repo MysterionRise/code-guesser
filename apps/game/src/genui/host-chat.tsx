@@ -4,6 +4,7 @@ import * as React from "react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, type UIMessage } from "ai";
 
+import type { GenuiEvent } from "../experiment/events";
 import { CatalogView, type HintOffer } from "./catalog-view";
 import { renderViews } from "./genui-panel";
 import { isSafeText, type RoundPhase } from "./render-catalog";
@@ -16,6 +17,8 @@ export interface HostChatProps {
   readonly optionLabels: readonly string[];
   readonly sessionToken: () => string;
   readonly hint: HintOffer;
+  /** Told when the player writes to the host and when the host falls back, for the event log (#107). */
+  readonly onEvent?: (event: GenuiEvent) => void;
 }
 
 export const HOST_FALLBACK = "The host isn’t available right now. The game plays on without them.";
@@ -44,7 +47,7 @@ const phaseOf = (message: UIMessage): RoundPhase => message.parts.some((part) =>
  * The host design (#104): a chat beside the round. Before the lock the host sees no code and may offer the next
  * hint, which the player buys with the round's own button logic; after the lock the same chat can discuss the code.
  */
-export default function HostChat({ roundId, phase, panes, optionLabels, sessionToken, hint }: HostChatProps) {
+export default function HostChat({ roundId, phase, panes, optionLabels, sessionToken, hint, onEvent }: HostChatProps) {
   const transport = React.useMemo(() => new DefaultChatTransport({
     api: "/api/genui",
     prepareSendMessagesRequest: ({ messages }) => ({ body: { sessionToken: sessionToken(), roundId, design: "host", messages } }),
@@ -54,11 +57,13 @@ export default function HostChat({ roundId, phase, panes, optionLabels, sessionT
   const input = React.useRef<HTMLInputElement>(null);
   // A refused paste would ride along in every later request and be refused again; it leaves the history instead.
   React.useEffect(() => {
-    if (refusalOf(error) !== "PASTED_CODE") return;
+    if (error === undefined) return;
+    if (refusalOf(error) !== "PASTED_CODE") { onEvent?.({ type: "genui_fallback", reason: "failed" }); return; }
+    onEvent?.({ type: "genui_fallback", reason: "refused" });
     setMessages((current) => current.at(-1)?.role === "user" ? current.slice(0, -1) : current);
     clearError();
     setNotice(HOST_PASTE_REFUSED);
-  }, [error, setMessages, clearError]);
+  }, [error, setMessages, clearError, onEvent]);
   // Only the latest offer can still be bought; earlier ones read as spent.
   const lastOffer = messages.reduce((last, message, at) => message.parts.some((part) => part.type === "tool-offer_hint") ? at : last, -1);
   const [draft, setDraft] = React.useState("");
@@ -73,6 +78,7 @@ export default function HostChat({ roundId, phase, panes, optionLabels, sessionT
     if (text.length === 0 || busy) return;
     setDraft("");
     setNotice(null);
+    onEvent?.({ type: "genui_interaction", action: "chat" });
     void sendMessage({ text });
     // The input stays enabled while the host replies, so keyboard focus stays here.
     input.current?.focus();
