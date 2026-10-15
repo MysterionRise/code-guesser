@@ -10,7 +10,7 @@ import { GitHubSearchError } from "./github-search";
 import { JournalError, openJournal } from "./journal";
 import { HARNESS_CANDIDATES, accepted, classificationsFor, harnessRow, hash, loadProfile, makeHarness } from "./command-test-harness";
 import {
-  CURATED_REPOSITORIES, CURATED_SECTION, FIX_SECTION, OUTPUT_SECTION, curatedFiles, fixHarnessData, loadCuratedProfile, missingLineFiles, nameFunctionFiles, outputFiles, sha256,
+  CURATED_REPOSITORIES, CURATED_SECTION, FIX_SECTION, OUTPUT_SECTION, curatedFiles, fixHarnessData, frameworkFiles, loadCuratedProfile, missingLineFiles, nameFunctionFiles, outputFiles, sha256,
 } from "./testdata/deck-builders";
 import { LANGUAGE_SLUGS } from "../../../packages/artifact/src/index";
 import { MAINSTREAM_LANGUAGES, parseCrawlProfile } from "./profile";
@@ -398,6 +398,30 @@ const logLines = (calls: readonly string[]): string[] =>
     expect(harness.calls.filter((call) => call.startsWith("read:algos/go:shapes/"))).toHaveLength(8);
     expect(harness.calls).toContain("name-function:8");
     expect(logLines(harness.calls)).toContain("log:PREPARATION_DECKS project,language,before-after,name-function");
+  });
+
+  it("selects a configured framework deck one family at a time, after checking each example states no licence of its own (#62)", async () => {
+    const profile = loadCuratedProfile({ beforeAfterPool: 5 }, { framework: true });
+    const harness = await makeHarness({}, { profile, curatedFiles: frameworkFiles() });
+    await prepareLocalExperiment(harness.dependencies);
+    expect(harness.calls).toContain("list:todo/examples:examples/react/src");
+    expect(harness.calls).toContain("read:todo/examples:examples/react/package.json");
+    expect(harness.calls.filter((call) => call.startsWith("curated:todo/examples:"))).toHaveLength(8);
+    expect(harness.calls).toContain("framework:8");
+    expect(logLines(harness.calls)).toContain("log:PREPARATION_DECKS project,language,before-after,framework");
+  });
+
+  it("skips an example that states a licence of its own, and with it the family it would have filled (#62)", async () => {
+    const profile = loadCuratedProfile({ beforeAfterPool: 5 }, { framework: true });
+    const files = new Map(frameworkFiles());
+    files.set("todo/examples:examples/svelte/LICENSE", "Some other licence.\n");
+    files.set("todo/examples:examples/ember/package.json", "{ \"license\": \"GPL-3.0\" }\n");
+    const harness = await makeHarness({}, { profile, curatedFiles: files });
+    await prepareLocalExperiment(harness.dependencies);
+    expect(harness.calls.some((call) => call.startsWith("read:todo/examples:examples/svelte/src/"))).toBe(false);
+    expect(logLines(harness.calls)).toContain("log:PREPARATION_DECK_SKIPPED framework DECK_SHORT");
+    expect((harness.reports[0] as any).diagnostics).toContainEqual({ stage: "ADMISSION", reasonCode: "FRAMEWORK_LICENSE_OWN", count: 2 });
+    expect((harness.reports[0] as any).diagnostics).toContainEqual({ stage: "SELECTION", reasonCode: "FRAMEWORK_FAMILY_SHORT", count: 2 });
   });
 
   it("attempts no algorithm deck when the profile configures none", async () => {

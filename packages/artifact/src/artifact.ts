@@ -32,10 +32,12 @@ import {
   type StackLanguage,
 } from "./domain";
 import { fail } from "./errors";
+import { frameworkDeckRule, parseFrameworks, validateFramework, type CuratedFramework } from "./framework";
 import { missingLineDeckRule, validateMissingLine } from "./missing-line";
 import { nameFunctionDeckRule, validateNameFunction } from "./name-function";
 import {
-  pinKey, validateCuratedSource, validateFixSource, validateLineageSource, validateMissingLineSource, validateNameFunctionSource, validateStackSource, type StackIdentity,
+  pinKey, validateCuratedSource, validateFixSource, validateFrameworkSource, validateLineageSource, validateMissingLineSource, validateNameFunctionSource,
+  validateStackSource, type StackIdentity,
 } from "./source";
 import {
   canonicalHash,
@@ -274,6 +276,8 @@ interface Snapshot {
   readonly algorithms: ReadonlyMap<string, CuratedAlgorithm>;
   /** The bug datasets fix rounds come from, by id. */
   readonly datasets: ReadonlySet<string>;
+  /** The frameworks a framework round may offer, by id (#62). */
+  readonly frameworks: ReadonlyMap<string, CuratedFramework>;
 }
 
 type Semantics = Readonly<{
@@ -396,6 +400,7 @@ const VALIDATORS: Readonly<Record<FixtureKind, (semantics: Semantics) => void>> 
   PROJECT: validateProject, LANGUAGE: validateLanguage, BEFORE_AFTER: validateBeforeAfter, ALGORITHM: validateAlgorithm,
   OUTPUT: validateOutput, FIX: validateFix, MISSING_LINE: (semantics: Semantics) => validateMissingLine(semantics),
   NAME_FUNCTION: (semantics: Semantics) => validateNameFunction(semantics),
+  FRAMEWORK: (semantics: Semantics) => validateFramework({ ...semantics, frameworks: semantics.snapshot.frameworks }),
 });
 
 /** Where each kind's source comes from, and the check that binds it to this snapshot. */
@@ -408,12 +413,14 @@ const SOURCE_VALIDATORS: Readonly<Record<FixtureKind, (value: unknown, snapshot:
   FIX: (value: unknown, snapshot: Snapshot) => validateFixSource(value, snapshot.id, snapshot.datasets),
   MISSING_LINE: (value: unknown, snapshot: Snapshot) => validateMissingLineSource(value, snapshot.id, snapshot.pins),
   NAME_FUNCTION: (value: unknown, snapshot: Snapshot) => validateNameFunctionSource(value, snapshot.id, snapshot.pins),
+  FRAMEWORK: (value: unknown, snapshot: Snapshot) => validateFrameworkSource(value, snapshot.id, snapshot.pins),
 });
 
 /** Rules a whole deck must keep beyond its rounds' own. */
 const DECK_RULES: Readonly<Partial<Record<DeckId, (fixtures: readonly ParsedFixture[]) => void>>> = Object.freeze({
   "missing-line": missingLineDeckRule,
   "name-function": nameFunctionDeckRule,
+  framework: frameworkDeckRule,
   // Pane order carries no signal: the later version is pane A in half the pool, give or take one.
   "before-after": (fixtures: readonly ParsedFixture[]) => {
     const aLater = fixtures.filter(({ correctCandidateId }) => correctCandidateId === BEFORE_AFTER_CANDIDATE_IDS[0]).length;
@@ -609,14 +616,16 @@ const parseDatasets = (value: unknown): ReadonlySet<string> => {
   if (ids.length === 0 || ids.some((id, index) => index > 0 && id <= ids[index - 1]!)) fail();
   return new Set(ids);
 };
-const parseCurated = (value: unknown): Pick<Snapshot, "pins" | "algorithms" | "datasets"> => {
-  const optional = ["algorithms", "datasets"].filter((key) => typeof value === "object" && value !== null && Object.hasOwn(value, key));
+const parseCurated = (value: unknown): Pick<Snapshot, "pins" | "algorithms" | "datasets" | "frameworks"> => {
+  const optional = ["algorithms", "datasets", "frameworks"].filter((key) => typeof value === "object" && value !== null && Object.hasOwn(value, key));
   const curated = record(value, ["pins", ...optional]);
   const pins = parsePins(curated.pins);
   return Object.freeze({
     pins,
     algorithms: optional.includes("algorithms") ? parseAlgorithms(curated.algorithms, pins) : new Map(),
     datasets: optional.includes("datasets") ? parseDatasets(curated.datasets) : new Set<string>(),
+    frameworks: optional.includes("frameworks")
+      ? parseFrameworks(curated.frameworks, (entry) => record(entry, ["id", "label", "family", "names", "symbols"])) : new Map(),
   });
 };
 
@@ -637,7 +646,7 @@ const parseSnapshot = (value: unknown, profileHash: string): Snapshot => {
   validateResponseHashes(snapshot.acceptedResponseHashes, id, profileHash);
   return Object.freeze({ id, queryIds, stack: identity,
     ...(curated ? parseCurated(snapshot.curated)
-      : { pins: new Set<string>(), algorithms: new Map<string, CuratedAlgorithm>(), datasets: new Set<string>() }) });
+      : { pins: new Set<string>(), algorithms: new Map<string, CuratedAlgorithm>(), datasets: new Set<string>(), frameworks: new Map() }) });
 };
 
 export const ARTIFACT_KEYS = ["schemaVersion", "contentClass", "profileHash", "crawlSnapshot", "decks"] as const;

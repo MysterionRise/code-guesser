@@ -9,6 +9,8 @@ import { generateMissingLineRounds, type MissingLineCandidate } from "../missing
 import { nameChoices, nameExtremeLimits, nameSlack } from "../name-function-window";
 import { generateNameFunctionRounds, type NameFunctionCandidate } from "../name-function-rounds";
 import { generateFixRounds, type FixCandidate } from "../fix-rounds";
+import { generateFrameworkRounds, type FrameworkCandidate } from "../framework-rounds";
+import { frameworkWindow } from "../framework-window";
 import { changeKind, fixWindows } from "../fix-window";
 import type { DatasetBug } from "../github-fixes";
 import { fixExtremeLimits, fixSlack, labelStems } from "../model";
@@ -339,6 +341,8 @@ export const composeInput = (
         ? { "missing-line": generateMissingLineRounds({ profile, candidates: missingLineCandidates(profile, snapshotId) }) } : {}),
       ...(profile.curated?.["name-function"]
         ? { "name-function": generateNameFunctionRounds({ profile, candidates: nameFunctionCandidates(profile, snapshotId) }) } : {}),
+      ...(profile.curated?.framework
+        ? { framework: generateFrameworkRounds({ profile, candidates: frameworkCandidates(profile, snapshotId) }) } : {}),
     },
     candidates,
   };
@@ -385,13 +389,16 @@ export const CURATED_SECTION = Object.freeze({
 /** The deck profile with the curated section: it configures an eight-round algorithm deck. */
 export const loadCuratedProfile = (
   selection: Readonly<Record<string, number>> = {},
-  decks: Readonly<{ algorithm?: boolean; output?: boolean; fix?: boolean; "missing-line"?: boolean; "name-function"?: boolean }> = { algorithm: true },
+  decks: Readonly<{ algorithm?: boolean; output?: boolean; fix?: boolean; "missing-line"?: boolean; "name-function"?: boolean;
+    framework?: boolean }> = { algorithm: true },
 ): CrawlProfile => {
   const raw = JSON.parse(readFileSync(new URL("../../profiles/local-real-rounds.v5.json", import.meta.url), "utf8"));
-  const curated = { repositories: CURATED_REPOSITORIES, ...(decks.algorithm ? { algorithm: CURATED_SECTION.algorithm } : {}),
+  const curated = { repositories: [...CURATED_REPOSITORIES, ...(decks.framework ? [FRAMEWORK_REPOSITORY] : [])],
+    ...(decks.algorithm ? { algorithm: CURATED_SECTION.algorithm } : {}),
     ...(decks.output ? { output: OUTPUT_SECTION } : {}), ...(decks.fix ? { fix: FIX_SECTION } : {}),
     ...(decks["missing-line"] ? { "missing-line": MISSING_LINE_SECTION } : {}),
-    ...(decks["name-function"] ? { "name-function": NAME_FUNCTION_SECTION } : {}) };
+    ...(decks["name-function"] ? { "name-function": NAME_FUNCTION_SECTION } : {}),
+    ...(decks.framework ? { framework: FRAMEWORK_SECTION } : {}) };
   return parseCrawlProfile({ ...raw, selection: { ...raw.selection, ...selection }, curated: structuredClone(curated) });
 };
 
@@ -498,6 +505,136 @@ export const nameFunctionCandidates = (profile: CrawlProfile, snapshotId: string
       crawlSnapshotId: snapshotId,
     });
   });
+};
+
+/**
+ * A repository of one app built in many frameworks (#62), whose licence file GitHub names no licence for: its pin
+ * declares MIT and pins the file.
+ */
+export const FRAMEWORK_REPOSITORY = Object.freeze({
+  repository: "todo/examples", commit: sha1("todo-pin"), language: "JavaScript",
+  license: { spdx: "MIT", path: "license.md", blob: sha1("todo-license") },
+} as const);
+
+const framework = (id: string, label: string, names: readonly string[], idea: string, files: readonly string[]) =>
+  ({ id, label, names, symbols: [], idea, examples: [`examples/${id}`], files: files.map((file) => `examples/${id}/${file}`) });
+
+/** An eight-round framework deck: two families of four, one round each. */
+export const FRAMEWORK_SECTION = Object.freeze({
+  rounds: 8,
+  repository: "todo/examples",
+  roundsPerFramework: 1,
+  windowLines: 12,
+  families: [
+    { id: "components", note: "All four build the page from components that update when their state changes.", frameworks: [
+      framework("react", "React", ["React"], "Components are functions that keep state in hooks and return markup.", ["src/item.jsx"]),
+      framework("vue", "Vue", ["Vue"], "Templates carry directives on ordinary attributes, and the script declares refs.", ["src/Item.vue"]),
+      framework("svelte", "Svelte", ["Svelte"], "A compiler makes plain variables reactive, and blocks open with a hash.", ["src/Item.svelte"]),
+      framework("angular", "Angular", ["Angular"], "Classes carry decorators, and templates bind events in parentheses.", ["src/app/item.component.ts"]),
+    ] },
+    { id: "classics", note: "All four come from the first wave of front-end frameworks, with models, views, and bindings.", frameworks: [
+      framework("backbone", "Backbone", ["Backbone"], "Views extend a base class and list their DOM events as selector strings.", ["js/views/todo-view.js"]),
+      framework("ember", "Ember", ["Ember", "glimmer"], "Components keep tracked properties and use curly-brace modifiers.", ["app/components/todo-item.gjs"]),
+      framework("knockout", "Knockout", ["Knockout"], "View models hold observables that are read by calling them.", ["js/app.js"]),
+      framework("angularjs", "AngularJS", ["AngularJS"], "Controllers get services injected by name and share one scope object.", ["js/controllers/todo.js"]),
+    ] },
+  ],
+  templates: {
+    title: "Which framework?",
+    description: "The same to-do app in many front-end frameworks, every name hidden: tell them apart by their idioms.",
+    prompt: "Which framework is this to-do app written with?",
+    evidence: "This is {path} in {repository}, the example built with {name}.",
+    explanation: "Every example builds the same app, so only how each framework writes it tells them apart.",
+  },
+});
+
+/** One small, idiomatic file per framework of the test deck, and a package manifest for some examples. */
+export const frameworkFiles = (): ReadonlyMap<string, string> => new Map(Object.entries({
+  "examples/react/package.json": "{ \"private\": true }\n",
+  "examples/react/src/item.jsx": [
+    "import { useState, useCallback } from \"react\";", "",
+    "export function Item({ todo, onToggle }) {",
+    "    const [editing, setEditing] = useState(false);",
+    "    const toggle = useCallback(() => onToggle(todo.id), [onToggle, todo.id]);",
+    "    return (",
+    "        <li className={editing ? \"editing\" : \"\"}>",
+    "            <input className=\"toggle\" type=\"checkbox\" checked={todo.done} onChange={toggle} />",
+    "            <label onDoubleClick={() => setEditing(true)}>{todo.title}</label>",
+    "        </li>",
+    "    );",
+    "}",
+  ].join("\n"),
+  "examples/vue/src/Item.vue": [
+    "<script setup>", "import { ref } from 'vue'", "const props = defineProps(['todo'])", "const emit = defineEmits(['toggle'])",
+    "const editing = ref(false)", "function toggle() {", "    emit('toggle', props.todo)", "}", "function edit() {", "    editing.value = true",
+    "}", "</script>", "", "<template>", "    <li :class=\"{ editing }\">",
+    "        <input type=\"checkbox\" class=\"toggle\" :checked=\"todo.done\" @change=\"toggle\" />",
+    "        <label @dblclick=\"edit\">{{ todo.title }}</label>", "    </li>", "</template>",
+  ].join("\n"),
+  "examples/svelte/src/Item.svelte": [
+    "<script>", "    let { item, onRemove } = $props();", "    let editing = $state(false);", "</script>", "",
+    "<li class:completed={item.completed} class:editing>",
+    "    <input class=\"toggle\" type=\"checkbox\" bind:checked={item.completed} />",
+    "    <label ondblclick={() => (editing = true)}>{item.description}</label>",
+    "    <button onclick={onRemove} class=\"destroy\"></button>",
+    "    {#if editing}", "        <input class=\"edit\" value={item.description} />", "        <span>editing</span>", "    {/if}", "</li>",
+  ].join("\n"),
+  "examples/angular/src/app/item.component.ts": [
+    "import { Component, EventEmitter, Input, Output } from '@angular/core';", "",
+    "@Component({", "  selector: 'app-item',", "  standalone: true,", "  templateUrl: './item.component.html',", "})",
+    "export class ItemComponent {", "  @Input({ required: true }) todo!: Todo;", "  @Output() remove = new EventEmitter<Todo>();",
+    "  editing = false;", "", "  removeTodo(): void {", "    this.remove.emit(this.todo);", "  }", "}",
+  ].join("\n"),
+  "examples/backbone/js/views/todo-view.js": [
+    "var app = app || {};", "", "(function ($) {", "\t'use strict';", "",
+    "\tapp.TodoView = Backbone.View.extend({", "\t\ttagName: 'li',", "\t\tevents: {", "\t\t\t'click .toggle': 'toggleCompleted',",
+    "\t\t\t'dblclick label': 'edit'", "\t\t},", "\t\tinitialize: function () {", "\t\t\tthis.listenTo(this.model, 'change', this.render);",
+    "\t\t},", "\t\trender: function () {", "\t\t\tthis.$el.html(this.template(this.model.toJSON()));", "\t\t\treturn this;", "\t\t}",
+    "\t});", "})(jQuery);",
+  ].join("\n"),
+  "examples/ember/package.json": "{ \"license\": \"MIT\" }\n",
+  "examples/ember/app/components/todo-item.gjs": [
+    "import Component from '@glimmer/component';", "import { tracked } from '@glimmer/tracking';", "",
+    "export default class TodoItem extends Component {", "\t<template>", "\t\t<li class=\"{{if @todo.completed 'completed'}}\">",
+    "\t\t\t<input class=\"toggle\" type=\"checkbox\" {{on \"change\" this.toggle}} />",
+    "\t\t\t<label {{on \"dblclick\" this.edit}}>{{@todo.title}}</label>", "\t\t</li>", "\t</template>", "",
+    "\t@tracked editing = false;", "", "\ttoggle = () => {", "\t\tthis.args.todo.completed = !this.args.todo.completed;", "\t};", "}",
+  ].join("\n"),
+  "examples/knockout/js/app.js": [
+    "(function () {", "\t'use strict';", "", "\tvar Todo = function (title, completed) {", "\t\tthis.title = ko.observable(title);",
+    "\t\tthis.completed = ko.observable(completed);", "\t\tthis.editing = ko.observable(false);", "\t};", "",
+    "\tvar ViewModel = function (todos) {", "\t\tthis.todos = ko.observableArray(todos);", "\t\tthis.remaining = ko.computed(function () {",
+    "\t\t\treturn this.todos().length;", "\t\t}.bind(this));", "\t};", "", "\tko.applyBindings(new ViewModel([]));", "}());",
+  ].join("\n"),
+  "examples/angularjs/js/controllers/todo.js": [
+    "angular.module('todomvc')", "\t.controller('TodoCtrl', function TodoCtrl($scope, $location, store) {", "\t\t'use strict';", "",
+    "\t\tvar todos = $scope.todos = store.todos;", "\t\t$scope.newTodo = '';", "",
+    "\t\t$scope.$watch('todos', function () {", "\t\t\t$scope.remainingCount = todos.filter(function (todo) {",
+    "\t\t\t\treturn !todo.completed;", "\t\t\t}).length;", "\t\t}, true);", "",
+    "\t\t$scope.addTodo = function () {", "\t\t\ttodos.push({ title: $scope.newTodo.trim(), completed: false });",
+    "\t\t\t$scope.newTodo = '';", "\t\t};", "\t});",
+  ].join("\n"),
+}).map(([path, text]) => [`todo/examples:${path}`, text] as const));
+
+/** Bound framework candidates for the small profile: each framework's first file and its window. */
+export const frameworkCandidates = (profile: CrawlProfile, snapshotId: string): readonly FrameworkCandidate[] => {
+  const deck = profile.curated!.framework!;
+  const every = deck.families.flatMap(({ frameworks }) => frameworks);
+  const terms = { names: every.flatMap(({ label, names }) => [label, ...names]), symbols: every.flatMap(({ symbols }) => symbols) };
+  const files = frameworkFiles();
+  return deck.families.flatMap((family) => family.frameworks.map((entry) => {
+    const path = entry.files[0]!;
+    const text = files.get(`todo/examples:${path}`)!;
+    const window = frameworkWindow(text, entry.id, family.frameworks.map(({ id }) => id), terms,
+      { maxLines: deck.windowLines, maxBytes: profile.screening.excerptBytes, minBytes: profile.screening.minimumExcerptBytes })!;
+    return Object.freeze({
+      familyId: family.id, framework: entry.id, repository: "todo/examples", commit: FRAMEWORK_REPOSITORY.commit, path,
+      blob: sha1(`blob ${text}`), rawContentHash: sha256(text), licenseName: "MIT License", licenseSpdx: "MIT",
+      licenseFileUrl: `https://github.com/todo/examples/blob/${FRAMEWORK_REPOSITORY.commit}/license.md`, authorName: "Curated Author",
+      authorLogin: "curated-author", authorCommit: "c".repeat(40), windowStart: window.windowStart, excerpt: window.excerpt,
+      excerptHash: sha256(window.excerpt), marker: window.markers[0]!, crawlSnapshotId: snapshotId,
+    });
+  }));
 };
 
 /** An eight-round output deck over the curated Python pin's `maths` and `strings` directories. */

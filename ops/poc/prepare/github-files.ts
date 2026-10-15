@@ -77,9 +77,9 @@ export const fileAuthor = async (
 
 /**
  * Reads one file of a curated repository at a pinned commit:
- * - the repository passes admission (public, not a fork or archived, licence allowed);
+ * - the repository passes admission (public, not a fork or archived, licence allowed, or declared by its pin);
  * - the path resolves through verified trees from the pinned commit's root tree, and the blob matches its id;
- * - the licence file at the pin agrees with the repository's licence;
+ * - the licence file at the pin agrees with the repository's licence, or is the file its pin declares;
  * - the author is the file's last human author.
  * Repository, commit, licence, and tree reads repeat across files of one pin, and the run's GET reuse
  * answers those repeats without a second request.
@@ -90,12 +90,13 @@ export const bindGitHubFile = async (
 ): Promise<CuratedFile> => {
   const git = gitReader(options, target.repository, (check) => fail(`FILE_${check}`));
   if (!/^[0-9a-f]{40}$/u.test(target.commit)) fail("FILE_SHAPE");
-  const metadata = admitRepository(await githubGet(options, git.api), target.repository, git.api, git.web, options.profile.licenses);
+  const declared = options.profile.curated?.repositories.find(({ repository }) => repository === target.repository)?.license;
+  const metadata = admitRepository(await githubGet(options, git.api), target.repository, git.api, git.web, options.profile.licenses, declared);
   const pinned = await git.commit(target.commit);
   const file = await git.resolvePath(pinned.tree, target.path);
   const bytes = await git.blob(file.blob);
   const license = admitLicense(await githubGet(options, `${git.api}/license?ref=${target.commit}`), metadata, target,
-    { profileVersion: options.profile.profileVersion, profileHash: options.profileHash }, git.api, git.web);
+    { profileVersion: options.profile.profileVersion, profileHash: options.profileHash }, git.api, git.web, declared);
   const author = await fileAuthor(options, target);
   return Object.freeze({
     repository: target.repository,

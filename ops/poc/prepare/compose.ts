@@ -18,7 +18,8 @@ import {
   type ExperimentArtifact,
   type ExperimentFixture,
 } from "./model";
-import { STACK_LANGUAGES, mentionsLabel, poolSizes, type AlgorithmEntry, type CrawlProfile } from "./profile";
+import { showsFrameworkSymbol, spellsFramework } from "../../../packages/artifact/src/index";
+import { STACK_LANGUAGES, mentionsLabel, poolSizes, type AlgorithmEntry, type CrawlProfile, type FrameworkEntry } from "./profile";
 import { isCuratedDeck } from "./curated-deck-ids";
 import type { GeneratedRounds } from "./round-helpers";
 
@@ -106,7 +107,11 @@ const publicParts = (fixture: ExperimentFixture) => ({
   clues: fixture.clues.join("\n"),
 });
 
-const requireOwnCandidatesAbsent = (fixture: ExperimentFixture, algorithmEntries: readonly AlgorithmEntry[]): void => {
+const requireOwnCandidatesAbsent = (
+  fixture: ExperimentFixture,
+  algorithmEntries: readonly AlgorithmEntry[],
+  frameworkEntries: readonly FrameworkEntry[],
+): void => {
   const parts = publicParts(fixture);
   const shown = [["PANES", parts.panes], ["PROMPT", parts.prompt], ["CLUES", parts.clues]] as const;
   for (const [part, value] of shown) {
@@ -120,16 +125,20 @@ const requireOwnCandidatesAbsent = (fixture: ExperimentFixture, algorithmEntries
       const entry = algorithmEntries.find((known) => known.label === label);
       return entry === undefined || namesAlgorithm(value, entry);
     })) fail(`PUBLIC_CONTAINMENT_CANDIDATE_IN_${part}`);
+    // A framework round masks every framework of the deck, not only its own family's.
+    if (fixture.kind === "FRAMEWORK" && frameworkEntries.some((entry) => spellsFramework(value, entry)
+      || (part === "PANES" && showsFrameworkSymbol(value, entry)))) fail(`PUBLIC_CONTAINMENT_CANDIDATE_IN_${part}`);
   }
 };
 
 /** Names the protected key and the public part that exposed it, never the value. */
 const requirePublicContainment = (fixtures: readonly ExperimentFixture[], profile: CrawlProfile): void => {
   const algorithmEntries = profile.curated?.algorithm?.families.flatMap(({ algorithms }) => algorithms) ?? [];
+  const frameworkEntries = profile.curated?.framework?.families.flatMap(({ frameworks }) => frameworks) ?? [];
   const shown = fixtures.map(publicParts);
   const publicText = shown.map((parts) => Object.values(parts).join("\n")).join("\n");
   for (const fixture of fixtures) {
-    requireOwnCandidatesAbsent(fixture, algorithmEntries);
+    requireOwnCandidatesAbsent(fixture, algorithmEntries, frameworkEntries);
     const protectedEntries: readonly (readonly [string, unknown])[] = [
       ["evidence", fixture.evidence], ["explanation", fixture.explanation], ["attribution", fixture.attribution],
       ...PROTECTED_SOURCE_KEYS.map((key) => [key, fixture.source[key]] as const),
@@ -167,7 +176,10 @@ const TEMPLATE_KEYS = Object.freeze({ project: "project", language: "language", 
 const deckTemplate = (profile: CrawlProfile, id: DeckId): Readonly<{ title: string; description: string }> =>
   isCuratedDeck(id) ? profile.curated?.[id]?.templates ?? fail() : profile.templates[TEMPLATE_KEYS[id]];
 
-/** The curated repositories' pins, the algorithms a round may offer, and the bug datasets, so the parser can check rounds. */
+/**
+ * The curated repositories' pins, the algorithms and frameworks a round may offer, and the bug datasets, so the parser
+ * can check rounds.
+ */
 const curatedSnapshot = (profile: CrawlProfile) => {
   if (!profile.curated) return {};
   const pins = [...profile.curated.repositories].map(({ repository, commit }) => Object.freeze({ repository, commit }))
@@ -178,8 +190,11 @@ const curatedSnapshot = (profile: CrawlProfile) => {
   }))).sort((left, right) => left.id < right.id ? -1 : 1);
   const datasets = profile.curated.fix?.datasets.map(({ id, repository, commit }) => Object.freeze({ id, repository, commit }))
     .sort((left, right) => left.id < right.id ? -1 : 1);
+  const frameworks = profile.curated.framework?.families.flatMap((family) => family.frameworks.map((entry) => Object.freeze({
+    id: entry.id, label: entry.label, family: family.id, names: entry.names, symbols: entry.symbols,
+  }))).sort((left, right) => left.id < right.id ? -1 : 1);
   return { curated: Object.freeze({ pins: Object.freeze(pins), ...(algorithms ? { algorithms: Object.freeze(algorithms) } : {}),
-    ...(datasets ? { datasets: Object.freeze(datasets) } : {}) }) };
+    ...(datasets ? { datasets: Object.freeze(datasets) } : {}), ...(frameworks ? { frameworks: Object.freeze(frameworks) } : {}) }) };
 };
 
 export const composeExperimentArtifact = (options: ComposeOptions): ComposedExperiment => {

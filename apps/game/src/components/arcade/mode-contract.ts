@@ -2,8 +2,11 @@ export interface Candidate { candidateId: string; label: string; detail: string 
 /** A hint's place in its round; its text stays on the server until the player buys it. */
 export interface PublicClue { order: 1 | 2 }
 export interface Pane { label: string | null; text: string }
-export type RoundModeKind = "project" | "language" | "before-after" | "algorithm" | "output" | "fix" | "missing-line" | "name-function";
-const ROUND_KINDS: readonly RoundModeKind[] = ["project", "language", "before-after", "algorithm", "output", "fix", "missing-line", "name-function"];
+export type RoundModeKind = "project" | "language" | "before-after" | "algorithm" | "output" | "fix" | "missing-line" | "name-function"
+  | "framework";
+const ROUND_KINDS: readonly RoundModeKind[] = [
+  "project", "language", "before-after", "algorithm", "output", "fix", "missing-line", "name-function", "framework",
+];
 /** A fix round's options name pane lines, `Line 7`; any other label names none. */
 export const optionLine = (label: string): number | undefined => {
   const line = /^Line ([1-9][0-9]*)$/u.exec(label)?.[1];

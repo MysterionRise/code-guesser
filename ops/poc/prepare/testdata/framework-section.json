@@ -1,0 +1,341 @@
+{
+  "repository": {
+    "repository": "tastejs/todomvc",
+    "commit": "ff43b02e59dfa604386bb382034b2cd07c2bcd8a",
+    "language": "JavaScript",
+    "license": {
+      "spdx": "MIT",
+      "path": "license.md",
+      "blob": "9275d4371020294b6a107e454a0d1819f8b71c31"
+    }
+  },
+  "framework": {
+    "rounds": 32,
+    "repository": "tastejs/todomvc",
+    "roundsPerFramework": 2,
+    "windowLines": 14,
+    "families": [
+      {
+        "id": "components",
+        "note": "All four build the page from components that update the view when their state changes.",
+        "frameworks": [
+          {
+            "id": "react",
+            "label": "React",
+            "names": [
+              "React"
+            ],
+            "symbols": [],
+            "idea": "Components are plain functions that keep their state in hooks and return markup written inside the script.",
+            "examples": [
+              "examples/react"
+            ],
+            "files": [
+              "examples/react/src/todo/components/item.jsx",
+              "examples/react/src/todo/components/main.jsx",
+              "examples/react/src/todo/components/footer.jsx",
+              "examples/react/src/todo/components/input.jsx"
+            ]
+          },
+          {
+            "id": "vue",
+            "label": "Vue",
+            "names": [
+              "Vue"
+            ],
+            "symbols": [],
+            "idea": "Templates put directives on ordinary HTML attributes, and the script declares reactive refs and emits events.",
+            "examples": [
+              "examples/vue"
+            ],
+            "files": [
+              "examples/vue/src/components/TodoItem.vue",
+              "examples/vue/src/components/TodoFooter.vue",
+              "examples/vue/src/components/TodoHeader.vue",
+              "examples/vue/src/components/TodosComponent.vue"
+            ]
+          },
+          {
+            "id": "svelte",
+            "label": "Svelte",
+            "names": [
+              "Svelte"
+            ],
+            "symbols": [],
+            "idea": "A compiler turns plain variables into reactive state, and template blocks open with a hash and close with a slash.",
+            "examples": [
+              "examples/svelte"
+            ],
+            "files": [
+              "examples/svelte/src/Item.svelte",
+              "examples/svelte/src/App.svelte",
+              "examples/svelte/src/Footer.svelte",
+              "examples/svelte/src/Header.svelte"
+            ]
+          },
+          {
+            "id": "angular",
+            "label": "Angular",
+            "names": [
+              "Angular"
+            ],
+            "symbols": [],
+            "idea": "Classes carry decorators, and templates bind events in parentheses and properties in square brackets.",
+            "examples": [
+              "examples/angular"
+            ],
+            "files": [
+              "examples/angular/src/app/todo-item/todo-item.component.ts",
+              "examples/angular/src/app/todo-item/todo-item.component.html",
+              "examples/angular/src/app/todo-list/todo-list.component.ts",
+              "examples/angular/src/app/footer/footer.component.ts"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "classics",
+        "note": "All four come from the first wave of front-end frameworks, with models, views, and bindings between them.",
+        "frameworks": [
+          {
+            "id": "backbone",
+            "label": "Backbone",
+            "names": [
+              "Backbone"
+            ],
+            "symbols": [],
+            "idea": "Views extend a base class, list their DOM events as selector strings, and listen to their models for changes.",
+            "examples": [
+              "examples/backbone"
+            ],
+            "files": [
+              "examples/backbone/src/views/todo-view.js",
+              "examples/backbone/src/views/app-view.js",
+              "examples/backbone/src/routers/router.js"
+            ]
+          },
+          {
+            "id": "ember",
+            "label": "Ember",
+            "names": [
+              "Ember",
+              "emberjs",
+              "glimmer"
+            ],
+            "symbols": [],
+            "idea": "Components are classes with tracked properties, and their templates use curly-brace helpers and modifiers.",
+            "examples": [
+              "examples/emberjs/todomvc"
+            ],
+            "files": [
+              "examples/emberjs/todomvc/app/components/todo-item.gjs",
+              "examples/emberjs/todomvc/app/components/create.gjs",
+              "examples/emberjs/todomvc/app/components/todo-list.gjs",
+              "examples/emberjs/todomvc/app/components/footer.gjs"
+            ]
+          },
+          {
+            "id": "knockout",
+            "label": "Knockout",
+            "names": [
+              "Knockout",
+              "knockoutjs"
+            ],
+            "symbols": [],
+            "idea": "View models hold observables that are read by calling them, and the page binds to them through data attributes.",
+            "examples": [
+              "examples/knockoutjs",
+              "examples/knockoutjs_require"
+            ],
+            "files": [
+              "examples/knockoutjs/js/app.js",
+              "examples/knockoutjs_require/js/extends/handlers.js",
+              "examples/knockoutjs_require/js/viewmodels/todo.js"
+            ]
+          },
+          {
+            "id": "angularjs",
+            "label": "AngularJS",
+            "names": [
+              "AngularJS"
+            ],
+            "symbols": [],
+            "idea": "Controllers receive services injected by name, and everything a template sees lives on one shared scope object.",
+            "examples": [
+              "examples/angularjs_require",
+              "examples/typescript-angular"
+            ],
+            "files": [
+              "examples/angularjs_require/js/controllers/todo.js",
+              "examples/angularjs_require/js/directives/todoFocus.js",
+              "examples/typescript-angular/js/controllers/TodoCtrl.ts"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "light",
+        "note": "All four are small libraries that render views from plain functions or templates.",
+        "frameworks": [
+          {
+            "id": "preact",
+            "label": "Preact",
+            "names": [
+              "Preact"
+            ],
+            "symbols": [],
+            "idea": "Function components keep their state in hooks and return markup written inside the script, from a library of a few kilobytes.",
+            "examples": [
+              "examples/preact"
+            ],
+            "files": [
+              "examples/preact/src/app/item.js",
+              "examples/preact/src/app/main.js",
+              "examples/preact/src/app/app.js",
+              "examples/preact/src/app/footer.js"
+            ]
+          },
+          {
+            "id": "lit",
+            "label": "Lit",
+            "names": [
+              "Lit"
+            ],
+            "symbols": [],
+            "idea": "Custom elements extend one base class and render templates written as tagged template literals.",
+            "examples": [
+              "examples/lit"
+            ],
+            "files": [
+              "examples/lit/src/lib/todo-item.ts",
+              "examples/lit/src/lib/todo-list.ts",
+              "examples/lit/src/lib/todo-form.ts",
+              "examples/lit/src/lib/todo-footer.ts"
+            ]
+          },
+          {
+            "id": "mithril",
+            "label": "Mithril",
+            "names": [
+              "Mithril"
+            ],
+            "symbols": [],
+            "idea": "Views are trees of calls to one short function that takes a selector, attributes, and children.",
+            "examples": [
+              "examples/mithril"
+            ],
+            "files": [
+              "examples/mithril/js/views/main-view.js",
+              "examples/mithril/js/controllers/todo.js",
+              "examples/mithril/js/views/footer-view.js"
+            ]
+          },
+          {
+            "id": "ractive",
+            "label": "Ractive",
+            "names": [
+              "Ractive"
+            ],
+            "symbols": [],
+            "idea": "One instance owns a mustache template and a data object that code reads and writes by keypath strings.",
+            "examples": [
+              "examples/ractive"
+            ],
+            "files": [
+              "examples/ractive/js/app.js",
+              "examples/ractive/index.html"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "toolkits",
+        "note": "All four are older toolkits that build a page from widgets, controls, or extended base views.",
+        "frameworks": [
+          {
+            "id": "dojo",
+            "label": "Dojo",
+            "names": [
+              "Dojo",
+              "dijit",
+              "dojox"
+            ],
+            "symbols": [],
+            "idea": "Widgets are declared from a list of mixins, and keep their callbacks bound to themselves through a helper.",
+            "examples": [
+              "examples/dojo"
+            ],
+            "files": [
+              "examples/dojo/js/todo/widgets/Todo.js",
+              "examples/dojo/js/todo/widgets/TodoEnter.js",
+              "examples/dojo/js/todo/widgets/Todos.js",
+              "examples/dojo/js/todo/widgets/CSSToggleWidget.js"
+            ]
+          },
+          {
+            "id": "closure",
+            "label": "Closure",
+            "names": [
+              "Closure"
+            ],
+            "symbols": [],
+            "idea": "Classes are constructor functions joined by explicit inheritance calls, under one long global namespace.",
+            "examples": [
+              "examples/closure"
+            ],
+            "files": [
+              "examples/closure/js/todomvc/view/ToDoItemControl.js",
+              "examples/closure/js/todomvc/view/ToDoItemControlRenderer.js",
+              "examples/closure/js/app.js",
+              "examples/closure/js/todomvc/model/ToDoItemStore.js"
+            ]
+          },
+          {
+            "id": "canjs",
+            "label": "CanJS",
+            "names": [
+              "CanJS"
+            ],
+            "symbols": [
+              "can"
+            ],
+            "idea": "Components extend a base with a tag name, and observable objects are read and written through one accessor.",
+            "examples": [
+              "examples/canjs",
+              "examples/canjs_require"
+            ],
+            "files": [
+              "examples/canjs/js/components/todo-app.js",
+              "examples/canjs/js/models/todo.js",
+              "examples/canjs_require/js/components/todo-app.js"
+            ]
+          },
+          {
+            "id": "marionette",
+            "label": "Marionette",
+            "names": [
+              "Marionette"
+            ],
+            "symbols": [],
+            "idea": "Views extend a base class with named UI elements and regions, and talk to each other through channels.",
+            "examples": [
+              "examples/backbone_marionette"
+            ],
+            "files": [
+              "examples/backbone_marionette/js/TodoMVC.TodoList.Views.js",
+              "examples/backbone_marionette/js/TodoMVC.Router.js",
+              "examples/backbone_marionette/js/TodoMVC.Layout.js"
+            ]
+          }
+        ]
+      }
+    ],
+    "templates": {
+      "title": "Which framework?",
+      "description": "The same to-do app in sixteen front-end frameworks, every name hidden: tell them apart by their idioms.",
+      "prompt": "Which framework is this to-do app written with?",
+      "evidence": "This is {path} in {repository}, the example built with {name}.",
+      "explanation": "Every example builds the same to-do app, so the task and its names carry no clue; only how each framework writes it does."
+    }
+  }
+}

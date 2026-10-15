@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { screenLicenseEvidence } from "@codeguessr/content/local-poc-support";
 import { canonicalHash } from "./canonical";
 import type { GitHubLineageCandidate } from "./github-lineage";
-import type { CrawlProfile } from "./profile";
+import { DECLARABLE_LICENSES, type CrawlProfile, type DeclaredLicense } from "./profile";
 import type { RetryController } from "./retry";
 import type { BoundedTransport } from "./transport";
 
@@ -92,18 +92,34 @@ const detectedLicense = (value: unknown): RepositoryAdmission => {
   return Object.freeze({ licenseName, licenseSpdx });
 };
 
-/** The repository is public, live, not a fork, and under an allowlisted licence. */
+/** GitHub's record of a licence file it could not match: `other`, with no SPDX identifier. */
+const undetected = (value: unknown): void => {
+  const license = record(value);
+  if (license.key !== "other" || license.spdx_id !== "NOASSERTION" || license.url !== null) fail("ADMISSION_LICENSE_SHAPE");
+};
+
+/**
+ * The repository is public, live, not a fork, and under an allowlisted licence: the one GitHub detects, or the one its
+ * pin declares when GitHub detects none.
+ */
 export const admitRepository = (
   value: unknown,
   repository: string,
   api: string,
   web: string,
   allowlist: readonly string[],
+  declared?: DeclaredLicense,
 ): RepositoryAdmission => {
   const response = record(value);
   if (response.full_name !== repository || response.url !== api || response.html_url !== web
     || response.private !== false || response.visibility !== "public" || response.disabled !== false
     || response.archived !== false || response.fork !== false) fail("ADMISSION_REPOSITORY");
+  if (declared !== undefined) {
+    undetected(response.license);
+    const licenseName = DECLARABLE_LICENSES[declared.spdx] ?? fail("ADMISSION_REPOSITORY_LICENSE");
+    if (!allowlist.includes(declared.spdx)) fail("ADMISSION_REPOSITORY_LICENSE");
+    return Object.freeze({ licenseName, licenseSpdx: declared.spdx });
+  }
   const license = detectedLicense(response.license);
   if (!allowlist.includes(license.licenseSpdx)) fail("ADMISSION_REPOSITORY_LICENSE");
   return license;
@@ -144,7 +160,10 @@ const decodeLicense = (response: UnknownRecord): Uint8Array => {
   return bytes;
 };
 
-/** The licence file at `target.commit` agrees with the repository's licence and passes the evidence screen. */
+/**
+ * The licence file at `target.commit` agrees with the repository's licence, or is the very file its pin declares, and
+ * passes the evidence screen.
+ */
 export const admitLicense = (
   value: unknown,
   metadata: RepositoryAdmission,
@@ -152,6 +171,7 @@ export const admitLicense = (
   policy: Readonly<{ profileVersion: string; profileHash: string }>,
   api: string,
   web: string,
+  declared?: DeclaredLicense,
 ): LicenseAdmission => {
   const response = record(value);
   const path = text(response.path);
@@ -162,13 +182,19 @@ export const admitLicense = (
     || response.html_url !== `${web}/blob/${target.commit}/${encodedPath}`
     || response.git_url !== `${api}/git/blobs/${blob}`
     || response.download_url !== `https://raw.githubusercontent.com/${target.repository}/${target.commit}/${encodedPath}`) fail("ADMISSION_LICENSE");
-  const detected = detectedLicense(response.license);
-  if (detected.licenseName !== metadata.licenseName || detected.licenseSpdx !== metadata.licenseSpdx) fail("ADMISSION_LICENSE");
+  if (declared === undefined) {
+    const detected = detectedLicense(response.license);
+    if (detected.licenseName !== metadata.licenseName || detected.licenseSpdx !== metadata.licenseSpdx) fail("ADMISSION_LICENSE");
+  } else {
+    // The file the profile read and declared, byte for byte.
+    undetected(response.license);
+    if (path !== declared.path || blob !== declared.blob || metadata.licenseSpdx !== declared.spdx) fail("ADMISSION_LICENSE");
+  }
   const bytes = decodeLicense(response);
   const textHash = createHash("sha256").update(bytes).digest("hex");
   const evidence = screenLicenseEvidence({
     identifier: metadata.licenseSpdx,
-    metadataIdentifiers: [detected.licenseSpdx],
+    metadataIdentifiers: [metadata.licenseSpdx],
     licenseFilePresent: true,
     licensePath: path,
     licenseBlobSha: blob,
