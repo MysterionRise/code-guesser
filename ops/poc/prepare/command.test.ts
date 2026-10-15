@@ -10,7 +10,7 @@ import { GitHubSearchError } from "./github-search";
 import { JournalError, openJournal } from "./journal";
 import { HARNESS_CANDIDATES, accepted, classificationsFor, harnessRow, hash, loadProfile, makeHarness } from "./command-test-harness";
 import {
-  CURATED_REPOSITORIES, CURATED_SECTION, FIX_SECTION, OUTPUT_SECTION, curatedFiles, fixHarnessData, frameworkFiles, loadCuratedProfile, missingLineFiles, nameFunctionFiles, outputFiles, sha256,
+  CURATED_REPOSITORIES, CURATED_SECTION, FIX_SECTION, OUTPUT_SECTION, curatedFiles, exerciseFiles, fixHarnessData, frameworkFiles, loadCuratedProfile, missingLineFiles, nameFunctionFiles, outputFiles, sha256,
 } from "./testdata/deck-builders";
 import { LANGUAGE_SLUGS } from "../../../packages/artifact/src/index";
 import { MAINSTREAM_LANGUAGES, parseCrawlProfile } from "./profile";
@@ -422,6 +422,19 @@ const logLines = (calls: readonly string[]): string[] =>
     expect(logLines(harness.calls)).toContain("log:PREPARATION_DECK_SKIPPED framework DECK_SHORT");
     expect((harness.reports[0] as any).diagnostics).toContainEqual({ stage: "ADMISSION", reasonCode: "FRAMEWORK_LICENSE_OWN", count: 2 });
     expect((harness.reports[0] as any).diagnostics).toContainEqual({ stage: "SELECTION", reasonCode: "FRAMEWORK_FAMILY_SHORT", count: 2 });
+  });
+
+  it("selects a configured exercise deck one family at a time, tracks taking turns, and falls back past a missing solution (#58)", async () => {
+    const profile = loadCuratedProfile({ beforeAfterPool: 5 }, { exercise: true });
+    const files = new Map(exerciseFiles());
+    files.delete("algos/go:exercises/practice/leap/.meta/example.go");
+    const harness = await makeHarness({}, { profile, curatedFiles: files });
+    await prepareLocalExperiment(harness.dependencies);
+    expect(harness.calls).toContain("curated:algos/go:exercises/practice/pangram/.meta/example.go");
+    expect(harness.calls).toContain("curated:algos/python:exercises/practice/leap/.meta/example.py");
+    expect(harness.calls).toContain("exercise:8");
+    expect(logLines(harness.calls)).toContain("log:PREPARATION_DECKS project,language,before-after,exercise");
+    expect((harness.reports[0] as any).diagnostics).toContainEqual({ stage: "ADMISSION", reasonCode: "FILE_PATH", count: 1 });
   });
 
   it("attempts no algorithm deck when the profile configures none", async () => {

@@ -268,19 +268,53 @@ export const algorithmWindow = (
   terms: MaskTerms,
   limits: ExcerptLimits,
 ): Readonly<{ excerpt: string; functionName: string }> | undefined => {
+  const window = maskedWindow(text, language, terms, limits, true);
+  return window === undefined ? undefined : Object.freeze({ excerpt: window.excerpt, functionName: window.masked[0]! });
+};
+
+/**
+ * The window an exercise round shows (#58): as an algorithm round's, but a solution need not name its exercise, so
+ * no masked name is required. `terms` masks every option of the family, and the window opens at a definition only
+ * of the answer's own names (`focus`): Go's saddle-points solution opens with `type Matrix`, a decoy's name, whose
+ * helper alone reads like that decoy's exercise. `windowStart` is its first line in the file with its commentary
+ * removed, from one.
+ */
+export const exerciseWindow = (
+  text: string,
+  language: StackLanguage,
+  terms: MaskTerms,
+  limits: ExcerptLimits,
+  focus: readonly string[],
+): Readonly<{ excerpt: string; windowStart: number }> | undefined => {
+  const window = maskedWindow(text, language, terms, limits, false, focus);
+  return window === undefined ? undefined : Object.freeze({ excerpt: window.excerpt, windowStart: window.start + 1 });
+};
+
+const maskedWindow = (
+  text: string,
+  language: StackLanguage,
+  terms: MaskTerms,
+  limits: ExcerptLimits,
+  requireMask: boolean,
+  focus?: readonly string[],
+): Readonly<{ excerpt: string; start: number; masked: readonly string[] }> | undefined => {
   const plain = withoutCommentary(text, language);
   const masked = maskNames(plain, terms);
-  if (masked.masked.length === 0) return undefined;
+  if (requireMask && masked.masked.length === 0) return undefined;
   const lines = masked.text.split("\n");
   // The window opens at the algorithm's own definition, not at a helper masked only for a label stem (`heapify`).
-  const named = maskNames(plain, { ...terms, stems: [] }).text.split("\n");
+  const named = maskNames(plain, focus === undefined ? { ...terms, stems: [] } : { names: focus, symbols: [], stems: [] }).text.split("\n");
   const first = firstCodeLine(lines, language);
   if (first === undefined) return undefined;
   const body = afterPreamble(lines, language, first);
-  const focused = named.findIndex((line, index) => index >= body && definesMask(line));
+  // An exercise window also opens at a Go method (`func (m *Matrix) Saddle()`); the algorithm deck's committed rounds
+  // were cut without that, so its windows keep the rule they were cut with.
+  const defines = (line: string) => definesMask(focus === undefined ? line : line.replace(/^(\s*)func\s*\([^)]*\)\s*/u, "$1func "));
+  const focused = named.findIndex((line, index) => index >= body && defines(line));
   const opening = lines.findIndex((line, index) => index >= body && isTopLevelDefinition(line, language));
   const windows = [focused, opening, body].filter((start, index, all) => start >= 0 && all.indexOf(start) === index)
-    .map((start) => fitWindow(lines, start, limits)).filter((excerpt): excerpt is string => excerpt !== undefined && MASK.test(excerpt));
-  const excerpt = windows.find((window, index) => index === windows.length - 1 || window.split("\n").length >= MINIMUM_FOCUSED_LINES);
-  return excerpt === undefined ? undefined : Object.freeze({ excerpt, functionName: masked.masked[0]! });
+    .map((start) => ({ start, excerpt: fitWindow(lines, start, limits) }))
+    .filter((window): window is { start: number; excerpt: string } => window.excerpt !== undefined && (!requireMask || MASK.test(window.excerpt)));
+  const chosen = windows.find(({ excerpt }, index) => index === windows.length - 1 || excerpt.split("\n").length >= MINIMUM_FOCUSED_LINES);
+  return chosen === undefined ? undefined : Object.freeze({ ...chosen, masked: masked.masked });
 };

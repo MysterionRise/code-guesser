@@ -1,0 +1,350 @@
+{
+  "repositories": [
+    {
+      "repository": "exercism/python",
+      "commit": "6105f6d9d3ef66ce3d5c8f529d2882af3d76b706",
+      "language": "Python"
+    },
+    {
+      "repository": "exercism/go",
+      "commit": "acdacf1d5721454b98fa6a263f1a73e1f3e96756",
+      "language": "Go"
+    },
+    {
+      "repository": "exercism/rust",
+      "commit": "cc099ae090a6acbe6f53f1e36325263046ba333e",
+      "language": "Rust"
+    },
+    {
+      "repository": "exercism/ruby",
+      "commit": "9de6794a21f4ebb9cba5fa99a222373356bfded1",
+      "language": "Ruby"
+    },
+    {
+      "repository": "exercism/javascript",
+      "commit": "65a60cac2145e8c6549de39e807753e577a02f8d",
+      "language": "JavaScript"
+    },
+    {
+      "repository": "exercism/csharp",
+      "commit": "70c7481992b8d74961a33872404a4ebb2f0b5e5b",
+      "language": "C#"
+    }
+  ],
+  "exercise": {
+    "rounds": 48,
+    "roundsPerExercise": 2,
+    "tracks": [
+      {
+        "repository": "exercism/python",
+        "solution": "exercises/practice/{slug}/.meta/example.py"
+      },
+      {
+        "repository": "exercism/go",
+        "solution": "exercises/practice/{slug}/.meta/example.go"
+      },
+      {
+        "repository": "exercism/rust",
+        "solution": "exercises/practice/{slug}/.meta/example.rs"
+      },
+      {
+        "repository": "exercism/ruby",
+        "solution": "exercises/practice/{slug}/.meta/example.rb"
+      },
+      {
+        "repository": "exercism/javascript",
+        "solution": "exercises/practice/{slug}/.meta/proof.ci.js"
+      },
+      {
+        "repository": "exercism/csharp",
+        "solution": "exercises/practice/{slug}/.meta/Example.cs"
+      }
+    ],
+    "families": [
+      {
+        "id": "words",
+        "note": "All four read the letters of a word or phrase and compare them.",
+        "exercises": [
+          {
+            "id": "isogram",
+            "label": "Isogram",
+            "names": [
+              "isogram"
+            ],
+            "symbols": [],
+            "idea": "No letter may appear more than once, ignoring spaces and hyphens.",
+            "detail": "It takes a word or phrase and returns true or false."
+          },
+          {
+            "id": "pangram",
+            "label": "Pangram",
+            "names": [
+              "pangram"
+            ],
+            "symbols": [],
+            "idea": "Every letter of the alphabet must appear at least once.",
+            "detail": "It takes a sentence and returns true or false."
+          },
+          {
+            "id": "anagram",
+            "label": "Anagram",
+            "names": [
+              "anagram"
+            ],
+            "symbols": [],
+            "idea": "It keeps the candidates made of exactly the target's letters, but never the target itself.",
+            "detail": "It takes a word and a list of words, and returns a list."
+          },
+          {
+            "id": "acronym",
+            "label": "Acronym",
+            "names": [
+              "acronym"
+            ],
+            "symbols": [],
+            "idea": "It joins the first letter of every word, in capitals.",
+            "detail": "It takes a phrase and returns a short string of capitals."
+          }
+        ]
+      },
+      {
+        "id": "arithmetic",
+        "note": "All four do arithmetic on whole integers: their digits, divisors, or steps.",
+        "exercises": [
+          {
+            "id": "armstrong-numbers",
+            "label": "Armstrong numbers",
+            "names": [
+              "armstrong"
+            ],
+            "symbols": [],
+            "idea": "Its digits, each raised to the power of the digit count, add up to the value itself.",
+            "detail": "It takes an integer and returns true or false."
+          },
+          {
+            "id": "perfect-numbers",
+            "label": "Perfect numbers",
+            "names": [
+              "perfect"
+            ],
+            "symbols": [],
+            "idea": "It compares an integer with the sum of its divisors below it.",
+            "detail": "It takes an integer and returns one of three classes, or an error."
+          },
+          {
+            "id": "collatz-conjecture",
+            "label": "Collatz conjecture",
+            "names": [
+              "collatz",
+              "conjecture"
+            ],
+            "symbols": [],
+            "idea": "It halves an even value and triples an odd one plus one, counting steps until it reaches one.",
+            "detail": "It takes an integer and returns a count of steps, or an error."
+          },
+          {
+            "id": "leap",
+            "label": "Leap",
+            "names": [
+              "leap"
+            ],
+            "symbols": [],
+            "idea": "Divisible by four, except centuries that are not divisible by four hundred.",
+            "detail": "It takes a year and returns true or false."
+          }
+        ]
+      },
+      {
+        "id": "ciphers",
+        "note": "All four turn letters into other letters by a rule, and most can undo it.",
+        "exercises": [
+          {
+            "id": "atbash-cipher",
+            "label": "Atbash cipher",
+            "names": [
+              "atbash"
+            ],
+            "symbols": [],
+            "idea": "It swaps each letter for its mirror in the alphabet, a for z, and groups the output in fives.",
+            "detail": "It takes text and returns the encoded text."
+          },
+          {
+            "id": "rotational-cipher",
+            "label": "Rotational cipher",
+            "names": [
+              "rotational"
+            ],
+            "symbols": [],
+            "idea": "It shifts each letter a fixed number of places along the alphabet, wrapping around.",
+            "detail": "It takes text and a shift, and returns the shifted text."
+          },
+          {
+            "id": "affine-cipher",
+            "label": "Affine cipher",
+            "names": [
+              "affine"
+            ],
+            "symbols": [],
+            "idea": "It maps each letter's index i to (a·i + b) mod 26, with a coprime to 26.",
+            "detail": "It takes text and two keys, and returns encoded or decoded text."
+          },
+          {
+            "id": "rail-fence-cipher",
+            "label": "Rail fence cipher",
+            "names": [
+              "railfence"
+            ],
+            "symbols": [],
+            "idea": "It writes the message in a zigzag over several rows, then reads the rows off one after another.",
+            "detail": "It takes text and a number of rows."
+          }
+        ]
+      },
+      {
+        "id": "grids",
+        "note": "All four read or build a grid of rows and columns.",
+        "exercises": [
+          {
+            "id": "minesweeper",
+            "label": "Minesweeper",
+            "names": [
+              "minesweeper"
+            ],
+            "symbols": [],
+            "idea": "It counts, for every empty cell, the mines in the eight cells around it.",
+            "detail": "It takes the rows of a board and returns the annotated rows."
+          },
+          {
+            "id": "saddle-points",
+            "label": "Saddle points",
+            "names": [
+              "saddle"
+            ],
+            "symbols": [],
+            "idea": "It finds the cells that are the largest in their row and the smallest in their column.",
+            "detail": "It takes a grid of integers and returns positions."
+          },
+          {
+            "id": "matrix",
+            "label": "Matrix",
+            "names": [
+              "matrix"
+            ],
+            "symbols": [],
+            "idea": "It parses rows of integers out of a string and hands back one row or one column.",
+            "detail": "It takes a string of lines and an index."
+          },
+          {
+            "id": "word-search",
+            "label": "Word search",
+            "names": [
+              "wordsearch"
+            ],
+            "symbols": [],
+            "idea": "It finds where each given term starts and ends in a grid, in any of eight directions.",
+            "detail": "It takes a grid of letters and a list of terms, and returns positions."
+          }
+        ]
+      },
+      {
+        "id": "replies",
+        "note": "All four answer with fixed English sentences built from their input.",
+        "exercises": [
+          {
+            "id": "bob",
+            "label": "Bob",
+            "names": [
+              "bob"
+            ],
+            "symbols": [],
+            "idea": "It answers a remark differently for a question, a shout, silence, or anything else.",
+            "detail": "It takes a remark and returns one of five replies."
+          },
+          {
+            "id": "raindrops",
+            "label": "Raindrops",
+            "names": [
+              "raindrops"
+            ],
+            "symbols": [],
+            "idea": "It turns an integer into sounds by which of three, five, and seven divide it.",
+            "detail": "It takes an integer and returns a string."
+          },
+          {
+            "id": "two-fer",
+            "label": "Two-fer",
+            "names": [
+              "twofer"
+            ],
+            "symbols": [],
+            "idea": "It hands out one for a named person, or for you when there is no name, and one for me.",
+            "detail": "It takes an optional name and returns a sentence."
+          },
+          {
+            "id": "proverb",
+            "label": "Proverb",
+            "names": [
+              "proverb"
+            ],
+            "symbols": [],
+            "idea": "It chains lines saying that for want of one thing, the next was lost.",
+            "detail": "It takes a list of things and returns lines of text."
+          }
+        ]
+      },
+      {
+        "id": "series",
+        "note": "All four compute one integer from a count or a limit.",
+        "exercises": [
+          {
+            "id": "sum-of-multiples",
+            "label": "Sum of multiples",
+            "names": [
+              "sumofmultiples"
+            ],
+            "symbols": [],
+            "idea": "It adds every integer below a limit that one of the given factors divides, counting each once.",
+            "detail": "It takes a limit and a list of factors, and returns a total."
+          },
+          {
+            "id": "difference-of-squares",
+            "label": "Difference of squares",
+            "names": [
+              "differenceofsquares"
+            ],
+            "symbols": [],
+            "idea": "For the first n integers, it takes the square of their sum minus the sum of each one squared.",
+            "detail": "It takes a count and returns an integer."
+          },
+          {
+            "id": "nth-prime",
+            "label": "Nth prime",
+            "names": [
+              "nthprime"
+            ],
+            "symbols": [],
+            "idea": "It finds the n-th integer greater than one that only one and itself divide.",
+            "detail": "It takes a position and returns an integer, or an error."
+          },
+          {
+            "id": "grains",
+            "label": "Grains",
+            "names": [
+              "grains"
+            ],
+            "symbols": [],
+            "idea": "It doubles a count on each of the 64 cells of a chessboard, and can total them.",
+            "detail": "It takes a cell number and returns a count, or an error."
+          }
+        ]
+      }
+    ],
+    "templates": {
+      "title": "Which exercise?",
+      "description": "A reference solution to an Exercism practice exercise, every name hidden: pick the exercise it solves.",
+      "prompt": "Which exercise does this code solve?",
+      "evidence": "This is {path} in {repository}, the track's reference solution to {name}.",
+      "explanation": "The answer is the exercise whose directory holds this solution; the other three come from the same family of exercises."
+    }
+  }
+}

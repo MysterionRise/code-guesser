@@ -1,4 +1,5 @@
 import {
+  EXERCISE_SOURCE_KEYS,
   FIX_SOURCE_KEYS,
   FRAMEWORK_SOURCE_KEYS,
   LINEAGE_SOURCE_KEYS,
@@ -113,6 +114,14 @@ export const validateNameFunctionSource = (value: unknown, snapshotId: string, p
 export const validateFrameworkSource = (value: unknown, snapshotId: string, pins: ReadonlySet<string>): ParsedSource => {
   const source = validateCuratedSource(value, FRAMEWORK_SOURCE_KEYS, snapshotId, pins);
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(text(source.framework))) fail();
+  positiveInteger(source.windowStart);
+  return source;
+};
+
+/** An exercise round's file (#58): a curated file, its track's language, and the line its pane begins with. */
+export const validateExerciseSource = (value: unknown, snapshotId: string, pins: ReadonlySet<string>): ParsedSource => {
+  const source = validateCuratedSource(value, EXERCISE_SOURCE_KEYS, snapshotId, pins);
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(text(source.exercise)) || !(STACK_LANGUAGES as readonly unknown[]).includes(source.language)) fail();
   positiveInteger(source.windowStart);
   return source;
 };
