@@ -1,3 +1,6 @@
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { defineConfig } from "@playwright/test";
 
 const nodeExecutable = JSON.stringify(process.execPath);
@@ -6,6 +9,8 @@ const port = Number(process.env.E2E_PORT ?? 3000);
 const baseURL = `http://127.0.0.1:${port}`;
 // Generative UI (#101) runs against a local stand-in for OpenRouter on the next port, never the real service.
 export const FAKE_OPENROUTER_PORT = port + 1;
+// The anonymous event log (#107) writes here during the browser tests, tagged as synthetic.
+export const E2E_EVENTS_DIR = join(tmpdir(), `codeguessr-e2e-events-${port}`);
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -30,6 +35,10 @@ export default defineConfig({
         GENUI_ENABLED: "1",
         OPENROUTER_API_KEY: "e2e-fake-key",
         OPENROUTER_BASE_URL: `http://127.0.0.1:${FAKE_OPENROUTER_PORT}/api/v1`,
+        EXPERIMENT_EVENTS_DIR: E2E_EVENTS_DIR,
+        EXPERIMENT_SOURCE: "synthetic",
+        // A game with no ?design= plays static, so tests that don't name a design aren't dealt one at random (#106).
+        EXPERIMENT_DISABLED: "design:catalog,design:composer,design:visualizer,design:host",
       },
       url: baseURL,
       timeout: 300_000,
@@ -54,7 +63,7 @@ export default defineConfig({
     },
     {
       name: "arcade",
-      testMatch: /(?:arcade-shell|accessibility-local|genui)\.spec\.ts/,
+      testMatch: /(?:arcade-shell|accessibility-local|genui|events)\.spec\.ts/,
       use: { baseURL },
     },
   ],

@@ -71,11 +71,14 @@ test("browser and gameplay dependency surfaces exclude acquisition capabilities"
     ...filesUnder(join(root, "packages", "artifact", "src")),
   ];
   assertContainsNoFingerprint(participantSources, "participant dependency surface");
-  // Generative UI's guarded route (#101) is the one server endpoint; it is off unless enabled and reads round data
-  // only through the answer-lock guard.
+  // Two server endpoints: generative UI's guarded route (#101), off unless enabled and reading round data only
+  // through the answer-lock guard; and the event log's beacon (#107), which reads no round data at all.
   const routes = participantSources.filter((path) => /(?:^|\/)(?:route|middleware|instrumentation)\.[cm]?[jt]sx?$/u.test(path));
-  assert.deepEqual(routes.map((path) => relative(root, path)), ["apps/game/src/app/api/genui/route.ts"]);
-  const genuiRoute = read(routes[0]);
+  assert.deepEqual(routes.map((path) => relative(root, path)), ["apps/game/src/app/api/events/route.ts", "apps/game/src/app/api/genui/route.ts"]);
+  const eventsRoute = read(routes[0]);
+  assert.match(eventsRoute, /const MAX_BODY_LENGTH = 1024;/u);
+  assert.deepEqual([...eventsRoute.matchAll(/experiment\.(\w+)\(/gu)].map(([, method]) => method), ["recordClientEvent"]);
+  const genuiRoute = read(routes[1]);
   assert.match(genuiRoute, /process\.env\.GENUI_ENABLED !== "1"/u);
   assert.match(genuiRoute, /experiment\.modelContext\(/u);
   assert.equal(participantSources.some((path) => /\bfetch\s*\(/u.test(read(path))), false);

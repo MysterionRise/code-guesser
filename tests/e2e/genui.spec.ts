@@ -22,7 +22,7 @@ test.beforeEach(async ({ request }) => {
 });
 
 test("a revealed round's explainer renders the model's checked components, sent the code only after the lock", async ({ page, request }) => {
-  await page.goto("/?deck=language");
+  await page.goto("/?deck=language&design=catalog");
   await expect(page.getByText("Round 1 of 5")).toBeVisible();
   const fixture = await answerRound(page);
   const panel = page.getByRole("region", { name: "Explainer" });
@@ -47,7 +47,7 @@ test("a revealed round's explainer renders the model's checked components, sent 
 test("when the provider refuses, the explainer steps aside and the game plays on", async ({ page, request }) => {
   // OpenRouter answers 402 when the key's spend limit is reached.
   await request.post(`${fake}/control`, { data: { status: 402 } });
-  await page.goto("/?deck=project");
+  await page.goto("/?deck=project&design=catalog");
   await expect(page.getByText("Round 1 of 5")).toBeVisible();
   await answerRound(page);
   const panel = page.getByRole("region", { name: "Explainer" });
@@ -165,7 +165,7 @@ test("the host recovers from a refused paste, shows a plain-text reply, and keep
 });
 
 test("asking for an explanation moves focus to the explainer's output", async ({ page }) => {
-  await page.goto("/?deck=fix");
+  await page.goto("/?deck=fix&design=catalog");
   await expect(page.getByText("Round 1 of 5")).toBeVisible();
   await answerRound(page);
   const panel = page.getByRole("region", { name: "Explainer" });

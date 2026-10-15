@@ -3,6 +3,8 @@ import "server-only";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { eventSinkFromEnv, type EventSink } from "../experiment/event-store.server";
+import { DECK_IDS } from "./local-real-experiment-domain.server";
 import { TRUSTED_ARTIFACT_HASH } from "./local-real-experiment.pin.server";
 import {
   LocalRealExperimentError,
@@ -34,6 +36,8 @@ export type LoadedLocalRealExperiment =
 export interface LoadOptions {
   readonly artifactPath?: string;
   readonly trustedArtifactHash?: string;
+  /** Where game events go (#107); none records nothing. */
+  readonly events?: EventSink | null;
 }
 
 /**
@@ -57,7 +61,7 @@ export const loadLocalRealExperiment = (options: LoadOptions = {}): LoadedLocalR
     return Object.freeze({ ok: false, reason: "SCHEMA" });
   }
   try {
-    const experiment = createLocalRealExperiment(value, trustedArtifactHash);
+    const experiment = createLocalRealExperiment(value, trustedArtifactHash, { events: options.events ?? null });
     return Object.freeze({ ok: true, experiment });
   } catch (error) {
     const reason = error instanceof LocalRealExperimentError && error.reason === "HASH_MISMATCH" ? "HASH_MISMATCH" : "SCHEMA";
@@ -73,7 +77,7 @@ let active: LoadedLocalRealExperiment | undefined;
  */
 export const activeLocalRealExperiment = (): LoadedLocalRealExperiment => {
   if (active === undefined) {
-    active = loadLocalRealExperiment();
+    active = loadLocalRealExperiment({ events: eventSinkFromEnv(DECK_IDS) });
     if (!active.ok) console.error(`LOCAL_REAL_EXPERIMENT_UNAVAILABLE ${active.reason}`);
   }
   return active;

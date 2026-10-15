@@ -122,8 +122,10 @@ pointed to the answer and away from it, and gives a one-line takeaway.
 GENUI_ENABLED=1 OPENROUTER_API_KEY=… pnpm --filter @codeguessr/game dev
 ```
 
-- `?design=` picks the design, and a "Designs" nav switches between them:
-  - `catalog` (the default) fills five fixed components;
+- Each game draws its design at random when it is dealt, and keeps it (see
+  [The design experiment](#the-design-experiment)). In lab mode, `?design=`
+  picks one instead, and a "Designs" nav switches between them:
+  - `catalog` fills five fixed components;
   - `composer` lets the model lay out the whole panel from 14 building
     blocks, ending in a quiz;
   - `visualizer` lets the model write a small interactive page that steps
@@ -142,6 +144,32 @@ GENUI_ENABLED=1 OPENROUTER_API_KEY=… pnpm --filter @codeguessr/game dev
   prompts.
 - The browser tests and unit tests use a local stand-in for OpenRouter, so
   they need no key.
+
+### The design experiment
+
+Each game draws one level of three factors when it is dealt, and the server
+seals them into the game's token:
+- **design:** off, catalog, composer, visualizer, or host;
+- **theme:** terminal (the only one built so far);
+- **question layer:** off (on arrives with #127).
+
+The factors are drawn independently, so every game counts toward every
+comparison. Nothing identifies a player: a returning player simply draws
+again.
+
+| Variable | Effect |
+| --- | --- |
+| `EXPERIMENT_LAB=1` | Lab mode: `?design=`, `?theme=`, and `?layer=` pick levels, and the Designs nav shows. On by default under `next dev` |
+| `EXPERIMENT_DISABLED` | Switches levels off, such as `design:host,design:visualizer`; their weight goes to the control level |
+| `EXPERIMENT_EVENTS_DIR` | Records the anonymous event log here, one JSON-lines file per UTC day. Unset, nothing is recorded |
+| `EXPERIMENT_SOURCE` | Tags events `agent` (playtests) or `synthetic` (tests), so they never mix with real games |
+
+The event log records what happened in a game and under which arms: the deal,
+hints, answers, the finished game, the way on, and generative-panel use and
+model calls, with durations and token counts. It never records an IP address,
+user agent, cookie, persistent id, chat text, round content, or the option
+chosen. A browser that sends `Sec-GPC: 1` gets a game that records nothing.
+Raw events are kept for 90 days and then rolled up into daily totals.
 
 For a production-mode local run:
 

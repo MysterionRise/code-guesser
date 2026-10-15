@@ -1,6 +1,8 @@
 "use client";
 
 import * as React from "react";
+import { sendEvent } from "../../experiment/beacon";
+import { viewportBucket, type ClientEvent, type GenuiEvent } from "../../experiment/events";
 import type { Design } from "../../genui/designs";
 import type { HostChatProps } from "../../genui/host-chat";
 import { AnswerOptions } from "./answer-options";
@@ -65,6 +67,19 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
   const latestHint = React.useRef<HTMLParagraphElement>(null);
   const answerButton = React.useRef<HTMLButtonElement>(null);
   const settled = React.useRef(false);
+
+  // The event log (#107) hears from the browser only what the server can't see: the viewport, the way on from a
+  // finished game, a copied result, and what the player does with a generative panel.
+  const track = React.useCallback((event: ClientEvent) => sendEvent(token.current, event), []);
+  // Once per game, though React's strict mode runs effects twice in development.
+  const viewed = React.useRef(false);
+  React.useEffect(() => {
+    if (viewed.current) return;
+    viewed.current = true;
+    track({ type: "game_viewed", viewport: viewportBucket(window.innerWidth) });
+  }, [track]);
+  const roundNumber = session.roundIndex + 1;
+  const trackGenui = React.useCallback((event: GenuiEvent) => track({ ...event, round: roundNumber }), [track, roundNumber]);
 
   // Keyboard and screen-reader users land on the verdict after answering and on the next prompt after
   // moving on; the first render leaves focus alone.
@@ -170,7 +185,7 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
               pickLabel={labelOf(session.lockedCandidateId)} complete={session.status === "complete"}
               correctRounds={session.correctRounds} deckTitle={deckTitle} newGameHref={newGameHref}
               chooseAnotherDeckHref={chooseAnotherDeckHref} genuiDesign={genuiDesign} sessionToken={currentToken}
-              onNext={next} headingRef={revealHeading} />
+              onNext={next} headingRef={revealHeading} track={track} trackGenui={trackGenui} />
           )}
         </div>
       </section>
@@ -181,8 +196,8 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
             hint={{
               label: session.lockedCandidateId !== null || session.visibleHintCount >= round.mode.clues.length ? null
                 : `Buy hint ${session.visibleHintCount + 1} (−${points(round.points[session.visibleHintCount]! - round.points[session.visibleHintCount + 1]!)} pts)`,
-              buy: () => { void requestHint(); },
-            }} />
+              buy: () => { trackGenui({ type: "genui_interaction", action: "offer_hint" }); void requestHint(); },
+            }} onEvent={trackGenui} />
         </React.Suspense>
       )}
     </main>

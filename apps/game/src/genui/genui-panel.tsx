@@ -7,6 +7,7 @@ import { DefaultChatTransport, getToolName, isToolUIPart, type UIMessage } from 
 import { CatalogView } from "./catalog-view";
 import { parseComposerSpec, type ComposerSpec } from "./composer-spec";
 import { ComposerView } from "./composer-view";
+import type { GenuiEvent } from "../experiment/events";
 import type { Design } from "./designs";
 import { parseRenderCall, type RenderCall, type RenderLimits, type RoundPhase } from "./render-catalog";
 import { parseVisualizer, type Visualizer } from "./visualizer-spec";
@@ -22,6 +23,8 @@ export interface GenuiPanelProps {
   readonly optionLabels: readonly string[];
   /** The game's latest session token, read when a request is sent. */
   readonly sessionToken: () => string;
+  /** Told when the player asks for the panel and when it falls back, for the event log (#107). */
+  readonly onEvent?: (event: GenuiEvent) => void;
 }
 
 /** The fixed request the player's button sends; free chat arrives with the host arm (#104). */
@@ -76,7 +79,7 @@ export const fellBack = (status: string, sent: boolean, rendered: number, error:
  * Generative UI's foundation (#101): one request to the server's guarded route, rendered through the catalog.
  * Any failure (no key, a refused or limited key, a timeout, a malformed call) leaves the static reveal as it is.
  */
-export default function GenuiPanel({ design, roundId, pick, phase, panes, optionLabels, sessionToken }: GenuiPanelProps) {
+export default function GenuiPanel({ design, roundId, pick, phase, panes, optionLabels, sessionToken, onEvent }: GenuiPanelProps) {
   const transport = React.useMemo(() => new DefaultChatTransport({
     api: "/api/genui",
     prepareSendMessagesRequest: ({ messages }) => ({ body: { sessionToken: sessionToken(), roundId, design, messages } }),
@@ -93,12 +96,19 @@ export default function GenuiPanel({ design, roundId, pick, phase, panes, option
   const failed = fellBack(status, messages.length > 0, views.length, error);
   const headingId = `genui-heading-${roundId}`;
   const output = React.useRef<HTMLDivElement>(null);
+  // A panel falls back at most once per round.
+  const reported = React.useRef(false);
+  React.useEffect(() => {
+    if (!failed || reported.current) return;
+    reported.current = true;
+    onEvent?.({ type: "genui_fallback", reason: error === undefined ? "rejected" : "failed" });
+  }, [failed, error, onEvent]);
 
   return (
     <section className="genui-panel" aria-labelledby={headingId} data-genui-status={failed ? "fallback" : status} data-genui-design={design}>
       <h3 id={headingId}>{PANEL_TEXT[design].heading}</h3>
       {messages.length === 0 && (
-        <button type="button" className="secondary-action" onClick={() => { void sendMessage({ text: explainRequest(pick) }); output.current?.focus(); }}>
+        <button type="button" className="secondary-action" onClick={() => { onEvent?.({ type: "genui_interaction", action: "explain" }); void sendMessage({ text: explainRequest(pick) }); output.current?.focus(); }}>
           {PANEL_TEXT[design].button}
         </button>
       )}
