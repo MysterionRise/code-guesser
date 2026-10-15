@@ -162,7 +162,9 @@ Each game draws one level of three factors when it is dealt, and the server
 seals them into the game's token:
 - **design:** off, catalog, composer, visualizer, or host;
 - **theme:** Terminal (the original), Paper, Arcade, or High contrast;
-- **question layer:** off (on arrives with #127).
+- **question layer:** off or on. On, an algorithm or language round shows
+  its question layer: a free scaffold above the code ("What to watch", or
+  "Ask of the code") and generated hints, including a step-through.
 
 The factors are drawn independently, so every game counts toward every
 comparison. Nothing identifies a player: a returning player simply draws
@@ -199,7 +201,8 @@ the answer drafts them; a layer a code-blind solver could read the answer from
 is refused, and the rest are frozen in
 `apps/game/src/demo/generated/question-layers.json`.
 It needs `OPENROUTER_API_KEY` for new answers; `--offline` replays its journal.
-So far it covers Which algorithm? and Which language?.
+So far it covers Which algorithm? and Which language?. A game shows them when
+the experiment draws `layer: on`, or with `?layer=on` in lab mode.
 
 ### Recording the demo
 

@@ -19,6 +19,20 @@ export interface RoundModeInput {
   candidates: Candidate[];
   clues: PublicClue[];
 }
+/**
+ * A question layer's free scaffold (#127, #128), shown with the question: names to watch and their kind of value
+ * ("Trace it"), or three questions to ask of the code ("Marker hunt"). It is audited before preparation publishes it,
+ * so it carries nothing that tells the answer.
+ */
+export type RoundScaffold =
+  | Readonly<{ design: "trace-it"; watch: readonly Readonly<{ name: string; role: string }>[] }>
+  | Readonly<{ design: "marker-hunt"; prompts: readonly string[] }>;
+
+/** What a bought layer hint shows beside its text: lines of the pane to mark, or a step-through. */
+export type HintDetail =
+  | Readonly<{ kind: "lines"; lines: readonly number[] }>
+  | Readonly<{ kind: "trace"; input: string; frames: readonly Readonly<{ label: string; state: string }>[] }>;
+
 export interface PublicRoundInput {
   roundId: string;
   roundVersionId: string;
@@ -28,8 +42,11 @@ export interface PublicRoundInput {
   /** Points for a correct answer after zero, one, or two hints. */
   points: [number, number, number];
   versions: { candidateSet: string; clueSet: string; scoring: string; rules: string };
+  /** The round's question-layer scaffold, when the game shows layers and the round has one. */
+  scaffold?: RoundScaffold;
 }
-export interface PublicRound extends Omit<PublicRoundInput, "mode" | "content" | "points"> {
+export interface PublicRound extends Omit<PublicRoundInput, "mode" | "content" | "points" | "scaffold"> {
+  readonly scaffold?: RoundScaffold;
   readonly content: Readonly<{ versionId: string; panes: readonly Readonly<Pane>[] }>;
   readonly points: readonly [number, number, number];
   readonly mode: Readonly<Omit<RoundModeInput, "candidates" | "clues">> & {
@@ -51,6 +68,20 @@ const points = (value: readonly number[]): readonly [number, number, number] => 
   }
   return Object.freeze([value[0]!, value[1]!, value[2]!]) as readonly [number, number, number];
 };
+/** A scaffold with the shape its design needs and non-blank text; anything else is refused. */
+const scaffoldOf = (value: RoundScaffold): RoundScaffold => {
+  if (value.design === "trace-it") {
+    if (value.watch.length < 1 || value.watch.length > 3) throw new ArcadeShellRuleError("a scaffold watches one to three names");
+    return Object.freeze({ design: "trace-it", watch: Object.freeze(value.watch.map(({ name, role }) =>
+      Object.freeze({ name: requirePublicText(name, "watched name"), role: requirePublicText(role, "watched role") }))) });
+  }
+  if (value.design === "marker-hunt") {
+    if (value.prompts.length !== 3) throw new ArcadeShellRuleError("a scaffold asks three questions");
+    return Object.freeze({ design: "marker-hunt", prompts: Object.freeze(value.prompts.map((prompt) => requirePublicText(prompt, "scaffold prompt"))) });
+  }
+  throw new ArcadeShellRuleError("unsupported scaffold");
+};
+
 /** A session is five rounds of one deck; every round keeps its code, options, hints, and points. */
 export function createPublicModeContract(input: PublicModeContractInput): PublicModeContract {
   if (input.rounds.length !== SESSION_ROUNDS) throw new ArcadeShellRuleError("a session deals exactly five rounds");
@@ -87,6 +118,7 @@ export function createPublicModeContract(input: PublicModeContractInput): Public
       points: points(round.points),
       versions: Object.freeze({ candidateSet: requirePublicText(round.versions.candidateSet, "candidate set version"), clueSet: requirePublicText(round.versions.clueSet, "clue set version"),
         scoring: requirePublicText(round.versions.scoring, "scoring version"), rules: requirePublicText(round.versions.rules, "rules version") }),
+      ...(round.scaffold === undefined ? {} : { scaffold: scaffoldOf(round.scaffold) }),
     });
   });
   return Object.freeze({ sessionContractVersionId: requirePublicText(input.sessionContractVersionId, "session contract version"), rounds: Object.freeze(rounds) });

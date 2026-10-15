@@ -399,4 +399,16 @@ noscript { display: block; padding: 12px; margin-bottom: 16px; background: var(-
 .lab-bar { display: grid; gap: 4px; width: min(980px, calc(100% - 32px)); margin: 30px auto -8px; }
 .lab-bar .design-nav { width: auto; margin: 0; }
 /* A marked line's number reads on its tinted fill too (#45: axe found Terminal's faint number on the highlight under 4.5:1). */
-.code-line.highlighted .line-number, .code-line.genui-helpful .line-number, .code-line.genui-misleading .line-number { color: var(--muted); }
+.code-line.highlighted .line-number, .code-line.hinted .line-number, .code-line.genui-helpful .line-number, .code-line.genui-misleading .line-number { color: var(--muted); }
+/* Question layers (#128): the free scaffold above the code, lines a hint marks, and a step-through hint. */
+.question-scaffold { margin: -12px 0 14px; padding: 10px 14px; border: 1px dashed var(--border-soft); border-radius: var(--radius-chip); background: var(--chip); }
+.scaffold-title { margin: 0 0 4px; color: var(--accent); font-size: .78rem; letter-spacing: .12em; text-transform: uppercase; }
+.scaffold-list { margin: 0; padding-left: 1.2em; color: var(--text-soft); }
+.scaffold-list code, .trace-stepper code { font-family: var(--font-mono); color: var(--code-text); }
+.scaffold-role { color: var(--muted); }
+.code-line.hinted { background: var(--highlight-bg); box-shadow: inset 3px 0 0 var(--focus); }
+.trace-stepper { flex-basis: 100%; padding: 10px 13px; border: 1px dashed var(--border-soft); border-radius: var(--radius-chip); background: var(--chip); color: var(--text-soft); }
+.trace-input, .trace-frame { margin: 0 0 6px; overflow-wrap: anywhere; }
+.trace-count { color: var(--muted); }
+.trace-controls { display: flex; gap: 8px; }
+.trace-controls .hint-button:disabled { cursor: not-allowed; opacity: .5; }

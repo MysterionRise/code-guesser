@@ -1,4 +1,4 @@
-import { ArcadeShellRuleError, requirePublicText as required, type PublicModeContract } from "./mode-contract";
+import { ArcadeShellRuleError, requirePublicText as required, type HintDetail, type PublicModeContract } from "./mode-contract";
 
 /**
  * A game's client-side session: the rounds played so far, the hints bought, and the locked answer. The server holds
@@ -21,7 +21,8 @@ export interface HintRequest {
 /** Why the server would not act: it cannot continue this game, or the request does not fit the game's state. */
 export type GameRefusal = Readonly<{ ok: false; reason: "SESSION_ENDED" | "REJECTED" }>;
 export type RevealResponse = Readonly<{ ok: true; reveal: AuthorizedReveal; sessionToken: string }> | GameRefusal;
-export type HintResponse = Readonly<{ ok: true; hint: string; sessionToken: string }> | GameRefusal;
+/** A bought hint: its text, and for a question-layer hint (#128) what it shows beside the text. */
+export type HintResponse = Readonly<{ ok: true; hint: string; detail?: HintDetail; sessionToken: string }> | GameRefusal;
 
 export interface AuthorizedReveal {
   roundId: string;
@@ -51,6 +52,8 @@ export interface ArcadeSession {
   readonly visibleHintCount: number;
   /** The current round's bought hints, in order; always `visibleHintCount` long. */
   readonly hints: readonly string[];
+  /** What each bought hint shows beside its text, or null; as long as `hints`. */
+  readonly hintDetails: readonly (HintDetail | null)[];
   readonly lockedCandidateId: string | null;
   readonly reveal: AuthorizedReveal | null;
   readonly score: number;
@@ -63,13 +66,13 @@ export interface ArcadeSession {
 }
 
 export type ArcadeSessionAction =
-  | { type: "reveal-hint"; label: string }
+  | { type: "reveal-hint"; label: string; detail?: HintDetail | null }
   | { type: "lock-answer"; candidateId: string }
   | { type: "accept-reveal"; reveal: AuthorizedReveal }
   | { type: "next-round" };
 
 export function createArcadeSession(_mode: PublicModeContract): ArcadeSession {
-  return Object.freeze({ roundIndex: 0, visibleHintCount: 0, hints: Object.freeze([]), lockedCandidateId: null,
+  return Object.freeze({ roundIndex: 0, visibleHintCount: 0, hints: Object.freeze([]), hintDetails: Object.freeze([]), lockedCandidateId: null,
     reveal: null, score: 0, completedRounds: 0, correctRounds: 0, outcomes: Object.freeze([]), result: null, status: "playing" });
 }
 
@@ -116,6 +119,25 @@ export function projectDisplayReveal(value: unknown): AuthorizedReveal {
   });
 }
 
+/** A hint's detail as the server sent it, checked: one or two line numbers, or a step-through of two to eight frames. */
+export function projectHintDetail(value: unknown): HintDetail {
+  if (typeof value !== "object" || value === null) throw new ArcadeShellRuleError("invalid hint detail");
+  const detail = value as Record<string, unknown>;
+  if (detail.kind === "lines" && Object.keys(detail).length === 2 && Array.isArray(detail.lines) && detail.lines.length >= 1 && detail.lines.length <= 2
+    && detail.lines.every((line) => Number.isSafeInteger(line) && (line as number) >= 1)) {
+    return Object.freeze({ kind: "lines", lines: Object.freeze([...detail.lines as number[]]) });
+  }
+  if (detail.kind === "trace" && Object.keys(detail).length === 3 && typeof detail.input === "string" && Array.isArray(detail.frames)
+    && detail.frames.length >= 2 && detail.frames.length <= 8) {
+    return Object.freeze({ kind: "trace", input: required(detail.input, "trace input"), frames: Object.freeze(detail.frames.map((frame) => {
+      const { label, state } = (frame ?? {}) as Record<string, unknown>;
+      if (typeof label !== "string" || typeof state !== "string") throw new ArcadeShellRuleError("invalid hint detail");
+      return Object.freeze({ label: required(label, "trace label"), state: required(state, "trace state") });
+    })) });
+  }
+  throw new ArcadeShellRuleError("invalid hint detail");
+}
+
 export function transitionArcadeSession(
   mode: PublicModeContract,
   session: ArcadeSession,
@@ -127,7 +149,8 @@ export function transitionArcadeSession(
     if (session.lockedCandidateId !== null || session.reveal !== null) throw new ArcadeShellRuleError("clues are unavailable after answer lock");
     if (session.visibleHintCount >= round.mode.clues.length) return session;
     const hints = Object.freeze([...session.hints, required(action.label, "hint")]);
-    return Object.freeze({ ...session, visibleHintCount: hints.length, hints });
+    const hintDetails = Object.freeze([...session.hintDetails, action.detail === undefined || action.detail === null ? null : projectHintDetail(action.detail)]);
+    return Object.freeze({ ...session, visibleHintCount: hints.length, hints, hintDetails });
   }
   if (action.type === "lock-answer") {
     if (session.lockedCandidateId !== null) throw new ArcadeShellRuleError("an answer is already locked for this round");
@@ -164,5 +187,5 @@ export function transitionArcadeSession(
   if (session.reveal === null) throw new ArcadeShellRuleError("the current round must reveal before navigation");
   if (session.roundIndex >= mode.rounds.length - 1) throw new ArcadeShellRuleError("there is no next round");
   return Object.freeze({ ...session, roundIndex: session.roundIndex + 1, visibleHintCount: 0, hints: Object.freeze([]),
-    lockedCandidateId: null, reveal: null });
+    hintDetails: Object.freeze([]), lockedCandidateId: null, reveal: null });
 }

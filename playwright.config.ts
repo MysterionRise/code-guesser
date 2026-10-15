@@ -37,9 +37,9 @@ export default defineConfig({
         OPENROUTER_BASE_URL: `http://127.0.0.1:${FAKE_OPENROUTER_PORT}/api/v1`,
         EXPERIMENT_EVENTS_DIR: E2E_EVENTS_DIR,
         EXPERIMENT_SOURCE: "synthetic",
-        // A game with no ?design= or ?theme= plays static in the original theme, so tests that don't name either
-        // aren't dealt one at random (#106).
-        EXPERIMENT_DISABLED: "design:catalog,design:composer,design:visualizer,design:host,theme:paper,theme:arcade,theme:contrast",
+        // A game with no ?design=, ?theme=, or ?layer= plays static, in the original theme, with no question layer,
+        // so tests that name none aren't dealt one at random (#106).
+        EXPERIMENT_DISABLED: "design:catalog,design:composer,design:visualizer,design:host,theme:paper,theme:arcade,theme:contrast,layer:on",
       },
       url: baseURL,
       timeout: 300_000,
@@ -64,7 +64,7 @@ export default defineConfig({
     },
     {
       name: "arcade",
-      testMatch: /(?:arcade-shell|accessibility-local|genui|events|themes)\.spec\.ts/,
+      testMatch: /(?:arcade-shell|accessibility-local|genui|events|themes|layers)\.spec\.ts/,
       use: { baseURL },
     },
   ],
