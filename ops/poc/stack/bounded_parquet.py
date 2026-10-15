@@ -27,6 +27,9 @@ DIRECTORIES = {
     "Python": "Python", "Ruby": "Ruby", "TypeScript": "TypeScript", "JavaScript": "JavaScript",
     "Go": "Go", "Rust": "Rust", "Java": "Java", "C#": "C-Sharp", "Kotlin": "Kotlin", "Swift": "Swift",
     "C": "C", "C++": "C++",
+    "Haskell": "Haskell", "Elm": "Elm", "OCaml": "OCaml", "F#": "F-Sharp", "Erlang": "Erlang", "Prolog": "Prolog",
+    "Clojure": "Clojure", "Racket": "Racket", "Julia": "Julia", "MATLAB": "MATLAB", "Ada": "Ada", "Pascal": "Pascal",
+    "Elixir": "Elixir", "Crystal": "Crystal",
 }
 CONFIGURATIONS = tuple(DIRECTORIES)
 SHARD_PATH = re.compile(

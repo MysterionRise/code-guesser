@@ -10,7 +10,7 @@ import {
 } from "./diagnostics";
 import type { GitHubQueryClassification } from "./github-search";
 import { artifactFixtures, DECK_IDS, type DeckId } from "./model";
-import { STACK_LANGUAGES, poolSizes, type CrawlProfile } from "./profile";
+import { poolSizes, type CrawlProfile } from "./profile";
 import { selectBeforeAfter } from "./select-github";
 import { selectStack, type ProjectSelection } from "./select-stack";
 import { addHashes, protectedValuesOf, provisionalSnapshot, repositoryScreen, safeDescription, view } from "./selection";
@@ -168,7 +168,8 @@ export const prepareLocalExperiment = async (deps: PreparationDependencies = def
     if (canonicalHash(JSON.parse(new TextDecoder().decode(loaded.canonicalProfileBytes))) !== profileHash) throw new PreparationError();
     const environment = deps.environment();
     const capacity = deps.createCapacity({ limits: loaded.profile.capacity,
-      githubQueryIds: loaded.profile.github.queries.map(({ id }) => id), stackLanguages: STACK_LANGUAGES });
+      githubQueryIds: loaded.profile.github.queries.map(({ id }) => id),
+      stackLanguages: loaded.profile.stack.configurations.map(({ language }) => language) });
     tracker.meter(capacity);
     runtime = deps.createRuntime({ profile: loaded.profile, environment, capacity });
     const context: Context = Object.freeze({ ...loaded, profileHash, environment, capacity, runtime });

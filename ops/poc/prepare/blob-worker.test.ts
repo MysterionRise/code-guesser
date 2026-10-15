@@ -2,7 +2,7 @@ import { CAPACITY_CEILINGS } from "../limits";
 import { readFile } from "node:fs/promises";
 
 import { createCapacityMeter } from "./capacity";
-import { parseCrawlProfile, STACK_LANGUAGES } from "./profile";
+import { parseCrawlProfile, MAINSTREAM_LANGUAGES } from "./profile";
 import { blobWorkerRequest, fetchSelectedBlob, parseBlobWorkerOutput, type BlobWorkerLimits } from "./blob-worker";
 
 const testModuleName: string = "vitest";
@@ -116,7 +116,7 @@ describe("selected-blob worker bridge", () => {
   it("runs the worker, records its requests on the capacity meter, and returns the frozen blob", async () => {
     const profile = parseCrawlProfile(JSON.parse(await readFile(profilePath, "utf8")));
     const capacity = createCapacityMeter({ limits: profile.capacity,
-      githubQueryIds: profile.github.queries.map(({ id }) => id), stackLanguages: STACK_LANGUAGES });
+      githubQueryIds: profile.github.queries.map(({ id }) => id), stackLanguages: MAINSTREAM_LANGUAGES });
     const requests: unknown[] = [];
 
     const fetched = await fetchSelectedBlob({ row, limits, environment, capacity,

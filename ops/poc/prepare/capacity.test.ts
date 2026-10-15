@@ -1,6 +1,6 @@
 import { createCapacityMeter, CapacityError } from "./capacity";
 import { RUN_RETRY_LIMIT } from "./retry";
-import { CAPACITY_CEILINGS, type CapacityLimits, STACK_LANGUAGES } from "./profile";
+import { CAPACITY_CEILINGS, type CapacityLimits, MAINSTREAM_LANGUAGES } from "./profile";
 
 const testModuleName: string = "vitest";
 const { describe, expect, it } = await import(testModuleName) as any;
@@ -13,7 +13,7 @@ const limits = (overrides: Partial<CapacityLimits> = {}): CapacityLimits => ({
 const meter = (overrides: Partial<CapacityLimits> = {}) => createCapacityMeter({
   limits: limits(overrides),
   githubQueryIds: ["first", "second"],
-  stackLanguages: STACK_LANGUAGES,
+  stackLanguages: MAINSTREAM_LANGUAGES,
 });
 
 describe("preparation capacity", () => {
@@ -52,7 +52,7 @@ describe("preparation capacity", () => {
     capacity.recordStackRows("Python", rows, bytes);
     const exact = capacity.snapshot();
 
-    expect(exact.stackRows).toEqual({ ...Object.fromEntries(STACK_LANGUAGES.map((language) => [language, 0])), Python: rows });
+    expect(exact.stackRows).toEqual({ ...Object.fromEntries(MAINSTREAM_LANGUAGES.map((language) => [language, 0])), Python: rows });
     expect(exact.stackMetadataBytes).toBe(bytes);
     expect(() => capacity.recordStackRows("Python", 1, 0)).toThrow(CapacityError);
     expect(() => capacity.recordStackRows("TypeScript", 0, 1)).toThrow(CapacityError);
@@ -124,7 +124,7 @@ describe("preparation capacity", () => {
     expect(single.snapshot().retryWaits).toBe(0);
 
     const discarded = createCapacityMeter({ limits: { ...CAPACITY_CEILINGS, githubPages: 2 },
-      githubQueryIds: ["q"], stackLanguages: STACK_LANGUAGES });
+      githubQueryIds: ["q"], stackLanguages: MAINSTREAM_LANGUAGES });
     discarded.recordGitHubPage("q", 100);
     discarded.recordGitHubPage("q", 50);
     expect(() => discarded.recordGitHubPage("q", 1)).toThrow(CapacityError);

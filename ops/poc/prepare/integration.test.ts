@@ -1,6 +1,6 @@
 const testModuleName: string = "vitest";
 const { describe, expect, it, vi } = await import(testModuleName) as any;
-import { STACK_LANGUAGES } from "./profile";
+import { MAINSTREAM_LANGUAGES } from "./profile";
 import { prepareLocalExperiment } from "./index";
 import { parseRunReport } from "./run-report";
 import { canonicalArtifactHash } from "./canonical";
@@ -94,7 +94,7 @@ describe("captured two-source preparation", () => {
           expect(logs[2]).toBe("PREPARATION_COMPLETE");
         }
         const artifact = JSON.parse(new TextDecoder().decode(firstArtifact));
-        const pool = 2 * STACK_LANGUAGES.length;
+        const pool = 2 * MAINSTREAM_LANGUAGES.length;
         expect(artifact.decks.map(({ id, fixtures }: any) => `${id}:${fixtures.map(({ kind }: any) => kind).join(",")}`)).toEqual([
           `project:${Array(pool).fill("PROJECT").join(",")}`,
           `language:${Array(pool).fill("LANGUAGE").join(",")}`,
@@ -108,7 +108,7 @@ describe("captured two-source preparation", () => {
         ]);
         for (const canary of first.sensitiveCanaries) expect(outputText).not.toContain(canary);
         expect(liveAttempts).toEqual([]);
-        expect(first.metadataConfigurations).toEqual([...STACK_LANGUAGES]);
+        expect(first.metadataConfigurations).toEqual([...MAINSTREAM_LANGUAGES]);
         // Two popular files per language for the project deck and two ordinary files per language for the language deck.
         expect(first.selectedBlobRows).toHaveLength(2 * pool);
         expect(first.requests.some((url: string) => url.includes("/search/commits"))).toBe(true);

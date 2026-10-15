@@ -1,4 +1,4 @@
-import { firstCodeLine, type ExcerptLimits } from "./excerpt-window";
+import { firstCodeLine, isRareComment, type ExcerptLimits } from "./excerpt-window";
 import type { StackLanguage } from "./profile";
 
 /**
@@ -20,6 +20,21 @@ const PREAMBLE: Readonly<Record<StackLanguage, RegExp>> = Object.freeze({
   Swift: /^(?:import\s|@testable\s+import\s|@_exported\s+import\s)/u,
   C: C_PREAMBLE,
   "C++": new RegExp(`${C_PREAMBLE.source}|^using\\s+namespace\\s+[\\w:]+\\s*;`, "u"),
+  // The rarer languages (v1.0): module headers, imports, and directives, which name the language's own system.
+  Haskell: /^(?:module\s|import\s|\{-#)/u,
+  Elm: /^(?:(?:port\s+|effect\s+)?module\s|import\s)/u,
+  OCaml: /^(?:open!?\s|\[@@@)/u,
+  "F#": /^(?:module\s+[\w.]+\s*$|module\s+rec\s|namespace\s|open\s|#(?:nowarn|light|r|load|if|endif)\b)/u,
+  Erlang: /^-(?:module|export|export_type|include|include_lib|compile|behaviou?r|author|vsn|import|dialyzer)\b/u,
+  Prolog: /^:-\s*(?:module|use_module|ensure_loaded|set_prolog_flag|encoding|license)\b/u,
+  Clojure: /^\((?:ns|in-ns|require|import|use)\s/u,
+  Racket: /^(?:#lang\s|\((?:require|provide)\b)/u,
+  Julia: /^(?:module\s|baremodule\s|using\s|import\s|export\s|include\()/u,
+  MATLAB: /^import\s/u,
+  Ada: /^(?:(?:limited\s+|private\s+)?with\s|use\s|pragma\s)/u,
+  Pascal: /^(?:unit\s|program\s|library\s|uses\b|interface\s*$|implementation\s*$|\{\$)/iu,
+  Elixir: /^(?:defmodule\s|use\s|import\s|alias\s|require\s|@moduledoc\b|@behaviour\b)/u,
+  Crystal: /^require\s/u,
 });
 /** A statement that opens a bracketed block continues until the bracket closes. */
 const OPENERS: Readonly<Record<string, string>> = Object.freeze({ "(": ")", "{": "}" });
@@ -39,18 +54,70 @@ const DEFINITION: Readonly<Record<StackLanguage, RegExp>> = Object.freeze({
   Swift: /^(?:@\w|(?:(?:public|private|fileprivate|internal|open|final|static)\s+)*(?:func\s|class\s|struct\s|enum\s|protocol\s|extension\s|actor\s))/u,
   C: C_DEFINITION,
   "C++": new RegExp(`${C_DEFINITION.source}|^(?:template\\s*<|class\\s|namespace\\s|[\\w:<>*&\\s]+\\s\\w+::~?\\w+\\s*\\()`, "u"),
+  Haskell: /^(?:[a-z_][\w']*\s*::|data\s|newtype\s|type\s|class\s|instance\s)/u,
+  Elm: /^(?:[a-z_]\w*\s*:\s|type\s|port\s)/u,
+  OCaml: /^(?:let\s|type\s|module\s|exception\s|class\s)/u,
+  "F#": /^(?:let\s|type\s|module\s|\[<)/u,
+  Erlang: /^(?:-spec\s|-record\(|-type\s|[a-z]\w*\()/u,
+  Prolog: /^[a-z]\w*(?:\(|\s*:-)/u,
+  Clojure: /^\((?:defn-?|def|defmacro|defrecord|defprotocol|deftype|defmulti|defmethod)\s/u,
+  Racket: /^\((?:define|struct|define-syntax|define-values)\b/u,
+  Julia: /^(?:function\s|struct\s|mutable\s+struct\s|abstract\s+type\s|macro\s|@\w|[a-z_]\w*\([^)]*\)\s*=)/u,
+  MATLAB: /^(?:function\s|classdef\s)/u,
+  Ada: /^(?:procedure\s|function\s|package\s|type\s|task\s|protected\s)/iu,
+  Pascal: /^(?:procedure\s|function\s|constructor\s|destructor\s|type\b|class\s+(?:procedure|function)\s)/iu,
+  Elixir: /^(?:defp?\s|defmacrop?\s|defstruct\b|@spec\s|@doc\s)/u,
+  Crystal: /^(?:def\s|class\s|struct\s|module\s|abstract\s|private\s+def\s|macro\s)/u,
 });
 /** Languages whose types often sit one level inside a namespace block; a definition there may be indented once. */
 const NESTED_DEFINITIONS: ReadonlySet<StackLanguage> = new Set(["C#"]);
+/** Rarer languages whose definitions usually sit one level in (a module, a package body, a class), at any indent. */
+const RARE_NESTED: ReadonlySet<StackLanguage> = new Set(["Elixir", "Crystal", "Ada", "F#", "Julia"]);
+/** The rarer languages: their comments, preamble statements, and nesting follow the rules below. */
+const RARE: ReadonlySet<StackLanguage> = new Set(["Haskell", "Elm", "OCaml", "F#", "Erlang", "Prolog", "Clojure", "Racket", "Julia",
+  "MATLAB", "Ada", "Pascal", "Elixir", "Crystal"]);
 const DEFINITION_LOOKAHEAD = 60;
 
 const isComment = (line: string, language: StackLanguage): boolean =>
-  language === "Python" || language === "Ruby" ? line.startsWith("#") : line.startsWith("//") || line.startsWith("*") || line.startsWith("/*");
+  isRareComment(line, language)
+  ?? (language === "Python" || language === "Ruby" ? line.startsWith("#") : line.startsWith("//") || line.startsWith("*") || line.startsWith("/*"));
 /** A line that starts a definition at the top level of its file, where a reader sees the shape of the code. */
 export const isTopLevelDefinition = (line: string, language: StackLanguage): boolean =>
   DEFINITION[language].test(line.trim()) && atTopLevel(line, language);
 const atTopLevel = (line: string, language: StackLanguage): boolean =>
-  line.trimStart() === line || (NESTED_DEFINITIONS.has(language) && /^(?: {4}|\t)\S/u.test(line));
+  line.trimStart() === line || (NESTED_DEFINITIONS.has(language) && /^(?: {4}|\t)\S/u.test(line))
+  || (RARE_NESTED.has(language) && /^(?: {2,4}|\t)\S/u.test(line));
+
+const STRING = /"(?:[^"\\]|\\.)*"/gu;
+/**
+ * The index after a rarer language's preamble statement that starts at `start`: its brackets must close, and some
+ * statements run to their own terminator: `uses …;` and `with …;`, Erlang's and Prolog's full stop, a Haskell
+ * module header's `where`, a Julia `export` list's last name, an Elixir `@moduledoc` heredoc's closing quotes.
+ */
+const rareStatementEnd = (lines: readonly string[], start: number, language: StackLanguage): number => {
+  const first = lines[start]!.trim();
+  if (language === "Elixir" && first.endsWith('"""')) {
+    const end = lines.findIndex((line, at) => at > start && line.trim().startsWith('"""'));
+    return end < 0 ? lines.length : end + 1;
+  }
+  const done = (line: string): boolean => {
+    if ((language === "Pascal" || language === "Ada") && /^(?:uses|with|use|limited|private|unit|program|library)\b/iu.test(first)) return line.endsWith(";");
+    if (language === "Erlang" || language === "Prolog") return line.endsWith(".");
+    if (language === "Haskell" && first.startsWith("module")) return /\bwhere$/u.test(line);
+    if (language === "Julia" && first.startsWith("export")) return !line.endsWith(",");
+    return true;
+  };
+  let depth = 0;
+  for (let index = start; index < lines.length; index += 1) {
+    const line = lines[index]!.replace(STRING, "\"\"").trim();
+    for (const character of line) {
+      if ("([{".includes(character)) depth += 1;
+      else if (")]}".includes(character)) depth -= 1;
+    }
+    if (depth <= 0 && done(line)) return index + 1;
+  }
+  return lines.length;
+};
 
 /** Index of the first line after the preamble: package clauses, imports, and the blank lines between them. */
 export const afterPreamble = (lines: readonly string[], language: StackLanguage, start: number): number => {
@@ -59,6 +126,7 @@ export const afterPreamble = (lines: readonly string[], language: StackLanguage,
     const line = lines[index]!.trim();
     if (line.length === 0 || isComment(line, language)) { index += 1; continue; }
     if (!PREAMBLE[language].test(line)) return index;
+    if (RARE.has(language)) { index = rareStatementEnd(lines, index, language); continue; }
     // A bracketed import group (`import (`, `use a::{`, `from a import (`) runs until its bracket closes.
     const opener = [...line].reverse().find((character) => character in OPENERS || character === ")" || character === "}");
     if (opener !== undefined && opener in OPENERS) {

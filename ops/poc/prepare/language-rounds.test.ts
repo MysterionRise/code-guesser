@@ -1,7 +1,7 @@
 import { generateLanguageRounds, LanguageRoundsError, validateLanguageCandidate } from "./language-rounds";
 import { LANGUAGE_PAIRS } from "../../../packages/artifact/src/index";
 import { MARKERS, tellsApart } from "./language-markers";
-import { STACK_LANGUAGES } from "./profile";
+import { MAINSTREAM_LANGUAGES } from "./profile";
 import { deckCandidates, loadDeckProfile, sha256, snapshotIdFor, stackCandidate } from "./testdata/deck-builders";
 
 const testModuleName: string = "vitest";
@@ -20,7 +20,7 @@ describe("language rounds", () => {
     for (const fixture of fixtures) {
       const labels = fixture.candidates.map(({ label }) => label);
       expect(labels).toHaveLength(4);
-      expect(labels.every((label) => (STACK_LANGUAGES as readonly string[]).includes(label))).toBe(true);
+      expect(labels.every((label) => (MAINSTREAM_LANGUAGES as readonly string[]).includes(label))).toBe(true);
       expect(labels).toEqual(expect.arrayContaining([...pairOf(String(fixture.source.configuration))]));
       // Every option's look-alike is an option too, so a missing sibling never singles one out.
       expect(labels.every((label) => pairOf(label).every((member) => labels.includes(member)))).toBe(true);
@@ -39,10 +39,10 @@ describe("language rounds", () => {
       if (answered.length === 2) expect(pairOf(answered[0]!)).not.toEqual(pairOf(answered[1]!));
     }
     // A language's two rounds offer different second pairs, and every pair is the second pair in four rounds.
-    for (const language of STACK_LANGUAGES) {
+    for (const language of MAINSTREAM_LANGUAGES) {
       expect(new Set(fixtures.filter(({ source }) => source.configuration === language).map(setKey)).size).toBe(2);
     }
-    for (const pair of LANGUAGE_PAIRS) {
+    for (const pair of LANGUAGE_PAIRS.filter(([first]) => MAINSTREAM_LANGUAGES.includes(first))) {
       const second = fixtures.filter((fixture) => !(pair as readonly string[]).includes(String(fixture.source.configuration))
         && fixture.candidates.some(({ label }) => (pair as readonly string[]).includes(label)));
       expect(second).toHaveLength(4);
@@ -57,7 +57,7 @@ describe("language rounds", () => {
   });
 
   it("keeps only code that tells its language apart from the look-alike", () => {
-    const candidate = (language: (typeof STACK_LANGUAGES)[number], excerpt: string) =>
+    const candidate = (language: (typeof MAINSTREAM_LANGUAGES)[number], excerpt: string) =>
       stackCandidate(profile, snapshotId, language, 0, { excerpt, excerptHash: sha256(excerpt) });
     // Plain code with no telling syntax could be either language of its pair.
     expect(() => validateLanguageCandidate({ profile, candidate: candidate("JavaScript",
@@ -73,7 +73,7 @@ describe("language rounds", () => {
     // Symmetric pairs: the other language's syntax makes the code ambiguous.
     expect(tellsApart("fun compute(value: Int): Int {\n    val total = value * 2\n    guard total > 0 else { return 0 }\n}", "Kotlin")).toBe(false);
     expect(tellsApart("def compute(value)\n  return nil if value.nil?\nend", "Python")).toBe(false);
-    for (const language of STACK_LANGUAGES) expect(MARKERS[language].length).toBeGreaterThan(0);
+    for (const language of MAINSTREAM_LANGUAGES) expect(MARKERS[language].length).toBeGreaterThan(0);
   });
 
   it("draws both hints from the excerpt, naming no language", () => {

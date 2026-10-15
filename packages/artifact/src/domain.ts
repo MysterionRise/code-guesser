@@ -18,16 +18,36 @@ export const PROFILE_VERSION = "local-real-rounds.v5";
 /** A session deals this many rounds from a deck's pool. */
 export const ROUNDS_PER_SESSION = 5;
 /** A deck's pool holds at least one session's rounds and at most this many. */
-export const MAXIMUM_POOL_SIZE = 40;
-/** The Stack v2 languages the decks draw from, in look-alike pairs: each pair's two languages share a lot of syntax. */
+export const MAXIMUM_POOL_SIZE = 60;
+/**
+ * The Stack v2 languages the decks can draw from, in look-alike pairs: each pair's two languages share a lot of
+ * syntax. The first twelve are the mainstream ones every deck reads; the rest (v1.0) are rarer languages a profile
+ * may add for the language deck alone.
+ */
 export const STACK_LANGUAGES = Object.freeze([
   "Python", "Ruby", "TypeScript", "JavaScript", "Go", "Rust", "Java", "C#", "Kotlin", "Swift", "C", "C++",
+  "Haskell", "Elm", "OCaml", "F#", "Erlang", "Prolog", "Clojure", "Racket", "Julia", "MATLAB", "Ada", "Pascal", "Elixir", "Crystal",
 ] as const);
 export type StackLanguage = typeof STACK_LANGUAGES[number];
 /** Each language and the look-alike it is paired with; a language round always offers both. */
 export const LANGUAGE_PAIRS: readonly (readonly [StackLanguage, StackLanguage])[] = Object.freeze([
   ["Python", "Ruby"], ["TypeScript", "JavaScript"], ["Go", "Rust"], ["Java", "C#"], ["Kotlin", "Swift"], ["C", "C++"],
+  ["Haskell", "Elm"], ["OCaml", "F#"], ["Erlang", "Prolog"], ["Clojure", "Racket"], ["Julia", "MATLAB"], ["Ada", "Pascal"],
+  ["Elixir", "Crystal"],
 ].map((pair) => Object.freeze(pair as [StackLanguage, StackLanguage])));
+/** The first twelve: the mainstream languages every deck reads. */
+export const MAINSTREAM_LANGUAGES: readonly StackLanguage[] = Object.freeze(STACK_LANGUAGES.slice(0, 12));
+/** The rarer languages (v1.0): past the first twelve, read for the language deck alone. */
+export const RARE_LANGUAGES: ReadonlySet<StackLanguage> = new Set(STACK_LANGUAGES.slice(12));
+/**
+ * Whether `languages` is a set a profile, a run, or an artifact may configure: known languages in `STACK_LANGUAGES`
+ * order, each with its look-alike, since a language round offers whole pairs.
+ */
+export const isLanguageSelection = (languages: readonly unknown[]): boolean => {
+  const indexes = languages.map((language) => (STACK_LANGUAGES as readonly unknown[]).indexOf(language));
+  return languages.length > 0 && indexes.every((index, at) => index >= 0 && (at === 0 || index > indexes[at - 1]!))
+    && LANGUAGE_PAIRS.every((pair) => pair.every((member) => languages.includes(member)) || pair.every((member) => !languages.includes(member)));
+};
 /** Project and language decks hold this many rounds per language; the language deck's option design needs exactly two. */
 export const ROUNDS_PER_LANGUAGE = 2;
 /** Options per round: four for every kind but before-or-after, which has two. */
@@ -44,6 +64,8 @@ export const PANE_LABELS = Object.freeze(["A", "B"] as const);
 export const LANGUAGE_SLUGS: Readonly<Record<StackLanguage, string>> = Object.freeze({
   Python: "python", Ruby: "ruby", TypeScript: "typescript", JavaScript: "javascript", Go: "go", Rust: "rust",
   Java: "java", "C#": "csharp", Kotlin: "kotlin", Swift: "swift", C: "c", "C++": "cpp",
+  Haskell: "haskell", Elm: "elm", OCaml: "ocaml", "F#": "fsharp", Erlang: "erlang", Prolog: "prolog", Clojure: "clojure",
+  Racket: "racket", Julia: "julia", MATLAB: "matlab", Ada: "ada", Pascal: "pascal", Elixir: "elixir", Crystal: "crystal",
 });
 
 /**

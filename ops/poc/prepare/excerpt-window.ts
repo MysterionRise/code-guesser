@@ -16,8 +16,68 @@ export interface ExcerptLimits {
 const HASH_COMMENT_LANGUAGES = new Set<StackLanguage>(["Python", "Ruby"]);
 const DOCSTRING_OPEN = /^[rRuUbBfF]{0,2}("""|''')/u;
 
+/** How a language writes comments: the prefixes of a line comment, and block comments' openers and closers. */
+interface CommentSyntax {
+  readonly line: readonly string[];
+  readonly blocks: readonly (readonly [string, string])[];
+}
+/**
+ * The rarer languages' comments (v1.0). The first twelve keep the rules below, unchanged, so the artifact they
+ * built rebuilds byte for byte.
+ */
+const COMMENTS: Readonly<Partial<Record<StackLanguage, CommentSyntax>>> = Object.freeze({
+  Haskell: { line: ["--"], blocks: [["{-", "-}"]] },
+  Elm: { line: ["--"], blocks: [["{-", "-}"]] },
+  OCaml: { line: [], blocks: [["(*", "*)"]] },
+  "F#": { line: ["//"], blocks: [["(*", "*)"]] },
+  Erlang: { line: ["%"], blocks: [] },
+  Prolog: { line: ["%"], blocks: [["/*", "*/"]] },
+  Clojure: { line: [";"], blocks: [] },
+  Racket: { line: [";"], blocks: [["#|", "|#"]] },
+  Julia: { line: ["#"], blocks: [["#=", "=#"]] },
+  MATLAB: { line: ["%"], blocks: [["%{", "%}"]] },
+  Ada: { line: ["--"], blocks: [] },
+  Pascal: { line: ["//"], blocks: [["{", "}"], ["(*", "*)"]] },
+  Elixir: { line: ["#"], blocks: [] },
+  Crystal: { line: ["#"], blocks: [] },
+});
+
+/** A `{-#` pragma and a `{$` directive look like comments but are the preamble's. */
+const DIRECTIVE = /^(?:\{-#|\{\$)/u;
+
+/** Whether a trimmed line is only a comment in one of the rarer languages; undefined for the first twelve. */
+export const isRareComment = (line: string, language: StackLanguage): boolean | undefined => {
+  const syntax = COMMENTS[language];
+  if (syntax === undefined) return undefined;
+  if (DIRECTIVE.test(line)) return false;
+  return syntax.line.some((prefix) => line.startsWith(prefix))
+    || syntax.blocks.some(([open, close]) => line.startsWith(open) && line.endsWith(close) && line.length >= open.length + close.length);
+};
+
+const firstRareCodeLine = (lines: readonly string[], syntax: CommentSyntax): number | undefined => {
+  let index = 0;
+  while (index < lines.length) {
+    const line = lines[index]!.trim();
+    if (line.length === 0 || (index === 0 && line.startsWith("#!"))) { index += 1; continue; }
+    if (DIRECTIVE.test(line)) return index;
+    if (syntax.line.some((prefix) => line.startsWith(prefix))) { index += 1; continue; }
+    const block = syntax.blocks.find(([open]) => line.startsWith(open));
+    if (block === undefined) return index;
+    const [open, close] = block;
+    const from = (at: number) => at === index ? lines[index]!.indexOf(open) + open.length : 0;
+    const end = lines.findIndex((candidate, at) => at >= index && candidate.includes(close, from(at)));
+    if (end < 0) return undefined;
+    // Code after a block comment on its closing line would be cut in half; such a file has no clean start.
+    if (lines[end]!.slice(lines[end]!.indexOf(close, from(end)) + close.length).trim().length > 0) return undefined;
+    index = end + 1;
+  }
+  return undefined;
+};
+
 /** Index of the first line that is code: not blank, not a comment, shebang, docstring, or licence header. */
 export const firstCodeLine = (lines: readonly string[], language: StackLanguage): number | undefined => {
+  const rare = COMMENTS[language];
+  if (rare !== undefined) return firstRareCodeLine(lines, rare);
   let index = 0;
   while (index < lines.length) {
     const line = lines[index]!.trim();

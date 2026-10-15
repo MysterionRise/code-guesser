@@ -19,6 +19,7 @@ import {
   PROTECTED_SOURCE_KEYS,
   ROUNDS_PER_SESSION,
   STACK_LANGUAGES,
+  isLanguageSelection,
   type CandidateRecord,
   type DeckId,
   type ExperimentArtifact,
@@ -632,8 +633,7 @@ const parseSnapshot = (value: unknown, profileHash: string): Snapshot => {
   const queryIds = parseQueryIds(github.queries);
   const stack = record(snapshot.stack, ["release", "revision", "configurations"]);
   const identity = Object.freeze({ release: text(stack.release), revision: gitId(stack.revision) });
-  if (!Array.isArray(stack.configurations)
-    || stack.configurations.join("|") !== STACK_LANGUAGES.join("|")) fail();
+  if (!Array.isArray(stack.configurations) || !isLanguageSelection(stack.configurations)) fail();
   validateResponseHashes(snapshot.acceptedResponseHashes, id, profileHash);
   return Object.freeze({ id, queryIds, stack: identity,
     ...(curated ? parseCurated(snapshot.curated)

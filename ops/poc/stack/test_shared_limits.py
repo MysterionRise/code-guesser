@@ -3,6 +3,7 @@ import os
 import unittest
 
 import bounded_http
+import bounded_parquet
 import fetch_blob
 import limits
 import stream_metadata
@@ -37,10 +38,13 @@ class SharedLimitTests(unittest.TestCase):
         self.assertEqual(stream_metadata.MAXIMUM_REQUESTS, self.capacity["requestCount"])
         self.assertEqual(stream_metadata.MAXIMUM_NETWORK_BYTES, self.capacity["stackMetadataBytes"])
         self.assertEqual(stream_metadata.MAXIMUM_TEMPORARY_BYTES, self.capacity["temporaryDiskBytes"])
-        self.assertEqual(
-            list(stream_metadata.EXTENSIONS),
-            [configuration["language"] for configuration in self.profile["stack"]["configurations"]],
-        )
+        # The worker knows every language a profile may read (v1.0 adds rarer ones); the profile reads some of them,
+        # in the worker's order, with the same extensions.
+        configured = [configuration["language"] for configuration in self.profile["stack"]["configurations"]]
+        self.assertEqual([language for language in stream_metadata.EXTENSIONS if language in configured], configured)
+        for configuration in self.profile["stack"]["configurations"]:
+            self.assertEqual(list(stream_metadata.EXTENSIONS[configuration["language"]]), configuration["extensions"])
+        self.assertEqual(list(bounded_parquet.DIRECTORIES), list(stream_metadata.EXTENSIONS))
 
     def test_http_budget_accepts_exactly_the_shared_request_and_metadata_byte_ceilings(self):
         self.assertEqual(bounded_http.MAXIMUM_REQUESTS, self.capacity["requestCount"])

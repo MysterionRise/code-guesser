@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 
 import { LANGUAGE_SLUGS } from "../../../../packages/artifact/src/index";
-import { STACK_LANGUAGES, type CrawlProfile, type StackLanguage } from "../profile";
+import { MAINSTREAM_LANGUAGES, type CrawlProfile, type StackLanguage } from "../profile";
 import type { SelectedStackBlob } from "../stack-revalidation";
 import type { StackMetadataRow } from "../stack-metadata";
 import { CAPTURED_AUTHOR_EMAIL } from "./captured-values";
@@ -175,7 +175,7 @@ const repeated = (count: number, block: (index: number) => readonly string[]): B
  * A file's code in each language, with a variant number so every file is distinct. Each shows syntax that sets
  * its language apart from the look-alike, as a language round needs.
  */
-const SOURCES: Readonly<Record<StackLanguage, (variant: number) => Readonly<{ name: string; bytes: Buffer }>>> = {
+const SOURCES: Readonly<Partial<Record<StackLanguage, (variant: number) => Readonly<{ name: string; bytes: Buffer }>>>> = {
   Python: (variant) => ({ name: `module_${variant}.py`, bytes: repeated(30, (index) => [`def captured_${variant}_${index}(value):`, "    if value is None:", "        return 0", `    return (value + ${index + 7}) * 2`, ""]) }),
   Ruby: (variant) => ({ name: `module_${variant}.rb`, bytes: repeated(25, (index) => [`def captured_${variant}_${index}(value)`, `  adjusted = value + ${index + 2}`, "  adjusted * 6", "end", ""]) }),
   TypeScript: (variant) => ({ name: `module-${variant}.ts`, bytes: repeated(30, (index) => [`export function captured${variant}x${index}(value: number): number {`, `  const adjusted = value + ${index + 9};`, "  return adjusted * 3;", "}", ""]) }),
@@ -224,14 +224,14 @@ export const createCapturedResponses = (
     })) });
   });
   // Per language: four popular repositories (the project deck's two answers and two decoys), then two ordinary files.
-  const languages = STACK_LANGUAGES.map((language, languageIndex) => {
+  const languages = MAINSTREAM_LANGUAGES.map((language, languageIndex) => {
     const slug = LANGUAGE_SLUGS[language];
     const popular = [0, 1, 2, 3].map((rank) => {
-      const source = SOURCES[language](rank);
+      const source = SOURCES[language]!(rank);
       return addStackFile(http, languageIndex * 10 + rank, `famous-${slug}/project-${rank}`, language, `lib/${source.name}`, source.bytes, 8000 - rank * 1000);
     });
     const ordinary = ["tools", "kit"].map((name, offset) => {
-      const source = SOURCES[language](8 + offset);
+      const source = SOURCES[language]!(8 + offset);
       return addStackFile(http, languageIndex * 10 + 8 + offset, `everyday-${slug}/${name}`, language, `src/${source.name}`, source.bytes, 3);
     });
     return [language, [...popular, ...ordinary]] as const;

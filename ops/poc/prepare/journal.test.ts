@@ -8,7 +8,7 @@ import { createCapacityMeter } from "./capacity";
 import { parsePreparationArguments } from "./index";
 import { openJournal, REDACTED_EMAIL, type JournalMode } from "./journal";
 import { loadProfile } from "./command-test-harness";
-import { STACK_LANGUAGES, type CrawlProfile } from "./profile";
+import { MAINSTREAM_LANGUAGES, type CrawlProfile } from "./profile";
 import { createPreparationRuntime } from "./runtime";
 import type { WorkerRequest, WorkerResult } from "./stack-metadata";
 import { journaledWorker, workerJournalKey } from "./worker-journal";
@@ -19,7 +19,7 @@ const { describe, expect, it } = await import(testModuleName) as any;
 const sha256 = (bytes: Uint8Array): string => createHash("sha256").update(bytes).digest("hex");
 const journalPath = (): string => join(mkdtempSync(join(tmpdir(), "codeguessr-journal-")), "run.jsonl");
 const capacityFor = (profile: CrawlProfile) => createCapacityMeter({ limits: profile.capacity,
-  githubQueryIds: profile.github.queries.map(({ id }) => id), stackLanguages: STACK_LANGUAGES });
+  githubQueryIds: profile.github.queries.map(({ id }) => id), stackLanguages: MAINSTREAM_LANGUAGES });
 const headers = (profile: CrawlProfile) => ({ accept: "application/vnd.github+json", "x-github-api-version": profile.github.apiVersion });
 const commitRequest = (profile: CrawlProfile, sha = "a") => ({ provider: "github", method: "GET", headers: headers(profile),
   url: `https://api.github.com/repos/example/project/commits/${sha.repeat(40)}` });

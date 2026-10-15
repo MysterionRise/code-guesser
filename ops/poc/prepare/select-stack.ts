@@ -3,7 +3,7 @@ import {
   DECK_SHORT, PreparationError, noteRejection, rejectCandidate, type DeckAttempts, type DeckOutcome, type DiagnosticStage, type RunState,
 } from "./diagnostics";
 import { ROUNDS_PER_LANGUAGE } from "../../../packages/artifact/src/index";
-import type { CrawlProfile, StackLanguage } from "./profile";
+import { projectLanguages, type CrawlProfile, type StackLanguage } from "./profile";
 import { namedByTemplates, projectRoundAllowed, type RepositoryOption } from "./project-rounds";
 import {
   addHashes, collidesWithSelected, provisionalSnapshot, revealsProtected, unreportable, view, type RepositoryScreen,
@@ -151,7 +151,7 @@ export const selectStack = async (
     // A repository is an option in one language's rounds only: one that recurred across languages (next.js has
     // JavaScript, TypeScript, and Rust files) would appear more often than the rest and point to a decoy.
     const offered = new Set<string>();
-    for (const language of languages) {
+    for (const language of projectLanguages(profile)) {
       // A repository the deck's own wording names (`github/…` in "GitHub star events") can be no option.
       const ranked = popularRepositories(rows.filter((row) => languageOf(row) === language), profile.selection.minimumStarEvents)
         .filter(({ repository }) => {

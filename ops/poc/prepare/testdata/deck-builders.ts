@@ -21,7 +21,7 @@ import type { ComposeOptions } from "../compose";
 import type { GitHubAdmissionCandidate } from "../github-admission";
 import { generateLanguageRounds } from "../language-rounds";
 import { LANGUAGE_SLUGS } from "../../../../packages/artifact/src/index";
-import { STACK_LANGUAGES, parseCrawlProfile, type CrawlProfile, type StackLanguage } from "../profile";
+import { MAINSTREAM_LANGUAGES, STACK_EXTENSIONS, STACK_LANGUAGES, parseCrawlProfile, type CrawlProfile, type StackLanguage } from "../profile";
 import { generateProjectRounds, type ProjectRoundInput, type RepositoryOption } from "../project-rounds";
 import type { RevalidatedStackCandidate } from "../stack-revalidation";
 
@@ -93,7 +93,7 @@ export const commitCandidate = (input: CommitCandidateInput): GitHubAdmissionCan
  * Two code shapes per language, each long enough for a round, free of any language's name, and showing syntax
  * that sets the language apart from its look-alike.
  */
-const LANGUAGE_FIXTURES: Readonly<Record<StackLanguage, readonly Readonly<{ path: string; excerpt: string }>[]>> = Object.freeze({
+const LANGUAGE_FIXTURES: Readonly<Partial<Record<StackLanguage, readonly Readonly<{ path: string; excerpt: string }>[]>>> = Object.freeze({
   Python: [
     { path: "pkg/compute.py", excerpt: "def compute(value):\n    total = value * 2\n    if total > 10:\n        return total - 1\n    elif total < 0:\n        return 0\n    return total + 1" },
     { path: "pkg/ledger.py", excerpt: "class Ledger:\n    def __init__(self):\n        self.entries = []\n\n    def add(self, amount):\n        self.entries.append(amount)\n        return sum(self.entries)" },
@@ -142,10 +142,67 @@ const LANGUAGE_FIXTURES: Readonly<Record<StackLanguage, readonly Readonly<{ path
     { path: "src/ledger.cpp", excerpt: "class Ledger {\npublic:\n    int add(int amount) {\n        entries_.push_back(amount);\n        return static_cast<int>(entries_.size());\n    }\n\nprivate:\n    std::vector<int> entries_;\n};" },
     { path: "src/compute.cc", excerpt: "namespace demo {\n\nauto compute(int value) -> int {\n    const auto total = value * 2;\n    return total > 10 ? total - 1 : total + 1;\n}\n\n}  // namespace demo" },
   ],
+  // The rarer languages (v1.0), each showing its own syntax and none of its look-alike's.
+  Haskell: [
+    { path: "src/Ledger.hs", excerpt: "total :: [Int] -> Int\ntotal entries = foldr add 0 entries\n  where\n    add amount running = amount + running\n\naverage :: [Int] -> Int\naverage entries = total entries `div` length entries" },
+    { path: "src/Compute.hs", excerpt: "compute :: Int -> Maybe Int\ncompute value = do\n  let doubled = value * 2\n  if doubled > 10 then Just (doubled - 1) else Nothing\n\nhalve :: Int -> Int\nhalve value = value `div` 2" },
+  ],
+  Elm: [
+    { path: "src/Ledger.elm", excerpt: "total : List Int -> Int\ntotal entries =\n    List.foldl (+) 0 entries\n\n\ntype alias Entry =\n    { amount : Int, note : String }" },
+    { path: "src/Counter.elm", excerpt: "update : Msg -> Model -> ( Model, Cmd Msg )\nupdate msg model =\n    case msg of\n        Increment ->\n            ( { model | count = model.count + 1 }, Cmd.none )" },
+  ],
+  OCaml: [
+    { path: "lib/ledger.ml", excerpt: "let total entries =\n  List.fold_left (fun acc amount -> acc + amount) 0 entries\n;;\n\nlet print_total entries =\n  Printf.printf \"%d\\n\" (total entries)" },
+    { path: "lib/compute.ml", excerpt: "let compute ~scale value =\n  let doubled = value * scale in\n  if doubled > 10 then doubled - 1 else doubled + 1\n\nlet halve value = compute ~scale:1 value / 2" },
+  ],
+  "F#": [
+    { path: "src/Ledger.fs", excerpt: "type Ledger() =\n    let mutable entries = []\n    member this.Add(amount: int) =\n        entries <- amount :: entries\n        List.sum entries" },
+    { path: "src/Compute.fs", excerpt: "let compute value =\n    let doubled = value * 2\n    if doubled > 10 then doubled - 1\n    elif doubled < 0 then 0\n    else doubled + 1\n\nprintfn \"%d\" (compute 4)" },
+  ],
+  Erlang: [
+    { path: "src/ledger.erl", excerpt: "total(Entries) ->\n    lists:foldl(fun(Amount, Sum) -> Amount + Sum end, 0, Entries).\n\nprint_total(Entries) ->\n    io:format(\"~p~n\", [total(Entries)])." },
+    { path: "src/counter.erl", excerpt: "loop(Count) ->\n    receive\n        {add, N} -> loop(Count + N);\n        {get, From} -> From ! {count, Count}, loop(Count)\n    end." },
+  ],
+  Prolog: [
+    { path: "src/ledger.pl", excerpt: "total([], 0).\ntotal([Amount|Rest], Sum) :-\n    total(Rest, Partial),\n    Sum is Partial + Amount.\n\naverage(Entries, Mean) :-\n    total(Entries, Sum),\n    length(Entries, Count),\n    Mean is Sum / Count." },
+    { path: "src/family.pl", excerpt: "parent(tom, bob).\nparent(bob, ann).\nparent(ann, joe).\n\ngrandparent(X, Z) :-\n    parent(X, Y),\n    parent(Y, Z).\n\nancestor(X, Y) :- parent(X, Y)." },
+  ],
+  Clojure: [
+    { path: "src/ledger/core.clj", excerpt: "(defn total [entries]\n  (reduce + 0 entries))\n\n(defn add-entry [ledger amount]\n  (update ledger :entries conj amount))" },
+    { path: "src/ledger/compute.clj", excerpt: "(defn compute [value]\n  (let [doubled (* value 2)]\n    (if (> doubled 10)\n      (dec doubled)\n      (inc doubled))))" },
+  ],
+  Racket: [
+    { path: "private/ledger.rkt", excerpt: "(define (total entries)\n  (foldl + 0 entries))\n\n(define (add-entry entries amount)\n  (cons amount entries))" },
+    { path: "private/compute.rkt", excerpt: "(define (compute value)\n  (let ([doubled (* value 2)])\n    (cond\n      [(> doubled 10) (sub1 doubled)]\n      [else (add1 doubled)])))" },
+  ],
+  Julia: [
+    { path: "src/ledger.jl", excerpt: "function total(entries::Vector{Int})\n    sum = 0\n    for amount in entries\n        sum += amount\n    end\n    return sum\nend" },
+    { path: "src/compute.jl", excerpt: "function scale!(values, factor)\n    for i in eachindex(values)\n        values[i] = values[i] * factor\n    end\n    push!(values, factor)\nend" },
+  ],
+  MATLAB: [
+    { path: "src/total.m", excerpt: "function result = total(entries)\n% Adds every entry.\nresult = 0;\nfor k = 1:numel(entries)\n    result = result + entries(k);\nend\nend" },
+    { path: "src/compute.m", excerpt: "function [low, high] = compute(value)\ndoubled = value * 2;\nif doubled ~= 10\n    disp(doubled);\nend\nlow = doubled - 1;\nhigh = doubled + 1;\nend" },
+  ],
+  Ada: [
+    { path: "src/ledger.adb", excerpt: "function Total (Entries : Amount_Array) return Integer is\n   Sum : Integer := 0;\nbegin\n   for I in Entries'Range loop\n      Sum := Sum + Entries (I);\n   end loop;\n   return Sum;\nend Total;" },
+    { path: "src/compute.adb", excerpt: "procedure Compute (Value : in out Integer) is\nbegin\n   if Value > 10 then\n      Value := Value - 1;\n   elsif Value < 0 then\n      Value := 0;\n   end if;\nend Compute;" },
+  ],
+  Pascal: [
+    { path: "src/ledger.pas", excerpt: "function Total(const Entries: array of Integer): Integer;\nvar\n  I: Integer;\nbegin\n  Result := 0;\n  for I := Low(Entries) to High(Entries) do\n    Result := Result + Entries[I];\nend;" },
+    { path: "src/compute.pas", excerpt: "procedure Compute(var Value: Integer);\nbegin\n  if Value > 10 then begin\n    Value := Value - 1;\n    WriteLn(Value);\n  end;\nend;" },
+  ],
+  Elixir: [
+    { path: "lib/ledger.ex", excerpt: "def total(entries) do\n  Enum.reduce(entries, 0, fn amount, sum -> amount + sum end)\nend\n\ndefp describe(total) do\n  \"total: #{total}\"\nend" },
+    { path: "lib/counter.ex", excerpt: "def handle_call(:get, _from, count) do\n  {:reply, count, count}\nend\n\ndef increment(pid) do\n  pid |> GenServer.cast(:increment)\nend" },
+  ],
+  Crystal: [
+    { path: "src/ledger.cr", excerpt: "class Ledger\n  property entries = [] of Int32\n\n  def add(amount : Int32) : Int32\n    entries << amount\n    entries.sum\n  end\nend" },
+    { path: "src/compute.cr", excerpt: "def compute(values : Array(Int32))\n  values.map do |value|\n    value * 2\n  end\nend\n\ndef halve(value : Int32)\n  value // 2\nend\n\nputs compute([1, 2, 3])" },
+  ],
 });
 
 /** A closing line that makes every variant's code distinct. */
-const VARIANT_LINE: Readonly<Record<StackLanguage, (variant: number) => string>> = Object.freeze({
+const VARIANT_LINE: Readonly<Partial<Record<StackLanguage, (variant: number) => string>>> = Object.freeze({
   Python: (variant: number) => `LIMIT_${variant} = ${variant}`,
   Ruby: (variant: number) => `LIMIT_${variant} = ${variant}`,
   TypeScript: (variant: number) => `export const LIMIT_${variant} = ${variant};`,
@@ -158,7 +215,32 @@ const VARIANT_LINE: Readonly<Record<StackLanguage, (variant: number) => string>>
   Swift: (variant: number) => `let limit${variant} = ${variant}`,
   C: (variant: number) => `static const int limit${variant} = ${variant};`,
   "C++": (variant: number) => `constexpr int kLimit${variant} = ${variant};`,
+  Haskell: (variant: number) => `limit${variant} = ${variant} :: Int`,
+  Elm: (variant: number) => `limit${variant} = ${variant}`,
+  OCaml: (variant: number) => `let limit_${variant} = ${variant}`,
+  "F#": (variant: number) => `let limit${variant} = ${variant}`,
+  Erlang: (variant: number) => `limit_${variant}() -> ${variant}.`,
+  Prolog: (variant: number) => `limit(${variant}).`,
+  Clojure: (variant: number) => `(def limit-${variant} ${variant})`,
+  Racket: (variant: number) => `(define limit-${variant} ${variant})`,
+  Julia: (variant: number) => `const LIMIT_${variant} = ${variant}`,
+  MATLAB: (variant: number) => `limit${variant} = ${variant};`,
+  Ada: (variant: number) => `Limit_${variant} : constant := ${variant};`,
+  Pascal: (variant: number) => `const Limit${variant} = ${variant};`,
+  Elixir: (variant: number) => `@limit_${variant} ${variant}`,
+  Crystal: (variant: number) => `LIMIT_${variant} = ${variant}`,
 });
+
+/**
+ * The deck profile reading every language (v1.0): the twelve as before, then the rarer pairs for the language deck
+ * alone.
+ */
+export const loadRareLanguageProfile = (): CrawlProfile => {
+  const raw = JSON.parse(readFileSync(new URL("../../profiles/local-real-rounds.v5.json", import.meta.url), "utf8"));
+  const rare = STACK_LANGUAGES.slice(MAINSTREAM_LANGUAGES.length)
+    .map((language) => ({ language, extensions: [...STACK_EXTENSIONS[language]], projectDeck: false }));
+  return parseCrawlProfile({ ...raw, stack: { ...raw.stack, configurations: [...raw.stack.configurations, ...rare] } });
+};
 
 /** One revalidated Stack candidate, as revalidation produces it. */
 export const stackCandidate = (
@@ -172,9 +254,9 @@ export const stackCandidate = (
   const root = `https://github.com/${repository}`;
   const commit = sha1(`stack-commit-${repository}-${language}-${variant}`);
   const blob = sha1(`stack-blob-${repository}-${language}-${variant}`);
-  const fixture = LANGUAGE_FIXTURES[language][variant % 2]!;
+  const fixture = LANGUAGE_FIXTURES[language]![variant % 2]!;
   const path = fixture.path;
-  const excerpt = `${fixture.excerpt}\n${VARIANT_LINE[language](variant)}`;
+  const excerpt = `${fixture.excerpt}\n${VARIANT_LINE[language]!(variant)}`;
   const value = {
     discoverySource: "STACK_V2", repository, repositoryUrl: root, authorName: `Stack Author ${language} ${variant}`,
     authorLogin: null, authorBasis: "SELECTED_COMMIT", authorSourceUrl: `${root}/commit/${commit}`, path, blob,
@@ -194,7 +276,7 @@ export const stackCandidate = (
 };
 
 /** Popular repositories per language; each language's rounds offer its two answers and two decoys. */
-const PROJECT_OPTIONS: Readonly<Record<StackLanguage, readonly string[]>> = Object.freeze({
+const PROJECT_OPTIONS: Readonly<Partial<Record<StackLanguage, readonly string[]>>> = Object.freeze({
   Python: ["orbitlabs/quasar", "orbitlabs/nimbus", "fernworks/tundra", "fernworks/lagoon"],
   Ruby: ["garnet/tram", "garnet/ferry", "opal-works/kiln", "opal-works/loom"],
   TypeScript: ["helix-dev/prism", "helix-dev/vortex", "sablecraft/ember", "sablecraft/zenith"],
@@ -210,8 +292,8 @@ const PROJECT_OPTIONS: Readonly<Record<StackLanguage, readonly string[]>> = Obje
 });
 
 export const projectRoundInputs = (profile: CrawlProfile, snapshotId: string): readonly ProjectRoundInput[] =>
-  STACK_LANGUAGES.flatMap((language) => {
-    const options: RepositoryOption[] = PROJECT_OPTIONS[language].map((repository) => ({ repository, description: `A popular ${repository.split("/")[1]} toolkit.` }));
+  MAINSTREAM_LANGUAGES.flatMap((language) => {
+    const options: RepositoryOption[] = PROJECT_OPTIONS[language]!.map((repository) => ({ repository, description: `A popular ${repository.split("/")[1]} toolkit.` }));
     return [0, 1].map((variant) => {
       const own = options[variant]!;
       return {
@@ -231,7 +313,7 @@ export interface DeckCandidates {
 /** A full pool per deck for one snapshot: two project and two language rounds per language, ten commits. */
 export const deckCandidates = (profile: CrawlProfile, snapshotId: string): DeckCandidates => ({
   project: projectRoundInputs(profile, snapshotId),
-  language: STACK_LANGUAGES.flatMap((language) => [0, 1].map((variant) => stackCandidate(profile, snapshotId, language, variant))),
+  language: MAINSTREAM_LANGUAGES.flatMap((language) => [0, 1].map((variant) => stackCandidate(profile, snapshotId, language, variant))),
   beforeAfter: Array.from({ length: 10 }, (_, index) => commitCandidate({ profile, snapshotId, index })),
 });
 

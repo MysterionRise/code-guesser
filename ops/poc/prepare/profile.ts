@@ -1,10 +1,11 @@
 import { CAPACITY_CEILINGS, STACK_RELEASE, STACK_REVISION, type CeilingKey } from "../limits";
 import {
-  AUTHORSHIP_CLAIM, PROFILE_VERSION, ROUNDS_PER_LANGUAGE, STACK_LANGUAGES, type DeckId, type StackLanguage,
+  AUTHORSHIP_CLAIM, MAINSTREAM_LANGUAGES, PROFILE_VERSION, ROUNDS_PER_LANGUAGE, STACK_LANGUAGES, isLanguageSelection, type DeckId,
+  type StackLanguage,
 } from "../../../packages/artifact/src/index";
 
 /** The hard ceilings from `ops/poc/limits.json`; a profile may lower any of them, never raise one. */
-export { CAPACITY_CEILINGS, PROFILE_VERSION, STACK_LANGUAGES, type StackLanguage };
+export { CAPACITY_CEILINGS, MAINSTREAM_LANGUAGES, PROFILE_VERSION, STACK_LANGUAGES, type StackLanguage };
 
 export type CapacityLimits = Readonly<Record<CeilingKey, number>>;
 
@@ -19,6 +20,10 @@ export interface ProfileQuery {
 export const STACK_EXTENSIONS: Readonly<Record<StackLanguage, readonly string[]>> = Object.freeze({
   Python: [".py"], Ruby: [".rb"], TypeScript: [".ts", ".tsx"], JavaScript: [".js"], Go: [".go"], Rust: [".rs"],
   Java: [".java"], "C#": [".cs"], Kotlin: [".kt"], Swift: [".swift"], C: [".c"], "C++": [".cpp", ".cc", ".cxx", ".hpp"],
+  // Prolog keeps to `.pl` and `.pro` as The Stack v2 classifies them; a Perl `.pl` file is Perl's, never read here.
+  Haskell: [".hs"], Elm: [".elm"], OCaml: [".ml"], "F#": [".fs"], Erlang: [".erl"], Prolog: [".pl", ".pro"],
+  Clojure: [".clj", ".cljc"], Racket: [".rkt"], Julia: [".jl"], MATLAB: [".m"], Ada: [".adb"], Pascal: [".pas", ".pp"],
+  Elixir: [".ex", ".exs"], Crystal: [".cr"],
 });
 
 export interface CrawlProfile {
@@ -32,6 +37,9 @@ export interface CrawlProfile {
       language: StackLanguage;
       configuration: StackLanguage;
       extensions: readonly string[];
+      /** Present, and false, for a language read for the language deck alone (#129): its popular repositories are
+       * mostly other languages' projects with a few of its files, so no project round could fairly ask about them. */
+      projectDeck?: false;
     }>[];
   }>;
   readonly licenses: readonly string[];
@@ -177,9 +185,13 @@ export const FIX_PATCH_READS_MAXIMUM = 240;
 /** The datasets a fix deck can read, each with the direction its patches run in. */
 export const FIX_DATASETS = Object.freeze(["defects4j", "bugsinpy"] as const);
 
+/** The configured languages the project deck reads: all but those marked for the language deck alone. */
+export const projectLanguages = (profile: CrawlProfile): readonly StackLanguage[] =>
+  profile.stack.configurations.filter(({ projectDeck }) => projectDeck !== false).map(({ language }) => language);
+
 /** Rounds in each deck's pool; a session deals five of them. A deck the profile does not configure holds none. */
 export const poolSizes = (profile: CrawlProfile): Readonly<Record<DeckId, number>> => Object.freeze({
-  project: ROUNDS_PER_LANGUAGE * profile.stack.configurations.length,
+  project: ROUNDS_PER_LANGUAGE * projectLanguages(profile).length,
   language: ROUNDS_PER_LANGUAGE * profile.stack.configurations.length,
   "before-after": profile.selection.beforeAfterPool,
   algorithm: profile.curated?.algorithm?.rounds ?? 0,
@@ -288,14 +300,25 @@ const parseQueries = (value: unknown): readonly ProfileQuery[] => {
   return Object.freeze(queries);
 };
 
+/**
+ * The languages a run reads: whole look-alike pairs in `STACK_LANGUAGES` order. A language marked
+ * `"projectDeck": false` feeds the language deck alone; the key appears only when set, so a profile without it
+ * parses (and hashes) as before.
+ */
 const parseConfigurations = (value: unknown): CrawlProfile["stack"]["configurations"] => {
-  if (!Array.isArray(value) || value.length !== STACK_LANGUAGES.length) return fail();
-  return Object.freeze(value.map((entry, index) => {
-    const item = exactRecord(entry, ["language", "extensions"]);
-    const language = STACK_LANGUAGES[index]!;
-    if (item.language !== language) fail();
-    return Object.freeze({ language, configuration: language, extensions: exactTexts(item.extensions, STACK_EXTENSIONS[language]) });
-  }));
+  if (!Array.isArray(value)) return fail();
+  const configurations = value.map((entry) => {
+    const languageOnly = isRecord(entry) && Object.hasOwn(entry, "projectDeck");
+    const item = exactRecord(entry, languageOnly ? ["language", "extensions", "projectDeck"] : ["language", "extensions"]);
+    if (!(STACK_LANGUAGES as readonly unknown[]).includes(item.language) || (languageOnly && item.projectDeck !== false)) fail();
+    const language = item.language as StackLanguage;
+    return Object.freeze({ language, configuration: language, extensions: exactTexts(item.extensions, STACK_EXTENSIONS[language]),
+      ...(languageOnly ? { projectDeck: false as const } : {}) });
+  });
+  if (!isLanguageSelection(configurations.map(({ language }) => language))) fail();
+  // The project deck needs at least one language, and its options are whole repositories, not pairs.
+  if (!configurations.some(({ projectDeck }) => projectDeck !== false)) fail();
+  return Object.freeze(configurations);
 };
 
 const parseCapacity = (value: unknown): CapacityLimits => {

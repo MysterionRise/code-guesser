@@ -11,8 +11,8 @@ import {
   texts,
   type RecordValue,
 } from "./model-validation";
-import { CAPACITY_CEILINGS, STACK_LANGUAGES } from "./profile";
-import { DECK_IDS, MAXIMUM_POOL_SIZE } from "../../../packages/artifact/src/index";
+import { CAPACITY_CEILINGS } from "./profile";
+import { DECK_IDS, MAXIMUM_POOL_SIZE, isLanguageSelection } from "../../../packages/artifact/src/index";
 import { RUN_RETRY_LIMIT } from "./retry";
 
 /** One deck or more, up to every deck, each a pool of five to forty rounds. */
@@ -81,17 +81,20 @@ const parseRunQueries = (value: unknown): readonly RecordValue[] => {
 };
 
 const parseRunConfigurations = (value: unknown): readonly RecordValue[] => {
-  if (!Array.isArray(value) || value.length !== STACK_LANGUAGES.length) return fail();
-  return value.map((entry, index) => {
+  if (!Array.isArray(value)) return fail();
+  const configurations = value.map((entry) => {
     const configuration = record(entry, [
       "language", "configuration", "rowCeiling", "completeness",
     ]);
-    exact(configuration.language, STACK_LANGUAGES[index]!);
-    exact(configuration.configuration, STACK_LANGUAGES[index]!);
+    if (typeof configuration.language !== "string") fail();
+    exact(configuration.configuration, configuration.language as string);
     boundedCount(configuration.rowCeiling, CAPACITY_CEILINGS.stackRowsPerLanguage);
     validateCompleteness(configuration.completeness, STACK_RESPONSE_STATES);
     return configuration;
   });
+  // The languages read are whole look-alike pairs in their fixed order, as the profile configures them.
+  if (!isLanguageSelection(configurations.map(({ language }) => language))) fail();
+  return configurations;
 };
 
 const validateRunUsage = (
@@ -106,9 +109,9 @@ const validateRunUsage = (
   boundedCount(counts.githubPages, queries.reduce((sum, query) => sum + count(query.pageCeiling), 0));
   boundedCount(counts.githubResults, queries.reduce((sum, query) => sum + count(query.resultCeiling), 0));
   boundedCount(counts.repositoriesAdmitted, sourceCapacity);
-  const stackRows = record(counts.stackRows, STACK_LANGUAGES);
-  STACK_LANGUAGES.forEach((language, index) =>
-    boundedCount(stackRows[language], count(configurations[index]!.rowCeiling)));
+  const languages = configurations.map(({ language }) => String(language));
+  const stackRows = record(counts.stackRows, languages);
+  languages.forEach((language, index) => boundedCount(stackRows[language], count(configurations[index]!.rowCeiling)));
   const attempts = boundedCount(counts.blobAttempts, CAPACITY_CEILINGS.blobAttempts);
   const retrieved = boundedCount(counts.blobsRetrieved, CAPACITY_CEILINGS.successfulBlobs);
   if (retrieved > attempts || count(counts.githubRevalidations) > attempts) fail();
