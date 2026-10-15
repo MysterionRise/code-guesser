@@ -1,3 +1,4 @@
+import { DECK_IDS, MAXIMUM_POOL_SIZE } from "../../../packages/artifact/src/index";
 import { CAPACITY_CEILINGS } from "../limits";
 import { STACK_LANGUAGES } from "./profile";
 import { ExperimentRecordError, parseRunRecord } from "./model";
@@ -154,7 +155,7 @@ describe("operational run records", () => {
     }
   });
 
-  it("accepts six full decks of selected rounds, and no more than six decks can hold", () => {
+  it("accepts full decks of selected rounds, and no more than every deck can hold", () => {
     const sized = (selected: number) => {
       const candidate = runRecord() as Record<string, any>;
       candidate.counts.screened = 400;
@@ -164,7 +165,9 @@ describe("operational run records", () => {
       return candidate;
     };
     expect((parseRunRecord(sized(130)) as any).counts.selected).toBe(130);
-    expect(() => parseRunRecord(sized(241))).toThrow(ExperimentRecordError);
+    // Every deck the artifact knows, each at its largest pool, bounds what a run may select.
+    expect((parseRunRecord(sized(DECK_IDS.length * MAXIMUM_POOL_SIZE)) as any).counts.selected).toBe(DECK_IDS.length * MAXIMUM_POOL_SIZE);
+    expect(() => parseRunRecord(sized(DECK_IDS.length * MAXIMUM_POOL_SIZE + 1))).toThrow(ExperimentRecordError);
   });
 
   it("bounds operational outcomes by the recorded source capacities and screening relationships", () => {

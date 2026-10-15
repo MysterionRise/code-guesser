@@ -289,6 +289,13 @@ gate: changing queries, retries, ceilings, deck rules, or running
     so no option set appears in more than two rounds.
   - **Phase 3b,** the curated decks. Each runs only when the profile carries
     its `curated` section, after the Stack and search decks.
+    - **Missing line (#57, v1.0):** `missing-line-window.ts` (gaps, decoys,
+      ranks), `select-missing-line.ts`, `missing-line-rounds.ts`, and the
+      shared rules in `packages/artifact/src/missing-line.ts` (kind
+      `MISSING_LINE`, deck `missing-line`). The profile section
+      `curated["missing-line"]` turns it on; the committed v5 profile has none,
+      so it goes live with the v6 run (#129). Dry run:
+      `docs/review/evidence/2026-10-15-missing-line-dry-run.md`.
     - **Registry (#36):** `ops/poc/prepare/curated-decks.ts` lists them in
       run order (`configured`, `select`, `generate`); ids live in
       `curated-deck-ids.ts`, and a deck's profile section is keyed by its id
@@ -445,7 +452,9 @@ when the preparer throws a code this section does not name.
   - A round generator's own check: `*_ROUNDS_REJECTED`,
     `ALGORITHM_NAME_SHOWN`, `ALGORITHM_FAMILY_UNBALANCED`,
     `OUTPUT_ANSWER_ECHOED`, `OUTPUT_RANK_UNBALANCED`, `FIX_RANK_UNBALANCED`,
-    `FIX_REPOSITORY_REPEATED`, `TEMPLATE_PLACEHOLDER_REJECTED`.
+    `FIX_REPOSITORY_REPEATED`, `MISSING_LINE_RANK_UNBALANCED`,
+    `MISSING_LINE_HINT_DECIDES` (no other option does what the answer
+    does, so the first hint would pick it), `TEMPLATE_PLACEHOLDER_REJECTED`.
 - Publication: `HASH_MISMATCH`, `INVALID_ARTIFACT`, `INVALID_HASH`, and
   `REPORT_*_FAILED` (staging, committing, rolling back, or finalizing the
   report). The previous artifact and pin stay.
@@ -527,6 +536,13 @@ add up.
   `OUTPUT_FILE_CHANGED`: the file bound differs from the file read.
   `OUTPUT_RANKS_UNBALANCED`: no choice of answers fills every rank in both
   orders, so the output deck is skipped.
+- `MISSING_LINE_NO_GAP` (#57): a file with no line a round can hide, in a
+  window that holds it away from both edges, with three same-indent decoys
+  from elsewhere in the file. `MISSING_LINE_FILE_CHANGED`: the file bound
+  differs from the file read. `MISSING_LINE_RANKS_UNBALANCED`: no choice of
+  gaps balances the deck in text, length, and shared-name orders, so the
+  deck is skipped. `MISSING_LINE_LANGUAGE`: the pinned repository's language
+  has no source-file rule yet.
 - `FIX_PATCH_WIDE`: a dataset patch that changes more than one line (most).
   - `FIX_CLAIM`: the fix's lines, which the reveal quotes, claim something
     about authorship (#32).

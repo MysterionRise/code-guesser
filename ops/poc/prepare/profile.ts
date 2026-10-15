@@ -126,6 +126,18 @@ export interface FixDeck {
   readonly perRepository: number;
   readonly templates: Readonly<{ title: string; description: string; prompt: string; evidence: string; explanation: string }>;
 }
+/** "Missing line" (#57): windows of a curated repository's files with one line hidden. */
+export interface MissingLineDeck {
+  readonly rounds: number;
+  readonly repository: string;
+  /** Top-level directories whose files are read, in an order fixed by hash. */
+  readonly directories: readonly string[];
+  /** At most this many files are read. */
+  readonly fileReads: number;
+  /** Lines a pane shows, the gap among them. */
+  readonly windowLines: number;
+  readonly templates: Readonly<{ title: string; description: string; prompt: string; evidence: string; explanation: string }>;
+}
 export interface CuratedProfile {
   readonly repositories: readonly CuratedRepository[];
   readonly algorithm?: Readonly<{
@@ -135,6 +147,7 @@ export interface CuratedProfile {
   }>;
   readonly output?: OutputDeck;
   readonly fix?: FixDeck;
+  readonly "missing-line"?: MissingLineDeck;
 }
 
 /** Options per algorithm round: one whole family. */
@@ -158,6 +171,7 @@ export const poolSizes = (profile: CrawlProfile): Readonly<Record<DeckId, number
   algorithm: profile.curated?.algorithm?.rounds ?? 0,
   output: profile.curated?.output?.rounds ?? 0,
   fix: profile.curated?.fix?.rounds ?? 0,
+  "missing-line": profile.curated?.["missing-line"]?.rounds ?? 0,
 });
 
 export class CrawlProfileError extends Error {
@@ -435,6 +449,29 @@ const parseOutputDeck = (value: unknown, repositories: readonly CuratedRepositor
   });
 };
 
+const parseMissingLineDeck = (value: unknown, repositories: readonly CuratedRepository[]): MissingLineDeck => {
+  const deck = exactRecord(value, ["rounds", "repository", "directories", "fileReads", "windowLines", "templates"]);
+  const rounds = integer(deck.rounds);
+  if (rounds % 4 !== 0 || rounds < 8 || rounds > 60) fail();
+  const repository = text(deck.repository);
+  if (repositories.find((known) => known.repository === repository) === undefined) fail();
+  const directories = uniqueTexts(deck.directories);
+  if (directories.some((directory) => !/^[A-Za-z0-9_]+$/u.test(directory))) fail();
+  const fileReads = integer(deck.fileReads);
+  if (fileReads < rounds || fileReads > OUTPUT_FILE_READS_MAXIMUM) fail();
+  const windowLines = integer(deck.windowLines);
+  if (windowLines < 6 || windowLines > 20) fail();
+  const templates = exactRecord(deck.templates, ["title", "description", "prompt", "evidence", "explanation"]);
+  return Object.freeze({
+    rounds, repository, directories, fileReads, windowLines,
+    templates: Object.freeze({
+      title: text(templates.title), description: text(templates.description), prompt: placeholderText(templates.prompt, []),
+      evidence: placeholderText(templates.evidence, ["path", "repository", "line"]),
+      explanation: placeholderText(templates.explanation, []),
+    }),
+  });
+};
+
 const PROJECT_NAME = /^[A-Za-z0-9_.-]+$/u;
 const parseFixDeck = (value: unknown): FixDeck => {
   const deck = exactRecord(value, ["rounds", "datasets", "patchReads", "perRepository", "templates"]);
@@ -473,7 +510,7 @@ const parseFixDeck = (value: unknown): FixDeck => {
 
 /** The curated pins, and each deck built from them that the profile configures. */
 const parseCurated = (value: unknown): CuratedProfile => {
-  const decks = (["algorithm", "output", "fix"] as const).filter((key) => isRecord(value) && Object.hasOwn(value, key));
+  const decks = (["algorithm", "output", "fix", "missing-line"] as const).filter((key) => isRecord(value) && Object.hasOwn(value, key));
   const curated = exactRecord(value, ["repositories", ...decks]);
   const repositories = parseCuratedRepositories(curated.repositories);
   return Object.freeze({
@@ -481,6 +518,7 @@ const parseCurated = (value: unknown): CuratedProfile => {
     ...(decks.includes("algorithm") ? { algorithm: parseAlgorithmDeck(curated.algorithm, repositories) } : {}),
     ...(decks.includes("output") ? { output: parseOutputDeck(curated.output, repositories) } : {}),
     ...(decks.includes("fix") ? { fix: parseFixDeck(curated.fix) } : {}),
+    ...(decks.includes("missing-line") ? { "missing-line": parseMissingLineDeck(curated["missing-line"], repositories) } : {}),
   });
 };
 

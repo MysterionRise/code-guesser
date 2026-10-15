@@ -4,6 +4,8 @@ import { readFileSync } from "node:fs";
 import { generateAlgorithmRounds, type AlgorithmCandidate } from "../algorithm-rounds";
 import { doctestFunctions, roundExamples } from "../doctest-parse";
 import { balancedAnswers, generateOutputRounds, outputPane, type OutputCandidate } from "../output-rounds";
+import { gapChoices, gapSlack } from "../missing-line-window";
+import { generateMissingLineRounds, type MissingLineCandidate } from "../missing-line-rounds";
 import { generateFixRounds, type FixCandidate } from "../fix-rounds";
 import { changeKind, fixWindows } from "../fix-window";
 import type { DatasetBug } from "../github-fixes";
@@ -249,6 +251,8 @@ export const composeInput = (
       ...(profile.curated?.algorithm ? { algorithm: generateAlgorithmRounds({ profile, candidates: algorithmCandidates(profile, snapshotId) }) } : {}),
       ...(profile.curated?.output ? { output: generateOutputRounds({ profile, candidates: outputCandidates(profile, snapshotId) }) } : {}),
       ...(profile.curated?.fix ? { fix: generateFixRounds({ profile, candidates: fixCandidates(profile, snapshotId) }) } : {}),
+      ...(profile.curated?.["missing-line"]
+        ? { "missing-line": generateMissingLineRounds({ profile, candidates: missingLineCandidates(profile, snapshotId) }) } : {}),
     },
     candidates,
   };
@@ -295,12 +299,64 @@ export const CURATED_SECTION = Object.freeze({
 /** The deck profile with the curated section: it configures an eight-round algorithm deck. */
 export const loadCuratedProfile = (
   selection: Readonly<Record<string, number>> = {},
-  decks: Readonly<{ algorithm?: boolean; output?: boolean; fix?: boolean }> = { algorithm: true },
+  decks: Readonly<{ algorithm?: boolean; output?: boolean; fix?: boolean; "missing-line"?: boolean }> = { algorithm: true },
 ): CrawlProfile => {
   const raw = JSON.parse(readFileSync(new URL("../../profiles/local-real-rounds.v5.json", import.meta.url), "utf8"));
   const curated = { repositories: CURATED_REPOSITORIES, ...(decks.algorithm ? { algorithm: CURATED_SECTION.algorithm } : {}),
-    ...(decks.output ? { output: OUTPUT_SECTION } : {}), ...(decks.fix ? { fix: FIX_SECTION } : {}) };
+    ...(decks.output ? { output: OUTPUT_SECTION } : {}), ...(decks.fix ? { fix: FIX_SECTION } : {}),
+    ...(decks["missing-line"] ? { "missing-line": MISSING_LINE_SECTION } : {}) };
   return parseCrawlProfile({ ...raw, selection: { ...raw.selection, ...selection }, curated: structuredClone(curated) });
+};
+
+/** An eight-round missing-line deck over the curated Python pin's `utils` directory (#57). */
+export const MISSING_LINE_SECTION = Object.freeze({
+  rounds: 8,
+  repository: "algos/python",
+  directories: ["utils"],
+  fileReads: 14,
+  windowLines: 8,
+  templates: {
+    title: "Missing line",
+    description: "One line of a real function is hidden; pick the line that fills the gap.",
+    prompt: "Which line fills the gap?",
+    evidence: "Line {line} of {path} in {repository} reads this way.",
+    explanation: "The answer is the file's own line; the others are lines from elsewhere in the same file.",
+  },
+});
+
+/**
+ * Twelve small modules of three functions each that share their names (`values`, `result`, `total`), as real code
+ * does, so a decoy from another function can share as many names with a pane as the hidden line.
+ */
+export const missingLineFiles = (): ReadonlyMap<string, string> => new Map(Array.from({ length: 12 }, (_, index) => {
+  const k = index + 3;
+  const text = [
+    `def scale_${k}(values, factor):`, "    result = []", "    for value in values:", `        result.append(value * factor + ${k})`,
+    `        total = sum(result) + ${k}`, "    total = max(result)", "    return total", "",
+    `def shift_${k}(values, offset):`, "    result = [0]", "    for value in reversed(values):", `        result.append(value - offset * ${k})`,
+    `        total = len(result) - ${k}`, "    total = min(result)", `    return total + ${k}`, "",
+    `def mix_${k}(values, other):`, "    result = [1]", "    for value, extra in zip(values, other):", `        result.append(value + extra * ${k})`,
+    `        total = sum(result) * ${k}`, "    total = len(result)", `    return total - ${k}`, "",
+  ].join("\n");
+  return [`algos/python:utils/mod_${k}.py`, text] as const;
+}));
+
+/** Bound missing-line candidates for the small profile: the first files, each with the gap the balance search picks. */
+export const missingLineCandidates = (profile: CrawlProfile, snapshotId: string): readonly MissingLineCandidate[] => {
+  const deck = profile.curated!["missing-line"]!;
+  const files = [...missingLineFiles()].slice(0, deck.rounds);
+  const choices = files.map(([key, text]) => gapChoices(text, key, deck.windowLines).slice(0, 48));
+  const picks = balancedChoice(choices.map((options) => options.map(({ ranks }) => ranks)), 4, gapSlack(files.length))!;
+  return files.map(([key, text], index) => {
+    const choice = choices[index]![picks[index]!]!;
+    return Object.freeze({
+      repository: "algos/python", commit: CURATED_REPOSITORIES[0].commit, path: key.slice("algos/python:".length),
+      blob: sha1(`blob ${text}`), rawContentHash: sha256(text), licenseName: "MIT License", licenseSpdx: "MIT",
+      licenseFileUrl: `https://github.com/algos/python/blob/${CURATED_REPOSITORIES[0].commit}/LICENSE`, authorName: "Curated Author",
+      authorLogin: "curated-author", authorCommit: "c".repeat(40), language: "Python" as const, ...choice, excerptHash: sha256(choice.excerpt),
+      crawlSnapshotId: snapshotId,
+    });
+  });
 };
 
 /** An eight-round output deck over the curated Python pin's `maths` and `strings` directories. */

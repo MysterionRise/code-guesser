@@ -1,14 +1,16 @@
 import type { JsonRecord } from "./validation";
 
 /** The decks an artifact may carry, in this order; a run publishes every deck it could fill. */
-export const DECK_IDS = Object.freeze(["project", "language", "before-after", "algorithm", "output", "fix"] as const);
+export const DECK_IDS = Object.freeze(["project", "language", "before-after", "algorithm", "output", "fix", "missing-line"] as const);
 export type DeckId = typeof DECK_IDS[number];
-export type FixtureKind = "PROJECT" | "LANGUAGE" | "BEFORE_AFTER" | "ALGORITHM" | "OUTPUT" | "FIX";
+export type FixtureKind = "PROJECT" | "LANGUAGE" | "BEFORE_AFTER" | "ALGORITHM" | "OUTPUT" | "FIX" | "MISSING_LINE";
 export const DECK_KINDS: Readonly<Record<DeckId, FixtureKind>> = Object.freeze({
   project: "PROJECT", language: "LANGUAGE", "before-after": "BEFORE_AFTER", algorithm: "ALGORITHM", output: "OUTPUT", fix: "FIX",
+  "missing-line": "MISSING_LINE",
 });
 export const MODE_KINDS: Readonly<Record<FixtureKind, DeckId>> = Object.freeze({
   PROJECT: "project", LANGUAGE: "language", BEFORE_AFTER: "before-after", ALGORITHM: "algorithm", OUTPUT: "output", FIX: "fix",
+  MISSING_LINE: "missing-line",
 });
 export const ARTIFACT_SCHEMA_VERSION = "local-experiment-artifact.v4";
 export const CONTENT_CLASS = "LOCAL_UNREVIEWED_EXPERIMENT";
@@ -30,7 +32,7 @@ export const LANGUAGE_PAIRS: readonly (readonly [StackLanguage, StackLanguage])[
 export const ROUNDS_PER_LANGUAGE = 2;
 /** Options per round: four for every kind but before-or-after, which has two. */
 export const CANDIDATE_COUNTS: Readonly<Record<FixtureKind, number>> = Object.freeze({
-  PROJECT: 4, LANGUAGE: 4, BEFORE_AFTER: 2, ALGORITHM: 4, OUTPUT: 4, FIX: 4,
+  PROJECT: 4, LANGUAGE: 4, BEFORE_AFTER: 2, ALGORITHM: 4, OUTPUT: 4, FIX: 4, MISSING_LINE: 4,
 });
 /** Before-or-after answers, in pane order: the first names pane A as the later version. */
 export const BEFORE_AFTER_CANDIDATE_IDS = Object.freeze([
@@ -89,6 +91,13 @@ export const OUTPUT_SOURCE_KEYS = [...CURATED_SOURCE_KEYS, "functionName", "call
 export const FIX_SOURCE_KEYS = [
   ...BASE_SOURCE_KEYS, "fixCommit", "fixBlob", "dataset", "bugId", "language", "changedLine", "windowStart",
 ] as const;
+/**
+ * A missing-line round's file (#57): `windowStart` and `gapLine` count lines of the file with its commentary removed,
+ * the text the pane is cut from, so the pane's gap is line `gapLine - windowStart + 1`.
+ */
+export const MISSING_LINE_SOURCE_KEYS = [...CURATED_SOURCE_KEYS, "language", "gapLine", "windowStart"] as const;
+/** What a missing-line pane shows in place of its hidden line, at that line's own indentation. */
+export const GAP_MARKER = "⟨ missing line ⟩";
 /** Identities that may not repeat within a deck. */
 export const DECK_DEDUPLICATION_KEYS = ["repository", "commit", "path", "blob", "rawContentHash", "excerptHash"] as const;
 /** Identities that may not repeat across decks; a repository may. */
@@ -105,17 +114,19 @@ export const DEDUPLICATION_KEYS_BY_KIND: Readonly<Record<FixtureKind, readonly s
   OUTPUT: [...FILE_KEYS],
   // A file may hold several recorded bugs; each round is its own bug and its own commit.
   FIX: ["commit", "fixCommit", "bugId", "blob", "rawContentHash", "excerptHash"],
+  MISSING_LINE: [...FILE_KEYS],
 });
 export const CROSS_DECK_KEYS_BY_KIND: Readonly<Record<FixtureKind, readonly string[]>> = Object.freeze({
   PROJECT: CROSS_DECK_KEYS, LANGUAGE: CROSS_DECK_KEYS, BEFORE_AFTER: CROSS_DECK_KEYS,
   ALGORITHM: ["blob", "rawContentHash", "excerptHash"],
   OUTPUT: ["blob", "rawContentHash", "excerptHash"],
   FIX: CROSS_DECK_KEYS,
+  MISSING_LINE: ["blob", "rawContentHash", "excerptHash"],
 });
 /** Each kind's panes: one unlabelled pane, or panes `A` and `B`. */
 export const PANE_LAYOUTS: Readonly<Record<FixtureKind, readonly (string | null)[]>> = Object.freeze({
   PROJECT: Object.freeze([null]), LANGUAGE: Object.freeze([null]), BEFORE_AFTER: PANE_LABELS, ALGORITHM: Object.freeze([null]),
-  OUTPUT: Object.freeze([null]), FIX: Object.freeze([null]),
+  OUTPUT: Object.freeze([null]), FIX: Object.freeze([null]), MISSING_LINE: Object.freeze([null]),
 });
 /** The word an algorithm round's code shows in place of the algorithm's own name (`mystery`, `Mystery`). */
 export const MASKED_NAME = "mystery";

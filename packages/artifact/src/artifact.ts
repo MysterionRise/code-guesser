@@ -31,7 +31,10 @@ import {
   type StackLanguage,
 } from "./domain";
 import { fail } from "./errors";
-import { pinKey, validateCuratedSource, validateFixSource, validateLineageSource, validateStackSource, type StackIdentity } from "./source";
+import { missingLineDeckRule, validateMissingLine } from "./missing-line";
+import {
+  pinKey, validateCuratedSource, validateFixSource, validateLineageSource, validateMissingLineSource, validateStackSource, type StackIdentity,
+} from "./source";
 import {
   canonicalHash,
   codeText,
@@ -389,7 +392,7 @@ const validateFix = ({ panes, candidates, clues, correctCandidateId, source }: S
 
 const VALIDATORS: Readonly<Record<FixtureKind, (semantics: Semantics) => void>> = Object.freeze({
   PROJECT: validateProject, LANGUAGE: validateLanguage, BEFORE_AFTER: validateBeforeAfter, ALGORITHM: validateAlgorithm,
-  OUTPUT: validateOutput, FIX: validateFix,
+  OUTPUT: validateOutput, FIX: validateFix, MISSING_LINE: (semantics: Semantics) => validateMissingLine(semantics),
 });
 
 /** Where each kind's source comes from, and the check that binds it to this snapshot. */
@@ -400,10 +403,12 @@ const SOURCE_VALIDATORS: Readonly<Record<FixtureKind, (value: unknown, snapshot:
   ALGORITHM: (value: unknown, snapshot: Snapshot) => validateCuratedSource(value, ALGORITHM_SOURCE_KEYS, snapshot.id, snapshot.pins),
   OUTPUT: (value: unknown, snapshot: Snapshot) => validateCuratedSource(value, OUTPUT_SOURCE_KEYS, snapshot.id, snapshot.pins),
   FIX: (value: unknown, snapshot: Snapshot) => validateFixSource(value, snapshot.id, snapshot.datasets),
+  MISSING_LINE: (value: unknown, snapshot: Snapshot) => validateMissingLineSource(value, snapshot.id, snapshot.pins),
 });
 
 /** Rules a whole deck must keep beyond its rounds' own. */
 const DECK_RULES: Readonly<Partial<Record<DeckId, (fixtures: readonly ParsedFixture[]) => void>>> = Object.freeze({
+  "missing-line": missingLineDeckRule,
   // Pane order carries no signal: the later version is pane A in half the pool, give or take one.
   "before-after": (fixtures: readonly ParsedFixture[]) => {
     const aLater = fixtures.filter(({ correctCandidateId }) => correctCandidateId === BEFORE_AFTER_CANDIDATE_IDS[0]).length;

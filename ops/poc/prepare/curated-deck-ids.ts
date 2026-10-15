@@ -3,7 +3,7 @@
  * without importing the registry (`curated-decks.ts`), whose selectors reach composition through `selection.ts`.
  * A curated deck's profile section is keyed by its id and carries the deck's `templates`.
  */
-export const CURATED_DECK_IDS = Object.freeze(["algorithm", "output", "fix"] as const);
+export const CURATED_DECK_IDS = Object.freeze(["algorithm", "output", "fix", "missing-line"] as const);
 export type CuratedDeckId = (typeof CURATED_DECK_IDS)[number];
 
 export const isCuratedDeck = (id: string): id is CuratedDeckId => (CURATED_DECK_IDS as readonly string[]).includes(id);
