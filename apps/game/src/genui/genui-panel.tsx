@@ -9,6 +9,8 @@ import { parseComposerSpec, type ComposerSpec } from "./composer-spec";
 import { ComposerView } from "./composer-view";
 import type { Design } from "./designs";
 import { parseRenderCall, type RenderCall, type RenderLimits, type RoundPhase } from "./render-catalog";
+import { parseVisualizer, type Visualizer } from "./visualizer-spec";
+import { VisualizerView } from "./visualizer-view";
 
 export interface GenuiPanelProps {
   readonly design: Design;
@@ -30,7 +32,8 @@ export const GENUI_FALLBACK_MESSAGE = "The explainer isn’t available right now
 
 export type RenderedView =
   | Readonly<{ kind: "catalog"; call: RenderCall }>
-  | Readonly<{ kind: "composer"; spec: ComposerSpec }>;
+  | Readonly<{ kind: "composer"; spec: ComposerSpec }>
+  | Readonly<{ kind: "visualizer"; visualizer: Visualizer }>;
 
 /**
  * Checked views in a chat's assistant messages, checked again here though the server already did: a catalog call
@@ -41,9 +44,9 @@ export const renderViews = (messages: readonly UIMessage[], phase: RoundPhase, l
     if (!isToolUIPart(part) || part.state !== "output-available") return [];
     try {
       const name = getToolName(part);
-      return name === "compose_panel"
-        ? [{ kind: "composer", spec: parseComposerSpec(composerInput(part.output), limits) }]
-        : [{ kind: "catalog", call: parseRenderCall({ component: name, props: part.output }, phase, limits) }];
+      if (name === "compose_panel") return [{ kind: "composer", spec: parseComposerSpec(composerInput(part.output), limits) }];
+      if (name === "render_visualizer") return [{ kind: "visualizer", visualizer: parseVisualizer(part.output) }];
+      return [{ kind: "catalog", call: parseRenderCall({ component: name, props: part.output }, phase, limits) }];
     } catch {
       return [];
     }
@@ -56,6 +59,14 @@ const composerInput = (output: unknown): unknown => {
   if (typeof elements !== "object" || elements === null) return output;
   return { root, elements: Object.entries(elements).map(([id, item]) => ({ id, ...(item as object) })) };
 };
+
+/** How each design names its panel, its button, and its wait. */
+const PANEL_TEXT: Readonly<Record<Design, Readonly<{ heading: string; button: string; busy: string }>>> = Object.freeze({
+  catalog: { heading: "Explainer", button: "Explain this round", busy: "Working on it…" },
+  composer: { heading: "Explainer", button: "Explain this round", busy: "Laying out an explanation…" },
+  visualizer: { heading: "Visualizer", button: "Visualize this round", busy: "Building a visualization; this can take half a minute…" },
+  host: { heading: "Host", button: "Ask the host", busy: "The host is thinking…" },
+});
 
 /** Whether a finished request rendered nothing: an error, or an answer with no usable render call at all. */
 export const fellBack = (status: string, sent: boolean, rendered: number, error: unknown): boolean =>
@@ -84,17 +95,18 @@ export default function GenuiPanel({ design, roundId, pick, phase, panes, option
 
   return (
     <section className="genui-panel" aria-labelledby={headingId} data-genui-status={failed ? "fallback" : status} data-genui-design={design}>
-      <h3 id={headingId}>Explainer</h3>
+      <h3 id={headingId}>{PANEL_TEXT[design].heading}</h3>
       {messages.length === 0 && (
         <button type="button" className="secondary-action" onClick={() => { void sendMessage({ text: explainRequest(pick) }); }}>
-          Explain this round
+          {PANEL_TEXT[design].button}
         </button>
       )}
       <div className="genui-output" aria-live="polite" aria-busy={busy}>
-        {busy && <p className="genui-status">Working on it…</p>}
-        {views.filter((view, index) => view.kind !== "composer" || !views.slice(index + 1).some(({ kind }) => kind === "composer")).map((view, index) => view.kind === "composer"
+        {busy && <p className="genui-status">{PANEL_TEXT[design].busy}</p>}
+        {views.filter((view, index) => view.kind === "catalog" || !views.slice(index + 1).some(({ kind }) => kind === view.kind)).map((view, index) => view.kind === "composer"
           ? <ComposerView key={index} spec={view.spec} panes={panes} />
-          : <CatalogView key={index} call={view.call} panes={panes} />)}
+          : view.kind === "visualizer" ? <VisualizerView key={index} visualizer={view.visualizer} />
+            : <CatalogView key={index} call={view.call} panes={panes} />)}
         {failed && <p className="genui-status">{GENUI_FALLBACK_MESSAGE}</p>}
       </div>
     </section>

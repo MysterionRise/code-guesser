@@ -5,6 +5,7 @@ import { jsonSchema, stepCountIs, streamText, tool, type ModelMessage, type Stop
 
 import { COMPOSER_TOOL_DESCRIPTION, ComposerRejected, composerInputSchema, parseComposerSpec } from "./composer-spec";
 import type { Design } from "./designs";
+import { VISUALIZER_TOOL_DESCRIPTION, VisualizerRejected, parseVisualizer } from "./visualizer-spec";
 import { RENDER_CATALOG, RenderCallRejected, componentsFor, inputSchemaFor, parseRenderCall, type RenderLimits } from "./render-catalog";
 import { modelInput, type RoundContext } from "./round-context.server";
 
@@ -19,14 +20,15 @@ export const DEFAULT_BASE_URL = "https://openrouter.ai/api/v1";
 /** Room for a few render calls or one composed panel; reasoning is off, so none of it goes to thinking. */
 const MAX_OUTPUT_TOKENS = 2_500;
 const TIMEOUT_MS = 20_000;
-/** A composed panel is one long call, and may take a repair round. */
-const COMPOSER_TIMEOUT_MS = 45_000;
+/** A composed panel is one long call, and may take a repair round; a visualizer page is longer still. */
+const LONG_TIMEOUT_MS: Readonly<Partial<Record<Design, number>>> = Object.freeze({ composer: 45_000, visualizer: 90_000 });
+const LONG_OUTPUT_TOKENS: Readonly<Partial<Record<Design, number>>> = Object.freeze({ visualizer: 9_000 });
 
 /**
  * One step, except that a composed panel the checks refused gets one repair round: the model sees which check
  * failed and calls again. The run stops as soon as a panel passes.
  */
-const stopFor = (design: Design): StopCondition<ToolSet> | StopCondition<ToolSet>[] => design !== "composer" ? stepCountIs(1)
+const stopFor = (design: Design): StopCondition<ToolSet> | StopCondition<ToolSet>[] => design !== "composer" && design !== "visualizer" ? stepCountIs(1)
   : [stepCountIs(2), ({ steps }) => steps.at(-1)?.content.some((part) => part.type === "tool-result") ?? false];
 /** Turns of chat the model sees, and how long one may be. */
 export const MAX_TURNS = 8;
@@ -89,21 +91,65 @@ const renderTools = (context: RoundContext, limits: RenderLimits): ToolSet => Ob
   })]),
 );
 
+/**
+ * A design that renders one thing (a composed panel, a visualizer page) keeps only the first that passes; a model
+ * that writes several in parallel (seen live) has the rest refused rather than shown in turn.
+ */
+const firstOnly = (name: string) => {
+  let accepted = false;
+  return <Value>(value: Value): Value => {
+    if (accepted) {
+      console.error(`GENUI_RENDER_REJECTED ${name} ONE_ONLY`);
+      throw new Error(`${name} was already called for this round. Do not call it again.`);
+    }
+    accepted = true;
+    return value;
+  };
+};
+
+/** Designs whose single tool may be called once per request. */
+const SINGLE_CALL: ReadonlySet<Design> = new Set(["composer", "visualizer"]);
+
 /** The composer lays out the whole panel in one call (#114). */
-const composerTools = (limits: RenderLimits): ToolSet => ({
+const composerTools = (limits: RenderLimits): ToolSet => { const once = firstOnly("compose_panel"); return {
   compose_panel: tool({
     description: COMPOSER_TOOL_DESCRIPTION,
     inputSchema: jsonSchema<Record<string, unknown>>(composerInputSchema() as never),
     execute: async (input: Record<string, unknown>) => {
       try {
-        return parseComposerSpec(input, limits);
+        return once(parseComposerSpec(input, limits));
       } catch (error) {
         if (error instanceof ComposerRejected) console.error(`GENUI_RENDER_REJECTED compose_panel ${error.code}`);
         throw error;
       }
     },
   }),
-});
+}; };
+
+/** The visualizer writes one sandboxed page (#115). */
+const visualizerTools = (): ToolSet => { const once = firstOnly("render_visualizer"); return {
+  render_visualizer: tool({
+    description: VISUALIZER_TOOL_DESCRIPTION,
+    inputSchema: jsonSchema<Record<string, unknown>>({
+      type: "object",
+      properties: {
+        title: { type: "string", minLength: 1, maxLength: 80, description: "What the visualization shows. At most 80 characters." },
+        summary: { type: "string", minLength: 1, maxLength: 600, description: "What it shows, in words, for players who can't see it. At most 600 characters." },
+        html: { type: "string", minLength: 1, description: "The page's body markup, with inline <style> and <script>." },
+      },
+      required: ["title", "summary", "html"],
+      additionalProperties: false,
+    } as never),
+    execute: async (input: Record<string, unknown>) => {
+      try {
+        return once(parseVisualizer(input));
+      } catch (error) {
+        if (error instanceof VisualizerRejected) console.error(`GENUI_RENDER_REJECTED render_visualizer ${error.code}`);
+        throw error;
+      }
+    },
+  }),
+}; };
 
 /** What each design asks of the model, on top of the guard's own rules. */
 const DESIGN_RULES: Readonly<Partial<Record<Design, string>>> = Object.freeze({
@@ -115,11 +161,16 @@ const DESIGN_RULES: Readonly<Partial<Record<Design, string>>> = Object.freeze({
     "Finish with a Quiz that checks the takeaway, with exactly one right choice.",
     "Aim for 8 to 20 elements and vary the layout to suit the round.",
   ].join(" "),
+  visualizer: [
+    "Build one interactive visualization of this round with a single render_visualizer call, and nothing else.",
+    "Show the code at work on a small concrete input taken from the round: step through the algorithm, trace the call, or show what the fix changes.",
+    "Keep it under 250 lines. Use a dark background and light text, readable at 14px, and label every control with text.",
+  ].join(" "),
 });
 
 /** The tools a design may call in this phase. */
 const toolsFor = (design: Design, context: RoundContext, limits: RenderLimits): ToolSet =>
-  design === "composer" ? composerTools(limits) : renderTools(context, limits);
+  design === "composer" ? composerTools(limits) : design === "visualizer" ? visualizerTools() : renderTools(context, limits);
 
 export interface RoundRequest {
   readonly design: Design;
@@ -151,6 +202,7 @@ export const streamRound = ({ design, context, limits, codeLines, turns, signal 
       // Rendering a few short components needs no thinking. With it on (Claude Haiku 5.5 thinks by default), the
       // first live check spent the whole output budget on reasoning and returned nothing.
       reasoning: { enabled: false },
+      ...(SINGLE_CALL.has(design) ? { parallel_tool_calls: false } : {}),
     }),
   });
   const { system: rules, data } = modelInput(context);
@@ -165,9 +217,9 @@ export const streamRound = ({ design, context, limits, codeLines, turns, signal 
     messages,
     tools: toolsFor(design, context, limits),
     stopWhen: stopFor(design),
-    maxOutputTokens: MAX_OUTPUT_TOKENS,
+    maxOutputTokens: LONG_OUTPUT_TOKENS[design] ?? MAX_OUTPUT_TOKENS,
     maxRetries: 1,
-    timeout: design === "composer" ? COMPOSER_TIMEOUT_MS : TIMEOUT_MS,
+    timeout: LONG_TIMEOUT_MS[design] ?? TIMEOUT_MS,
     ...(signal === undefined ? {} : { abortSignal: signal }),
     onError: ({ error }) => {
       const status = isRecord(error) && typeof error.statusCode === "number" ? error.statusCode : "NETWORK";

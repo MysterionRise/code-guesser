@@ -83,3 +83,24 @@ test("the composer design lays out its own panel, and the switcher moves between
   await expect(page.getByRole("region", { name: "Explainer" })).toHaveCount(0);
   await expect(page.getByRole("link", { name: "All decks" })).toBeVisible();
 });
+
+test("the visualizer runs the model's page in a sandbox that can't reach the game, storage, or the network", async ({ page, request }) => {
+  await page.goto("/?deck=algorithm&design=visualizer");
+  await expect(page.getByText("Round 1 of 5")).toBeVisible();
+  await answerRound(page);
+  const panel = page.getByRole("region", { name: "Visualizer" });
+  await panel.getByRole("button", { name: "Visualize this round" }).click();
+  const frame = panel.locator("iframe.visualizer-frame");
+  await expect(frame).toHaveAttribute("sandbox", "allow-scripts");
+  await expect(frame).toHaveAttribute("title", "Stepping through the round");
+  await expect(panel.locator(".visualizer-summary")).toHaveText("A counter that advances one step per press.");
+  // The page spelled its escapes in pieces to pass the server's checks; only the sandbox and its CSP stop them.
+  const inside = page.frameLocator("iframe.visualizer-frame");
+  await expect(inside.locator("#isolation")).toHaveText("isolated");
+  await expect(inside.locator("#storage")).toHaveText("blocked");
+  await inside.getByRole("button", { name: "Step" }).click();
+  await expect(inside.locator("#status")).toHaveText("Step 1");
+  await page.waitForTimeout(500);
+  expect(await (await request.get(`${fake}/leaks`)).text()).toBe("0");
+  await expect(page.getByRole("button", { name: "Next round" })).toBeEnabled();
+});
