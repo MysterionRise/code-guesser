@@ -47,6 +47,8 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
   const token = React.useRef(sessionToken);
   const currentToken = React.useCallback(() => token.current, []);
   const hintPending = React.useRef(false);
+  // Shown as state too, so "Lock in answer" waits visibly while a hint loads instead of ignoring the press.
+  const [hintLoading, setHintLoading] = React.useState(false);
   const [hintError, setHintError] = React.useState<string | null>(null);
   const [ended, setEnded] = React.useState(false);
   const [selection, setSelection] = React.useState("");
@@ -128,6 +130,7 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
   const requestHint = async () => {
     if (hintPending.current || busy || ended || session.lockedCandidateId !== null) return;
     hintPending.current = true;
+    setHintLoading(true);
     setHintError(null);
     try {
       const response = await revealHintAction({ sessionToken: token.current, roundId: round.roundId });
@@ -142,6 +145,7 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
       setHintError("Couldn’t get that hint. Try again.");
     } finally {
       hintPending.current = false;
+      setHintLoading(false);
     }
   };
 
@@ -156,8 +160,9 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
   return (
     <main className="arcade-shell" data-round-count={mode.rounds.length}>
       <noscript>This game needs JavaScript for answers and progressive evidence.</noscript>
-      <ArcadeHeader score={session.score} />
-      <RoundTrack rounds={mode.rounds} roundIndex={session.roundIndex} outcomes={session.outcomes} />
+      <ArcadeHeader score={session.score}>
+        <RoundTrack rounds={mode.rounds} roundIndex={session.roundIndex} outcomes={session.outcomes} />
+      </ArcadeHeader>
 
       <section className="game-card" aria-labelledby="round-title" data-round-id={round.roundId}>
         <p className="eyebrow">Round {session.roundIndex + 1} of {mode.rounds.length}</p>
@@ -172,7 +177,7 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
           answerCandidateId={session.reveal?.answerCandidateId ?? null} lockedCandidateId={session.lockedCandidateId}
           disabled={session.reveal !== null || busy} onSelect={setSelection} onFocusCandidate={setFocusedCandidate} />
 
-        <button className="answer-button" type="button" ref={answerButton} disabled={selection === "" || session.reveal !== null || busy || ended} onClick={submit}>
+        <button className="answer-button" type="button" ref={answerButton} disabled={selection === "" || session.reveal !== null || busy || ended || hintLoading} onClick={submit}>
           {busy ? "Checking…" : "Lock in answer"}
         </button>
         {error && <p className="demo-error" role="alert">{error}</p>}
@@ -186,7 +191,7 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
           {session.reveal && (
             <RoundReveal round={round} reveal={session.reveal} hintsUsed={session.visibleHintCount}
               pickLabel={labelOf(session.lockedCandidateId)} complete={session.status === "complete"}
-              correctRounds={session.correctRounds} deckTitle={deckTitle} newGameHref={newGameHref}
+              correctRounds={session.correctRounds} history={session.history} deckTitle={deckTitle} newGameHref={newGameHref}
               chooseAnotherDeckHref={chooseAnotherDeckHref} genuiDesign={genuiDesign} sessionToken={currentToken}
               onNext={next} headingRef={revealHeading} track={track} trackGenui={trackGenui} />
           )}

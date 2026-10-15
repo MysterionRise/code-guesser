@@ -60,7 +60,9 @@ Hints cost points. A correct answer is worth 1,000, 800, or 500 points after
 zero, one, or two hints on a four-option round, and 500, 400, or 250 on a
 two-option round, so guessing at random earns the same 250 a round on every
 deck. After you answer, the reveal highlights the right option and explains
-it.
+it under "Why". The round dots mark each answered round ✓ or ✗, and a
+finished game lists every round, your pick, the answer, the points, and its
+source.
 
 `/?deck=project`, `/?deck=language`, `/?deck=before-after`,
 `/?deck=algorithm`, `/?deck=output`, and `/?deck=fix` open a deck directly.

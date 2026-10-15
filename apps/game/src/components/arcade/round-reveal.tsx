@@ -3,8 +3,8 @@ import * as React from "react";
 import type { ClientEvent, GenuiEvent } from "../../experiment/events";
 import type { Design } from "../../genui/designs";
 import type { GenuiPanelProps } from "../../genui/genui-panel";
-import type { AuthorizedReveal, EntertainmentResultProjection } from "./arcade-session";
-import { formatCompletionResult, projectSpoilerFreeShare, roundPointsNote } from "./arcade-text";
+import type { AuthorizedReveal, EntertainmentResultProjection, RoundRecord } from "./arcade-session";
+import { formatCompletionResult, points, projectSpoilerFreeShare, roundPointsNote } from "./arcade-text";
 import type { PublicRound } from "./mode-contract";
 
 const SOURCE_LINK = /(https:\/\/\S+)/u;
@@ -17,6 +17,34 @@ const linkedAttribution = (attribution: string): React.ReactNode[] => attributio
 
 /** Generative UI's panel, fetched only when the server turns it on, so the static game never loads it. */
 const GenuiPanel = React.lazy(() => import("../../genui/genui-panel")) as React.ComponentType<GenuiPanelProps>;
+
+/** A label that may break after each slash on a narrow screen, so `owner/name` never splits inside a word. */
+const breakable = (label: string): React.ReactNode[] => label.split("/").flatMap((part, index) => index === 0 ? [part] : [<wbr key={index} />, `/${part}`]);
+
+/** "Your game" (#43): every round's pick, answer, points, and source, and the total against the most it could earn. */
+function GameSummary({ history, result }: { readonly history: readonly RoundRecord[]; readonly result: EntertainmentResultProjection }) {
+  return (
+    <section className="game-summary" aria-labelledby="game-summary-title">
+      <h3 id="game-summary-title">Your game</h3>
+      <table>
+        <thead><tr><th scope="col"><abbr title="Round">#</abbr></th><th scope="col">Your pick</th><th scope="col">Answer</th><th scope="col">Points</th></tr></thead>
+        <tbody>
+          {history.map((entry, index) => (
+            <tr key={entry.roundId} className={entry.correct ? "summary-right" : "summary-missed"}>
+              <th scope="row">
+                {entry.source ? <a href={entry.source} rel="noreferrer noopener" target="_blank">{index + 1}<span className="visually-hidden"> (source)</span></a> : index + 1}
+              </th>
+              <td><span aria-hidden="true">{entry.correct ? "✓ " : "✗ "}</span>{breakable(entry.picked)}<span className="visually-hidden">{entry.correct ? ", right" : ", missed"}</span></td>
+              <td>{breakable(entry.answer)}</td>
+              <td>{points(entry.points)}{entry.hints > 0 && <span className="summary-hints"> ({entry.hints === 1 ? "1 hint" : `${entry.hints} hints`})</span>}</td>
+            </tr>
+          ))}
+        </tbody>
+        <tfoot><tr><th scope="row" colSpan={2}>Total</th><td colSpan={2}>{points(result.score)} of {points(result.attainableMaximum)}</td></tr></tfoot>
+      </table>
+    </section>
+  );
+}
 
 /** Where a finished game can go next, and its spoiler-free share line. */
 function CompletionActions({ result, correctRounds, deckTitle, newGameHref, chooseAnotherDeckHref, track }: {
@@ -50,10 +78,11 @@ function CompletionActions({ result, correctRounds, deckTitle, newGameHref, choo
 }
 
 /**
- * A revealed round: the verdict, what it earned, the answer and why, its source, the generative panel when the
- * server turns one on, and the way on. The parent renders it only after the server authorized the reveal.
+ * A revealed round (#126): the verdict, what it earned, and the answer first; on the last round the game's summary and
+ * the way on right after; then why, which folds away once a generative explainer has rendered (#121); then the
+ * explainer, the round's source, and the next round. The parent renders it only after the server authorized the reveal.
  */
-export function RoundReveal({ round, reveal, hintsUsed, pickLabel, complete, correctRounds, deckTitle, newGameHref, chooseAnotherDeckHref, genuiDesign, sessionToken, onNext, headingRef, track, trackGenui }: {
+export function RoundReveal({ round, reveal, hintsUsed, pickLabel, complete, correctRounds, history, deckTitle, newGameHref, chooseAnotherDeckHref, genuiDesign, sessionToken, onNext, headingRef, track, trackGenui }: {
   readonly round: Readonly<PublicRound>;
   readonly reveal: AuthorizedReveal;
   readonly hintsUsed: number;
@@ -61,6 +90,8 @@ export function RoundReveal({ round, reveal, hintsUsed, pickLabel, complete, cor
   readonly pickLabel: string;
   readonly complete: boolean;
   readonly correctRounds: number;
+  /** Every answered round so far, for the summary once the game is complete. */
+  readonly history: readonly RoundRecord[];
   readonly deckTitle: string | undefined;
   readonly newGameHref: string | undefined;
   readonly chooseAnotherDeckHref: string | undefined;
@@ -72,27 +103,37 @@ export function RoundReveal({ round, reveal, hintsUsed, pickLabel, complete, cor
   readonly track: (event: ClientEvent) => void;
   readonly trackGenui: (event: GenuiEvent) => void;
 }) {
+  const answer = round.mode.candidates.find(({ candidateId }) => candidateId === reveal.answerCandidateId)?.label;
+  const [whyOpen, setWhyOpen] = React.useState(true);
   return (
     <>
       <h2 ref={headingRef} tabIndex={-1} className={reveal.correct ? "verdict-right" : "verdict-missed"}>{reveal.correct ? "Nice read." : "Not this time."}</h2>
       <p className="round-points">{roundPointsNote(reveal.score, hintsUsed)}</p>
-      <p className="answer-line">The answer: <strong>{round.mode.candidates.find(({ candidateId }) => candidateId === reveal.answerCandidateId)?.label}</strong></p>
-      <p>{reveal.evidence}</p>
-      <p>{reveal.explanation}</p>
-      <p>Helpful signals: {reveal.helpfulSignals.join(" · ")}</p>
-      <p>Misleading signals: {reveal.misleadingSignals.join(" · ")}</p>
-      <small>{linkedAttribution(reveal.attribution)}</small>
+      <p className="answer-line">The answer: <strong>{answer}</strong></p>
+      {complete && (
+        <>
+          <GameSummary history={history} result={reveal.result} />
+          <CompletionActions result={reveal.result} correctRounds={correctRounds} deckTitle={deckTitle}
+            newGameHref={newGameHref} chooseAnotherDeckHref={chooseAnotherDeckHref} track={track} />
+        </>
+      )}
+      <details className="reveal-why" open={whyOpen} onToggle={(event) => setWhyOpen(event.currentTarget.open)}>
+        <summary>Why it’s {answer}</summary>
+        <p>{reveal.evidence}</p>
+        <p>{reveal.explanation}</p>
+        <p>Helpful signals: {reveal.helpfulSignals.join(" · ")}</p>
+        <p>Misleading signals: {reveal.misleadingSignals.join(" · ")}</p>
+      </details>
       {genuiDesign && genuiDesign !== "host" && (
         <React.Suspense fallback={null}>
           <GenuiPanel key={round.roundId} design={genuiDesign} roundId={round.roundId} phase="after-lock" panes={round.content.panes}
             pick={{ label: pickLabel, correct: reveal.correct }}
-            optionLabels={round.mode.candidates.map(({ label }) => label)} sessionToken={sessionToken} onEvent={trackGenui} />
+            optionLabels={round.mode.candidates.map(({ label }) => label)} sessionToken={sessionToken} onEvent={trackGenui}
+            onRendered={() => setWhyOpen(false)} />
         </React.Suspense>
       )}
-      {!complete
-        ? <button type="button" onClick={onNext}>Next round</button>
-        : <CompletionActions result={reveal.result} correctRounds={correctRounds} deckTitle={deckTitle}
-            newGameHref={newGameHref} chooseAnotherDeckHref={chooseAnotherDeckHref} track={track} />}
+      <small className="reveal-source">{linkedAttribution(reveal.attribution)}</small>
+      {!complete && <button type="button" onClick={onNext}>Next round</button>}
     </>
   );
 }

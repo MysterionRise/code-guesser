@@ -308,7 +308,6 @@ noscript { display: block; padding: 12px; margin-bottom: 16px; background: var(-
 .deck-size { color: var(--subtle); font-size: .88rem; }
 .deck-link { margin-right: 16px; }
 @media (max-width: 760px) { .code-panes.compare { grid-template-columns: 1fr; } }
-.deck-tag { justify-self: start; padding: 2px 10px; border: 1px solid var(--border-soft); border-radius: var(--radius-pill); color: var(--accent); font-size: .74rem; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
 @media (min-width: 640px) { .deck-list { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .code-pane .pane-note { color: var(--muted); font-weight: 600; letter-spacing: 0; text-transform: none; font-size: .86rem; }
 .code-window.numbered { padding-left: 8px; }
@@ -412,3 +411,29 @@ noscript { display: block; padding: 12px; margin-bottom: 16px; background: var(-
 .trace-count { color: var(--muted); }
 .trace-controls { display: flex; gap: 8px; }
 .trace-controls .hint-button:disabled { cursor: not-allowed; opacity: .5; }
+/* The UI pass (#126): a one-line header, the reveal's order, the game summary, the grouped chooser, a compact notice. */
+.arcade-header { flex-wrap: wrap; gap: 12px 18px; margin-bottom: 26px; }
+.arcade-header .round-track { flex: 1 1 280px; margin: 0; max-width: 440px; }
+@media (max-width: 600px) { .arcade-header .round-track { order: 3; flex-basis: 100%; max-width: none; } }
+.round-dot.done.missed { color: var(--miss); background: var(--miss-bg); }
+.demo-notice { margin-top: 12px; padding: 8px 12px; font-size: .78rem; line-height: 1.4; }
+.reveal-why { margin: 14px 0; padding: 10px 14px; border: 1px solid var(--border); border-radius: var(--radius-chip); background: var(--panel); }
+.reveal-why summary { cursor: pointer; font-weight: 700; color: var(--text-soft); }
+.reveal-why[open] summary { margin-bottom: 6px; }
+.reveal-why p { margin: 6px 0; }
+.reveal-source { display: block; margin: 14px 0 0; }
+.game-summary { margin: 16px 0 8px; }
+.game-summary h3 { margin: 0 0 8px; }
+.game-summary table { width: 100%; border-collapse: collapse; font-size: .92rem; }
+.game-summary th, .game-summary td { padding: 6px 8px; border-top: 1px solid var(--border); text-align: left; vertical-align: top; overflow-wrap: break-word; }
+.game-summary abbr { text-decoration: none; }
+.game-summary td:last-child { white-space: nowrap; }
+.game-summary thead th { color: var(--muted); font-weight: 700; border-top: 0; }
+.game-summary tfoot th, .game-summary tfoot td { font-weight: 800; }
+.game-summary tfoot td { text-align: right; }
+.game-summary .summary-missed td:nth-child(2) { color: var(--miss); }
+.game-summary .summary-hints { color: var(--muted); }
+.game-summary a { color: var(--accent); }
+.deck-group { margin: 0 0 22px; }
+.deck-group-title { margin: 0 0 10px; font-size: 1rem; letter-spacing: .12em; text-transform: uppercase; color: var(--accent); }
+.deck-group-note { margin-left: 10px; color: var(--muted); font-size: .85rem; letter-spacing: 0; text-transform: none; font-weight: 600; }

@@ -324,7 +324,27 @@ describe("static arcade shell", () => {
     expect(() => projectSpoilerFreeShare(session.result!, 6)).toThrow(ArcadeShellRuleError);
     expect(formatCompletionResult(session.result!, session.correctRounds, "Which language?"))
       .toBe("Run complete — 5,000 points, 5 of 5 correct. Share: CodeGuessr · Which language? · 5/5 correct · 5,000/5,000.");
+  });
 
+  it("keeps every answered round for the game's summary: pick, answer, points, hints, and source (#43)", () => {
+    const mode = createPublicModeContract(modeInput());
+    let session = createArcadeSession(mode);
+    for (let index = 0; index < 5; index += 1) {
+      if (index === 0) session = transitionArcadeSession(mode, session, { type: "reveal-hint", label: "A hint" });
+      const pick = index === 1 ? "candidate-b" : "candidate-a";
+      const roundScore = index === 1 ? 0 : index === 0 ? 800 : 1000;
+      const total = session.score + roundScore;
+      session = transitionArcadeSession(mode, session, { type: "lock-answer", candidateId: pick });
+      session = transitionArcadeSession(mode, session, { type: "accept-reveal", reveal: { ...displayReveal(index, total, 5000, index + 1, roundScore),
+        correct: pick === "candidate-a", attribution: `Author · repo · MIT · https://github.com/acme/repo/blob/abc/file-${index}.py` } });
+      if (index < 4) session = transitionArcadeSession(mode, session, { type: "next-round" });
+    }
+    expect(session.history.map(({ picked, answer, correct, points, hints }) => [picked, answer, correct, points, hints])).toEqual([
+      ["Option A", "Option A", true, 800, 1], ["Option B", "Option A", false, 0, 0], ["Option A", "Option A", true, 1000, 0],
+      ["Option A", "Option A", true, 1000, 0], ["Option A", "Option A", true, 1000, 0],
+    ]);
+    expect(session.history.reduce((total, { points }) => total + points, 0)).toBe(session.score);
+    expect(session.history[2]!.source).toBe("https://github.com/acme/repo/blob/abc/file-2.py");
   });
 
   it("never replays revealed rounds: a finished run takes no further action, and unknown actions are refused", () => {
