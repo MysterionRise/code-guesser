@@ -60,13 +60,21 @@ export const VISUALIZER_CSP = [
   "connect-src 'none'", "media-src 'none'", "frame-src 'none'", "worker-src 'none'", "form-action 'none'", "base-uri 'none'",
 ].join("; ");
 
-/** The document the iframe loads: the CSP first, then a base style, then the model's markup. */
+/**
+ * The document the iframe loads: the CSP first, then a base style, then the model's markup, then a small script
+ * of the game's own that reports the body's height (not the document's, which never drops below the frame's own
+ * and would grow the frame on every report), so the frame can fit the page without an inner scroll. The model's
+ * markup may not post messages itself (`parseVisualizer`); the parent only reads a clamped number.
+ */
 export const visualizerDocument = (html: string): string => `<!doctype html>
 <html lang="en"><head><meta http-equiv="Content-Security-Policy" content="${VISUALIZER_CSP}"><meta charset="utf-8">
 <style>body{margin:0;padding:12px;background:#0b1c16;color:#effff8;font:14px/1.5 ui-sans-serif,system-ui,sans-serif}
 button{font:inherit;padding:6px 12px;border-radius:8px;border:1px solid #527565;background:#10251d;color:#baff65;cursor:pointer}
 button:focus-visible{outline:3px solid #baff65;outline-offset:2px}code,pre{font-family:ui-monospace,Menlo,monospace}</style>
-</head><body>${html}</body></html>`;
+</head><body>${html}<script>
+(() => { const report = () => parent.postMessage({ codeguessrVisualizerHeight: document.body.getBoundingClientRect().height }, "*");
+  new ResizeObserver(report).observe(document.body); report(); })();
+</script></body></html>`;
 
 export const VISUALIZER_TOOL_DESCRIPTION = "Write one self-contained HTML page that visualizes this round's code at work. "
   + `Inline CSS and JavaScript only, at most ${MAX_VISUALIZER_BYTES} bytes. No external resources, links, URLs, network, storage, or `

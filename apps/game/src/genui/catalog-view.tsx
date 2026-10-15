@@ -19,6 +19,18 @@ type Row = Readonly<{ option: string; for: string; against: string }>;
 const KIND_TEXT = { helpful: "points to the answer", misleading: "points away" } as const;
 
 /**
+ * The line numbers a code view shows: each highlight with two lines either side, in order. The round's code is
+ * already on screen above, so the view repeats only what it annotates (the UX judge found the full repeat long).
+ */
+export const excerptLines = (lineCount: number, highlighted: readonly number[], context = 2): number[] => {
+  const shown = new Set<number>();
+  for (const line of highlighted) {
+    for (let at = Math.max(1, line - context); at <= Math.min(lineCount, line + context); at += 1) shown.add(at);
+  }
+  return [...shown].sort((left, right) => left - right);
+};
+
+/**
  * Renders one checked render call. Every value is text React escapes; state is carried in words as well as
  * colour, and nothing animates.
  */
@@ -32,7 +44,8 @@ export function CatalogView({ call, panes, hint }: CatalogViewProps) {
       return (
         <p className="genui-offer">
           {props.reason as string}{" "}
-          <button type="button" className="hint-button" disabled={!hint?.label} onClick={hint?.buy}>{hint?.label ?? "No hint left"}</button>
+          {hint === undefined ? <span className="genui-status">(offer closed)</span>
+            : <button type="button" className="hint-button" disabled={!hint.label} onClick={hint.buy}>{hint.label ?? "No hint left"}</button>}
         </p>
       );
     case "takeaway":
@@ -51,17 +64,20 @@ export function CatalogView({ call, panes, hint }: CatalogViewProps) {
       if (pane === undefined) return null;
       const highlights = props.highlights as readonly Highlight[];
       const kindOf = new Map(highlights.map(({ line, kind }) => [line, kind]));
+      const lines = pane.text.split("\n");
       return (
         <figure className="genui-code">
           <figcaption>{pane.label ? `Version ${pane.label}, annotated` : "The code, annotated"}</figcaption>
           <pre className="code-window numbered" role="region" tabIndex={0} aria-label="Annotated code"><code>
-            {pane.text.split("\n").map((line, index) => {
-              const kind = kindOf.get(index + 1);
-              return (
-                <span className={kind ? `code-line genui-${kind}` : "code-line"} data-line={index + 1} key={index}>
-                  <span className="line-number" aria-hidden="true">{index + 1}</span>{line}
-                </span>
-              );
+            {excerptLines(lines.length, highlights.map(({ line }) => line)).flatMap((number, index, shown) => {
+              const kind = kindOf.get(number);
+              const gap = index > 0 && number !== shown[index - 1]! + 1;
+              return [
+                ...(gap ? [<span className="code-line code-gap" key={`gap-${number}`} aria-hidden="true">⋯</span>] : []),
+                <span className={kind ? `code-line genui-${kind}` : "code-line"} data-line={number} key={number}>
+                  <span className="line-number" aria-hidden="true">{number}</span>{lines[number - 1]}
+                </span>,
+              ];
             })}
           </code></pre>
           <ol className="genui-notes">

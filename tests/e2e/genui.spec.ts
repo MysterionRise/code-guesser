@@ -100,6 +100,12 @@ test("the visualizer runs the model's page in a sandbox that can't reach the gam
   await expect(inside.locator("#storage")).toHaveText("blocked");
   await inside.getByRole("button", { name: "Step" }).click();
   await expect(inside.locator("#status")).toHaveText("Step 1");
+  // The frame fits its page: the game's own reporter sets its height, so a short page gets no empty box.
+  await expect.poll(async () => frame.evaluate((element) => element.getBoundingClientRect().height)).toBeLessThan(480);
+  // ...and holds it: a report that fed back into itself would grow the frame on every resize.
+  const settled = await frame.evaluate((element) => element.getBoundingClientRect().height);
+  await page.waitForTimeout(1000);
+  expect(await frame.evaluate((element) => element.getBoundingClientRect().height)).toBe(settled);
   await page.waitForTimeout(500);
   expect(await (await request.get(`${fake}/leaks`)).text()).toBe("0");
   await expect(page.getByRole("button", { name: "Next round" })).toBeEnabled();
@@ -129,7 +135,41 @@ test("the host chats during the round without the code, sells the next hint on r
   await host.getByRole("button", { name: "Send" }).click();
   await expect(host.locator(".genui-takeaway")).toHaveText("Takeaway: Read the keywords before the punctuation.");
   const after = await (await request.get(`${fake}/requests`)).json() as { body: { tools: { function: { name: string } }[] } }[];
-  expect(after.at(-1)!.body.tools.map(({ function: { name } }) => name)).toContain("code_view");
+  // After the lock the host answers in chat-sized pieces, not with the explainer's code views and tables.
+  expect(after.at(-1)!.body.tools.map(({ function: { name } }) => name)).toEqual(["host_message", "takeaway", "signal_list"]);
   await page.getByRole("button", { name: "Next round" }).click();
   await expect(page.getByRole("complementary", { name: "Host" }).locator(".host-turn")).toHaveCount(0);
+});
+
+test("the host recovers from a refused paste, shows a plain-text reply, and keeps keyboard focus in its input", async ({ page, request }) => {
+  await page.goto("/?deck=language&design=host");
+  await expect(page.getByText("Round 1 of 5")).toBeVisible();
+  const round = (await page.locator(".game-card").getAttribute("data-round-id"))!;
+  const pasted = fixtures.get(round)!.panes[0]!.text.split("\n").find((line) => line.trim().length >= 12)!.trim();
+  const host = page.getByRole("complementary", { name: "Host" });
+  const input = host.getByLabel("Ask the host");
+  await input.fill(`What language is ${pasted}`);
+  await input.press("Enter");
+  await expect(host.getByRole("alert")).toHaveText("The host can’t look at code before you lock in. Ask without pasting it.");
+  await expect(host.locator(".host-turn.player")).toHaveCount(0);
+  await expect(input).toBeFocused();
+  // The refused message left the history, so the next question goes through.
+  await request.post(`${fake}/control`, { data: { text: "Happy to help with the rules!" } });
+  await input.fill("How do hints work?");
+  await input.press("Enter");
+  await expect(host.locator(".host-turn.host .genui-host")).toHaveText("Happy to help with the rules!");
+  await expect(host.getByRole("alert")).toHaveCount(0);
+  await expect(input).toBeFocused();
+  const recorded = await (await request.get(`${fake}/requests`)).json() as { body: { messages: unknown[] } }[];
+  expect(JSON.stringify(recorded.at(-1)!.body.messages)).not.toContain(pasted.slice(0, 12));
+});
+
+test("asking for an explanation moves focus to the explainer's output", async ({ page }) => {
+  await page.goto("/?deck=fix");
+  await expect(page.getByText("Round 1 of 5")).toBeVisible();
+  await answerRound(page);
+  const panel = page.getByRole("region", { name: "Explainer" });
+  await panel.getByRole("button", { name: "Explain this round" }).click();
+  await expect(panel.locator(".genui-output")).toBeFocused();
+  await expect(panel.locator(".genui-takeaway")).toBeVisible();
 });

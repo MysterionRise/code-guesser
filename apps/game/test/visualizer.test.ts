@@ -62,3 +62,15 @@ describe("visualizer pages (#115)", () => {
     expect(VISUALIZER_CSP).not.toMatch(/https?:|\*/u);
   });
 });
+
+describe("visualizer frame height", () => {
+  it("takes only a clamped height the game's own reporter sends", async () => {
+    const { reportedHeight } = await import("../src/genui/visualizer-view");
+    expect(reportedHeight({ codeguessrVisualizerHeight: 612.2 })).toBe(617);
+    expect(reportedHeight({ codeguessrVisualizerHeight: 10 })).toBe(240);
+    expect(reportedHeight({ codeguessrVisualizerHeight: 99_999 })).toBe(1100);
+    for (const junk of [null, "600", { height: 600 }, { codeguessrVisualizerHeight: Number.NaN }]) expect(reportedHeight(junk)).toBeNull();
+    // The reporter is the game's, after the model's markup; the model's own markup still may not post messages.
+    expect(visualizerDocument("<p>x</p>").indexOf("codeguessrVisualizerHeight")).toBeGreaterThan(visualizerDocument("<p>x</p>").indexOf("<p>x</p>"));
+  });
+});

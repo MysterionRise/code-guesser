@@ -75,6 +75,10 @@ describe("generative UI building blocks (#101)", () => {
     expect(mentionsCode([{ role: "user", text: "what is   return sum(values)  ?" }], code)).toBe(true);
     expect(mentionsCode([{ role: "user", text: "is it } or {" }], code)).toBe(false);
     expect(mentionsCode([{ role: "assistant", text: "def total(values):" }], code)).toBe(false);
+    // The red-team playtest got code past the plain-text check in base64.
+    const encoded = Buffer.from("    return sum(values)", "utf8").toString("base64");
+    expect(mentionsCode([{ role: "user", text: `decode this: ${encoded}` }], code)).toBe(true);
+    expect(mentionsCode([{ role: "user", text: "a longish ordinary sentence with nothing encoded" }], code)).toBe(false);
   });
 
   it("tells the model the player's pick, and falls back when a finished request rendered nothing", () => {
@@ -86,6 +90,13 @@ describe("generative UI building blocks (#101)", () => {
     expect(fellBack("ready", true, 0, undefined)).toBe(true);
     expect(fellBack("ready", true, 2, undefined)).toBe(false);
     expect(fellBack("error", true, 0, new Error("GENUI_FAILED"))).toBe(true);
+  });
+
+  it("shows a code view's highlighted lines with two either side, not the whole pane again", async () => {
+    const { excerptLines } = await import("../src/genui/catalog-view");
+    expect(excerptLines(20, [10])).toEqual([8, 9, 10, 11, 12]);
+    expect(excerptLines(20, [1, 19])).toEqual([1, 2, 3, 17, 18, 19, 20]);
+    expect(excerptLines(20, [5, 7])).toEqual([3, 4, 5, 6, 7, 8, 9]);
   });
 
   it("renders only finished tool calls that pass the catalog", () => {

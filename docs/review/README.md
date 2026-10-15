@@ -27,7 +27,8 @@ designs with an anonymous first-party event log.
 | Phase | What it did | PRs | Issues |
 | --- | --- | --- | --- |
 | 1 | Server-held game state; the answer-lock guard; generative UI on the Vercel AI SDK through OpenRouter, behind `GENUI_ENABLED`; fixes from the first live check | #110, #111, #112, and this phase's completion PR | #96, #102, #101; [live check](evidence/2026-10-14-genui-live-check.md) |
-| next | Arm assignment and the event log, then the explainer and host arms and the report; hardening before launch | planned | #106, #107, #103, #104, #108; #97–#100 |
+| 2 | Open-ended designs compared locally: a design switcher, the json-render composer, a sandboxed visualizer, and the host chat; a Claude Code agent playtest team and the fixes from its first run | #117, #118, #119, and #116's PR | #114, #115, #104, #116; [agent playtest](evidence/2026-10-14-agent-playtest.md) |
+| next | Arm assignment and the event log, then the report; hardening before launch | planned | #106, #107, #108; #97–#100 |
 
 - [Architecture](../architecture.md): the flow from preparation to play, the
   artifact's shape, and a glossary.

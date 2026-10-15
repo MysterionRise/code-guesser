@@ -23,6 +23,11 @@ export interface GameState {
   readonly roundIndex: number;
   /** Hints bought for the round being played. */
   readonly hints: number;
+  /**
+   * Hints bought in each answered round, in play order, so an explanation can name only those the player saw
+   * (the agent playtest's explanation judge found explanations citing hints the player never bought).
+   */
+  readonly hintsByRound: readonly number[];
   readonly score: number;
   readonly dealtAt: number;
 }
@@ -44,7 +49,7 @@ export const LEDGER_CAPACITY = 50_000;
 /** A configured secret must be at least this long. */
 export const MIN_SECRET_LENGTH = 32;
 const MAC_CONTEXT = "codeguessr-game-session.v1";
-const STATE_KEYS = ["artifactHash", "dealtAt", "deck", "gameId", "hints", "roundIds", "roundIndex", "score", "step", "version"];
+const STATE_KEYS = ["artifactHash", "dealtAt", "deck", "gameId", "hints", "hintsByRound", "roundIds", "roundIndex", "score", "step", "version"];
 
 interface SessionGlobals {
   secret?: Buffer;
@@ -94,9 +99,11 @@ const parseState = (value: unknown): GameState => {
     || !isCount(state.step, ROUNDS_PER_SESSION * 3)
     || !isCount(state.roundIndex, ROUNDS_PER_SESSION)
     || !isCount(state.hints, 2)
+    || !Array.isArray(state.hintsByRound) || state.hintsByRound.length !== state.roundIndex
+    || state.hintsByRound.some((count) => !isCount(count, 2))
     || !isCount(state.score, Number.MAX_SAFE_INTEGER)
     || !isCount(state.dealtAt, Number.MAX_SAFE_INTEGER)) throw new SessionRefusal("SESSION_ENDED");
-  return Object.freeze({ ...state, roundIds: Object.freeze([...state.roundIds]) }) as GameState;
+  return Object.freeze({ ...state, roundIds: Object.freeze([...state.roundIds]), hintsByRound: Object.freeze([...(state.hintsByRound as number[])]) }) as GameState;
 };
 
 /** The state as a token: its canonical JSON in base64url, a dot, and the HMAC of both under this server's secret. */

@@ -10,9 +10,9 @@ const valid = () => ({
     { id: "verdict", type: "Callout", props: { tone: "tip", title: "Verdict", text: "Indentation decides it." }, children: [] },
     { id: "pair", type: "Row", props: {}, children: ["code", "card"] },
     { id: "code", type: "CodeExcerpt", props: { pane: 2, from: 2, to: 6, highlights: [{ line: 3, kind: "helpful", note: "A def line." }] }, children: [] },
-    { id: "card", type: "Card", props: { title: "Signals" }, children: ["list", "meter"] },
+    { id: "card", type: "Card", props: { title: "Signals" }, children: ["list", "badge"] },
     { id: "list", type: "List", props: { ordered: false, items: ["def", "colons"] }, children: [] },
-    { id: "meter", type: "Meter", props: { label: "How strongly def points to Python", value: 90 }, children: [] },
+    { id: "badge", type: "Badge", props: { text: "def", tone: "good" }, children: [] },
     { id: "quiz", type: "Quiz", props: { question: "What decided it?", choices: [
       { label: "def", correct: true, feedback: "Yes." }, { label: "braces", correct: false, feedback: "There are none." },
     ] }, children: [] },
@@ -38,6 +38,8 @@ describe("composer specs (#114)", () => {
   });
 
   it("refuses anything beyond plain layout: unknown blocks, extra keys, state, actions, and expressions", () => {
+    // Meter is gone: in the agent playtest it invited invented confidence percentages.
+    rejects((spec) => { at(spec, "badge").type = "Meter"; at(spec, "badge").props = { label: "Confidence", value: 90 }; }, /^SCHEMA/u);
     rejects((spec) => { at(spec, "list").type = "Script"; }, /^SCHEMA/u);
     rejects((spec) => { at(spec, "list").visible = { $state: "/shown" }; }, /^SCHEMA/u);
     rejects((spec) => { at(spec, "list").on = { press: { action: "setState" } }; }, /^SCHEMA/u);
@@ -91,5 +93,14 @@ describe("composer specs (#114)", () => {
     expect(variants.map((variant) => variant.properties.type.const).sort()).toEqual(Object.keys(COMPOSER_BLOCKS).sort());
     expect(variants.every((variant) => variant.additionalProperties === false && variant.properties.props.additionalProperties === false)).toBe(true);
     expect(schema.properties.elements.maxItems).toBe(40);
+  });
+});
+
+describe("composer quiz feedback", () => {
+  it("adds a verdict only when the model's feedback doesn't already open with one", async () => {
+    const { verdictFor } = await import("../src/genui/composer-view");
+    expect(verdictFor({ label: "a", correct: true, feedback: "Keywords decide it." })).toBe("Right. Keywords decide it.");
+    expect(verdictFor({ label: "a", correct: false, feedback: "Not quite. Braces are shared." })).toBe("Not quite. Braces are shared.");
+    expect(verdictFor({ label: "a", correct: true, feedback: "Correct: it is the loop." })).toBe("Correct: it is the loop.");
   });
 });

@@ -1,4 +1,20 @@
+"use client";
+
+import * as React from "react";
+
 import { visualizerDocument, type Visualizer } from "./visualizer-spec";
+
+/** The frame's height before the page reports, and the range a report may set. */
+const START_HEIGHT = 480;
+const MIN_HEIGHT = 240;
+const MAX_HEIGHT = 1_100;
+
+/** A height a visualizer frame reported, clamped; anything else from the frame is ignored. */
+export const reportedHeight = (data: unknown): number | null => {
+  if (typeof data !== "object" || data === null) return null;
+  const height = (data as Record<string, unknown>).codeguessrVisualizerHeight;
+  return typeof height === "number" && Number.isFinite(height) ? Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, Math.ceil(height) + 4)) : null;
+};
 
 /**
  * A checked visualizer page in a sandbox: scripts may run, but with an opaque origin, so the page can't reach the
@@ -6,11 +22,22 @@ import { visualizerDocument, type Visualizer } from "./visualizer-spec";
  * allows no network. The summary beside it says in words what it shows.
  */
 export function VisualizerView({ visualizer }: { readonly visualizer: Visualizer }) {
+  const frame = React.useRef<HTMLIFrameElement>(null);
+  const [height, setHeight] = React.useState(START_HEIGHT);
+  React.useEffect(() => {
+    const listen = (event: MessageEvent) => {
+      if (event.source !== frame.current?.contentWindow) return;
+      const next = reportedHeight(event.data);
+      if (next !== null) setHeight(next);
+    };
+    window.addEventListener("message", listen);
+    return () => window.removeEventListener("message", listen);
+  }, []);
   return (
     <figure className="genui-visualizer">
       <figcaption>{visualizer.title}</figcaption>
-      <iframe className="visualizer-frame" title={visualizer.title} sandbox="allow-scripts" allow="" referrerPolicy="no-referrer"
-        srcDoc={visualizerDocument(visualizer.html)} />
+      <iframe ref={frame} className="visualizer-frame" title={visualizer.title} sandbox="allow-scripts" allow="" referrerPolicy="no-referrer"
+        srcDoc={visualizerDocument(visualizer.html)} style={{ height }} />
       <p className="visualizer-summary">{visualizer.summary}</p>
     </figure>
   );

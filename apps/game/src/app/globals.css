@@ -142,3 +142,9 @@ noscript { display: block; padding: 12px; margin-bottom: 16px; background: #522;
 .genui-offer { margin: 6px 0 0; }
 .host-form { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; }
 .host-form input { min-width: 0; padding: 8px 10px; border-radius: 8px; border: 1px solid #527565; background: #030a08; color: #effff8; font: inherit; }
+.composer-callout-title { display: block; margin-bottom: 2px; }
+.genui-output:focus-visible { outline: 3px solid #baff65; outline-offset: 3px; }
+.reveal h2.verdict-missed { color: #ffb86b; }
+/* Annotated code in a generative panel wraps instead of clipping; the round's own pane above still scrolls. */
+.genui-panel .code-window, .host-chat .code-window { white-space: pre-wrap; overflow-wrap: anywhere; }
+.code-line.code-gap { color: #6f9283; padding-left: 4ch; }

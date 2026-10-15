@@ -62,10 +62,6 @@ const ELEMENT_SCHEMAS = [
     rows: z.array(z.array(text(160, "A cell.")).min(2).max(4)).min(1).max(6),
   }, false),
   element("Badge", "A short label.", { text: text(30, "The label."), tone: z.enum(["good", "bad", "neutral"]) }, false),
-  element("Meter", "A labelled bar from 0 to 100, for how strongly something pointed one way.", {
-    label: text(60, "What is measured."),
-    value: z.number().int().min(0).max(100),
-  }, false),
   element("Divider", "A thin rule between sections.", {}, false),
   element("Quiz", "A one-question check of the takeaway; the player picks a choice and sees its feedback.", {
     question: text(200, "The question."),

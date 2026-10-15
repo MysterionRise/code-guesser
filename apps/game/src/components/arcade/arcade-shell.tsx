@@ -455,7 +455,7 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
         <div className="reveal" aria-live="polite" aria-atomic="true">
           {session.reveal && (
             <>
-              <h2 ref={revealHeading} tabIndex={-1}>{session.reveal.correct ? "Nice read." : "Not this time."}</h2>
+              <h2 ref={revealHeading} tabIndex={-1} className={session.reveal.correct ? "verdict-right" : "verdict-missed"}>{session.reveal.correct ? "Nice read." : "Not this time."}</h2>
               <p className="round-points">{roundPointsNote(session.reveal.score, session.visibleHintCount)}</p>
               <p className="answer-line">The answer: <strong>{round.mode.candidates.find(({ candidateId }) => candidateId === session.reveal!.answerCandidateId)?.label}</strong></p>
               <p>{session.reveal.evidence}</p>

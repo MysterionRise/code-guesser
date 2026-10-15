@@ -59,6 +59,14 @@ document.getElementById("storage").textContent = storage;
 const chunk = (choices, extra = {}) =>
   `data: ${JSON.stringify({ id: "fake-1", object: "chat.completion.chunk", created: 0, model: "fake", choices, ...extra })}\n\n`;
 
+/** An OpenAI-style stream of plain text and no tool call, as a model that ignores its tools sends. */
+const textStream = (text) => [
+  chunk([{ index: 0, delta: { role: "assistant", content: text }, finish_reason: null }]),
+  chunk([{ index: 0, delta: {}, finish_reason: "stop" }]),
+  chunk([], { usage: { prompt_tokens: 100, completion_tokens: 10, total_tokens: 110 } }),
+  "data: [DONE]\n\n",
+].join("");
+
 /** An OpenAI-style stream that calls each tool once, then reports usage. */
 const toolCallStream = (calls) => [
   chunk([{ index: 0, delta: { role: "assistant", content: "" }, finish_reason: null }]),
@@ -81,7 +89,8 @@ const readBody = (request) => new Promise((resolve, reject) => {
 
 /**
  * Starts the fake on a port (0 picks a free one). `control` sets what the next completions return: an HTTP
- * `status` to fail with, the tool `calls` to make every time, or a `sequence` of call lists, one per request;
+ * `status` to fail with, the tool `calls` to make every time, a `sequence` of call lists, one per request, or a
+ * plain `text` reply with no tool call;
  * `requests` holds every completion request body received.
  */
 export const startFakeOpenRouter = async (port = 0) => {
@@ -111,6 +120,10 @@ export const startFakeOpenRouter = async (port = 0) => {
         return response.end(JSON.stringify({ error: { message: "fake provider body that must never reach a player", code: next.status } }));
       }
       const offered = new Set((body.tools ?? []).map((entry) => entry.function?.name));
+      if (typeof next.text === "string") {
+        response.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
+        return response.end(textStream(next.text));
+      }
       const calls = next.sequence?.shift() ?? next.calls ?? (offered.has("render_visualizer") ? visualizerCall(server.address().port)
         : offered.has("compose_panel") ? DEFAULT_CALLS.composer
         : offered.has("offer_hint") ? DEFAULT_CALLS["host-before-lock"]

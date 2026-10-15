@@ -20,6 +20,11 @@ const catalog = defineCatalog(schema, {
 
 const KIND_TEXT = { helpful: "points to the answer", misleading: "points away" } as const;
 
+/** "Right." or "Not quite." before the feedback, unless the model's feedback already opens with a verdict. */
+export const verdictFor = ({ correct, feedback }: Choice): string =>
+  /^(?:right|correct|yes|exactly|not quite|no|wrong|incorrect|close)\b/iu.test(feedback.trim()) ? feedback
+    : `${correct ? "Right." : "Not quite."} ${feedback}`;
+
 /** A one-question check: the choice stays picked and its feedback is announced; nothing leaves the page. */
 function Quiz({ question, choices }: { question: string; choices: readonly Choice[] }) {
   const [picked, setPicked] = React.useState<number | null>(null);
@@ -33,9 +38,7 @@ function Quiz({ question, choices }: { question: string; choices: readonly Choic
           {choice.label}
         </label>
       ))}
-      <p aria-live="polite" className="composer-feedback">
-        {picked === null ? "" : `${choices[picked]!.correct ? "Right." : "Not quite."} ${choices[picked]!.feedback}`}
-      </p>
+      <p aria-live="polite" className="composer-feedback">{picked === null ? "" : verdictFor(choices[picked]!)}</p>
     </fieldset>
   );
 }
@@ -54,7 +57,7 @@ const registryFor = (panes: readonly Pane[]) => defineRegistry(catalog, {
     Text: ({ props }: { props: Props }) => <p className="composer-text">{props.text as string}</p>,
     Callout: ({ props }: { props: Props }) => (
       <aside className={`composer-callout tone-${props.tone as string}`}>
-        <strong>{props.title as string}</strong> <span>{props.text as string}</span>
+        <strong className="composer-callout-title">{props.title as string}</strong> <span>{props.text as string}</span>
       </aside>
     ),
     CodeExcerpt: ({ props }: { props: Props }) => {
@@ -102,13 +105,6 @@ const registryFor = (panes: readonly Pane[]) => defineRegistry(catalog, {
       </table>
     ),
     Badge: ({ props }: { props: Props }) => <span className={`composer-badge tone-${props.tone as string}`}>{props.text as string}</span>,
-    Meter: ({ props }: { props: Props }) => (
-      <div className="composer-meter">
-        <span>{props.label as string}</span>
-        <meter min={0} max={100} value={props.value as number} aria-label={props.label as string}>{props.value as number}%</meter>
-        <span aria-hidden="true">{props.value as number}%</span>
-      </div>
-    ),
     Divider: () => <hr className="composer-divider" />,
     Quiz: ({ props }: { props: Props }) => <Quiz question={props.question as string} choices={props.choices as readonly Choice[]} />,
   },
