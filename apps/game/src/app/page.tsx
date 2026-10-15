@@ -22,6 +22,7 @@ const DECK_TAGS: Readonly<Record<string, string>> = Object.freeze({
   project: "Recognise", language: "Recognise", algorithm: "Recognise", "before-after": "Reason", output: "Reason", fix: "Reason",
   "missing-line": "Reason",
   "name-function": "Reason",
+  framework: "Recognise",
 });
 
 interface PageProps {

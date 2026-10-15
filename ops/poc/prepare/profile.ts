@@ -1,8 +1,9 @@
 import { CAPACITY_CEILINGS, STACK_RELEASE, STACK_REVISION, type CeilingKey } from "../limits";
 import {
-  AUTHORSHIP_CLAIM, MAINSTREAM_LANGUAGES, PROFILE_VERSION, ROUNDS_PER_LANGUAGE, STACK_LANGUAGES, isLanguageSelection, type DeckId,
-  type StackLanguage,
+  AUTHORSHIP_CLAIM, MAINSTREAM_LANGUAGES, PROFILE_VERSION, ROUNDS_PER_LANGUAGE, STACK_LANGUAGES, isLanguageSelection, spellsFramework,
+  type DeckId, type StackLanguage,
 } from "../../../packages/artifact/src/index";
+import { isKnownFramework } from "./framework-markers";
 
 /** The hard ceilings from `ops/poc/limits.json`; a profile may lower any of them, never raise one. */
 export { CAPACITY_CEILINGS, MAINSTREAM_LANGUAGES, PROFILE_VERSION, STACK_LANGUAGES, type StackLanguage };
@@ -77,11 +78,27 @@ export interface CrawlProfile {
   readonly curated?: CuratedProfile;
 }
 
+/**
+ * A licence a curated pin declares for a repository whose licence file GitHub names no licence for, such as the MIT
+ * text under a line on its scope (tastejs/todomvc's "MIT License unless otherwise specified"). The profile declares
+ * it after reading the file, and pins the file by path and blob.
+ */
+export interface DeclaredLicense {
+  readonly spdx: string;
+  readonly path: string;
+  readonly blob: string;
+}
+
+/** The names GitHub gives the licences a pin may declare. */
+export const DECLARABLE_LICENSES: Readonly<Record<string, string>> = Object.freeze({ MIT: "MIT License" });
+
 /** A repository read at one pinned commit, in one language. */
 export interface CuratedRepository {
   readonly repository: string;
   readonly commit: string;
   readonly language: StackLanguage;
+  /** The licence of a repository whose licence file GitHub names none for, declared after reading it, its file pinned. */
+  readonly license?: DeclaredLicense;
 }
 /** One file that shows an algorithm, and any identifiers in it that name the algorithm too briefly to match by name. */
 export interface AlgorithmFile {
@@ -157,6 +174,43 @@ export interface NameFunctionDeck {
   readonly functionLines: number;
   readonly templates: Readonly<{ title: string; description: string; prompt: string; evidence: string; explanation: string }>;
 }
+/** One framework of "Which framework?" (#62): its TodoMVC examples, and the files a round may show. */
+export interface FrameworkEntry {
+  /** One of `FRAMEWORK_MARKERS`' frameworks. */
+  readonly id: string;
+  readonly label: string;
+  /** Spellings code may name it by (`React`, `glimmer`), matched across an identifier's words and masked in every round. */
+  readonly names: readonly string[];
+  /** Identifiers that name it only when whole (`can`), masked in every round. */
+  readonly symbols: readonly string[];
+  /** The first hint: how it builds a page, naming no framework. */
+  readonly idea: string;
+  /** Its examples' directories, each checked for a licence of its own. */
+  readonly examples: readonly string[];
+  /** Files a round may show, in the order they are tried; its rounds show different files. */
+  readonly files: readonly string[];
+}
+/** Four frameworks offered together; each family's rounds answer each of them equally often. */
+export interface FrameworkFamily {
+  readonly id: string;
+  /** What the reveal says the family shares, so the wrong options were tempting. */
+  readonly note: string;
+  readonly frameworks: readonly FrameworkEntry[];
+}
+/** "Which framework?" (#62): windows of one repository's examples of the same app, each in a different framework. */
+export interface FrameworkDeck {
+  readonly rounds: number;
+  readonly repository: string;
+  /** Rounds each framework of a published family answers, each from a different file. */
+  readonly roundsPerFramework: number;
+  /** The most lines a pane shows. */
+  readonly windowLines: number;
+  readonly families: readonly FrameworkFamily[];
+  readonly templates: Readonly<{ title: string; description: string; prompt: string; evidence: string; explanation: string }>;
+}
+/** Options per framework round: one whole family. */
+export const FRAMEWORK_FAMILY_SIZE = 4;
+
 /** The languages whose functions "Name the function" can find. */
 export const NAME_FUNCTION_LANGUAGES: readonly StackLanguage[] = Object.freeze(["Java", "Go", "Python"]);
 export interface CuratedProfile {
@@ -170,6 +224,7 @@ export interface CuratedProfile {
   readonly fix?: FixDeck;
   readonly "missing-line"?: MissingLineDeck;
   readonly "name-function"?: NameFunctionDeck;
+  readonly framework?: FrameworkDeck;
 }
 
 /** Options per algorithm round: one whole family. */
@@ -199,6 +254,7 @@ export const poolSizes = (profile: CrawlProfile): Readonly<Record<DeckId, number
   fix: profile.curated?.fix?.rounds ?? 0,
   "missing-line": profile.curated?.["missing-line"]?.rounds ?? 0,
   "name-function": profile.curated?.["name-function"]?.rounds ?? 0,
+  framework: profile.curated?.framework?.rounds ?? 0,
 });
 
 export class CrawlProfileError extends Error {
@@ -395,15 +451,32 @@ const ALGORITHM_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/u;
 const foldName = (value: string): string => value.toLocaleLowerCase("en-US").replace(/[^a-z0-9]/gu, "");
 
+const SAFE_PATH = /^[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*$/u;
+const safePath = (value: unknown): string => {
+  const path = text(value);
+  return SAFE_PATH.test(path) && !path.split("/").some((part) => part === "." || part === "..") ? path : fail();
+};
+
+/** A pin's declared licence: one GitHub can name, and the licence file's path and blob. */
+const parseDeclaredLicense = (value: unknown): DeclaredLicense => {
+  const license = exactRecord(value, ["spdx", "path", "blob"]);
+  const spdx = text(license.spdx);
+  if (!Object.hasOwn(DECLARABLE_LICENSES, spdx) || !/^[0-9a-f]{40}$/u.test(text(license.blob))) fail();
+  return Object.freeze({ spdx, path: safePath(license.path), blob: license.blob as string });
+};
+
 const parseCuratedRepositories = (value: unknown): readonly CuratedRepository[] => {
   if (!Array.isArray(value) || value.length === 0) return fail();
   const repositories = value.map((entry) => {
-    const item = exactRecord(entry, ["repository", "commit", "language"]);
+    // A pin declares a licence only when it needs one; one without hashes exactly as before.
+    const declared = isRecord(entry) && Object.hasOwn(entry, "license");
+    const item = exactRecord(entry, ["repository", "commit", "language", ...(declared ? ["license"] : [])]);
     const repository = text(item.repository);
     const commit = text(item.commit);
     if (!REPOSITORY_NAME.test(repository) || !/^[0-9a-f]{40}$/u.test(commit)
       || !(STACK_LANGUAGES as readonly unknown[]).includes(item.language)) fail();
-    return Object.freeze({ repository, commit, language: item.language as StackLanguage });
+    return Object.freeze({ repository, commit, language: item.language as StackLanguage,
+      ...(declared ? { license: parseDeclaredLicense(item.license) } : {}) });
   });
   if (new Set(repositories.map(({ repository }) => repository)).size !== repositories.length) fail();
   return Object.freeze(repositories);
@@ -539,6 +612,60 @@ const parseNameFunctionDeck = (value: unknown, repositories: readonly CuratedRep
   });
 };
 
+const FRAMEWORK_NAME = /^[A-Za-z][A-Za-z0-9]{1,31}$/u;
+const parseFrameworkEntry = (value: unknown): FrameworkEntry => {
+  const item = exactRecord(value, ["id", "label", "names", "symbols", "idea", "examples", "files"]);
+  const id = text(item.id);
+  if (!ALGORITHM_ID.test(id) || !isKnownFramework(id)) fail();
+  const names = uniqueTexts(item.names);
+  const symbols = Array.isArray(item.symbols) ? item.symbols.map(text) : fail();
+  if (names.some((name) => !FRAMEWORK_NAME.test(name)) || symbols.some((symbol) => !IDENTIFIER.test(symbol))
+    || new Set(symbols).size !== symbols.length) fail();
+  const examples = uniqueTexts(item.examples).map(safePath);
+  const files = uniqueTexts(item.files).map(safePath);
+  if (files.some((file) => !examples.some((example) => file.startsWith(`${example}/`)))) fail();
+  return Object.freeze({ id, label: text(item.label), names, symbols: Object.freeze(symbols), idea: text(item.idea),
+    examples: Object.freeze(examples), files: Object.freeze(files) });
+};
+
+const parseFrameworkDeck = (value: unknown, repositories: readonly CuratedRepository[]): FrameworkDeck => {
+  const deck = exactRecord(value, ["rounds", "repository", "roundsPerFramework", "windowLines", "families", "templates"]);
+  const rounds = integer(deck.rounds);
+  const roundsPerFramework = integer(deck.roundsPerFramework);
+  if (roundsPerFramework > 3 || rounds % (FRAMEWORK_FAMILY_SIZE * roundsPerFramework) !== 0 || rounds < 8 || rounds > 60) fail();
+  const repository = text(deck.repository);
+  if (repositories.find((known) => known.repository === repository) === undefined) fail();
+  const windowLines = integer(deck.windowLines);
+  if (windowLines < 8 || windowLines > 20) fail();
+  const families = (Array.isArray(deck.families) && deck.families.length * FRAMEWORK_FAMILY_SIZE * roundsPerFramework >= rounds
+    ? deck.families : fail()).map((entry: unknown) => {
+    const family = exactRecord(entry, ["id", "note", "frameworks"]);
+    const id = text(family.id);
+    if (!ALGORITHM_ID.test(id)) fail();
+    const frameworks = (Array.isArray(family.frameworks) && family.frameworks.length === FRAMEWORK_FAMILY_SIZE
+      ? family.frameworks : fail()).map(parseFrameworkEntry);
+    if (frameworks.some(({ files }) => files.length < roundsPerFramework)) fail();
+    return Object.freeze({ id, note: text(family.note), frameworks: Object.freeze(frameworks) });
+  });
+  const all = families.flatMap(({ frameworks }) => frameworks);
+  if (new Set(families.map(({ id }) => id)).size !== families.length || new Set(all.map(({ id }) => id)).size !== all.length
+    || new Set(all.map(({ label }) => label)).size !== all.length) fail();
+  // A hint or note that spells any framework of the deck would answer a round, or rule an option out.
+  const copy = [...families.map(({ note }) => note), ...all.map(({ idea }) => idea)];
+  if (copy.some((value) => all.some((framework) => spellsFramework(value, framework)))) fail();
+  const templates = exactRecord(deck.templates, ["title", "description", "prompt", "evidence", "explanation"]);
+  const prompt = placeholderText(templates.prompt, []);
+  if (all.some((framework) => spellsFramework(prompt, framework))) fail();
+  return Object.freeze({
+    rounds, repository, roundsPerFramework, windowLines, families: Object.freeze(families),
+    templates: Object.freeze({
+      title: text(templates.title), description: text(templates.description), prompt,
+      evidence: placeholderText(templates.evidence, ["path", "repository", "name"]),
+      explanation: placeholderText(templates.explanation, []),
+    }),
+  });
+};
+
 const PROJECT_NAME = /^[A-Za-z0-9_.-]+$/u;
 const parseFixDeck = (value: unknown): FixDeck => {
   const deck = exactRecord(value, ["rounds", "datasets", "patchReads", "perRepository", "templates"]);
@@ -577,7 +704,7 @@ const parseFixDeck = (value: unknown): FixDeck => {
 
 /** The curated pins, and each deck built from them that the profile configures. */
 const parseCurated = (value: unknown): CuratedProfile => {
-  const decks = (["algorithm", "output", "fix", "missing-line", "name-function"] as const).filter((key) => isRecord(value) && Object.hasOwn(value, key));
+  const decks = (["algorithm", "output", "fix", "missing-line", "name-function", "framework"] as const).filter((key) => isRecord(value) && Object.hasOwn(value, key));
   const curated = exactRecord(value, ["repositories", ...decks]);
   const repositories = parseCuratedRepositories(curated.repositories);
   return Object.freeze({
@@ -587,6 +714,7 @@ const parseCurated = (value: unknown): CuratedProfile => {
     ...(decks.includes("fix") ? { fix: parseFixDeck(curated.fix) } : {}),
     ...(decks.includes("missing-line") ? { "missing-line": parseMissingLineDeck(curated["missing-line"], repositories) } : {}),
     ...(decks.includes("name-function") ? { "name-function": parseNameFunctionDeck(curated["name-function"], repositories) } : {}),
+    ...(decks.includes("framework") ? { framework: parseFrameworkDeck(curated.framework, repositories) } : {}),
   });
 };
 

@@ -18,7 +18,7 @@ const MAX_DECODED_BYTES = 256 * 1024;
 const MAX_LINE_LENGTH = 1_000;
 // The rarer languages' extensions (v1.0) follow the first line's.
 const SUPPORTED_EXTENSION =
-  /\.(?:c|cc|cpp|cs|go|h|hpp|html|java|js|jsx|kt|php|py|rb|rs|scala|sh|sql|swift|ts|tsx|vue|hs|elm|ml|fs|erl|pl|pro|clj|cljc|rkt|jl|m|adb|pas|pp|ex|exs|cr)$/u;
+  /\.(?:c|cc|cpp|cs|go|h|hpp|html|java|js|jsx|kt|php|py|rb|rs|scala|sh|sql|swift|ts|tsx|vue|svelte|gjs|gts|hs|elm|ml|fs|erl|pl|pro|clj|cljc|rkt|jl|m|adb|pas|pp|ex|exs|cr)$/u;
 const EXCLUDED_PATH =
   /(?:^|\/)(?:\.github|docs?|generated|node_modules|vendor)(?:\/|$)|(?:^|\/)(?:package-lock\.json|yarn\.lock|pnpm-lock\.yaml)$|\.min\.(?:js|css)$/iu;
 const GENERATED_MARKER = /(?:code generated|auto-generated|generated file).{0,40}(?:do not edit|automatic)/iu;

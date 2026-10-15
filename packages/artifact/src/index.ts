@@ -1,6 +1,7 @@
 export * from "./artifact";
 export * from "./domain";
 export * from "./errors";
+export * from "./framework";
 export * from "./missing-line";
 export * from "./name-function";
 export * from "./question-layer";

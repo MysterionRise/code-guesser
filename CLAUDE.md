@@ -326,6 +326,23 @@ gate: changing queries, retries, ceilings, deck rules, or running
       its directories (nested paths allowed, since directory listings are
       flat); like missing-line it goes live with the v6 run. Dry run:
       `docs/review/evidence/2026-10-15-name-function-dry-run.md`.
+    - **Which framework? (#62, v1.0):** a Recognise deck from tastejs/todomvc, the same to-do app in many
+      front-end frameworks, so only idioms tell them apart. `framework-window.ts` (commentary, masking, windows),
+      `framework-markers.ts` (each framework's idioms), `select-framework.ts`, `framework-rounds.ts`, and
+      `packages/artifact/src/framework.ts` (kind `FRAMEWORK`, deck `framework`).
+      - A round offers one family of four (`curated.framework.families`) and each family's rounds answer each
+        framework `roundsPerFramework` times, from different files listed in the profile.
+      - Every framework's names (`names`, matched across words) and `symbols` (whole identifiers, such as `can`)
+        are masked as `mystery` in every round. API namespaces that spell no name (`ko.`, `m(`, `goog.`, `Mn.`,
+        `$scope`) stay: they are the idioms.
+      - A window shows at least two of its framework's markers and none of another family member's; it skips
+        imports, AMD and Closure headers, style sheets, credit lines, and script tags, and never crosses a
+        single-file component's sections.
+      - TodoMVC's licence file is MIT "unless otherwise specified", which GitHub names no licence for. Its pin
+        declares the licence (`license: { spdx, path, blob }`), which `admitRepository` and `admitLicense` accept
+        only for that exact file and only where GitHub detects none. An example is skipped when a directory on a
+        file's path holds a licence file or its `package.json` declares another licence.
+      - Goes live with the v6 run (#129). Dry run: `docs/review/evidence/2026-10-15-framework-dry-run.md`.
     - **Registry (#36):** `ops/poc/prepare/curated-decks.ts` lists them in
       run order (`configured`, `select`, `generate`); ids live in
       `curated-deck-ids.ts`, and a deck's profile section is keyed by its id
@@ -363,8 +380,7 @@ gate: changing queries, retries, ceilings, deck rules, or running
    (GitLab, Software Heritage) and the "Which era?" deck. It has open decisions
    (licence allowlist, accounts) to settle with the user first.
 2. The research note's backlog: guess the commit message (the user said "not
-   now"), name the function, which exercise, which framework, vulnerable or
-   fixed.
+   now"), which exercise, vulnerable or fixed.
 
 Ask before widening the licence allowlist, raising the 3,000-request ceiling,
 or adding a source not named in the research note.
@@ -487,7 +503,9 @@ when the preparer throws a code this section does not name.
     does, so the first hint would pick it), `NAME_FUNCTION_RANK_UNBALANCED`,
     `NAME_FUNCTION_HINT_DECIDES` (no other name joins as many words as the
     answer), `LANGUAGE_PAIRING_CONFLICT` (no cycle of second pairs keeps resembling
-    pairs out of the same round), `TEMPLATE_PLACEHOLDER_REJECTED`.
+    pairs out of the same round), `FRAMEWORK_FAMILY_UNBALANCED` (a family's frameworks are
+    not answered equally often), `FRAMEWORK_NAME_SHOWN` (a pane, prompt, or hint still
+    names a framework), `TEMPLATE_PLACEHOLDER_REJECTED`.
 - Publication: `HASH_MISMATCH`, `INVALID_ARTIFACT`, `INVALID_HASH`, and
   `REPORT_*_FAILED` (staging, committing, rolling back, or finalizing the
   report). The previous artifact and pin stay.
@@ -584,6 +602,12 @@ add up.
   `NAME_FUNCTION_RANKS_UNBALANCED`: no choice balances the deck in text and
   length order within the extreme solvers' limits, so the deck is skipped.
   `NAME_FUNCTION_LANGUAGE`: a source's language has no source-file rule.
+- `FRAMEWORK_LICENSE_OWN` (#62): an example that states a licence of its own, by a licence
+  file on the file's path or its `package.json`; `FRAMEWORK_LICENSE_UNREADABLE`: a manifest
+  that is not a JSON object. `FRAMEWORK_WINDOW`: a file with no window that shows two of its
+  framework's idioms and none of another of its family. `FRAMEWORK_FILE_CHANGED`: the file
+  bound differs from the file read. `FRAMEWORK_FAMILY_SHORT`: a family dropped whole because
+  one of its frameworks found too few files.
 - `FIX_PATCH_WIDE`: a dataset patch that changes more than one line (most).
   - `FIX_CLAIM`: the fix's lines, which the reveal quotes, claim something
     about authorship (#32).
