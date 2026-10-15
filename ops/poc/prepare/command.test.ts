@@ -329,6 +329,57 @@ const logLines = (calls: readonly string[]): string[] =>
     expect(logLines(harness.calls)).toContain("log:PREPARATION_DECKS project,language,before-after");
   });
 
+  it("skips a deck whose rounds fail generation, and publishes the rest (#32)", async () => {
+    const profile = loadCuratedProfile({ beforeAfterPool: 5 }, { fix: true });
+    const harness = await makeHarness({}, { profile, fix: fixHarnessData() });
+    const generate = harness.dependencies.generateCurated;
+    harness.dependencies.generateCurated = (options) => options.deck === "fix"
+      ? (() => { throw Object.assign(new Error("FIX_ROUNDS_REJECTED"), { code: "FIX_RANK_UNBALANCED" }); })()
+      : generate(options);
+    await prepareLocalExperiment(harness.dependencies);
+    expect(logLines(harness.calls)).toContain("log:PREPARATION_DECK_SKIPPED fix FIX_RANK_UNBALANCED");
+    expect(logLines(harness.calls)).toContain("log:PREPARATION_DECKS project,language,before-after");
+    expect(harness.calls).toContain(`compose:${STACK_POOL}/${STACK_POOL}/5`);
+    expect((harness.reports[0] as any).diagnostics).toContainEqual({ stage: "SELECTION", reasonCode: "FIX_DECK_SKIPPED", count: 1 });
+  });
+
+  it("drops the later deck when composing it collides with one already kept (#32)", async () => {
+    const profile = loadCuratedProfile({ beforeAfterPool: 5 }, { fix: true });
+    const harness = await makeHarness({}, { profile, fix: fixHarnessData() });
+    const compose = harness.dependencies.compose;
+    harness.dependencies.compose = (options) => options.decks.fix !== undefined && options.decks["before-after"] !== undefined
+      ? (() => { throw Object.assign(new Error("EXPERIMENT_COMPOSITION_REJECTED"), { code: "PUBLIC_CONTAINMENT_CANDIDATE_IN_PANES" }); })()
+      : compose(options);
+    await prepareLocalExperiment(harness.dependencies);
+    expect(logLines(harness.calls)).toContain("log:PREPARATION_DECK_SKIPPED fix PUBLIC_CONTAINMENT_CANDIDATE_IN_PANES");
+    expect(logLines(harness.calls)).toContain("log:PREPARATION_DECKS project,language,before-after");
+  });
+
+  it("fails the run on an uncoded generation error, which is a bug rather than a deck to skip (#32)", async () => {
+    const profile = loadCuratedProfile({ beforeAfterPool: 5 }, { fix: true });
+    const harness = await makeHarness({}, { profile, fix: fixHarnessData() });
+    const generate = harness.dependencies.generateCurated;
+    harness.dependencies.generateCurated = (options) => options.deck === "fix" ? (undefined as any).fixtures : generate(options);
+    await expect(prepareLocalExperiment(harness.dependencies)).rejects.toThrow("PREPARATION_FAILED");
+    expect(logLines(harness.calls)[0]).toBe("log:PREPARATION_STAGE_FAILED GENERATION UNCODED_TYPEERROR none");
+    expect(logLines(harness.calls).some((line) => line.startsWith("log:PREPARATION_DECK_SKIPPED"))).toBe(false);
+  });
+
+  it("refuses a fix whose lines claim anything about authorship at selection, not after the spend (#32)", async () => {
+    const profile = loadCuratedProfile({ beforeAfterPool: 5 }, { fix: true });
+    const harness = await makeHarness({}, { profile, fix: fixHarnessData() });
+    const bind = harness.dependencies.bindFixCommit;
+    let calls = 0;
+    harness.dependencies.bindFixCommit = async (options) => {
+      const result = await bind(options);
+      if ((calls += 1) !== 1) return result;
+      const value = result.value;
+      return { ...result, value: { ...value, fix: { ...value.fix, fixedLine: `${value.fix.fixedLine} // AI-generated` } } };
+    };
+    await prepareLocalExperiment(harness.dependencies);
+    expect((harness.reports[0] as any).diagnostics).toContainEqual({ stage: "SCREENING", reasonCode: "FIX_CLAIM", count: 1 });
+  });
+
   it("attempts no algorithm deck when the profile configures none", async () => {
     const harness = await makeHarness();
     await prepareLocalExperiment(harness.dependencies);
@@ -1001,10 +1052,14 @@ const logLines = (calls: readonly string[]): string[] =>
   it("names the generation, report, and curated-file stages when they fail, with the selection counts", async () => {
     const counts = "log:PREPARATION_COUNTS discovered=8 admitted=5 duplicates=0";
     const rejections = "log:PREPARATION_REJECTIONS SCREENING:LANGUAGE_ROUNDS_REJECTED=1";
+    // Composition refuses every deck in turn (#32): each is skipped with the code, and with none left the run fails.
     const composing = await makeHarness({ compose: () => { throw Object.assign(new Error("EXPERIMENT_COMPOSITION_REJECTED"), { code: "DECK_SIZE_PROJECT" }); } });
     await expect(prepareLocalExperiment(composing.dependencies)).rejects.toThrow("PREPARATION_FAILED");
     expect(logLines(composing.calls)).toEqual([
-      "log:PREPARATION_STAGE_FAILED GENERATION DECK_SIZE_PROJECT none", counts, rejections, "log:PREPARATION_FAILED",
+      ...["project", "language", "before-after"].map((deck) => `log:PREPARATION_DECK_SKIPPED ${deck} DECK_SIZE_PROJECT`),
+      "log:PREPARATION_STAGE_FAILED GENERATION DECK_SIZE_PROJECT none", counts,
+      "log:PREPARATION_REJECTIONS SCREENING:LANGUAGE_ROUNDS_REJECTED=1 SELECTION:BEFORE_AFTER_DECK_SKIPPED=1 SELECTION:LANGUAGE_DECK_SKIPPED=1 SELECTION:PROJECT_DECK_SKIPPED=1",
+      "log:PREPARATION_FAILED",
     ]);
 
     // The real run-report parser, given a selected count above its bound (v5 run 1's failure).

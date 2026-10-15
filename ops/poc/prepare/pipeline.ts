@@ -2,16 +2,15 @@ import { canonicalHash } from "./canonical";
 import type { CapacityMeter } from "./capacity";
 import type { ComposedExperiment } from "./compose";
 import { defaultDependencies } from "./dependencies";
+import { CURATED_DECK_IDS, type CuratedDeckId } from "./curated-deck-ids";
+import { CURATED_DECKS } from "./curated-decks";
 import {
   createDeckAttempts, createRunState, failureDiagnostic, failureSite, noteRejection, PreparationError, rejectionSummary,
-  reportedFailure, uncodedDiagnostic, type DeckOutcome, type FailureStage, type RunState,
+  reportedFailure, stableCode, uncodedDiagnostic, type DeckOutcome, type FailureStage, type RunState,
 } from "./diagnostics";
 import type { GitHubQueryClassification } from "./github-search";
 import { artifactFixtures, DECK_IDS, type DeckId } from "./model";
 import { STACK_LANGUAGES, poolSizes, type CrawlProfile } from "./profile";
-import { selectAlgorithm, type AlgorithmSelection } from "./select-algorithm";
-import { selectOutput, type OutputSelection } from "./select-output";
-import { selectFix, type FixSelection } from "./select-fix";
 import { selectBeforeAfter } from "./select-github";
 import { selectStack, type ProjectSelection } from "./select-stack";
 import { addHashes, protectedValuesOf, provisionalSnapshot, repositoryScreen, safeDescription, view } from "./selection";
@@ -195,29 +194,21 @@ export const prepareLocalExperiment = async (deps: PreparationDependencies = def
     const beforeAfter = await selectBeforeAfter(context, deps, hashes, search.value.candidates, state, screenRepository, attempt, () => []);
     tracker.enter("BLOB_RETRIEVAL");
     const stack = await selectStack(context, deps, hashes, metadata, state, screenRepository, attempt, () => beforeAfter.candidates ?? []);
-    // Curated decks run last, so a run-wide budget they spend can skip only them.
+    // Curated decks run last, in the registry's order (#36), so a run-wide budget they spend can skip only them.
+    // Each sees the candidates of every deck selected before it.
     const earlierDecks = (): readonly unknown[] => [...(beforeAfter.candidates ?? []),
       ...[...(stack.project.candidates ?? []), ...(stack.language.candidates ?? [])].map(({ candidate }) => candidate)];
-    let algorithm: DeckOutcome<AlgorithmSelection> | undefined;
-    let output: DeckOutcome<OutputSelection> | undefined;
-    if (loaded.profile.curated?.algorithm) {
+    const curated: Partial<Record<CuratedDeckId, DeckOutcome>> = {};
+    for (const deck of CURATED_DECKS) {
+      if (!deck.configured(loaded.profile)) continue;
       tracker.enter("CURATED_FILES");
-      algorithm = await selectAlgorithm(context, deps, hashes, state, attempt, earlierDecks);
-    }
-    if (loaded.profile.curated?.output) {
-      tracker.enter("CURATED_FILES");
-      output = await selectOutput(context, deps, hashes, state, attempt, () => [...earlierDecks(), ...(algorithm?.candidates ?? [])]);
-    }
-    let fix: DeckOutcome<FixSelection> | undefined;
-    if (loaded.profile.curated?.fix) {
-      tracker.enter("CURATED_FILES");
-      fix = await selectFix(context, deps, hashes, state, attempt,
-        () => [...earlierDecks(), ...(algorithm?.candidates ?? []), ...(output?.candidates ?? [])]);
+      const before = Object.values(curated);
+      curated[deck.id] = await deck.select(context, deps, hashes, state, attempt,
+        () => [...earlierDecks(), ...before.flatMap((outcome) => outcome?.candidates ?? [])]);
     }
     tracker.enter("SELECTION");
     const outcomes: Readonly<Partial<Record<DeckId, DeckOutcome>>> = {
-      project: stack.project, language: stack.language, "before-after": beforeAfter, ...(algorithm ? { algorithm } : {}),
-      ...(output ? { output } : {}), ...(fix ? { fix } : {}),
+      project: stack.project, language: stack.language, "before-after": beforeAfter, ...curated,
     };
     const published = publishedDecks(deps, state, outcomes);
     tracker.enter("GENERATION");
@@ -233,9 +224,8 @@ export const prepareLocalExperiment = async (deps: PreparationDependencies = def
       || [...finalized.projectCandidates, ...finalized.languageCandidates]
         .some((candidate) => (candidate as { crawlSnapshotId?: unknown }).crawlSnapshotId !== crawlSnapshotId))) throw new PreparationError();
     // A curated file's source is built from the selection itself, so binding it to the final snapshot needs no request.
-    const algorithmCandidates = (algorithm?.candidates ?? []).map((selection) => Object.freeze({ ...selection, crawlSnapshotId }));
-    const outputCandidates = (output?.candidates ?? []).map((selection) => Object.freeze({ ...selection, crawlSnapshotId }));
-    const fixCandidates = (fix?.candidates ?? []).map((selection) => Object.freeze({ ...selection, crawlSnapshotId }));
+    const curatedCandidates = (id: CuratedDeckId): readonly unknown[] =>
+      (curated[id]?.candidates ?? []).map((selection) => Object.freeze({ ...(selection as object), crawlSnapshotId }));
     const generate: Readonly<Record<DeckId, () => GeneratedRounds>> = {
       project: () => {
         // Descriptions are public; one that names any selected source's protected value is left out.
@@ -248,25 +238,42 @@ export const prepareLocalExperiment = async (deps: PreparationDependencies = def
       },
       language: () => deps.generateLanguage({ profile: loaded.profile, candidates: finalized.languageCandidates }),
       "before-after": () => deps.generateBeforeAfter({ profile: loaded.profile, candidates: finalized.beforeAfterCandidates }),
-      algorithm: () => deps.generateAlgorithm({ profile: loaded.profile, candidates: algorithmCandidates }),
-      output: () => deps.generateOutput({ profile: loaded.profile, candidates: outputCandidates }),
-      fix: () => deps.generateFix({ profile: loaded.profile, candidates: fixCandidates }),
+      ...Object.fromEntries(CURATED_DECK_IDS.map((id) => [id,
+        () => deps.generateCurated({ deck: id, profile: loaded.profile, candidates: curatedCandidates(id) })])) as Record<CuratedDeckId, () => GeneratedRounds>,
     };
     const expected = poolSizes(loaded.profile);
-    const decks = Object.fromEntries(published.map((id) => {
-      const generated = generate[id]();
-      if (generated.fixtures.length !== expected[id]) throw new PreparationError();
-      return [id, generated];
-    }));
-    const composed = deps.compose({ profile: loaded.profile, canonicalProfileBytes: loaded.canonicalProfileBytes,
-      acceptedResponseHashes: Object.freeze(hashes), decks });
+    const composeWith = (decks: Readonly<Partial<Record<DeckId, GeneratedRounds>>>): ComposedExperiment => deps.compose({
+      profile: loaded.profile, canonicalProfileBytes: loaded.canonicalProfileBytes, acceptedResponseHashes: Object.freeze(hashes), decks });
+    // Each deck is generated and composed in turn (#32): a deck whose generator or the parser refuses it, or that
+    // collides with a deck already kept, is skipped with its code and the rest still publish. An invariant or an
+    // uncoded error is a bug, and still fails the run.
+    const kept: Partial<Record<DeckId, GeneratedRounds>> = {};
+    let composed: ComposedExperiment | undefined;
+    let firstFailure: unknown;
+    for (const id of published) {
+      try {
+        const generated = generate[id]();
+        if (generated.fixtures.length !== expected[id]) throw new PreparationError();
+        composed = composeWith({ ...kept, [id]: generated });
+        kept[id] = generated;
+      } catch (error) {
+        const code = stableCode(error);
+        if (code === undefined || error instanceof PreparationError) throw error;
+        firstFailure ??= error;
+        deps.log(`PREPARATION_DECK_SKIPPED ${id} ${code}`);
+        // Counted as a selection skip is: the deck is not published; its log line names the generation code.
+        noteRejection(state, "SELECTION", new Error(`${id.toUpperCase().replaceAll("-", "_")}_DECK_SKIPPED`));
+      }
+    }
+    if (composed === undefined) throw firstFailure;
+    const keptDecks = published.filter((id) => kept[id] !== undefined);
     if (composed.artifact.crawlSnapshot.id !== crawlSnapshotId) throw new PreparationError();
     tracker.enter("REPORT");
     const report = deps.createReport(reportInput(context, composed, deps.uuid(), deps.now().toISOString(), state, classifications));
     tracker.enter("PUBLICATION");
     const publication = await publishWithReport(deps, composed, report);
     if (classifications.some(({ completeness }) => completeness === "PROVIDER_REPORTED_INCOMPLETE")) deps.log("GITHUB_SEARCH_INCOMPLETE");
-    deps.log(`PREPARATION_DECKS ${published.join(",")}`);
+    deps.log(`PREPARATION_DECKS ${keptDecks.join(",")}`);
     logSpend();
     finishRuntime();
     deps.log("PREPARATION_COMPLETE");

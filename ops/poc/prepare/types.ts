@@ -1,6 +1,7 @@
 import type { BlobWorkerLimits } from "./blob-worker";
 import type { CapacityMeter, createCapacityMeter } from "./capacity";
 import type { ComposedExperiment, composeExperimentArtifact } from "./compose";
+import type { CuratedDeckId } from "./curated-deck-ids";
 import type { CuratedFile } from "./github-files";
 import type { BoundFix, DatasetBug, FixPointer } from "./github-fixes";
 import type { GitHubQueryClassification } from "./github-search";
@@ -70,9 +71,8 @@ export interface PreparationDependencies {
   generateProject(options: Readonly<{ profile: CrawlProfile; rounds: readonly ProjectRoundInput[] }>): GeneratedRounds;
   generateLanguage(options: Readonly<{ profile: CrawlProfile; candidates: readonly unknown[] }>): GeneratedRounds;
   generateBeforeAfter(options: Readonly<{ profile: CrawlProfile; candidates: readonly unknown[] }>): GeneratedRounds;
-  generateAlgorithm(options: Readonly<{ profile: CrawlProfile; candidates: readonly unknown[] }>): GeneratedRounds;
-  generateOutput(options: Readonly<{ profile: CrawlProfile; candidates: readonly unknown[] }>): GeneratedRounds;
-  generateFix(options: Readonly<{ profile: CrawlProfile; candidates: readonly unknown[] }>): GeneratedRounds;
+  /** One curated deck's rounds (#36), by the registry's generator for that deck. */
+  generateCurated(options: Readonly<{ deck: CuratedDeckId; profile: CrawlProfile; candidates: readonly unknown[] }>): GeneratedRounds;
   compose(options: Parameters<typeof composeExperimentArtifact>[0]): ComposedExperiment;
   createReport(input: Readonly<Record<string, unknown>>): unknown;
   stageReport(report: unknown): Promise<StagedRunReport>;

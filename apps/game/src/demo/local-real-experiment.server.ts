@@ -7,7 +7,7 @@ import type {
   HintResponse,
   RevealRequest,
   RevealResponse,
-} from "../components/arcade/arcade-shell";
+} from "../components/arcade/arcade-session";
 import {
   createPublicModeContract,
   type PublicModeContract,
@@ -36,6 +36,9 @@ import {
   sealGame,
   type GameState,
 } from "./local-real-experiment-session.server";
+import { CONTROL, type Arms } from "../experiment/arms";
+import type { EventSink } from "../experiment/event-store.server";
+import { elapsed, emitterFor, recordClientEvent, type ClientEventOutcome, type Emit } from "./local-real-experiment-events.server";
 import type { RenderLimits } from "../genui/render-catalog";
 import { roundContext, type RoundContext } from "../genui/round-context.server";
 import {
@@ -62,8 +65,8 @@ export interface LocalRealExperiment {
   readonly privateReveals: Readonly<Record<string, PrivateReveal>>;
   /** Five rounds drawn at random from the deck's pool, each four-option round's options in a fresh order. */
   readonly dealSession: (deckId: DeckId, random?: () => number) => PublicModeContract;
-  /** A dealt session and the signed token that holds its progress on the server's terms. */
-  readonly dealGame: (deckId: DeckId, random?: () => number, now?: number) => DealtGame;
+  /** A dealt session and the signed token that holds its progress, its arms, and whether it records events. */
+  readonly dealGame: (deckId: DeckId, random?: () => number, now?: number, seal?: DealSeal) => DealtGame;
   /** The next hint of the round being played, which lowers what a right answer scores. */
   readonly revealHint: (request: HintRequest, now?: number) => HintResponse;
   /** Locks in one answer for the round being played and reveals it, scored from the server's own state. */
@@ -73,7 +76,37 @@ export interface LocalRealExperiment {
    * locked, or any round already answered. Later rounds are refused.
    */
   readonly modelContext: (request: ModelContextRequest, now?: number) => ModelContextResponse;
+  /**
+   * Records one event only a browser sees (#107), for a game this server dealt and that has not expired. It names
+   * a round already reached, and a game takes a bounded number of them.
+   */
+  readonly recordClientEvent: (request: unknown, now?: number) => ClientEventOutcome;
 }
+
+
+/** What a deal seals beside the rounds: the experiment arms (#106) and whether the game records events (#107). */
+export interface DealSeal {
+  readonly arms: Arms;
+  readonly record: boolean;
+}
+
+/** One model call's outcome, as the genui route reports it for the event log. */
+export interface ModelCallOutcome {
+  readonly ok: boolean;
+  /** The provider's HTTP status when the call failed with one; 0 otherwise. */
+  readonly status: number;
+  readonly calls: number;
+  readonly tokensIn: number;
+  readonly tokensOut: number;
+  readonly ms: number;
+}
+
+export interface ExperimentOptions {
+  /** Where game events go; none records nothing. */
+  readonly events?: EventSink | null;
+}
+
+export type { ClientEventOutcome } from "./local-real-experiment-events.server";
 
 export interface ModelContextRequest {
   readonly sessionToken: string;
@@ -90,12 +123,18 @@ export type ModelContextResponse =
      * Never part of the context, and never sent to a model or a browser.
      */
     codeLines: readonly string[];
+    /** The game's sealed arms; the route serves only the design the game drew. */
+    arms: Arms;
+    /** Records one model call for this round in the event log, when the game records events. */
+    recordCall: (outcome: ModelCallOutcome, now?: number) => void;
   }>
   | GameRefusal;
 
 export interface DealtGame {
   readonly mode: PublicModeContract;
   readonly sessionToken: string;
+  /** The arms sealed into the token, so the page renders the game the experiment drew. */
+  readonly arms: Arms;
 }
 
 interface DerivedRound {
@@ -241,7 +280,7 @@ const refusalFor = (error: unknown): GameRefusal =>
   error instanceof SessionRefusal && error.reason === "SESSION_ENDED" ? SESSION_ENDED : REJECTED;
 
 /** The guard's context for one round of a game, from the server's own copy of the round. */
-const contextFor = (round: DerivedRound, deckTitle: string, state: GameState, index: number): ModelContextResponse => {
+const contextFor = (round: DerivedRound, deckTitle: string, state: GameState, index: number, emit: Emit): ModelContextResponse => {
   const { publicRound, hints, privateReveal } = round;
   const phase = index < state.roundIndex ? "after-lock" : "before-lock";
   const context = roundContext({
@@ -261,6 +300,8 @@ const contextFor = (round: DerivedRound, deckTitle: string, state: GameState, in
       optionLabels: Object.freeze(publicRound.mode.candidates.map(({ label }) => label)),
     }),
     codeLines: Object.freeze(publicRound.content.panes.flatMap(({ text }) => text.split("\n"))),
+    arms: state.arms,
+    recordCall: (outcome: ModelCallOutcome, now = Date.now()) => emit(state, "genui_call", { round: index + 1, phase, ...outcome }, now),
   });
 };
 
@@ -275,6 +316,7 @@ const revealFor = (
   state: GameState,
   candidateId: string,
   artifactHash: string,
+  now: number,
 ): { next: GameState; result: AuthorizedReveal } => {
   const { publicRound, privateReveal: reveal } = round;
   if (!publicRound.mode.candidates.some((candidate) => candidate.candidateId === candidateId)) fail();
@@ -282,7 +324,7 @@ const revealFor = (
   const roundScore = correct ? publicRound.points[state.hints] ?? fail() : 0;
   const next: GameState = {
     ...state, step: state.step + 1, roundIndex: state.roundIndex + 1, hints: 0, hintsByRound: [...state.hintsByRound, state.hints],
-    score: state.score + roundScore,
+    correct: state.correct + (correct ? 1 : 0), score: state.score + roundScore, roundStartedAt: now,
   };
   return {
     next,
@@ -322,8 +364,10 @@ const pinnedHash = (artifactInput: unknown, trustedArtifactHash: string): string
 export const createLocalRealExperiment = (
   artifactInput: unknown,
   trustedArtifactHash: string,
+  options: ExperimentOptions = {},
 ): LocalRealExperiment => {
   const expectedArtifactHash = pinnedHash(artifactInput, trustedArtifactHash);
+  const emit = emitterFor(options.events);
   // Anything an artifact that matches its pin then fails is the schema's.
   try {
     const artifact = record(artifactInput, ARTIFACT_KEYS);
@@ -343,32 +387,51 @@ export const createLocalRealExperiment = (
       decks: Object.freeze(decks.map(({ deck }) => deck)),
       privateReveals,
       dealSession,
-      dealGame: (deckId: DeckId, random: () => number = Math.random, now = Date.now()) => {
+      dealGame: (deckId: DeckId, random: () => number = Math.random, now = Date.now(), seal: DealSeal = { arms: CONTROL, record: true }) => {
         const mode = dealSession(deckId, random);
         const state: GameState = {
-          version: 1, gameId: newGameId(), artifactHash: expectedArtifactHash, deck: deckId,
-          roundIds: mode.rounds.map(({ roundId }) => roundId), step: 0, roundIndex: 0, hints: 0, hintsByRound: [], score: 0, dealtAt: now,
+          version: 2, gameId: newGameId(), artifactHash: expectedArtifactHash, deck: deckId,
+          roundIds: mode.rounds.map(({ roundId }) => roundId), step: 0, roundIndex: 0, hints: 0, hintsByRound: [], correct: 0, score: 0,
+          dealtAt: now, roundStartedAt: now, arms: seal.arms, record: seal.record,
         };
         const sessionToken = sealGame(state);
         recordStep(state, now);
-        return Object.freeze({ mode, sessionToken });
+        emit(state, "game_dealt", {}, now);
+        return Object.freeze({ mode, sessionToken, arms: state.arms });
       },
       revealHint: (value: HintRequest, now = Date.now()): HintResponse => {
         const request = strings(value, ["sessionToken", "roundId"]);
         if (request === null) return REJECTED;
+        let bought: GameState | undefined;
         const outcome = transact(request.sessionToken!, expectedArtifactHash, now, (state) => {
           const round = currentRound(rounds, state, request.roundId!);
           const hint = round.hints[state.hints] ?? fail();
-          return { next: { ...state, step: state.step + 1, hints: state.hints + 1 }, result: hint };
+          bought = { ...state, step: state.step + 1, hints: state.hints + 1 };
+          return { next: bought, result: hint };
         });
-        return outcome.ok ? Object.freeze({ ok: true, hint: outcome.result, sessionToken: outcome.sessionToken }) : outcome;
+        if (!outcome.ok) return outcome;
+        emit(bought!, "hint_revealed", { round: bought!.roundIndex + 1, hint: bought!.hints, ms: elapsed(bought!.roundStartedAt, now) }, now);
+        return Object.freeze({ ok: true, hint: outcome.result, sessionToken: outcome.sessionToken });
       },
       answer: (value: RevealRequest, now = Date.now()): RevealResponse => {
         const request = strings(value, ["sessionToken", "roundId", "candidateId"]);
         if (request === null) return REJECTED;
-        const outcome = transact(request.sessionToken!, expectedArtifactHash, now, (state) =>
-          revealFor(currentRound(rounds, state, request.roundId!), state, request.candidateId!, expectedArtifactHash));
-        return outcome.ok ? Object.freeze({ ok: true, reveal: outcome.result, sessionToken: outcome.sessionToken }) : outcome;
+        let before: GameState | undefined;
+        let after: GameState | undefined;
+        const outcome = transact(request.sessionToken!, expectedArtifactHash, now, (state) => {
+          before = state;
+          const revealed = revealFor(currentRound(rounds, state, request.roundId!), state, request.candidateId!, expectedArtifactHash, now);
+          after = revealed.next;
+          return revealed;
+        });
+        if (!outcome.ok) return outcome;
+        emit(after!, "round_revealed", { round: after!.roundIndex, correct: outcome.result.correct, hints: before!.hints,
+          ms: elapsed(before!.roundStartedAt, now) }, now);
+        if (after!.roundIndex === ROUNDS_PER_SESSION) {
+          emit(after!, "game_completed", { score: after!.score, correct: after!.correct,
+            hints: after!.hintsByRound.reduce((total, count) => total + count, 0), ms: elapsed(after!.dealtAt, now) }, now);
+        }
+        return Object.freeze({ ok: true, reveal: outcome.result, sessionToken: outcome.sessionToken });
       },
       modelContext: (value: ModelContextRequest, now = Date.now()): ModelContextResponse => {
         const request = strings(value, ["sessionToken", "roundId"]);
@@ -383,8 +446,9 @@ export const createLocalRealExperiment = (
         const round = rounds.get(request.roundId!);
         // The round being played, or one already answered; never a round still to come.
         if (index < 0 || index > state.roundIndex || round === undefined) return REJECTED;
-        return contextFor(round, deckTitles.get(request.roundId!)!, state, index);
+        return contextFor(round, deckTitles.get(request.roundId!)!, state, index, emit);
       },
+      recordClientEvent: (value: unknown, now = Date.now()): ClientEventOutcome => recordClientEvent(value, expectedArtifactHash, now, emit),
     });
   } catch {
     return fail("SCHEMA");

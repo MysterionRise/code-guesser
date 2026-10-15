@@ -40,10 +40,14 @@ export async function POST(request: Request): Promise<Response> {
   if (!loaded.ok) return refuse(503, "GENUI_UNAVAILABLE");
   const round = loaded.experiment.modelContext({ sessionToken, roundId });
   if (!round.ok) return refuse(round.reason === "SESSION_ENDED" ? 410 : 403, round.reason);
+  // A game serves only the design it drew (#106), so a client can't switch arms mid-game.
+  if (round.arms.design !== design) return refuse(403, "DESIGN");
   if (AFTER_LOCK_ONLY.has(design) && round.context.phase !== "after-lock") return refuse(403, "PHASE");
   const turns = playerTurns(messages);
   if (turns === null) return refuse(400, "MESSAGES_REJECTED");
-  const streamed = streamRound({ design, context: round.context, limits: round.limits, codeLines: round.codeLines, turns, signal: request.signal });
+  const streamed = streamRound({ design, context: round.context, limits: round.limits, codeLines: round.codeLines, turns, signal: request.signal,
+    onOutcome: (outcome) => round.recordCall({ ...outcome, tokensIn: Math.min(outcome.tokensIn, 1_000_000),
+      tokensOut: Math.min(outcome.tokensOut, 100_000), ms: Math.min(outcome.ms, 86_400_000) }) });
   if (typeof streamed === "string") return refuse(streamed === "GENUI_UNAVAILABLE" ? 503 : 422, streamed);
   return streamed;
 }

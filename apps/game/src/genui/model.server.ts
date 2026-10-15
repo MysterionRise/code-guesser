@@ -205,6 +205,17 @@ const toolsFor = (design: Design, context: RoundContext, limits: RenderLimits): 
   return design === "host" ? Object.fromEntries(Object.entries(tools).filter(([name]) => HOST_COMPONENTS.has(name))) : tools;
 };
 
+/** How one model call ended, in counts only, for the event log (#107). */
+export interface CallOutcome {
+  readonly ok: boolean;
+  /** The provider's HTTP status when the call failed with one; 0 otherwise. */
+  readonly status: number;
+  readonly calls: number;
+  readonly tokensIn: number;
+  readonly tokensOut: number;
+  readonly ms: number;
+}
+
 export interface RoundRequest {
   readonly design: Design;
   readonly context: RoundContext;
@@ -212,6 +223,8 @@ export interface RoundRequest {
   readonly codeLines: readonly string[];
   readonly turns: readonly PlayerTurn[];
   readonly signal?: AbortSignal;
+  /** Told once how the call ended. */
+  readonly onOutcome?: (outcome: CallOutcome) => void;
 }
 
 /**
@@ -219,7 +232,7 @@ export interface RoundRequest {
  * is not configured or the player pasted the round's code before the lock. Provider errors never reach the
  * browser or the log beyond a code.
  */
-export const streamRound = ({ design, context, limits, codeLines, turns, signal }: RoundRequest): Response | GenuiRefusal => {
+export const streamRound = ({ design, context, limits, codeLines, turns, signal, onOutcome }: RoundRequest): Response | GenuiRefusal => {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (apiKey === undefined || apiKey.length === 0) return "GENUI_UNAVAILABLE";
   if (context.phase === "before-lock" && mentionsCode(turns, codeLines)) return "PASTED_CODE";
@@ -244,6 +257,8 @@ export const streamRound = ({ design, context, limits, codeLines, turns, signal 
     { role: "user", content: data },
     ...turns.map(({ role, text }): ModelMessage => ({ role, content: text })),
   ];
+  const started = Date.now();
+  const tokens = (value: number | undefined): number => Number.isSafeInteger(value) && value! >= 0 ? value! : 0;
   const result = streamText({
     model: provider.chatModel(process.env.OPENROUTER_MODEL ?? DEFAULT_MODEL),
     system,
@@ -257,10 +272,13 @@ export const streamRound = ({ design, context, limits, codeLines, turns, signal 
     onError: ({ error }) => {
       const status = isRecord(error) && typeof error.statusCode === "number" ? error.statusCode : "NETWORK";
       console.error(`GENUI_STREAM_FAILED ${status}`);
+      onOutcome?.({ ok: false, status: typeof status === "number" && status >= 0 && status <= 599 ? status : 0, calls: 0, tokensIn: 0, tokensOut: 0, ms: Date.now() - started });
     },
     // Counts and codes only: how the step ended, how many render calls it made, and the tokens it used.
     onFinish: ({ finishReason, toolCalls, totalUsage }) => {
       console.info(`GENUI_FINISHED ${design} ${context.phase} ${finishReason} calls=${toolCalls.length} in=${totalUsage.inputTokens ?? "?"} out=${totalUsage.outputTokens ?? "?"}`);
+      onOutcome?.({ ok: true, status: 0, calls: Math.min(toolCalls.length, 20), tokensIn: tokens(totalUsage.inputTokens),
+        tokensOut: tokens(totalUsage.outputTokens), ms: Date.now() - started });
     },
   });
   return result.toUIMessageStreamResponse({ onError: () => "GENUI_FAILED", headers: { "cache-control": "no-store" } });

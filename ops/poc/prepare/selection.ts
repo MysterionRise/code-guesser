@@ -1,5 +1,5 @@
 import { canonicalHash } from "./canonical";
-import { containsProtected } from "./compose";
+import { PROTECTED_SOURCE_KEYS, containsProtected } from "./compose";
 import { noteRejection, PreparationError, rejectCandidate, type DiagnosticStage, type RunState } from "./diagnostics";
 import { AUTHORSHIP_CLAIM } from "../../../packages/artifact/src/index";
 import { CROSS_DECK_KEYS } from "./model";
@@ -38,8 +38,6 @@ export const addHashes = (target: string[], values: readonly string[]): void => 
 export const provisionalSnapshot = (profileHash: string, hashes: readonly string[]): string =>
   canonicalHash({ profileHash, acceptedResponseHashes: hashes.length > 0 ? hashes : [canonicalHash("capture")] });
 
-const PROTECTED_SOURCE_KEYS = ["repository", "repositoryUrl", "authorName", "authorLogin", "authorSourceUrl", "path", "blob", "rawContentHash",
-  "licenseName", "licenseSpdx", "licenseFileUrl", "commit", "commitUrl", "blobUrl"] as const;
 /** Every pane of code a candidate's round would show, and for a commit the subject its first hint quotes. */
 const excerptOf = (candidate: unknown): string => {
   const { lineage, excerpt } = view(candidate);

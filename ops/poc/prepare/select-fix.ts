@@ -1,6 +1,6 @@
 import { screenBlob } from "@codeguessr/content/local-poc-support";
 
-import { CROSS_DECK_KEYS_BY_KIND, DEDUPLICATION_KEYS_BY_KIND } from "../../../packages/artifact/src/index";
+import { AUTHORSHIP_CLAIM, CROSS_DECK_KEYS_BY_KIND, DEDUPLICATION_KEYS_BY_KIND } from "../../../packages/artifact/src/index";
 import { DECK_SHORT, noteRejection, rejectCandidate, type DeckAttempts, type DeckOutcome, type RunState } from "./diagnostics";
 import { looksGenerated } from "./excerpt-window";
 import { bugsInPyRevisions, defects4jRevisions, oneLineFix, type BugRevisions } from "./fix-patch";
@@ -115,6 +115,9 @@ export const selectFix = async (
     try {
       const screened = screenBlob({ path: bound.fix.path, bytes: bound.bytes }, seen);
       if (looksGenerated(screened.text, profile.screening.generatedScanLines)) fail("GENERATED_CONTENT");
+      // The fix's lines are quoted in the reveal, so one that claims anything about authorship is refused here rather
+      // than by the parser after the whole run's spend (#32).
+      if (AUTHORSHIP_CLAIM.test(`${bound.fix.buggyLine}\n${bound.fix.fixedLine}`)) fail("FIX_CLAIM");
       const windows = fixWindows(screened.text, bound.changedLine, `${bug.dataset}:${bug.bug}`, FIX_WINDOW_LINES, project.language)
         .filter(({ excerpt }) => Buffer.byteLength(excerpt) <= profile.screening.excerptBytes);
       if (windows.length === 0) fail("FIX_WINDOW");

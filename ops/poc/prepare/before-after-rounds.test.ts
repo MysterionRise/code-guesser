@@ -41,6 +41,9 @@ describe("before-or-after rounds", () => {
     expect(beforeAfterSubject("Fix", "acme/widget", 90)).toBeUndefined();
     expect(beforeAfterSubject("Refactor widget internals", "acme/widget", 90)).toBeUndefined();
     expect(beforeAfterSubject("Thanks @someone for the review", "acme/widget", 90)).toBeUndefined();
+    // A claim about authorship would fail the parser after the run's spend, so selection refuses it first (#32).
+    expect(beforeAfterSubject("Replace the AI-generated parser helpers", "acme/widget", 90)).toBeUndefined();
+    expect(beforeAfterSubject("Mark files as human-written in headers", "acme/widget", 90)).toBeUndefined();
     expect(beforeAfterSubject("See https://example.test/issue", "acme/widget", 90)).toBeUndefined();
     expect(beforeAfterSubject("x".repeat(91), "acme/widget", 90)).toBeUndefined();
   });

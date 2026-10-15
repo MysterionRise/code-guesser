@@ -1,3 +1,4 @@
+import { AUTHORSHIP_CLAIM } from "../../../packages/artifact/src/index";
 import { canonicalHash } from "./canonical";
 import type { GitHubAdmissionCandidate } from "./github-admission";
 import { deepFreeze } from "./model-validation";
@@ -23,11 +24,13 @@ const UNSAFE_SUBJECT = /https?:|www\.|@|[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+|\bco-au
 
 /**
  * The commit subject a hint may quote: its first line without a trailing pull-request number, within the
- * length limit, naming no address, handle, or the repository itself. Undefined when no such subject exists.
+ * length limit, naming no address, handle, or the repository itself, and claiming nothing about authorship.
+ * Undefined when no such subject exists.
  */
 export const beforeAfterSubject = (message: string, repository: string, maximumLength: number): string | undefined => {
   const subject = (message.split(/\r?\n/u)[0] ?? "").replace(PULL_REQUEST_SUFFIX, "").trim();
-  if (subject.length < 8 || subject.length > maximumLength || UNSAFE_SUBJECT.test(subject)
+  // A subject that claims anything about authorship would fail the parser after the whole run's spend (#32).
+  if (subject.length < 8 || subject.length > maximumLength || UNSAFE_SUBJECT.test(subject) || AUTHORSHIP_CLAIM.test(subject)
     || mentionsRepository(subject, repository) || /[“”]/u.test(subject)) return undefined;
   return subject;
 };

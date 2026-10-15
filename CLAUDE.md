@@ -116,9 +116,9 @@ gate: changing queries, retries, ceilings, deck rules, or running
   - The server logs codes only: `GENUI_FINISHED <phase> <finishReason>
     calls=<n> in=<tokens> out=<tokens>`, `GENUI_RENDER_REJECTED <component>
     <check>`, `GENUI_STREAM_FAILED <status>`.
-  - Designs (#114, Phase 2 of #109): with `GENUI_ENABLED=1`, `?design=`
-    picks `catalog` (the default), `composer`, `visualizer`, `host`, or
-    `off`, and a "Designs" nav switches between them (`genui/designs.ts`).
+  - Designs (#114, Phase 2 of #109): `catalog`, `composer`, `visualizer`,
+    `host`, or `off` (`genui/designs.ts`). Each game draws one at deal time
+    (#106); in lab mode `?design=` picks it and a "Designs" nav switches.
   - The composer (`genui/composer-spec.ts`, `genui/composer-view.tsx`) lets
     the model lay out the whole post-lock panel as a json-render spec. The
     spec is a tree of 14 blocks: stack, row, card, details, heading, text,
@@ -175,6 +175,34 @@ gate: changing queries, retries, ceilings, deck rules, or running
   - Live check, with each explain about $0.0007:
     `docs/review/evidence/2026-10-14-genui-live-check.md`. Run it locally
     with `GENUI_ENABLED=1 OPENROUTER_API_KEY="$(cat ~/.config/openrouter/key)"`.
+- The design experiment (#106, #107; v1.0 milestone):
+  - **Arms** (`apps/game/src/experiment/arms.ts`): each game draws design ×
+    theme × question layer independently at deal time, by committed
+    `WEIGHTS`. Themes and the layer weigh 0 until #125 and #127 ship.
+    - The draw is sealed in the session token (version 2, with `arms`,
+      `record`, `correct`, `roundStartedAt`), and the genui route serves only
+      the sealed design (`403 DESIGN`).
+    - `EXPERIMENT_DISABLED=design:host,…` switches levels off; their weight
+      goes to control, which can't be switched off.
+    - Lab mode (`EXPERIMENT_LAB=1`, or `next dev`) honours `?design=`,
+      `?theme=`, `?layer=` and shows the Designs nav. Playtests on
+      `next start` need it.
+  - **Event log** (`experiment/events.ts`, `experiment/event-store.server.ts`,
+    `demo/local-real-experiment-events.server.ts`):
+    - schema v1, one strict parser: exact keys, closed enums, bounded
+      numbers, so no IP, user agent, id, chat text, round content, or chosen
+      option can be stored;
+    - the server records `game_dealt`, `hint_revealed`, `round_revealed`,
+      `game_completed`, and `genui_call` itself; the browser sends
+      `game_viewed`, `deal_again`, `result_copied`, `genui_interaction`, and
+      `genui_fallback` to the beacon route `app/api/events/route.ts`
+      (1 KB, a live signed token, 60 per game);
+    - opt-in: nothing is recorded without `EXPERIMENT_EVENTS_DIR` (one JSONL
+      file per UTC day, rolled up into `totals.jsonl` after 90 days), and a
+      deal under `Sec-GPC: 1` seals `record: false`;
+    - `EXPERIMENT_SOURCE=agent|synthetic` tags playtests and tests.
+    - SQLite waits for Node 24 (#21): Node 20 has no `node:sqlite`, so the
+      store is JSONL behind the `EventStore` interface.
 - Question layers (#127, #128; v1.0): generative UI inside the question,
   written at preparation time and frozen in
   `apps/game/src/demo/generated/question-layers.json`, pinned by
@@ -242,6 +270,13 @@ gate: changing queries, retries, ceilings, deck rules, or running
     so no option set appears in more than two rounds.
   - **Phase 3b,** the curated decks. Each runs only when the profile carries
     its `curated` section, after the Stack and search decks.
+    - **Registry (#36):** `ops/poc/prepare/curated-decks.ts` lists them in
+      run order (`configured`, `select`, `generate`); ids live in
+      `curated-deck-ids.ts`, and a deck's profile section is keyed by its id
+      with its `templates`. The pipeline loops over the registry, and
+      generation goes through one `generateCurated` dependency. A new curated
+      deck still touches the artifact schema (`packages/artifact`) and, for
+      snapshot data, `compose.ts`.
     - **Curated files:** `github-files.ts` reads a file at a pinned commit
       through verified trees, with its licence and last human author.
       `github-fixes.ts` lists dataset bugs (BugsInPy's through one recursive
@@ -361,11 +396,17 @@ when the preparer throws a code this section does not name.
   `INCOMPLETE`, `TOTAL_CHANGED`, `ITEM_COUNT`, and `DUPLICATE` are provider
   inconsistencies; `SHAPE`, `IDENTITY`, and `DATE` are record drift;
   `RESULT_CEILING` and `PAGE_CEILING` mean a query outgrew its ceilings.
-- `PREPARATION_DECK_SKIPPED <deck> <code>`: that deck did not fill
-  (`DECK_SHORT`, or the `BUDGET_EXHAUSTED_*` budget that ran out) and was left
-  out; the others still publish, and the aggregates count it as
-  `<DECK>_DECK_SKIPPED`. `SELECTION DECK_SHORT` or `NO_DECK_FILLED` means none
-  filled.
+- `PREPARATION_DECK_SKIPPED <deck> <code>`: that deck was left out and the
+  others still publish; the aggregates count it as `SELECTION:<DECK>_DECK_SKIPPED`.
+  - In selection: it did not fill (`DECK_SHORT`, or the `BUDGET_EXHAUSTED_*`
+    budget that ran out). `SELECTION DECK_SHORT` or `NO_DECK_FILLED` means
+    none filled.
+  - In generation (#32): its generator or the parser refused it, or it
+    collided with a deck already kept, and the code is that check's (for
+    example `FIX_RANK_UNBALANCED`, `PUBLIC_CONTAINMENT_<KEY>_IN_<FIELD>`).
+    Decks are generated and composed in order, so a collision drops the later
+    deck. With every deck refused, the run fails in `GENERATION` with the
+    first code. An invariant or uncoded error is a bug and fails the run.
 - `BUDGET_EXHAUSTED_<BUDGET>`: a run-wide budget ran out (`REQUEST_COUNT`,
   `BLOB_ATTEMPTS`, `SUCCESSFUL_BLOBS`, or `TOTAL_BLOB_BYTES`). The deck being
   filled and every later deck are skipped instead of rejecting every later
@@ -468,6 +509,8 @@ add up.
   `OUTPUT_RANKS_UNBALANCED`: no choice of answers fills every rank in both
   orders, so the output deck is skipped.
 - `FIX_PATCH_WIDE`: a dataset patch that changes more than one line (most).
+  - `FIX_CLAIM`: the fix's lines, which the reveal quotes, claim something
+    about authorship (#32).
   - `FIX_CHANGE`, `FIX_DIFF`, `FIX_PARENT`: the upstream fix commit changes
     more of the file, differs from the dataset's line, or is a merge.
   - `FIX_WINDOW`: no window gives four comparable option lines.

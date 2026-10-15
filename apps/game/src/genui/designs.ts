@@ -1,6 +1,6 @@
 /**
- * The generative designs a game can use (#114). Locally `?design=` picks one; the experiment's arm assignment
- * (#106) will seal it on the server instead.
+ * The generative designs a game can use (#114). Each game draws one at deal time and the server seals it (#106,
+ * `experiment/arms.ts`); in lab mode `?design=` picks it instead.
  */
 export const DESIGNS = ["catalog", "composer", "visualizer", "host"] as const;
 export type Design = (typeof DESIGNS)[number];

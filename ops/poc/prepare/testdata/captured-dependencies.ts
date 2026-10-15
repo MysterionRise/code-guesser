@@ -2,9 +2,7 @@ import { publishArtifact } from "../artifact-store";
 import { canonicalBytes, canonicalHash } from "../canonical";
 import { createCapacityMeter, type CapacityMeter } from "../capacity";
 import { composeExperimentArtifact } from "../compose";
-import { generateAlgorithmRounds } from "../algorithm-rounds";
-import { generateOutputRounds } from "../output-rounds";
-import { generateFixRounds } from "../fix-rounds";
+import { curatedDeck } from "../curated-decks";
 import { bindFixCommit, readDatasetBlob, readDatasetBugs } from "../github-fixes";
 import { generateBeforeAfterRounds } from "../before-after-rounds";
 import { bindGitHubFile, listGitHubDirectory, readGitHubFile } from "../github-files";
@@ -270,15 +268,13 @@ const finalizeLane = (
 });
 
 const outputLane = (state: CapturedDependencyState): Pick<PreparationDependencies,
-  "generateProject" | "generateLanguage" | "generateBeforeAfter" | "generateAlgorithm" | "generateOutput" | "generateFix" | "compose"
+  "generateProject" | "generateLanguage" | "generateBeforeAfter" | "generateCurated" | "compose"
   | "createReport" | "stageReport"
   | "publishArtifact" | "now" | "uuid" | "log"> => ({
   generateProject: (context) => generateProjectRounds(context as any),
   generateLanguage: (context) => generateLanguageRounds(context as any),
   generateBeforeAfter: (context) => generateBeforeAfterRounds(context as any),
-  generateAlgorithm: (context) => generateAlgorithmRounds(context),
-  generateOutput: (context) => generateOutputRounds(context),
-  generateFix: (context) => generateFixRounds(context),
+  generateCurated: ({ deck, ...context }) => curatedDeck(deck).generate(context),
   compose: composeExperimentArtifact,
   createReport: createRunReport,
   stageReport: async (report) => {

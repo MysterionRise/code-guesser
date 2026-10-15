@@ -1,12 +1,7 @@
+export { ArcadeShell } from "./arcade-shell";
 export {
-  ArcadeShell,
-  SESSION_ENDED_MESSAGE,
   createArcadeSession,
-  formatCompletionResult,
   projectDisplayReveal,
-  projectSpoilerFreeShare,
-  roundPointsNote,
-  roundStatusText,
   transitionArcadeSession,
   type ArcadeSession,
   type AuthorizedReveal,
@@ -15,7 +10,14 @@ export {
   type HintResponse,
   type RevealRequest,
   type RevealResponse,
-} from "./arcade-shell";
+} from "./arcade-session";
+export {
+  SESSION_ENDED_MESSAGE,
+  formatCompletionResult,
+  projectSpoilerFreeShare,
+  roundPointsNote,
+  roundStatusText,
+} from "./arcade-text";
 export {
   ArcadeShellRuleError,
   createPublicModeContract,
