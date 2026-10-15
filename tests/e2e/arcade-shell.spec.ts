@@ -293,3 +293,50 @@ test("a finished game lists every round in a summary that adds up, and the dots 
     [".game-summary", ".completion-actions", ".reveal-why"].map((selector) => [...reveal.querySelectorAll("*")].indexOf(reveal.querySelector(selector)!)));
   expect([...order].sort((left, right) => left - right)).toEqual(order);
 });
+
+test("a round plays from the keyboard alone: Tab, arrows, Enter, and the N, number, and H shortcuts (#71)", async ({ page }) => {
+  await page.goto("/?deck=fix");
+  await expect(page.getByText("Round 1 of 5")).toBeVisible();
+  const answer = answers.get(await currentRound(page))!;
+  // Tab to the options, then arrow to the answer; Enter on it locks it in.
+  for (let presses = 0; presses < 30 && !(await page.evaluate(() => (document.activeElement as HTMLInputElement | null)?.type === "radio")); presses += 1) {
+    await page.keyboard.press("Tab");
+  }
+  for (let presses = 0; presses < 4 && (await page.evaluate(() => (document.activeElement as HTMLInputElement).getAttribute("aria-label"))) !== answer; presses += 1) {
+    await page.keyboard.press("ArrowDown");
+  }
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("heading", { name: "Nice read." })).toBeFocused();
+  // N moves on; 2 picks the second option; H buys a hint; Enter locks in.
+  await page.keyboard.press("n");
+  await expect(page.getByText("Round 2 of 5")).toBeVisible();
+  await page.keyboard.press("h");
+  await expect(page.getByRole("button", { name: "Reveal hint 2" })).toBeVisible();
+  await page.keyboard.press("2");
+  await expect(page.getByRole("group", { name: "Choose one answer" }).getByRole("radio").nth(1)).toBeChecked();
+  await expect(page.getByRole("group", { name: "Choose one answer" }).getByRole("radio").nth(1)).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("heading", { name: /Nice read\.|Not this time\./u })).toBeVisible();
+  await expect(page.locator(".keys-note")).toContainText("Enter locks in");
+});
+
+test("on a phone no fix option's code is cut off, and wrapped lines keep their indentation (#46, #85)", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 568 });
+  await page.goto("/?deck=fix");
+  await expect(page.getByText("Round 1 of 5")).toBeVisible();
+  const truncated = await page.locator(".code-detail").evaluateAll((details) => details.filter((detail) => detail.scrollWidth > detail.clientWidth + 1).length);
+  expect(truncated).toBe(0);
+  const pane = page.locator(".code-window").first();
+  await page.getByRole("button", { name: "Wrap lines" }).click();
+  await expect(page.getByRole("button", { name: "Wrap lines" })).toHaveAttribute("aria-pressed", "true");
+  expect(await pane.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+  // An indented line wraps under its own indentation, past its number.
+  const hanging = await page.locator(".code-line").evaluateAll((lines) => lines.map((line) => ({
+    indent: (line as HTMLElement).style.getPropertyValue("--indent"), padding: parseFloat(getComputedStyle(line).paddingLeft),
+  })));
+  const flat = hanging.find(({ indent }) => indent === "0ch")!;
+  const indented = hanging.find(({ indent }) => indent !== "0ch")!;
+  expect(indented.padding).toBeGreaterThan(flat.padding);
+  // Every line isolates its own text direction, so a right-to-left string can't reorder the code around it.
+  expect(await pane.locator(".code-line").first().evaluate((line) => getComputedStyle(line).unicodeBidi)).toBe("plaintext");
+});
