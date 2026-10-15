@@ -20,6 +20,7 @@
     "typecheck": "pnpm --recursive --if-present typecheck && tsc --noEmit -p ops/tsconfig.json && tsc --noEmit -p tsconfig.tests.json"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.13.0",
     "@codeguessr/content": "workspace:*",
     "@playwright/test": "1.64.0",
     "@types/node": "20.17.10",

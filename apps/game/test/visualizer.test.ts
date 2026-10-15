@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { VISUALIZER_CSP, VisualizerRejected, parseVisualizer, visualizerDocument } from "../src/genui/visualizer-spec";
+import { TERMINAL_PALETTE, VISUALIZER_CSP, VisualizerRejected, paletteFrom, parseVisualizer, visualizerDocument } from "../src/genui/visualizer-spec";
 
 const page = (html: string) => ({ title: "Insertion sort, step by step", summary: "Each step moves one item into place.", html });
 const codeOf = (value: unknown): string => {
@@ -72,5 +72,17 @@ describe("visualizer frame height", () => {
     for (const junk of [null, "600", { height: 600 }, { codeguessrVisualizerHeight: Number.NaN }]) expect(reportedHeight(junk)).toBeNull();
     // The reporter is the game's, after the model's markup; the model's own markup still may not post messages.
     expect(visualizerDocument("<p>x</p>").indexOf("codeguessrVisualizerHeight")).toBeGreaterThan(visualizerDocument("<p>x</p>").indexOf("<p>x</p>"));
+  });
+
+  it("starts the page in the player's theme, taking only plain colours from the page's tokens (#125)", () => {
+    const tokens: Record<string, string> = { "--panel": " #fbf7ee", "--text": "rgba(31, 27, 22, 0.9)", "--border-soft": "red;}</style><script>alert(1)</script>",
+      "--chip": "url(https://example.org/x.png)", "--accent": "#a23d16", "--focus": "" };
+    const palette = paletteFrom((token) => tokens[token] ?? "");
+    expect(palette).toEqual({ panel: "#fbf7ee", text: "rgba(31, 27, 22, 0.9)", border: TERMINAL_PALETTE.border, chip: TERMINAL_PALETTE.chip,
+      accent: "#a23d16", focus: TERMINAL_PALETTE.focus });
+    const page = visualizerDocument("<p>x</p>", palette);
+    expect(page).toContain("background:#fbf7ee");
+    expect(page).not.toMatch(/<script>alert|example\.org/u);
+    expect(visualizerDocument("<p>x</p>")).toContain(`background:${TERMINAL_PALETTE.panel}`);
   });
 });

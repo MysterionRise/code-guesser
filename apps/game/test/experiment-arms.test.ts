@@ -17,10 +17,10 @@ const share = (arms: readonly Arms[], factor: keyof Arms, level: string): number
   arms.filter((value) => value[factor] === level).length / arms.length;
 
 describe("experiment arms (#106)", () => {
-  it("draws every design level by its committed weight, and themes and layers stay at control until built", () => {
+  it("draws every design and theme level by its committed weight, and the layer stays at control until built", () => {
     const arms = draws(20_000, { genuiEnabled: true, disabled: new Set() });
     for (const level of FACTORS.design) expect(share(arms, "design", level)).toBeCloseTo(0.2, 1);
-    expect(share(arms, "theme", "terminal")).toBe(1);
+    for (const level of FACTORS.theme) expect(share(arms, "theme", level)).toBeCloseTo(0.25, 1);
     expect(share(arms, "layer", "off")).toBe(1);
   });
 
@@ -28,7 +28,7 @@ describe("experiment arms (#106)", () => {
     const arms = draws(20_000, { genuiEnabled: true, disabled: new Set() });
     const host = arms.filter(({ design }) => design === "host");
     expect(host.length / arms.length).toBeCloseTo(0.2, 1);
-    expect(share(host, "theme", "terminal")).toBe(1);
+    for (const level of FACTORS.theme) expect(share(host, "theme", level)).toBeCloseTo(0.25, 1);
   });
 
   it("gives a switched-off level's weight to the control level, and never switches control off", () => {

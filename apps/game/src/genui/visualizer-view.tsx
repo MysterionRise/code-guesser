@@ -2,7 +2,7 @@
 
 import * as React from "react";
 
-import { visualizerDocument, type Visualizer } from "./visualizer-spec";
+import { TERMINAL_PALETTE, paletteFrom, visualizerDocument, type Visualizer } from "./visualizer-spec";
 
 /** The frame's height before the page reports, and the range a report may set. */
 const START_HEIGHT = 480;
@@ -24,6 +24,9 @@ export const reportedHeight = (data: unknown): number | null => {
 export function VisualizerView({ visualizer }: { readonly visualizer: Visualizer }) {
   const frame = React.useRef<HTMLIFrameElement>(null);
   const [height, setHeight] = React.useState(START_HEIGHT);
+  // The page's theme tokens, read once in the browser, so the model's page starts in the player's colours.
+  const palette = React.useMemo(() => typeof window === "undefined" ? TERMINAL_PALETTE
+    : paletteFrom((token) => getComputedStyle(document.documentElement).getPropertyValue(token)), []);
   React.useEffect(() => {
     const listen = (event: MessageEvent) => {
       if (event.source !== frame.current?.contentWindow) return;
@@ -37,7 +40,7 @@ export function VisualizerView({ visualizer }: { readonly visualizer: Visualizer
     <figure className="genui-visualizer">
       <figcaption>{visualizer.title}</figcaption>
       <iframe ref={frame} className="visualizer-frame" title={visualizer.title} sandbox="allow-scripts" allow="" referrerPolicy="no-referrer"
-        srcDoc={visualizerDocument(visualizer.html)} style={{ height }} />
+        srcDoc={visualizerDocument(visualizer.html, palette)} style={{ height }} />
       <p className="visualizer-summary">{visualizer.summary}</p>
     </figure>
   );

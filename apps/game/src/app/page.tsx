@@ -9,7 +9,7 @@ import {
   activeLocalRealExperiment,
 } from "../demo/local-real-experiment-loader.server";
 import type { LocalRealDeck } from "../demo/local-real-experiment.server";
-import { assignArms, labMode, labOverrides, parseDisabled, type Arms } from "../experiment/arms";
+import { CONTROL, FACTORS, assignArms, labMode, labOverrides, parseDisabled, type Arms, type Level } from "../experiment/arms";
 import { DESIGN_LABELS, READY_DESIGNS, type Design } from "../genui/designs";
 
 const DECK_COUNT_WORDS = ["No decks", "One deck", "Two decks", "Three decks", "Four decks", "Five decks", "Six decks"] as const;
@@ -25,7 +25,8 @@ interface PageProps {
   readonly searchParams: Promise<Readonly<Record<string, string | string[] | undefined>>>;
 }
 
-function DeckChooser({ decks }: { readonly decks: readonly LocalRealDeck[] }) {
+/** The chooser; in lab mode `query` carries the tester's picks onto each deck's link. */
+function DeckChooser({ decks, query }: { readonly decks: readonly LocalRealDeck[]; readonly query: string }) {
   return (
     <main className="deck-chooser" aria-labelledby="deck-chooser-title">
       <h1 id="deck-chooser-title">Pick a deck</h1>
@@ -36,7 +37,7 @@ function DeckChooser({ decks }: { readonly decks: readonly LocalRealDeck[] }) {
       <ul className="deck-list">
         {decks.map((deck) => (
           <li key={deck.id}>
-            <a className="deck-card" href={`/?deck=${deck.id}`}>
+            <a className="deck-card" href={`/?deck=${deck.id}${query}`}>
               <span className="deck-title">{deck.title}</span>{" "}
               {DECK_TAGS[deck.id] && <span className="deck-tag">{DECK_TAGS[deck.id]}</span>}{" "}
               <span className="deck-description">{deck.description}</span>{" "}
@@ -53,17 +54,40 @@ function DeckChooser({ decks }: { readonly decks: readonly LocalRealDeck[] }) {
 const labQuery = (overrides: Partial<Arms>): string =>
   Object.entries(overrides).map(([factor, level]) => `&${factor}=${level}`).join("");
 
-/** Lab mode's design switcher (#114): every ready generative design, and the static game. */
-function DesignNav({ deck, design, overrides }: { readonly deck: LocalRealDeck; readonly design: Design | null; readonly overrides: Partial<Arms> }) {
-  const href = (level: Design | "off") => `/?deck=${deck.id}${labQuery({ ...overrides, design: level })}`;
+const THEME_LABELS: Readonly<Record<Level<"theme">, string>> = Object.freeze({
+  terminal: "Terminal", paper: "Paper", arcade: "Arcade", contrast: "High contrast",
+});
+
+/**
+ * Lab mode's bar: switchers for the design (#114), with generative UI on, and the theme (#125). Players outside lab
+ * mode never see it; their game's arms are the draw's.
+ */
+function LabBar({ deck, arms, overrides, genuiEnabled }: {
+  readonly deck: LocalRealDeck;
+  readonly arms: Arms;
+  readonly overrides: Partial<Arms>;
+  readonly genuiEnabled: boolean;
+}) {
+  const href = (change: Partial<Arms>) => `/?deck=${deck.id}${labQuery({ ...overrides, ...change })}`;
+  const design: Design | null = arms.design === "off" ? null : arms.design;
   return (
-    <nav className="design-nav" aria-label="Designs">
-      <span className="design-nav-label">Design:</span>
-      {READY_DESIGNS.map((name) => (
-        <a key={name} href={href(name)} aria-current={name === design ? "page" : undefined}>{DESIGN_LABELS[name]}</a>
-      ))}
-      <a href={href("off")} aria-current={design === null ? "page" : undefined}>Static</a>
-    </nav>
+    <div className="lab-bar">
+      {genuiEnabled && (
+        <nav className="design-nav" aria-label="Designs">
+          <span className="design-nav-label">Design:</span>
+          {READY_DESIGNS.map((name) => (
+            <a key={name} href={href({ design: name })} aria-current={name === design ? "page" : undefined}>{DESIGN_LABELS[name]}</a>
+          ))}
+          <a href={href({ design: "off" })} aria-current={design === null ? "page" : undefined}>Static</a>
+        </nav>
+      )}
+      <nav className="design-nav" aria-label="Themes">
+        <span className="design-nav-label">Theme:</span>
+        {FACTORS.theme.map((name) => (
+          <a key={name} href={href({ theme: name })} aria-current={name === arms.theme ? "page" : undefined}>{THEME_LABELS[name]}</a>
+        ))}
+      </nav>
+    </div>
   );
 }
 
@@ -96,8 +120,10 @@ export default async function Page({ searchParams }: PageProps) {
   const deck = loaded.ok && typeof requested === "string"
     ? loaded.experiment.decks.find(({ id }) => id === requested)
     : undefined;
+  // A game shows the theme it drew (#125); the chooser, outside any game, keeps the original unless a tester picks one.
+  const theme = deck ? arms.theme : overrides.theme ?? CONTROL.theme;
   return (
-    <div className="demo-page">
+    <div className="demo-page" data-theme={theme}>
       <p className="demo-notice">
         <strong>{LOCAL_REAL_EXPERIMENT_NOTICE_LEAD}</strong> {LOCAL_REAL_EXPERIMENT_NOTICE_BODY}
       </p>
@@ -108,11 +134,11 @@ export default async function Page({ searchParams }: PageProps) {
           ? (
             <>
               <nav className="deck-nav" aria-label="Decks"><a href="/">All decks</a></nav>
-              {lab && genuiEnabled && <DesignNav deck={deck} design={arms.design === "off" ? null : arms.design} overrides={overrides} />}
+              {lab && <LabBar deck={deck} arms={arms} overrides={overrides} genuiEnabled={genuiEnabled} />}
               <DealtSession deck={deck} arms={arms} record={record} overrides={overrides} />
             </>
           )
-          : <DeckChooser decks={loaded.experiment.decks} />}
+          : <DeckChooser decks={loaded.experiment.decks} query={labQuery(overrides)} />}
     </div>
   );
 }
