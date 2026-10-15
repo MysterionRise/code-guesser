@@ -6,6 +6,8 @@ import { doctestFunctions, roundExamples } from "../doctest-parse";
 import { balancedAnswers, generateOutputRounds, outputPane, type OutputCandidate } from "../output-rounds";
 import { gapChoices, gapSlack } from "../missing-line-window";
 import { generateMissingLineRounds, type MissingLineCandidate } from "../missing-line-rounds";
+import { nameChoices, nameExtremeLimits, nameSlack } from "../name-function-window";
+import { generateNameFunctionRounds, type NameFunctionCandidate } from "../name-function-rounds";
 import { generateFixRounds, type FixCandidate } from "../fix-rounds";
 import { changeKind, fixWindows } from "../fix-window";
 import type { DatasetBug } from "../github-fixes";
@@ -253,6 +255,8 @@ export const composeInput = (
       ...(profile.curated?.fix ? { fix: generateFixRounds({ profile, candidates: fixCandidates(profile, snapshotId) }) } : {}),
       ...(profile.curated?.["missing-line"]
         ? { "missing-line": generateMissingLineRounds({ profile, candidates: missingLineCandidates(profile, snapshotId) }) } : {}),
+      ...(profile.curated?.["name-function"]
+        ? { "name-function": generateNameFunctionRounds({ profile, candidates: nameFunctionCandidates(profile, snapshotId) }) } : {}),
     },
     candidates,
   };
@@ -299,12 +303,13 @@ export const CURATED_SECTION = Object.freeze({
 /** The deck profile with the curated section: it configures an eight-round algorithm deck. */
 export const loadCuratedProfile = (
   selection: Readonly<Record<string, number>> = {},
-  decks: Readonly<{ algorithm?: boolean; output?: boolean; fix?: boolean; "missing-line"?: boolean }> = { algorithm: true },
+  decks: Readonly<{ algorithm?: boolean; output?: boolean; fix?: boolean; "missing-line"?: boolean; "name-function"?: boolean }> = { algorithm: true },
 ): CrawlProfile => {
   const raw = JSON.parse(readFileSync(new URL("../../profiles/local-real-rounds.v5.json", import.meta.url), "utf8"));
   const curated = { repositories: CURATED_REPOSITORIES, ...(decks.algorithm ? { algorithm: CURATED_SECTION.algorithm } : {}),
     ...(decks.output ? { output: OUTPUT_SECTION } : {}), ...(decks.fix ? { fix: FIX_SECTION } : {}),
-    ...(decks["missing-line"] ? { "missing-line": MISSING_LINE_SECTION } : {}) };
+    ...(decks["missing-line"] ? { "missing-line": MISSING_LINE_SECTION } : {}),
+    ...(decks["name-function"] ? { "name-function": NAME_FUNCTION_SECTION } : {}) };
   return parseCrawlProfile({ ...raw, selection: { ...raw.selection, ...selection }, curated: structuredClone(curated) });
 };
 
@@ -354,6 +359,60 @@ export const missingLineCandidates = (profile: CrawlProfile, snapshotId: string)
       blob: sha1(`blob ${text}`), rawContentHash: sha256(text), licenseName: "MIT License", licenseSpdx: "MIT",
       licenseFileUrl: `https://github.com/algos/python/blob/${CURATED_REPOSITORIES[0].commit}/LICENSE`, authorName: "Curated Author",
       authorLogin: "curated-author", authorCommit: "c".repeat(40), language: "Python" as const, ...choice, excerptHash: sha256(choice.excerpt),
+      crawlSnapshotId: snapshotId,
+    });
+  });
+};
+
+/** An eight-round name-the-function deck over the curated Go pin's `shapes` directory (#73). */
+export const NAME_FUNCTION_SECTION = Object.freeze({
+  rounds: 8,
+  sources: [{ repository: "algos/go", directories: ["shapes"] }],
+  fileReads: 12,
+  functionLines: 12,
+  templates: {
+    title: "Name the function",
+    description: "A real function with its name hidden; pick the name its author gave it.",
+    prompt: "What did its author name this function?",
+    evidence: "{path} in {repository} declares it as {name}.",
+    explanation: "The answer is the name its author gave it; the others are functions declared beside it in the same file.",
+  },
+});
+
+/** Twelve small Go files of six functions each, named in one, two, and three words, as real files are. */
+export const nameFunctionFiles = (): ReadonlyMap<string, string> => new Map(Array.from({ length: 12 }, (_, index) => {
+  const k = index + 3;
+  const text = [
+    "package shapes", "",
+    "func scale(values []int, factor int) []int {", "\tout := make([]int, 0, len(values))", "\tfor _, v := range values {",
+    `\t\tout = append(out, v*factor+${k})`, "\t}", "\treturn out", "}", "",
+    "func total(values []int) int {", `\tsum := ${k}`, "\tfor _, v := range values {", "\t\tsum += v", "\t}", "\treturn sum", "}", "",
+    "func largest(values []int) int {", `\tbest := values[0] + ${k}`, "\tfor _, v := range values {", "\t\tif v > best {", "\t\t\tbest = v",
+    "\t\t}", "\t}", "\treturn best", "}", "",
+    "func countAbove(values []int, limit int) int {", `\tn := ${k}`, "\tfor _, v := range values {", "\t\tif v > limit {", "\t\t\tn++",
+    "\t\t}", "\t}", "\treturn n", "}", "",
+    "func reverseOrder(values []int) []int {", `\tout := make([]int, len(values)+${k})`, "\tfor i, v := range values {",
+    "\t\tout[len(values)-1-i] = v", "\t}", "\treturn out", "}", "",
+    "func mergeSortedLists(left, right []int) []int {", `\tout := make([]int, 0, len(left)+len(right)+${k})`, "\tout = append(out, left...)",
+    "\tout = append(out, right...)", "\treturn out", "}",
+  ].join("\n");
+  return [`algos/go:shapes/shape_${k}.go`, text] as const;
+}));
+
+/** Bound name-the-function candidates for the small profile: the first files, each with the function the balance picks. */
+export const nameFunctionCandidates = (profile: CrawlProfile, snapshotId: string): readonly NameFunctionCandidate[] => {
+  const deck = profile.curated!["name-function"]!;
+  const files = [...nameFunctionFiles()].slice(0, deck.rounds);
+  const choices = files.map(([key, text]) => nameChoices(text, "Go", key, deck.functionLines).slice(0, 96));
+  const picks = balancedChoice(choices.map((options) => options.map(({ ranks }) => ranks)), 4, nameSlack(files.length),
+    { costs: choices.map((options) => options.map(({ extremes }) => extremes)), limits: nameExtremeLimits(files.length) })!;
+  return files.map(([key, text], index) => {
+    const choice = choices[index]![picks[index]!]!;
+    return Object.freeze({
+      repository: "algos/go", commit: CURATED_REPOSITORIES[1].commit, path: key.slice("algos/go:".length),
+      blob: sha1(`blob ${text}`), rawContentHash: sha256(text), licenseName: "MIT License", licenseSpdx: "MIT",
+      licenseFileUrl: `https://github.com/algos/go/blob/${CURATED_REPOSITORIES[1].commit}/LICENSE`, authorName: "Curated Author",
+      authorLogin: "curated-author", authorCommit: "c".repeat(40), language: "Go" as const, ...choice, excerptHash: sha256(choice.excerpt),
       crawlSnapshotId: snapshotId,
     });
   });

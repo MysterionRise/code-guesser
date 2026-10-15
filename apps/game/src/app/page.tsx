@@ -21,6 +21,7 @@ const deckSummary = (count: number): string => `${DECK_COUNT_WORDS[count] ?? `${
 const DECK_TAGS: Readonly<Record<string, string>> = Object.freeze({
   project: "Recognise", language: "Recognise", algorithm: "Recognise", "before-after": "Reason", output: "Reason", fix: "Reason",
   "missing-line": "Reason",
+  "name-function": "Reason",
 });
 
 interface PageProps {

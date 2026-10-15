@@ -18,8 +18,8 @@ export function AnswerOptions({ round, numbered, paneLines, selection, answerCan
   readonly onSelect: (candidateId: string) => void;
   readonly onFocusCandidate: (candidateId: string | null) => void;
 }) {
-  // A missing-line round's options are lines of code, shown as code (#57).
-  const codeLabels = round.mode.kind === "missing-line";
+  // Missing-line options are lines of code (#57), and name-the-function options are identifiers (#73): shown as code.
+  const codeLabels = round.mode.kind === "missing-line" || round.mode.kind === "name-function";
   return (
     <fieldset disabled={disabled}>
       <legend>Choose one answer</legend>

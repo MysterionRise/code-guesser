@@ -2,6 +2,7 @@ import {
   FIX_SOURCE_KEYS,
   LINEAGE_SOURCE_KEYS,
   MISSING_LINE_SOURCE_KEYS,
+  NAME_FUNCTION_SOURCE_KEYS,
   PROFILE_VERSION,
   STACK_LANGUAGES,
   STACK_SOURCE_KEYS,
@@ -95,6 +96,15 @@ export const validateMissingLineSource = (value: unknown, snapshotId: string, pi
   const source = validateCuratedSource(value, MISSING_LINE_SOURCE_KEYS, snapshotId, pins);
   if (!(STACK_LANGUAGES as readonly unknown[]).includes(source.language)) fail();
   if (positiveInteger(source.windowStart) > positiveInteger(source.gapLine)) fail();
+  return source;
+};
+
+/** A name-the-function round's file (#73): a curated file, its language, and the function whose name is hidden. */
+export const validateNameFunctionSource = (value: unknown, snapshotId: string, pins: ReadonlySet<string>): ParsedSource => {
+  const source = validateCuratedSource(value, NAME_FUNCTION_SOURCE_KEYS, snapshotId, pins);
+  if (!(STACK_LANGUAGES as readonly unknown[]).includes(source.language)) fail();
+  if (!/^[A-Za-z_][A-Za-z0-9_]{1,63}$/u.test(text(source.functionName))) fail();
+  positiveInteger(source.functionLine);
   return source;
 };
 

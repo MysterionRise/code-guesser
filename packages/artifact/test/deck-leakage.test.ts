@@ -189,6 +189,35 @@ describe("deck leakage", () => {
     memoryWithinReplay(fixtures);
   });
 
+  it.runIf(deck("name-function") !== undefined)("name-function options give no edge by text, length, word count, or words shared with the pane (#73)", () => {
+    const { fixtures } = deck("name-function")!;
+    const limit = chance(fixtures[0]!) + TOLERANCE;
+    const words = (text: string) => (text.match(/[A-Z]+(?![a-z])|[A-Z]?[a-z]+|[0-9]+/gu) ?? []).map((word) => word.toLowerCase());
+    const shared = (fixture: ParsedFixture, label: string) => {
+      const pane = new Set(words(fixture.panes[0]!.text));
+      return new Set(words(label).filter((word) => word.length >= 3 && pane.has(word))).size;
+    };
+    // Looser still: any word of two letters or more that starts a word of the pane, or that a pane word starts.
+    const prefixes = (fixture: ParsedFixture, label: string) => {
+      const pane = [...new Set(words(fixture.panes[0]!.text))].filter((word) => word !== "mystery");
+      return words(label).filter((word) => word.length >= 2 && pane.some((other) => other.startsWith(word) || (other.length >= 3 && word.startsWith(other)))).length;
+    };
+    for (const direction of [1, -1]) {
+      for (const [name, measure] of [["shared", shared], ["prefixes", prefixes], ["length", (_fixture: ParsedFixture, label: string) => label.length],
+        ["words", (_fixture: ParsedFixture, label: string) => words(label).length],
+        ["text", (fixture: ParsedFixture, label: string) => [...fixture.candidates.map((option) => option.label)].sort().indexOf(label)]] as const) {
+        expect(accuracy(fixtures, (fixture, label) => direction * measure(fixture, label)), `${name} ${direction}`).toBeLessThanOrEqual(limit);
+      }
+    }
+    // After the second hint two names are left: picking the longer is a coin toss.
+    const longerOfPair = (fixture: ParsedFixture, label: string) => {
+      const [, first, second] = /^It is either “(.+)” or “(.+)”\.$/u.exec(fixture.clues[1]!)!;
+      return label !== first && label !== second ? -1 : label.length;
+    };
+    expect(accuracy(fixtures, longerOfPair)).toBeLessThanOrEqual(0.5 + TOLERANCE);
+    memoryWithinReplay(fixtures);
+  });
+
   it.runIf(deck("before-after") !== undefined)("the later version is not found by always picking one pane", () => {
     const { fixtures } = deck("before-after")!;
     const limit = chance(fixtures[0]!) + TOLERANCE;

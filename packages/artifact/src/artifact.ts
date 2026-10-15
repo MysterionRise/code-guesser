@@ -32,8 +32,9 @@ import {
 } from "./domain";
 import { fail } from "./errors";
 import { missingLineDeckRule, validateMissingLine } from "./missing-line";
+import { nameFunctionDeckRule, validateNameFunction } from "./name-function";
 import {
-  pinKey, validateCuratedSource, validateFixSource, validateLineageSource, validateMissingLineSource, validateStackSource, type StackIdentity,
+  pinKey, validateCuratedSource, validateFixSource, validateLineageSource, validateMissingLineSource, validateNameFunctionSource, validateStackSource, type StackIdentity,
 } from "./source";
 import {
   canonicalHash,
@@ -393,6 +394,7 @@ const validateFix = ({ panes, candidates, clues, correctCandidateId, source }: S
 const VALIDATORS: Readonly<Record<FixtureKind, (semantics: Semantics) => void>> = Object.freeze({
   PROJECT: validateProject, LANGUAGE: validateLanguage, BEFORE_AFTER: validateBeforeAfter, ALGORITHM: validateAlgorithm,
   OUTPUT: validateOutput, FIX: validateFix, MISSING_LINE: (semantics: Semantics) => validateMissingLine(semantics),
+  NAME_FUNCTION: (semantics: Semantics) => validateNameFunction(semantics),
 });
 
 /** Where each kind's source comes from, and the check that binds it to this snapshot. */
@@ -404,11 +406,13 @@ const SOURCE_VALIDATORS: Readonly<Record<FixtureKind, (value: unknown, snapshot:
   OUTPUT: (value: unknown, snapshot: Snapshot) => validateCuratedSource(value, OUTPUT_SOURCE_KEYS, snapshot.id, snapshot.pins),
   FIX: (value: unknown, snapshot: Snapshot) => validateFixSource(value, snapshot.id, snapshot.datasets),
   MISSING_LINE: (value: unknown, snapshot: Snapshot) => validateMissingLineSource(value, snapshot.id, snapshot.pins),
+  NAME_FUNCTION: (value: unknown, snapshot: Snapshot) => validateNameFunctionSource(value, snapshot.id, snapshot.pins),
 });
 
 /** Rules a whole deck must keep beyond its rounds' own. */
 const DECK_RULES: Readonly<Partial<Record<DeckId, (fixtures: readonly ParsedFixture[]) => void>>> = Object.freeze({
   "missing-line": missingLineDeckRule,
+  "name-function": nameFunctionDeckRule,
   // Pane order carries no signal: the later version is pane A in half the pool, give or take one.
   "before-after": (fixtures: readonly ParsedFixture[]) => {
     const aLater = fixtures.filter(({ correctCandidateId }) => correctCandidateId === BEFORE_AFTER_CANDIDATE_IDS[0]).length;
