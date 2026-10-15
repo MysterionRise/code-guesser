@@ -53,6 +53,10 @@ gate: changing queries, retries, ceilings, deck rules, or running
   route `apps/game/src/app/api/genui/route.ts` calls OpenRouter only through
   the answer-lock guard, for a live game's round, and the browser never talks
   to a model. Spend limits live on the OpenRouter key, not in the app.
+- Preparation may also call OpenRouter: `pnpm prepare:questions` (#127) writes
+  question layers with a model that knows the answer. Its answers are journaled
+  in `ops/poc/questions/tmp/journal.jsonl` (gitignored) and its output is
+  frozen and pinned, so play still never calls a model before the lock.
 - Malformed provider data fails closed. Transient errors may be retried within
   the request budget.
 - Preserve unrelated worktree changes.
@@ -199,6 +203,31 @@ gate: changing queries, retries, ceilings, deck rules, or running
     - `EXPERIMENT_SOURCE=agent|synthetic` tags playtests and tests.
     - SQLite waits for Node 24 (#21): Node 20 has no `node:sqlite`, so the
       store is JSONL behind the `EventStore` interface.
+- Question layers (#127, #128; v1.0): generative UI inside the question,
+  written at preparation time and frozen in
+  `apps/game/src/demo/generated/question-layers.json`, pinned by
+  `question-layers.pin.server.ts` and bound to the artifact's hash.
+  - Designs so far: "Trace it" (algorithm) and "Marker hunt" (language). The
+    free scaffold uses closed vocabularies (`WATCH_KINDS`, `MARKER_PROMPTS`),
+    since free text leaked in the pilots; two hints are sold like the static
+    ones.
+  - `packages/artifact/src/question-layer.ts` is the one parser. It refuses
+    a layer that names an option (labels, spellings, stems, languages, file
+    extensions), points outside the code, or isn't plain bounded text.
+  - `ops/poc/questions/` writes them: one writer call a round, one repair,
+    then a code-blind solver (`audit.ts`) measures how far the scaffold and
+    hint 1 lift the answer over a control holding what the layer quotes from
+    the code. Round and deck bounds refuse leaky layers.
+  - `pnpm prepare:questions [--offline | --fresh] [--decks=…] [--limit=N]
+    [--model=…]`; `--limit` is a pilot that writes only
+    `ops/poc/questions/tmp/report.json`. Logs are codes and counts:
+    `QUESTIONS_DECK <deck> attempted= kept= <CODE>=n`, `QUESTIONS_DECK_REFUSED`,
+    `QUESTIONS_PUBLISHED`, `QUESTIONS_CALLS`, `QUESTIONS_FAILED <code>`
+    (`JOURNAL_MISS`, `OPENROUTER_KEY_MISSING`, `QUESTIONS_PROVIDER_<status>`,
+    `QUESTIONS_MALFORMED`, `ARTIFACT_PIN_MISMATCH`).
+  - The layers bind to the artifact, so a new artifact needs a new
+    `prepare:questions` run. The game doesn't show them yet.
+  - Evidence: `docs/review/evidence/2026-10-15-question-layers-first-build.md`.
 - The committed artifact `apps/game/src/demo/generated/local-real-rounds.json`
   came from the 2026-10-13 v5 run (1,859 of 3,000 requests), rebuilt
   `--offline` with the algorithm and fix leak fixes (#76, #79) and, on

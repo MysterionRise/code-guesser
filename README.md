@@ -187,6 +187,16 @@ pnpm --filter @codeguessr/game start
 
 `start` also listens on 127.0.0.1 only and takes the same `PORT`.
 
+### Question layers
+
+`pnpm prepare:questions` writes each round's question layer (#127): a free
+scaffold shown with the question and two generated hints. A model that knows
+the answer drafts them; a layer a code-blind solver could read the answer from
+is refused, and the rest are frozen in
+`apps/game/src/demo/generated/question-layers.json`.
+It needs `OPENROUTER_API_KEY` for new answers; `--offline` replays its journal.
+So far it covers Which algorithm? and Which language?.
+
 ### Recording the demo
 
 `pnpm demo:record` starts a dev server on port 3100, plays scripted scenes in
