@@ -29,6 +29,11 @@ export const RENDER_CATALOG = Object.freeze({
     phases: ["before-lock", "after-lock"],
     props: { text: text(280, "What the host says, in plain text.") },
   },
+  offer_hint: {
+    description: "Offer the player the round's next hint. It shows as a button the player may press; buying it costs the usual points. Offer at most once a round.",
+    phases: ["before-lock"],
+    props: { reason: text(120, "One friendly line to the player inviting them to take the hint, such as \"Want a nudge? The next hint is yours if you like.\" Never a note about the player, and nothing about the answer.") },
+  },
   takeaway: {
     description: "One sentence the player can carry to the next round.",
     phases: ["after-lock"],

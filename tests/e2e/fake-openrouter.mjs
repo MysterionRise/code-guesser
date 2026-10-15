@@ -13,6 +13,11 @@ const DEFAULT_CALLS = Object.freeze({
     { name: "signal_list", args: { helpful: ["The block keywords"], misleading: ["The familiar operators"] } },
   ],
   "before-lock": [{ name: "host_message", args: { text: "Hints cost points. Good luck!" } }],
+  // The host, before the lock, when it may offer the round's next hint.
+  "host-before-lock": [
+    { name: "host_message", args: { text: "I can't see the code yet, but I can cheer you on." } },
+    { name: "offer_hint", args: { reason: "Stuck? A hint might point you the right way." } },
+  ],
   // A small composed panel that fits any round: its excerpt is the first line, which every pane has.
   composer: [{ name: "compose_panel", args: {
     root: "panel",
@@ -108,6 +113,7 @@ export const startFakeOpenRouter = async (port = 0) => {
       const offered = new Set((body.tools ?? []).map((entry) => entry.function?.name));
       const calls = next.sequence?.shift() ?? next.calls ?? (offered.has("render_visualizer") ? visualizerCall(server.address().port)
         : offered.has("compose_panel") ? DEFAULT_CALLS.composer
+        : offered.has("offer_hint") ? DEFAULT_CALLS["host-before-lock"]
         : offered.has("takeaway") ? DEFAULT_CALLS["after-lock"] : DEFAULT_CALLS["before-lock"]);
       response.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
       return response.end(toolCallStream(calls));

@@ -1,9 +1,16 @@
 import type { RenderCall } from "./render-catalog";
 
+/** The round's next hint, as the host may offer it: what pressing the button costs, or null when none is left. */
+export interface HintOffer {
+  readonly label: string | null;
+  readonly buy: () => void;
+}
+
 interface CatalogViewProps {
   readonly call: RenderCall;
   /** The round's panes, which a code view shows again with its highlights. */
   readonly panes: readonly Readonly<{ label: string | null; text: string }>[];
+  readonly hint?: HintOffer;
 }
 
 type Highlight = Readonly<{ line: number; kind: "helpful" | "misleading"; note: string }>;
@@ -15,11 +22,19 @@ const KIND_TEXT = { helpful: "points to the answer", misleading: "points away" }
  * Renders one checked render call. Every value is text React escapes; state is carried in words as well as
  * colour, and nothing animates.
  */
-export function CatalogView({ call, panes }: CatalogViewProps) {
+export function CatalogView({ call, panes, hint }: CatalogViewProps) {
   const props = call.props;
   switch (call.component) {
     case "host_message":
       return <p className="genui-host">{props.text as string}</p>;
+    case "offer_hint":
+      // The host only suggests; the player decides, and the hint costs what the round's own button says.
+      return (
+        <p className="genui-offer">
+          {props.reason as string}{" "}
+          <button type="button" className="hint-button" disabled={!hint?.label} onClick={hint?.buy}>{hint?.label ?? "No hint left"}</button>
+        </p>
+      );
     case "takeaway":
       return <p className="genui-takeaway"><strong>Takeaway:</strong> {props.text as string}</p>;
     case "signal_list":

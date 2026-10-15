@@ -167,8 +167,9 @@ describe("round data is untrusted (#102)", () => {
     expect(view.props.highlights).toEqual([{ line: 1, kind: "helpful", note: "Uses Vec<i64> and def." }]);
     expect(Object.isFrozen(view.props)).toBe(true);
     expect(parseRenderCall({ component: "host_message", props: { text: "  Hints cost points.  " } }, "before-lock", limits).props.text).toBe("Hints cost points.");
-    expect(componentsFor("before-lock")).toEqual(["host_message"]);
+    expect(componentsFor("before-lock")).toEqual(["host_message", "offer_hint"]);
     expect(componentsFor("after-lock")).toEqual(["host_message", "takeaway", "signal_list", "code_view", "comparison"]);
+    expect(() => parseRenderCall({ component: "offer_hint", props: { reason: "A hint?" } }, "after-lock", limits)).toThrow(RenderCallRejected);
   });
 });
 
