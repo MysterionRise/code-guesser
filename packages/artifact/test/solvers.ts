@@ -125,3 +125,64 @@ export const paneOverlapSolver = (fixture: ParsedFixture, label: string): number
   const option = fixture.candidates.find((candidate) => candidate.label === label)!;
   return [...stems(`${label.replace("/", " ")} ${option.detail ?? ""}`)].filter((stem) => pane.has(stem)).length;
 };
+
+/** A small deterministic generator, so simulated deals repeat exactly. */
+const seededRandom = (seed: number) => () => {
+  seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648;
+  return seed / 2_147_483_648;
+};
+
+/** Five distinct rounds drawn uniformly, as the game deals them. */
+const deal = (size: number, random: () => number): readonly number[] => {
+  const indexes = Array.from({ length: size }, (_, index) => index);
+  for (let index = size - 1; index > 0; index -= 1) {
+    const other = Math.floor(random() * (index + 1));
+    [indexes[index], indexes[other]] = [indexes[other]!, indexes[index]!];
+  }
+  return indexes.slice(0, 5);
+};
+
+/**
+ * A player who never reads code (#81): it remembers every reveal, answers a round it has seen from memory, and
+ * otherwise rules out the answers already revealed for rounds with the same options, picking evenly among the rest.
+ * Its expected accuracy in game `game`, averaged over seeded uniform deals. Ruling out is a strategy only where
+ * option sets differ between rounds; before-after shows every round the same two, so it is off there.
+ */
+export const memoryPlayer = (fixtures: readonly ParsedFixture[], game: number, ruleOut = true, players = 4_000, seed = 7): number => {
+  const random = seededRandom(seed);
+  let total = 0;
+  for (let player = 0; player < players; player += 1) {
+    const seen = new Set<number>();
+    const revealed = new Map<string, Set<string>>();
+    for (let played = 1; played <= game; played += 1) {
+      for (const index of deal(fixtures.length, random)) {
+        const fixture = fixtures[index]!;
+        const answer = answerOf(fixture);
+        if (played === game) {
+          if (seen.has(index)) total += 1;
+          else {
+            const ruledOut = ruleOut ? revealed.get(optionKey(fixture)) ?? new Set<string>() : new Set<string>();
+            const remaining = fixture.candidates.filter(({ label }) => !ruledOut.has(label));
+            const left = remaining.length > 0 ? remaining : fixture.candidates;
+            total += left.some(({ label }) => label === answer) ? 1 / left.length : 0;
+          }
+        }
+        seen.add(index);
+        revealed.set(optionKey(fixture), new Set([...(revealed.get(optionKey(fixture)) ?? []), answer]));
+      }
+    }
+  }
+  return total / (players * 5);
+};
+
+/** What remembering reveals alone earns in game `game` on a pool of `size` rounds with no structure to exploit. */
+export const replayBaseline = (size: number, options: number, game: number): number => {
+  const seenBefore = 1 - (1 - 5 / size) ** (game - 1);
+  return seenBefore + (1 - seenBefore) / options;
+};
+
+/** Before-after: the pane with more of something reads as the newer version. */
+export const paneSizeSolver = (measure: (text: string) => number) => (fixture: ParsedFixture, label: string): number => {
+  const index = fixture.candidates.findIndex((candidate) => candidate.label === label);
+  return measure(fixture.panes[index]?.text ?? "");
+};

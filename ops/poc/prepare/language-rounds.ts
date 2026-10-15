@@ -164,28 +164,28 @@ const cluesFor = (profile: CrawlProfile, excerpt: string, language: StackLanguag
 };
 
 /**
- * Each round offers two look-alike pairs: its answer's pair and one more. The pairs sit in a private cycle
- * (keyed by blob identities no player sees), and each neighbouring two make one option set, so there are as
- * many sets as pairs. A language's first round uses the set it shares with the pair before it, its second the
- * set it shares with the pair after it. Every set then holds four rounds whose answers are its four languages,
- * every language appears in exactly eight rounds, and an option set never points to its answer: neither which
- * pair holds the answer nor which of the pair it is.
+ * Each round offers two look-alike pairs: its answer's pair and one more (#81). A pair's four rounds (two languages,
+ * two rounds each) take four different second pairs: every pair but itself and the one it skips. The pairs sit in a
+ * private cycle (keyed by blob identities no player sees) and each skips the next, so the skips form a derangement
+ * and every pair is also the second pair in exactly four rounds. Every language then appears in exactly eight
+ * rounds, and an option set appears in at most two rounds, whose answers sit in different pairs: a remembered
+ * answer rules out one option of a later round at most, where a set of four rounds used to give its last one away.
  */
 const optionSets = (classified: readonly ClassifiedCandidate[]): ReadonlyMap<ClassifiedCandidate, readonly StackLanguage[]> => {
   const seed = sha256(classified.map(({ candidate }) => String(candidate.blob)).sort().join("|"));
-  const cycle = [...LANGUAGE_PAIRS].sort((left, right) => sha256(`${seed}:${left.join("|")}`) < sha256(`${seed}:${right.join("|")}`) ? -1 : 1);
-  if (cycle.length < 3) fail();
+  const byHash = (key: (pair: readonly StackLanguage[]) => string) => (left: readonly StackLanguage[], right: readonly StackLanguage[]) =>
+    sha256(key(left)) < sha256(key(right)) ? -1 : 1;
+  const cycle = [...LANGUAGE_PAIRS].sort(byHash((pair) => `${seed}:${pair.join("|")}`));
   const sets = new Map<ClassifiedCandidate, readonly StackLanguage[]>();
   cycle.forEach((pair, position) => {
-    const before = cycle[(position + cycle.length - 1) % cycle.length]!;
-    const after = cycle[(position + 1) % cycle.length]!;
-    for (const language of pair) {
-      const rounds = classified.filter((entry) => entry.language === language)
-        .sort((left, right) => sha256(String(left.candidate.blob)) < sha256(String(right.candidate.blob)) ? -1 : 1);
-      if (rounds.length !== 2) fail();
-      sets.set(rounds[0]!, Object.freeze([...before, ...pair]));
-      sets.set(rounds[1]!, Object.freeze([...pair, ...after]));
-    }
+    const skipped = cycle[(position + 1) % cycle.length]!;
+    const others = cycle.filter((other) => other !== pair && other !== skipped)
+      .sort(byHash((other) => `${seed}:${pair.join("|")}:${other.join("|")}`));
+    const rounds = classified.filter((entry) => (pair as readonly string[]).includes(entry.language))
+      .sort((left, right) => sha256(String(left.candidate.blob)) < sha256(String(right.candidate.blob)) ? -1 : 1);
+    // Six pairs leave each pair exactly four others for its four rounds; any other shape would unbalance the deck.
+    if (rounds.length !== 4 || others.length !== rounds.length || pair.some((language) => rounds.filter((entry) => entry.language === language).length !== 2)) fail();
+    rounds.forEach((round, index) => sets.set(round, Object.freeze([...pair, ...others[index]!])));
   });
   return sets;
 };

@@ -77,9 +77,16 @@ ten points:
   indentation, or words used once, a line of prose, and the longer line of
   the second hint's pair.
 
-Two known leaks wait for new source data and run as expected failures: words
-a project pane shares with an option (#77), and an output that rearranges its
-call's arguments (#78).
+A simulated player who never reads code but remembers every reveal must
+stay within three points of what replaying reveals alone earns, in games
+two and three, and no language option set appears in more than two rounds
+(#81).
+
+Four known leaks wait for new source data and run as expected failures:
+- words a project pane shares with an option (#77);
+- an output that rearranges its call's arguments (#78);
+- the newer before-after pane being the bigger one (#75);
+- algorithm families that a remembering player can finish (#81).
 
 The real-data PoC is localhost-only, automatically prepared, unreviewed, and
 not meant for public players.

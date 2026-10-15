@@ -29,16 +29,23 @@ describe("language rounds", () => {
     }
   });
 
-  it("gives each option set four rounds whose answers are its four languages", () => {
+  it("shows an option set in at most two rounds, whose answers sit in different pairs (#81)", () => {
     const { fixtures } = generateLanguageRounds({ profile, candidates: pool() });
     const setKey = (fixture: (typeof fixtures)[number]) => fixture.candidates.map(({ label }) => label).sort().join("|");
     const answers = new Map<string, string[]>();
     for (const fixture of fixtures) answers.set(setKey(fixture), [...(answers.get(setKey(fixture)) ?? []), String(fixture.source.configuration)]);
-    expect(answers.size).toBe(LANGUAGE_PAIRS.length);
-    for (const [key, answered] of answers) expect([...answered].sort().join("|")).toBe(key);
+    for (const answered of answers.values()) {
+      expect(answered.length).toBeLessThanOrEqual(2);
+      if (answered.length === 2) expect(pairOf(answered[0]!)).not.toEqual(pairOf(answered[1]!));
+    }
+    // A language's two rounds offer different second pairs, and every pair is the second pair in four rounds.
     for (const language of STACK_LANGUAGES) {
-      const sets = fixtures.filter(({ source }) => source.configuration === language).map(setKey);
-      expect(new Set(sets).size).toBe(2);
+      expect(new Set(fixtures.filter(({ source }) => source.configuration === language).map(setKey)).size).toBe(2);
+    }
+    for (const pair of LANGUAGE_PAIRS) {
+      const second = fixtures.filter((fixture) => !(pair as readonly string[]).includes(String(fixture.source.configuration))
+        && fixture.candidates.some(({ label }) => (pair as readonly string[]).includes(label)));
+      expect(second).toHaveLength(4);
     }
   });
 

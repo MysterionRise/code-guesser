@@ -173,13 +173,15 @@ gate: changing queries, retries, ceilings, deck rules, or running
     with `GENUI_ENABLED=1 OPENROUTER_API_KEY="$(cat ~/.config/openrouter/key)"`.
 - The committed artifact `apps/game/src/demo/generated/local-real-rounds.json`
   came from the 2026-10-13 v5 run (1,859 of 3,000 requests), rebuilt
-  `--offline` with the algorithm and fix leak fixes (#76, #79).
+  `--offline` with the algorithm and fix leak fixes (#76, #79) and, on
+  2026-10-15, the language option sets (#81).
   - Its canonical SHA-256
-    `8f542bd92942174e67e79249896a31d4f9a3ecdbbc31d882f26722b0967a5535` is
+    `4747549666813ab44d60fca7df89152a65ea5cf91570b316d8d1539aacd4f90a` is
     pinned in `apps/game/src/demo/local-real-experiment.pin.server.ts`; the
     preparer writes the pin.
-  - Evidence: `docs/review/evidence/2026-10-13-v5-six-decks-run.md` and
-    `docs/review/evidence/2026-10-13-v5-leak-fixes-offline.md`.
+  - Evidence: `docs/review/evidence/2026-10-13-v5-six-decks-run.md`,
+    `docs/review/evidence/2026-10-13-v5-leak-fixes-offline.md`, and
+    `docs/review/evidence/2026-10-15-language-pairing-offline.md`.
   - The run's journal is in `ops/poc/stack/tmp/journal/run.jsonl` on this
     machine, so `STACK_V2_ACKNOWLEDGED_USABLE_REVISION=… pnpm prepare:poc
     --offline` rebuilds it byte for byte with no network.
@@ -206,7 +208,9 @@ gate: changing queries, retries, ceilings, deck rules, or running
     - The leakage test is `packages/artifact/test/deck-leakage.test.ts`.
   - **Phase 3a:** The Stack v2 grown to twelve languages in look-alike pairs
     (`LANGUAGE_PAIRS`). The language deck offers two whole pairs per round and
-    must tell a language from its look-alike (`language-markers.ts`).
+    must tell a language from its look-alike (`language-markers.ts`). Since
+    #81 a pair's four rounds take four different second pairs (a derangement),
+    so no option set appears in more than two rounds.
   - **Phase 3b,** the curated decks. Each runs only when the profile carries
     its `curated` section, after the Stack and search decks.
     - **Curated files:** `github-files.ts` reads a file at a pinned commit
