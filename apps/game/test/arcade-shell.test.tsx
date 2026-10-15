@@ -202,8 +202,9 @@ describe("static arcade shell", () => {
     expect(roundPointsNote(0, 0)).toBe("0 points (no hints)");
     expect(roundPointsNote(0, 2)).toBe("0 points (2 hints)");
     const shell = readFileSync(new URL("../src/components/arcade/arcade-shell.tsx", import.meta.url), "utf8");
-    const reveal = shell.slice(shell.indexOf('<div className="reveal" aria-live="polite" aria-atomic="true">'));
-    const note = reveal.indexOf("roundPointsNote(session.reveal.score, session.visibleHintCount)");
+    expect(shell).toMatch(/<div className="reveal" aria-live="polite" aria-atomic="true">\s*\{session\.reveal && \(\s*<RoundReveal [^>]*hintsUsed=\{session\.visibleHintCount\}/u);
+    const reveal = readFileSync(new URL("../src/components/arcade/round-reveal.tsx", import.meta.url), "utf8");
+    const note = reveal.indexOf("roundPointsNote(reveal.score, hintsUsed)");
     expect(note).toBeGreaterThan(reveal.indexOf("Nice read."));
     expect(note).toBeLessThan(reveal.indexOf("The answer:"));
   });
@@ -365,7 +366,8 @@ describe("static arcade shell", () => {
   it("keeps excluded country attribution out and exposes demo errors and a fresh deal, never a replay", () => {
     const page = readFileSync(new URL("../src/app/page.tsx", import.meta.url), "utf8");
     const layout = readFileSync(new URL("../src/app/layout.tsx", import.meta.url), "utf8");
-    const shell = readFileSync(new URL("../src/components/arcade/arcade-shell.tsx", import.meta.url), "utf8");
+    const shell = ["arcade-shell.tsx", "round-reveal.tsx"]
+      .map((file) => readFileSync(new URL(`../src/components/arcade/${file}`, import.meta.url), "utf8")).join("\n");
     expect(`${page}\n${layout}`).not.toMatch(/country|code-location|where did this code come from|finland|brazil|japan|germany|india/iu);
     expect(existsSync(new URL("../src/app/actions.ts", import.meta.url))).toBe(true);
     expect(shell).toContain('role="alert"');

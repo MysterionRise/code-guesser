@@ -88,6 +88,7 @@ test("browser and gameplay dependency surfaces exclude acquisition capabilities"
 test("public attribution can enter the browser only through authorized reveal", () => {
   const publicContract = read(join(game, "src", "components", "arcade", "mode-contract.ts"));
   const shell = read(join(game, "src", "components", "arcade", "arcade-shell.tsx"));
+  const reveal = read(join(game, "src", "components", "arcade", "round-reveal.tsx"));
   const page = read(join(game, "src", "app", "page.tsx"));
   const action = read(join(game, "src", "app", "actions.ts"));
 
@@ -100,8 +101,10 @@ test("public attribution can enter the browser only through authorized reveal", 
   assert.match(action, /authorizeLocalExperimentReveal/u);
   assert.match(action, /activeLocalRealExperiment/u);
   assert.match(loader, /^import "server-only";/u);
-  assert.match(shell, /session\.reveal\s*&&/u);
-  assert.match(shell, /session\.reveal\.attribution/u);
+  // The shell renders the reveal only once the server authorized it, and only the reveal reads attribution.
+  assert.match(shell, /session\.reveal\s*&&\s*\(\s*<RoundReveal /u);
+  assert.doesNotMatch(shell, /attribution/u);
+  assert.match(reveal, /reveal\.attribution/u);
 
   const staticFiles = filesUnder(join(built, "static")).filter((path) => textExtensions.has(extname(path)));
   for (const path of staticFiles) {

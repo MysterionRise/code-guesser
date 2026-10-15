@@ -7,7 +7,7 @@ import type {
   HintResponse,
   RevealRequest,
   RevealResponse,
-} from "../components/arcade/arcade-shell";
+} from "../components/arcade/arcade-session";
 import {
   createPublicModeContract,
   type PublicModeContract,
