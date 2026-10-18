@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 
 import { CAPACITY_CEILINGS, LIMITS_URL, parseLimits, STACK_REVISION } from "../limits";
 import { loadProfile } from "./command-test-harness";
+import { parseCrawlProfile } from "./profile";
 
 const testModuleName: string = "vitest";
 const { describe, expect, it } = await import(testModuleName) as any;
@@ -13,6 +14,9 @@ describe("shared limits file", () => {
     const profile = await loadProfile();
     expect(profile.stack.revision).toBe(STACK_REVISION);
     for (const [key, value] of Object.entries(profile.capacity)) expect(value).toBeLessThanOrEqual(CAPACITY_CEILINGS[key as keyof typeof CAPACITY_CEILINGS]);
+    // The v1.0 run's profile spends the raised ceilings in full (#129).
+    const v6 = parseCrawlProfile(JSON.parse(readFileSync(new URL("../profiles/local-real-rounds.v6.json", import.meta.url), "utf8")));
+    expect(v6.capacity).toEqual(CAPACITY_CEILINGS);
   });
 
   it("rejects a missing, extra, non-positive, or malformed entry", () => {

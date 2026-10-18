@@ -72,6 +72,15 @@ gate: changing queries, retries, ceilings, deck rules, or running
   chooser (`/?deck=project|language|before-after|algorithm|output|fix`). A
   page load deals five rounds from the deck's pool; `dealGame` in
   `apps/game/src/demo/local-real-experiment.server.ts` does it server-side.
+- **Profile v6 (#129):** `ops/poc/profiles/local-real-rounds.v6.json` is the v1.0 data run's profile. It configures
+  every v1.0 deck built so far (missing-line, name-function, framework, exercise), the seven rarer pairs for the
+  language deck alone, the wider allowlist (BSD-2-Clause, ISC, Python-2.0), and the raised ceilings in
+  `ops/poc/limits.json` (5,000 requests, 448 MiB of Stack metadata, 400 blob attempts, 200 blobs, 32 MiB).
+  - `PROFILE_VERSIONS` and `ARTIFACT_SCHEMA_VERSIONS` (`packages/artifact/src/domain.ts`) pair each profile with
+    its schema: v5 with `local-experiment-artifact.v4`, v6 with `.v5`. The parser holds an artifact to its
+    snapshot's version, in its schema and every source.
+  - The preparer still runs v5 (`PROFILE_VERSION`), so `--offline` keeps rebuilding the committed artifact byte for
+    byte. Rules for v6 apply to v6 artifacts only; the data-run PR switches the preparer to v6.
 - The server holds each game's progress (#96): `dealGame` seals it in a signed
   token (`local-real-experiment-session.server.ts`), and the hint and answer
   server actions take one step each. A ledger refuses an older token, so a

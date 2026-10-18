@@ -13,6 +13,33 @@ const rejects = (value: unknown): void => {
   expect(() => parseCrawlProfile(value)).toThrow(CrawlProfileError);
 };
 
+describe("local crawl profile v6 (#129)", () => {
+  const v6 = async (): Promise<Record<string, any>> =>
+    JSON.parse(await readFile(new URL("../profiles/local-real-rounds.v6.json", import.meta.url), "utf8")) as Record<string, any>;
+
+  it("configures every v1.0 deck built so far, the rarer languages for the language deck alone, and the wider allowlist", async () => {
+    const profile = parseCrawlProfile(await v6());
+    expect(profile.profileVersion).toBe("local-real-rounds.v6");
+    expect(profile.licenses).toEqual(["Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "MIT", "Python-2.0"]);
+    expect(profile.stack.configurations).toHaveLength(26);
+    expect(profile.stack.configurations.slice(12).every(({ projectDeck }) => projectDeck === false)).toBe(true);
+    expect(poolSizes(profile)).toEqual({ project: 24, language: 52, "before-after": 10, algorithm: 24, output: 24, fix: 24, "missing-line": 24,
+      "name-function": 24, framework: 32, exercise: 48, "vulnerable-line": 0 });
+    expect(profile.capacity).toEqual(CAPACITY_CEILINGS);
+  });
+
+  it("keeps v5's sections as they were, so only the additions differ", async () => {
+    const [five, six] = [await validProfile(), await v6()];
+    for (const key of ["algorithm", "output", "fix"]) expect(six.curated[key]).toEqual(five.curated[key]);
+    expect(six.stack.configurations.slice(0, 12)).toEqual(five.stack.configurations);
+    expect(six.curated.repositories.slice(0, 3)).toEqual(five.curated.repositories);
+  });
+
+  it("refuses a profile version it does not know", async () => {
+    rejects({ ...(await v6()), profileVersion: "local-real-rounds.v7" });
+  });
+});
+
 describe("local crawl profile v5", () => {
   it("loads the profile with the pinned dataset and twelve languages in look-alike pairs", async () => {
     const profile = parseCrawlProfile(await validProfile());

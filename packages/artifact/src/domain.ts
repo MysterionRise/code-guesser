@@ -15,9 +15,22 @@ export const MODE_KINDS: Readonly<Record<FixtureKind, DeckId>> = Object.freeze({
   MISSING_LINE: "missing-line", NAME_FUNCTION: "name-function", FRAMEWORK: "framework", EXERCISE: "exercise",
   VULNERABLE_LINE: "vulnerable-line",
 });
-export const ARTIFACT_SCHEMA_VERSION = "local-experiment-artifact.v4";
+/**
+ * The crawl profiles an artifact may come from, oldest first, each with its artifact schema. v5 made the committed
+ * artifact; v6 is the v1.0 data run (#129), and its rules apply to its own artifacts only, so v5 still rebuilds the
+ * committed artifact byte for byte.
+ */
+export const PROFILE_VERSIONS = Object.freeze(["local-real-rounds.v5", "local-real-rounds.v6"] as const);
+export type ProfileVersion = typeof PROFILE_VERSIONS[number];
+export const ARTIFACT_SCHEMA_VERSIONS = Object.freeze({
+  "local-real-rounds.v5": "local-experiment-artifact.v4",
+  "local-real-rounds.v6": "local-experiment-artifact.v5",
+} as const);
+export type ArtifactSchemaVersion = typeof ARTIFACT_SCHEMA_VERSIONS[ProfileVersion];
+/** The profile the preparer runs, and its artifact's schema; the v1.0 data run moves both to v6. */
+export const PROFILE_VERSION: ProfileVersion = "local-real-rounds.v5";
+export const ARTIFACT_SCHEMA_VERSION: ArtifactSchemaVersion = ARTIFACT_SCHEMA_VERSIONS[PROFILE_VERSION];
 export const CONTENT_CLASS = "LOCAL_UNREVIEWED_EXPERIMENT";
-export const PROFILE_VERSION = "local-real-rounds.v5";
 /** A session deals this many rounds from a deck's pool. */
 export const ROUNDS_PER_SESSION = 5;
 /** A deck's pool holds at least one session's rounds and at most this many. */
@@ -252,7 +265,7 @@ export type ExperimentDeck = DeckRecord;
 export type ParsedDeck = DeckRecord<ParsedFixture>;
 
 export interface ExperimentArtifact {
-  readonly schemaVersion: typeof ARTIFACT_SCHEMA_VERSION;
+  readonly schemaVersion: ArtifactSchemaVersion;
   readonly contentClass: typeof CONTENT_CLASS;
   readonly profileHash: string;
   readonly crawlSnapshot: Readonly<JsonRecord>;

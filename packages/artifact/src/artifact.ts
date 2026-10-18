@@ -1,7 +1,7 @@
 import {
   ALGORITHM_SOURCE_KEYS,
   OUTPUT_SOURCE_KEYS,
-  ARTIFACT_SCHEMA_VERSION,
+  ARTIFACT_SCHEMA_VERSIONS,
   BEFORE_AFTER_CANDIDATE_IDS,
   CANDIDATE_COUNTS,
   CONTENT_CLASS,
@@ -15,7 +15,7 @@ import {
   MASKED_NAME,
   MAXIMUM_POOL_SIZE,
   PANE_LAYOUTS,
-  PROFILE_VERSION,
+  PROFILE_VERSIONS,
   PROTECTED_SOURCE_KEYS,
   ROUNDS_PER_SESSION,
   STACK_LANGUAGES,
@@ -29,6 +29,7 @@ import {
   type ParsedDeck,
   type ParsedFixture,
   type ParsedSource,
+  type ProfileVersion,
   type StackLanguage,
 } from "./domain";
 import { fail } from "./errors";
@@ -271,6 +272,8 @@ const parsePanes = (value: unknown, kind: FixtureKind): readonly Pane[] => {
 
 interface Snapshot {
   readonly id: string;
+  /** The profile the run read: every source names it, and the artifact's schema is the one it makes. */
+  readonly profileVersion: ProfileVersion;
   readonly queryIds: ReadonlySet<string>;
   readonly stack: StackIdentity;
   /** The curated repositories' pinned commits, as `owner/name@commit`; empty when the run read none. */
@@ -675,7 +678,8 @@ const parseSnapshot = (value: unknown, profileHash: string): Snapshot => {
   const curated = typeof value === "object" && value !== null && Object.hasOwn(value, "curated");
   const snapshot = record(value, curated ? [...SNAPSHOT_KEYS, "curated"] : SNAPSHOT_KEYS);
   const id = sha256(snapshot.id);
-  if (snapshot.profileVersion !== PROFILE_VERSION || sha256(snapshot.profileHash) !== profileHash) fail();
+  const profileVersion = PROFILE_VERSIONS.find((known) => known === snapshot.profileVersion) ?? fail();
+  if (sha256(snapshot.profileHash) !== profileHash) fail();
   const github = record(snapshot.github, ["apiVersion", "queries"]);
   text(github.apiVersion);
   const queryIds = parseQueryIds(github.queries);
@@ -683,7 +687,7 @@ const parseSnapshot = (value: unknown, profileHash: string): Snapshot => {
   const identity = Object.freeze({ release: text(stack.release), revision: gitId(stack.revision) });
   if (!Array.isArray(stack.configurations) || !isLanguageSelection(stack.configurations)) fail();
   validateResponseHashes(snapshot.acceptedResponseHashes, id, profileHash);
-  return Object.freeze({ id, queryIds, stack: identity,
+  return Object.freeze({ id, profileVersion, queryIds, stack: identity,
     ...(curated ? parseCurated(snapshot.curated)
       : { pins: new Set<string>(), algorithms: new Map<string, CuratedAlgorithm>(), datasets: new Set<string>(), frameworks: new Map(),
         exercises: new Map(), advisories: NO_ADVISORIES }) });
@@ -697,9 +701,10 @@ export const ARTIFACT_KEYS = ["schemaVersion", "contentClass", "profileHash", "c
  */
 export const parseArtifactDecks = (value: unknown): readonly ParsedDeck[] => {
   const artifact: JsonRecord = record(value, ARTIFACT_KEYS);
-  if (artifact.schemaVersion !== ARTIFACT_SCHEMA_VERSION || artifact.contentClass !== CONTENT_CLASS) fail();
+  if (artifact.contentClass !== CONTENT_CLASS) fail();
   const profileHash = sha256(artifact.profileHash);
   const snapshot = parseSnapshot(artifact.crawlSnapshot, profileHash);
+  if (artifact.schemaVersion !== ARTIFACT_SCHEMA_VERSIONS[snapshot.profileVersion]) fail();
   const values = Array.isArray(artifact.decks) ? artifact.decks : fail();
   if (values.length === 0 || values.length > DECK_IDS.length) fail();
   const decks = values.map((deck: unknown) => parseDeck(deck, snapshot));
@@ -708,6 +713,7 @@ export const parseArtifactDecks = (value: unknown): readonly ParsedDeck[] => {
   const fixtures = decks.flatMap(({ fixtures: deckFixtures }) => deckFixtures);
   const roundIds = fixtures.map(({ roundId }) => roundId.toLocaleLowerCase("en-US"));
   if (new Set(roundIds).size !== fixtures.length) fail();
+  if (fixtures.some(({ source }) => source.profileVersion !== snapshot.profileVersion)) fail();
   requireDistinctAcrossDecks(fixtures);
   requirePublicContainment(fixtures);
   return Object.freeze(decks);

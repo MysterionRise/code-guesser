@@ -141,7 +141,7 @@ describe("operational run records", () => {
       (candidate) => { candidate.counts.blobAttempts = CAPACITY_CEILINGS.blobAttempts + 1; },
       (candidate) => { candidate.counts.blobsRetrieved = 9; },
       (candidate) => { candidate.bytes.stackMetadata = CAPACITY_CEILINGS.stackMetadataBytes + 1; },
-      (candidate) => { candidate.bytes.stackBlobs = 16 * 1024 * 1024 + 1; },
+      (candidate) => { candidate.bytes.stackBlobs = CAPACITY_CEILINGS.totalBlobBytes + 1; },
       (candidate) => { candidate.waits.retries = 6; },
       (candidate) => { candidate.waits.milliseconds = 30_001; },
       (candidate) => { candidate.counts.selected = 4; },

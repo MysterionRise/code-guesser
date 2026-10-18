@@ -5,7 +5,7 @@ import {
   canonicalHash,
 } from "./canonical";
 import {
-  ARTIFACT_SCHEMA_VERSION,
+  ARTIFACT_SCHEMA_VERSIONS,
   CROSS_DECK_KEYS_BY_KIND,
   DEDUPLICATION_KEYS_BY_KIND,
   DECK_IDS,
@@ -228,7 +228,7 @@ export const composeExperimentArtifact = (options: ComposeOptions): ComposedExpe
   // Named first, so a leak reports its key and part instead of the parser's single rejection.
   requirePublicContainment(present.flatMap((id) => options.decks[id]!.fixtures), options.profile);
   const artifact = parseExperimentArtifact({
-    schemaVersion: ARTIFACT_SCHEMA_VERSION,
+    schemaVersion: ARTIFACT_SCHEMA_VERSIONS[options.profile.profileVersion],
     contentClass: "LOCAL_UNREVIEWED_EXPERIMENT",
     profileHash,
     crawlSnapshot: snapshot,

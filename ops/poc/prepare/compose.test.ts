@@ -1,6 +1,10 @@
+import { readFileSync } from "node:fs";
+
 import { canonicalArtifactBytes, canonicalArtifactHash } from "./canonical";
 import { ComposeError, composeExperimentArtifact } from "./compose";
 import { artifactFixtures } from "./model";
+import { parseArtifactDecks } from "../../../packages/artifact/src/index";
+import { parseCrawlProfile } from "./profile";
 import { generateLanguageRounds } from "./language-rounds";
 import { composeInput, sha256, snapshotIdFor, stackCandidate } from "./testdata/deck-builders";
 
@@ -21,6 +25,19 @@ describe("pooled experiment composition", () => {
     expect(composed.artifactHash).toBe(canonicalArtifactHash(composed.artifact));
     expect(Buffer.from(composed.artifactBytes)).toEqual(Buffer.from(canonicalArtifactBytes(composed.artifact)));
     expect(artifactFixtures(composed.artifact).every(({ source }) => source.crawlSnapshotId === composed.artifact.crawlSnapshot.id)).toBe(true);
+  });
+
+  it("writes a v6 profile's artifact in schema v5, which the parser holds to its own version (#129)", () => {
+    const { curated: _curated, ...raw } = JSON.parse(readFileSync(new URL("../profiles/local-real-rounds.v5.json", import.meta.url), "utf8"));
+    const v6 = composeInput(parseCrawlProfile({ ...raw, profileVersion: "local-real-rounds.v6" }));
+    const composed = composeExperimentArtifact(v6);
+    expect(composed.artifact.schemaVersion).toBe("local-experiment-artifact.v5");
+    expect(artifactFixtures(composed.artifact).every(({ source }) => source.profileVersion === "local-real-rounds.v6")).toBe(true);
+    const tampered = (change: (artifact: any) => void) => { const copy = structuredClone(composed.artifact) as any; change(copy); return () => parseArtifactDecks(copy); };
+    expect(tampered(() => undefined)).not.toThrow();
+    expect(tampered((artifact) => { artifact.schemaVersion = "local-experiment-artifact.v4"; })).toThrow();
+    expect(tampered((artifact) => { artifact.decks[0].fixtures[0].source.profileVersion = "local-real-rounds.v5"; })).toThrow();
+    expect(tampered((artifact) => { artifact.crawlSnapshot.profileVersion = "local-real-rounds.v7"; })).toThrow();
   });
 
   it("composes any subset of decks, in deck order", () => {

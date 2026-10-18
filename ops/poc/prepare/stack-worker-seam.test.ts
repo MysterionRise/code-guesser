@@ -11,6 +11,8 @@ const testModuleName: string = "vitest";
 const { describe, expect, it } = await import(testModuleName) as any;
 
 const profilePath = new URL("../profiles/local-real-rounds.v5.json", import.meta.url);
+/** The v1.0 run's profile spends every ceiling in full, so a budget one above its own is one above the worker's maximum. */
+const ceilingProfilePath = new URL("../profiles/local-real-rounds.v6.json", import.meta.url);
 const hasUv = spawnSync("uv", ["--version"], { stdio: "ignore" }).status === 0;
 const SEAM_TIMEOUT_MILLISECONDS = 120_000;
 
@@ -45,7 +47,7 @@ describe.skipIf(!hasUv)("Node to Python worker seam", () => {
   }, SEAM_TIMEOUT_MILLISECONDS);
 
   it("the metadata worker names a budget above its own maximum", async () => {
-    const profile = parseCrawlProfile(JSON.parse(await readFile(profilePath, "utf8")));
+    const profile = parseCrawlProfile(JSON.parse(await readFile(ceilingProfilePath, "utf8")));
     const capacity = createCapacityMeter({
       limits: profile.capacity,
       githubQueryIds: profile.github.queries.map(({ id }) => id),
@@ -61,7 +63,7 @@ describe.skipIf(!hasUv)("Node to Python worker seam", () => {
   }, SEAM_TIMEOUT_MILLISECONDS);
 
   it("the blob worker accepts limits at every signed ceiling and names one above", async () => {
-    const profile = parseCrawlProfile(JSON.parse(await readFile(profilePath, "utf8")));
+    const profile = parseCrawlProfile(JSON.parse(await readFile(ceilingProfilePath, "utf8")));
     const { capacity } = profile;
     const limits: BlobWorkerLimits = {
       blobAttempts: capacity.blobAttempts, successfulBlobs: capacity.successfulBlobs,
