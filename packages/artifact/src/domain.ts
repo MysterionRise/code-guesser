@@ -1,16 +1,19 @@
 import type { JsonRecord } from "./validation";
 
 /** The decks an artifact may carry, in this order; a run publishes every deck it could fill. */
-export const DECK_IDS = Object.freeze(["project", "language", "before-after", "algorithm", "output", "fix", "missing-line", "name-function", "framework", "exercise"] as const);
+export const DECK_IDS = Object.freeze(["project", "language", "before-after", "algorithm", "output", "fix", "missing-line", "name-function", "framework", "exercise", "vulnerable-line"] as const);
 export type DeckId = typeof DECK_IDS[number];
-export type FixtureKind = "PROJECT" | "LANGUAGE" | "BEFORE_AFTER" | "ALGORITHM" | "OUTPUT" | "FIX" | "MISSING_LINE" | "NAME_FUNCTION" | "FRAMEWORK" | "EXERCISE";
+export type FixtureKind = "PROJECT" | "LANGUAGE" | "BEFORE_AFTER" | "ALGORITHM" | "OUTPUT" | "FIX" | "MISSING_LINE" | "NAME_FUNCTION" | "FRAMEWORK" | "EXERCISE"
+  | "VULNERABLE_LINE";
 export const DECK_KINDS: Readonly<Record<DeckId, FixtureKind>> = Object.freeze({
   project: "PROJECT", language: "LANGUAGE", "before-after": "BEFORE_AFTER", algorithm: "ALGORITHM", output: "OUTPUT", fix: "FIX",
   "missing-line": "MISSING_LINE", "name-function": "NAME_FUNCTION", framework: "FRAMEWORK", exercise: "EXERCISE",
+  "vulnerable-line": "VULNERABLE_LINE",
 });
 export const MODE_KINDS: Readonly<Record<FixtureKind, DeckId>> = Object.freeze({
   PROJECT: "project", LANGUAGE: "language", BEFORE_AFTER: "before-after", ALGORITHM: "algorithm", OUTPUT: "output", FIX: "fix",
   MISSING_LINE: "missing-line", NAME_FUNCTION: "name-function", FRAMEWORK: "framework", EXERCISE: "exercise",
+  VULNERABLE_LINE: "vulnerable-line",
 });
 export const ARTIFACT_SCHEMA_VERSION = "local-experiment-artifact.v4";
 export const CONTENT_CLASS = "LOCAL_UNREVIEWED_EXPERIMENT";
@@ -53,6 +56,7 @@ export const ROUNDS_PER_LANGUAGE = 2;
 /** Options per round: four for every kind but before-or-after, which has two. */
 export const CANDIDATE_COUNTS: Readonly<Record<FixtureKind, number>> = Object.freeze({
   PROJECT: 4, LANGUAGE: 4, BEFORE_AFTER: 2, ALGORITHM: 4, OUTPUT: 4, FIX: 4, MISSING_LINE: 4, NAME_FUNCTION: 4, FRAMEWORK: 4, EXERCISE: 4,
+  VULNERABLE_LINE: 4,
 });
 /** Before-or-after answers, in pane order: the first names pane A as the later version. */
 export const BEFORE_AFTER_CANDIDATE_IDS = Object.freeze([
@@ -133,6 +137,13 @@ export const FRAMEWORK_SOURCE_KEYS = [...CURATED_SOURCE_KEYS, "framework", "wind
  * the file, with its commentary removed, that the pane begins with.
  */
 export const EXERCISE_SOURCE_KEYS = [...CURATED_SOURCE_KEYS, "exercise", "language", "windowStart"] as const;
+/**
+ * A vulnerable-line round's file (#59), as it stood before the one-line fix a reviewed GitHub advisory links: as a
+ * fix round's, with the advisory (`GHSA-…`), the ecosystem and package it was filed under, and the CWE its hint names.
+ */
+export const VULNERABLE_LINE_SOURCE_KEYS = [
+  ...BASE_SOURCE_KEYS, "fixCommit", "fixBlob", "advisory", "ecosystem", "packageName", "cwe", "language", "changedLine", "windowStart",
+] as const;
 /** What a missing-line pane shows in place of its hidden line, at that line's own indentation. */
 export const GAP_MARKER = "⟨ missing line ⟩";
 /** Identities that may not repeat within a deck. */
@@ -156,6 +167,7 @@ export const DEDUPLICATION_KEYS_BY_KIND: Readonly<Record<FixtureKind, readonly s
   NAME_FUNCTION: [...FILE_KEYS],
   FRAMEWORK: [...FILE_KEYS],
   EXERCISE: [...FILE_KEYS],
+  VULNERABLE_LINE: ["repository", "commit", "fixCommit", "advisory", "blob", "rawContentHash", "excerptHash"],
 });
 export const CROSS_DECK_KEYS_BY_KIND: Readonly<Record<FixtureKind, readonly string[]>> = Object.freeze({
   PROJECT: CROSS_DECK_KEYS, LANGUAGE: CROSS_DECK_KEYS, BEFORE_AFTER: CROSS_DECK_KEYS,
@@ -166,12 +178,14 @@ export const CROSS_DECK_KEYS_BY_KIND: Readonly<Record<FixtureKind, readonly stri
   NAME_FUNCTION: ["blob", "rawContentHash", "excerptHash"],
   FRAMEWORK: ["blob", "rawContentHash", "excerptHash"],
   EXERCISE: ["blob", "rawContentHash", "excerptHash"],
+  // A fix the bug datasets record may also have an advisory; the two decks never show the same commit or file.
+  VULNERABLE_LINE: CROSS_DECK_KEYS,
 });
 /** Each kind's panes: one unlabelled pane, or panes `A` and `B`. */
 export const PANE_LAYOUTS: Readonly<Record<FixtureKind, readonly (string | null)[]>> = Object.freeze({
   PROJECT: Object.freeze([null]), LANGUAGE: Object.freeze([null]), BEFORE_AFTER: PANE_LABELS, ALGORITHM: Object.freeze([null]),
   OUTPUT: Object.freeze([null]), FIX: Object.freeze([null]), MISSING_LINE: Object.freeze([null]), NAME_FUNCTION: Object.freeze([null]),
-  FRAMEWORK: Object.freeze([null]), EXERCISE: Object.freeze([null]),
+  FRAMEWORK: Object.freeze([null]), EXERCISE: Object.freeze([null]), VULNERABLE_LINE: Object.freeze([null]),
 });
 /** The word an algorithm round's code shows in place of the algorithm's own name (`mystery`, `Mystery`). */
 export const MASKED_NAME = "mystery";
@@ -181,11 +195,11 @@ export const DETAIL_KINDS: ReadonlySet<FixtureKind> = new Set<FixtureKind>(["PRO
 export const PROTECTED_SOURCE_KEYS = [
   "repository", "repositoryUrl", "authorName", "authorLogin", "authorSourceUrl", "path",
   "blob", "rawContentHash", "licenseName", "licenseSpdx", "licenseFileUrl", "commit",
-  "commitUrl", "blobUrl",
+  "commitUrl", "blobUrl", "advisory",
 ] as const;
 
 export interface ParsedSource extends JsonRecord {
-  readonly discoverySource: "GITHUB_COMMIT_SEARCH" | "STACK_V2" | "CURATED_GITHUB";
+  readonly discoverySource: "GITHUB_COMMIT_SEARCH" | "STACK_V2" | "CURATED_GITHUB" | "CURATED_DATASET" | "GITHUB_ADVISORY";
   readonly repository: string;
   readonly authorName: string;
   readonly path: string;

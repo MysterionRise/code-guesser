@@ -1,0 +1,274 @@
+{
+  "vulnerable-line": {
+    "rounds": 16,
+    "ecosystems": [
+      "rubygems",
+      "npm",
+      "go"
+    ],
+    "published": [
+      "2021-01-01..2021-06-30",
+      "2021-07-01..2021-12-31",
+      "2022-01-01..2022-06-30",
+      "2022-07-01..2022-12-31",
+      "2023-01-01..2023-06-30",
+      "2023-07-01..2023-12-31",
+      "2024-01-01..2024-06-30",
+      "2024-07-01..2024-12-31"
+    ],
+    "commitReads": 600,
+    "cwes": [
+      {
+        "id": "CWE-20",
+        "hint": "Input from outside is used without checking that it is well formed."
+      },
+      {
+        "id": "CWE-22",
+        "hint": "A path built from outside input can climb out of the directory it was meant for."
+      },
+      {
+        "id": "CWE-74",
+        "hint": "Outside input reaches another interpreter without being neutralised."
+      },
+      {
+        "id": "CWE-77",
+        "hint": "Outside input can change a command the program builds and runs."
+      },
+      {
+        "id": "CWE-78",
+        "hint": "Outside input can change a shell command the program runs."
+      },
+      {
+        "id": "CWE-79",
+        "hint": "Text from outside reaches a page without being escaped."
+      },
+      {
+        "id": "CWE-80",
+        "hint": "Script tags in outside text reach a page without being neutralised."
+      },
+      {
+        "id": "CWE-89",
+        "hint": "Outside input can change a database query the program builds."
+      },
+      {
+        "id": "CWE-94",
+        "hint": "Outside input can become code the program evaluates."
+      },
+      {
+        "id": "CWE-95",
+        "hint": "Outside input reaches an eval of dynamic code."
+      },
+      {
+        "id": "CWE-116",
+        "hint": "Output is not encoded or escaped for the place it is sent."
+      },
+      {
+        "id": "CWE-117",
+        "hint": "Outside input can forge or corrupt log entries."
+      },
+      {
+        "id": "CWE-125",
+        "hint": "The code can read past the end, or before the start, of a buffer."
+      },
+      {
+        "id": "CWE-190",
+        "hint": "A calculation can overflow and wrap around."
+      },
+      {
+        "id": "CWE-200",
+        "hint": "Information meant to stay private can reach someone not meant to see it."
+      },
+      {
+        "id": "CWE-203",
+        "hint": "Responses differ in a way that reveals a secret, such as their timing."
+      },
+      {
+        "id": "CWE-209",
+        "hint": "An error message reveals details meant to stay private."
+      },
+      {
+        "id": "CWE-248",
+        "hint": "An exception can go uncaught and stop the program."
+      },
+      {
+        "id": "CWE-269",
+        "hint": "A privilege is granted or kept where it should not be."
+      },
+      {
+        "id": "CWE-284",
+        "hint": "Access to a resource is not restricted as it should be."
+      },
+      {
+        "id": "CWE-285",
+        "hint": "An action is allowed without checking that the actor may perform it."
+      },
+      {
+        "id": "CWE-287",
+        "hint": "An identity is accepted without being properly proven."
+      },
+      {
+        "id": "CWE-295",
+        "hint": "A certificate is accepted without being properly validated."
+      },
+      {
+        "id": "CWE-327",
+        "hint": "A broken or risky cryptographic algorithm is used."
+      },
+      {
+        "id": "CWE-330",
+        "hint": "Values that must be unpredictable come from a predictable source."
+      },
+      {
+        "id": "CWE-345",
+        "hint": "Data is trusted without checking where it came from."
+      },
+      {
+        "id": "CWE-346",
+        "hint": "The origin of a request or message is not properly checked."
+      },
+      {
+        "id": "CWE-347",
+        "hint": "A signature is not properly verified."
+      },
+      {
+        "id": "CWE-352",
+        "hint": "A request is accepted without proof that the user meant to send it."
+      },
+      {
+        "id": "CWE-362",
+        "hint": "Shared state can change between a check and its use."
+      },
+      {
+        "id": "CWE-377",
+        "hint": "A temporary file is created in a way another process could take over."
+      },
+      {
+        "id": "CWE-384",
+        "hint": "A session identifier is not renewed when the user signs in."
+      },
+      {
+        "id": "CWE-400",
+        "hint": "Outside input can make the program use resources without bound."
+      },
+      {
+        "id": "CWE-434",
+        "hint": "A file of a dangerous type can be uploaded."
+      },
+      {
+        "id": "CWE-476",
+        "hint": "A null or missing value can be used as if it were present."
+      },
+      {
+        "id": "CWE-502",
+        "hint": "Untrusted data is deserialized in a way that can build arbitrary objects."
+      },
+      {
+        "id": "CWE-532",
+        "hint": "Private information is written to a log."
+      },
+      {
+        "id": "CWE-601",
+        "hint": "A redirect can send the user to a site an attacker chooses."
+      },
+      {
+        "id": "CWE-611",
+        "hint": "An XML parser resolves external entities in untrusted documents."
+      },
+      {
+        "id": "CWE-613",
+        "hint": "A session stays valid longer than it should."
+      },
+      {
+        "id": "CWE-639",
+        "hint": "A user can reach another user's data by changing an identifier."
+      },
+      {
+        "id": "CWE-668",
+        "hint": "A resource is exposed to people outside the sphere it belongs to."
+      },
+      {
+        "id": "CWE-674",
+        "hint": "Some input can make recursion go arbitrarily deep."
+      },
+      {
+        "id": "CWE-693",
+        "hint": "A protection mechanism is missing or can be bypassed."
+      },
+      {
+        "id": "CWE-697",
+        "hint": "A comparison decides wrongly for some values."
+      },
+      {
+        "id": "CWE-704",
+        "hint": "A value is converted to the wrong type."
+      },
+      {
+        "id": "CWE-707",
+        "hint": "Input is not neutralised before it reaches a sensitive use."
+      },
+      {
+        "id": "CWE-754",
+        "hint": "An unusual or exceptional condition goes unchecked."
+      },
+      {
+        "id": "CWE-755",
+        "hint": "An exceptional condition is handled in an unsafe way."
+      },
+      {
+        "id": "CWE-770",
+        "hint": "Resources are allocated without a limit on how many."
+      },
+      {
+        "id": "CWE-787",
+        "hint": "The code can write past the end, or before the start, of a buffer."
+      },
+      {
+        "id": "CWE-835",
+        "hint": "Some input can make a loop run forever."
+      },
+      {
+        "id": "CWE-862",
+        "hint": "An action never checks whether the actor is allowed to perform it."
+      },
+      {
+        "id": "CWE-863",
+        "hint": "An authorization check exists but decides wrongly."
+      },
+      {
+        "id": "CWE-915",
+        "hint": "Outside input can set object attributes that should not be settable."
+      },
+      {
+        "id": "CWE-918",
+        "hint": "The server can be made to send requests to an address an attacker chooses."
+      },
+      {
+        "id": "CWE-1188",
+        "hint": "A setting defaults to an insecure value."
+      },
+      {
+        "id": "CWE-1284",
+        "hint": "A quantity from outside is not checked for a sane range."
+      },
+      {
+        "id": "CWE-1321",
+        "hint": "Outside input can change the prototype that other objects inherit from."
+      },
+      {
+        "id": "CWE-1333",
+        "hint": "A regular expression can take exponential time on crafted input."
+      },
+      {
+        "id": "CWE-1336",
+        "hint": "Outside input can become part of a template the program renders."
+      }
+    ],
+    "templates": {
+      "title": "Spot the vulnerable line",
+      "description": "Read code just before a real one-line security fix and pick the line that was vulnerable.",
+      "prompt": "A security fix changed one of these lines. Which one was vulnerable?",
+      "evidence": "GitHub advisory {advisory} ({cwe}) links the fix in {repository}; it changed line {line} of this excerpt.",
+      "explanation": "The answer is the one line the advisory's fix commit replaced. Advisory data: GitHub Advisory Database, CC-BY 4.0."
+    }
+  }
+}

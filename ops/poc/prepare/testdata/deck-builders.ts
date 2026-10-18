@@ -11,8 +11,10 @@ import { generateNameFunctionRounds, type NameFunctionCandidate } from "../name-
 import { generateExerciseRounds, type ExerciseCandidate } from "../exercise-rounds";
 import { generateFixRounds, type FixCandidate } from "../fix-rounds";
 import { generateFrameworkRounds, type FrameworkCandidate } from "../framework-rounds";
+import { generateVulnerableLineRounds, type VulnerableLineCandidate } from "../vulnerable-line-rounds";
 import { frameworkWindow } from "../framework-window";
 import { changeKind, fixWindows } from "../fix-window";
+import type { AdvisoryPointer } from "../github-advisories";
 import type { DatasetBug } from "../github-fixes";
 import { fixExtremeLimits, fixSlack, labelStems } from "../model";
 import { balancedChoice } from "../round-helpers";
@@ -346,6 +348,8 @@ export const composeInput = (
         ? { framework: generateFrameworkRounds({ profile, candidates: frameworkCandidates(profile, snapshotId) }) } : {}),
       ...(profile.curated?.exercise
         ? { exercise: generateExerciseRounds({ profile, candidates: exerciseCandidates(profile, snapshotId) }) } : {}),
+      ...(profile.curated?.["vulnerable-line"]
+        ? { "vulnerable-line": generateVulnerableLineRounds({ profile, candidates: vulnerableLineCandidates(profile, snapshotId) }) } : {}),
     },
     candidates,
   };
@@ -393,7 +397,7 @@ export const CURATED_SECTION = Object.freeze({
 export const loadCuratedProfile = (
   selection: Readonly<Record<string, number>> = {},
   decks: Readonly<{ algorithm?: boolean; output?: boolean; fix?: boolean; "missing-line"?: boolean; "name-function"?: boolean;
-    framework?: boolean; exercise?: boolean }> = { algorithm: true },
+    framework?: boolean; exercise?: boolean; "vulnerable-line"?: boolean }> = { algorithm: true },
 ): CrawlProfile => {
   const raw = JSON.parse(readFileSync(new URL("../../profiles/local-real-rounds.v5.json", import.meta.url), "utf8"));
   const curated = { repositories: [...CURATED_REPOSITORIES, ...(decks.framework ? [FRAMEWORK_REPOSITORY] : [])],
@@ -402,7 +406,8 @@ export const loadCuratedProfile = (
     ...(decks["missing-line"] ? { "missing-line": MISSING_LINE_SECTION } : {}),
     ...(decks["name-function"] ? { "name-function": NAME_FUNCTION_SECTION } : {}),
     ...(decks.framework ? { framework: FRAMEWORK_SECTION } : {}),
-    ...(decks.exercise ? { exercise: EXERCISE_SECTION } : {}) };
+    ...(decks.exercise ? { exercise: EXERCISE_SECTION } : {}),
+    ...(decks["vulnerable-line"] ? { "vulnerable-line": VULNERABLE_LINE_SECTION } : {}) };
   return parseCrawlProfile({ ...raw, selection: { ...raw.selection, ...selection }, curated: structuredClone(curated) });
 };
 
@@ -892,11 +897,11 @@ const FILLER_OFFSETS = [-10, 8, -6, 4, -3, 10, -8, 6, -4, 3, -12, 12, -2, 2] as 
  * own; or longer, busier, more indented, and with four words of its own. A window can then place the changed line
  * at any rank by position, centrality, length, and complexity, and in the middle of every line feature.
  */
-const syntheticFile = (language: "Java" | "Python", changed: string): string => Array.from({ length: 27 }, (_, index) => {
+const syntheticFile = (language: StackLanguage, changed: string): string => Array.from({ length: 27 }, (_, index) => {
   if (index === 13) return changed;
   const offset = FILLER_OFFSETS[index % FILLER_OFFSETS.length]!;
   const length = changed.trim().length + offset;
-  const end = language === "Java" ? ";" : "";
+  const end = language === "Python" ? "" : ";";
   const indent = " ".repeat(changed.length - changed.trimStart().length);
   if (offset < 0) {
     const pad = "a".repeat(Math.max(1, Math.floor((length - 11 - end.length) / 2)));
@@ -977,6 +982,113 @@ export const fixCandidates = (profile: CrawlProfile, snapshotId: string): readon
       rawContentHash: sha256(fix.text), licenseName: "MIT License", licenseSpdx: "MIT",
       licenseFileUrl: `https://github.com/${fix.repository}/blob/${fix.parent}/LICENSE`, authorName: "Fix Author", authorLogin: "fix-author",
       buggyLine: fix.buggyLine, fixedLine: fix.fixedLine, changedLine: fix.changedLine, changeKind: changeKind(fix.buggyLine, fix.fixedLine),
+      windowStart: window.windowStart, answer: window.answer, decoys: window.decoys, excerpt: window.excerpt,
+      excerptHash: sha256(window.excerpt), crawlSnapshotId: snapshotId,
+    });
+  });
+};
+
+/** An eight-round vulnerable-line deck (#59) over two ecosystems' advisories in two publication windows. */
+export const VULNERABLE_LINE_SECTION = Object.freeze({
+  rounds: 8,
+  ecosystems: ["pip", "npm"],
+  published: ["2024-01-01..2024-06-30", "2024-07-01..2024-12-31"],
+  commitReads: 20,
+  cwes: [
+    { id: "CWE-22", hint: "A path built from outside input can climb out of the directory it was meant for." },
+    { id: "CWE-79", hint: "Text from outside reaches a page without being escaped." },
+  ],
+  templates: {
+    title: "Spot the vulnerable line",
+    description: "Read code just before a real one-line security fix and pick the line that was vulnerable.",
+    prompt: "A security fix changed one of these lines. Which one was vulnerable?",
+    evidence: "GitHub advisory {advisory} ({cwe}) links the fix in {repository}; it changed line {line} of this excerpt.",
+    explanation: "The answer is the one line the advisory's fix commit replaced. Advisory data: GitHub Advisory Database, CC-BY 4.0.",
+  },
+});
+
+const GHSA_ALPHABET = "23456789cfghjmpqrvwx";
+/** A well-formed advisory id for a synthetic advisory. */
+export const syntheticAdvisory = (index: number): string => {
+  const group = (offset: number) => Array.from({ length: 4 }, (_, at) => GHSA_ALPHABET[(index * 7 + offset + at) % GHSA_ALPHABET.length]).join("");
+  return `GHSA-${group(0)}-${group(4)}-${group(8)}`;
+};
+
+/** One synthetic advisory fix: a one-line change in its own repository, as the harness's fix binder serves it. */
+export interface SyntheticAdvisoryFix {
+  readonly advisory: string;
+  readonly ecosystem: "pip" | "npm";
+  readonly repository: string;
+  readonly language: "Python" | "JavaScript";
+  readonly path: string;
+  readonly text: string;
+  readonly changedLine: number;
+  readonly buggyLine: string;
+  readonly fixedLine: string;
+  readonly parent: string;
+  readonly fixCommit: string;
+  readonly bug: string;
+}
+
+/** Ten one-line advisory fixes, in ten repositories, alternately Python on pip and JavaScript on npm. */
+export const syntheticAdvisoryFixes = (): readonly SyntheticAdvisoryFix[] => Array.from({ length: 10 }, (_, index) => {
+  const python = index % 2 === 0;
+  const name = `app${index + 1}`;
+  // As the fix deck's synthetic lines, three words used once each, so a window can rank them anywhere among the filler.
+  const buggyLine = python ? `    target = join(root) + ${10 + index}` : `    html = render(text) + ${10 + index};`;
+  const fixedLine = python ? `    target = join(safe(root)) + ${10 + index}` : `    html = escape(text) + ${10 + index};`;
+  const language = python ? "Python" as const : "JavaScript" as const;
+  return Object.freeze({
+    advisory: syntheticAdvisory(index), ecosystem: python ? "pip" as const : "npm" as const, repository: `vuln/${name}`, language,
+    path: python ? `${name}/views.py` : `lib/${name}.js`, text: syntheticFile(language, buggyLine), changedLine: 14, buggyLine, fixedLine,
+    parent: sha1(`parent-${name}`), fixCommit: sha1(`fix-${name}`), bug: syntheticAdvisory(index),
+  });
+});
+
+const advisoryPointer = (fix: Pick<SyntheticAdvisoryFix, "advisory" | "ecosystem" | "repository" | "fixCommit">, index: number,
+  overrides: Partial<AdvisoryPointer> = {}): AdvisoryPointer => Object.freeze({
+  advisory: fix.advisory, ecosystem: fix.ecosystem, packages: [`pkg-${index + 1}`], cwes: [index % 2 === 0 ? "CWE-22" : "CWE-79"],
+  commits: [{ repository: fix.repository, commit: fix.fixCommit }], withdrawn: false, ...overrides,
+});
+
+/** What the harness serves for the vulnerable-line deck: each listing's advisories, their windows, and each fix upstream. */
+export interface AdvisoryHarnessData {
+  readonly listed: readonly AdvisoryPointer[];
+  readonly published: ReadonlyMap<string, string>;
+  readonly fixes: readonly SyntheticAdvisoryFix[];
+}
+/**
+ * The ten fixes' advisories, and four more a deck sets aside before or after reading the commit: one withdrawn, one
+ * linking two commits, one under a CWE the profile has no hint for, and one whose commit changes more than one line.
+ */
+export const advisoryHarnessData = (): AdvisoryHarnessData => {
+  const fixes = syntheticAdvisoryFixes();
+  const extra = (index: number, overrides: Partial<AdvisoryPointer>) =>
+    advisoryPointer({ advisory: syntheticAdvisory(index), ecosystem: "pip", repository: `vuln/extra${index}`, fixCommit: sha1(`extra-${index}`) }, index, overrides);
+  const listed = [
+    ...fixes.map((fix, index) => advisoryPointer(fix, index)),
+    extra(11, { withdrawn: true }),
+    extra(12, { commits: [{ repository: "vuln/extra12", commit: sha1("extra-12a") }, { repository: "vuln/extra12", commit: sha1("extra-12b") }] }),
+    extra(13, { cwes: ["CWE-999"] }),
+    extra(14, {}),
+  ];
+  return { listed, fixes, published: new Map(listed.map((advisory, index) => [advisory.advisory, VULNERABLE_LINE_SECTION.published[index % 2]!])) };
+};
+
+/** Bound vulnerable-line candidates for the small profile: eight of the fixes, windows chosen so the answers balance. */
+export const vulnerableLineCandidates = (profile: CrawlProfile, snapshotId: string): readonly VulnerableLineCandidate[] => {
+  const chosen = syntheticAdvisoryFixes().slice(0, 8);
+  const windows = chosen.map((fix) => fixWindows(fix.text, fix.changedLine, `advisory:${fix.advisory}`, FIX_WINDOW_LINES, fix.language));
+  const choices = balancedChoice(windows.map((options) => options.map(({ ranks }) => ranks)), 4, fixSlack(chosen.length),
+    { costs: windows.map((options) => options.map(({ extremes }) => extremes)), limits: fixExtremeLimits(chosen.length) })!;
+  return chosen.map((fix, index) => {
+    const window = windows[index]![choices[index]!]!;
+    return Object.freeze({
+      advisory: fix.advisory, ecosystem: fix.ecosystem, packageName: `pkg-${index + 1}`, cwe: index % 2 === 0 ? "CWE-22" : "CWE-79",
+      repository: fix.repository, language: fix.language, commit: fix.parent, fixCommit: fix.fixCommit, path: fix.path,
+      blob: sha1(`buggy-${fix.bug}`), fixBlob: sha1(`fixed-${fix.bug}`), rawContentHash: sha256(fix.text), licenseName: "MIT License",
+      licenseSpdx: "MIT", licenseFileUrl: `https://github.com/${fix.repository}/blob/${fix.parent}/LICENSE`, authorName: "Fix Author",
+      authorLogin: "fix-author", buggyLine: fix.buggyLine, fixedLine: fix.fixedLine, changedLine: fix.changedLine,
       windowStart: window.windowStart, answer: window.answer, decoys: window.decoys, excerpt: window.excerpt,
       excerptHash: sha256(window.excerpt), crawlSnapshotId: snapshotId,
     });

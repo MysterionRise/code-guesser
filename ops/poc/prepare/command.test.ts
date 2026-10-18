@@ -10,7 +10,7 @@ import { GitHubSearchError } from "./github-search";
 import { JournalError, openJournal } from "./journal";
 import { HARNESS_CANDIDATES, accepted, classificationsFor, harnessRow, hash, loadProfile, makeHarness } from "./command-test-harness";
 import {
-  CURATED_REPOSITORIES, CURATED_SECTION, FIX_SECTION, OUTPUT_SECTION, curatedFiles, exerciseFiles, fixHarnessData, frameworkFiles, loadCuratedProfile, missingLineFiles, nameFunctionFiles, outputFiles, sha256,
+  CURATED_REPOSITORIES, CURATED_SECTION, FIX_SECTION, OUTPUT_SECTION, advisoryHarnessData, curatedFiles, exerciseFiles, fixHarnessData, frameworkFiles, loadCuratedProfile, missingLineFiles, nameFunctionFiles, outputFiles, sha256,
 } from "./testdata/deck-builders";
 import { LANGUAGE_SLUGS } from "../../../packages/artifact/src/index";
 import { MAINSTREAM_LANGUAGES, parseCrawlProfile } from "./profile";
@@ -435,6 +435,19 @@ const logLines = (calls: readonly string[]): string[] =>
     expect(harness.calls).toContain("exercise:8");
     expect(logLines(harness.calls)).toContain("log:PREPARATION_DECKS project,language,before-after,exercise");
     expect((harness.reports[0] as any).diagnostics).toContainEqual({ stage: "ADMISSION", reasonCode: "FILE_PATH", count: 1 });
+  });
+
+  it("selects a configured vulnerable-line deck from each ecosystem's listings, reading no commit for an advisory it sets aside (#59)", async () => {
+    const profile = loadCuratedProfile({ beforeAfterPool: 5 }, { "vulnerable-line": true });
+    const harness = await makeHarness({}, { profile, advisories: advisoryHarnessData() });
+    await prepareLocalExperiment(harness.dependencies);
+    for (const ecosystem of ["pip", "npm"]) {
+      for (const published of ["2024-01-01..2024-06-30", "2024-07-01..2024-12-31"]) expect(harness.calls).toContain(`advisories:${ecosystem}:${published}`);
+    }
+    // Withdrawn, linking two commits, or under a CWE the profile has no hint for: set aside before any commit is read.
+    for (const repository of ["vuln/extra11", "vuln/extra12", "vuln/extra13"]) expect(harness.calls).not.toContain(`advisory-fix:${repository}`);
+    expect(harness.calls).toContain("vulnerable-line:8");
+    expect(logLines(harness.calls)).toContain("log:PREPARATION_DECKS project,language,before-after,vulnerable-line");
   });
 
   it("attempts no algorithm deck when the profile configures none", async () => {

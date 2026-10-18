@@ -3,6 +3,7 @@ import { canonicalBytes, canonicalHash } from "../canonical";
 import { createCapacityMeter, type CapacityMeter } from "../capacity";
 import { composeExperimentArtifact } from "../compose";
 import { curatedDeck } from "../curated-decks";
+import { readAdvisories, readAdvisoryFix } from "../github-advisories";
 import { bindFixCommit, readDatasetBlob, readDatasetBugs } from "../github-fixes";
 import { generateBeforeAfterRounds } from "../before-after-rounds";
 import { bindGitHubFile, listGitHubDirectory, readGitHubFile } from "../github-files";
@@ -190,7 +191,7 @@ const stackLane = (
   state: CapturedDependencyState, reference: RuntimeReference,
 ): Pick<PreparationDependencies, "collectStackMetadata" | "fetchStackBlob"
   | "revalidateStackCandidate" | "validateLanguageCandidate" | "bindCuratedFile" | "listCuratedDirectory" | "readCuratedFile"
-  | "readDatasetBugs" | "readDatasetBlob" | "bindFixCommit"> => ({
+  | "readDatasetBugs" | "readDatasetBlob" | "readAdvisories" | "readAdvisoryFix" | "bindFixCommit"> => ({
   collectStackMetadata: (context) => record(state, `stack-metadata-${context.configuration}`, async () => {
     state.metadataConfigurations.push(context.configuration);
     const value = await collectStackMetadata({ profile: context.profile, capacity: context.capacity,
@@ -239,6 +240,14 @@ const stackLane = (
   readDatasetBlob: (context) => record(state, "dataset-blob", () => {
     const runtime = runtimeOf(reference);
     return stage(runtime, () => readDatasetBlob({ profile: context.profile, transport: runtime.transport, retry: runtime.retry }, context));
+  }),
+  readAdvisories: (context) => record(state, "advisories", () => {
+    const runtime = runtimeOf(reference);
+    return stage(runtime, () => readAdvisories({ profile: context.profile, transport: runtime.transport, retry: runtime.retry }, context));
+  }),
+  readAdvisoryFix: (context) => record(state, "advisory-fix", () => {
+    const runtime = runtimeOf(reference);
+    return stage(runtime, () => readAdvisoryFix({ profile: context.profile, transport: runtime.transport, retry: runtime.retry }, context));
   }),
   bindFixCommit: (context) => record(state, "fix-commit", () => {
     const runtime = runtimeOf(reference);

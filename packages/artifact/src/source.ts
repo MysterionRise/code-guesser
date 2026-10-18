@@ -2,15 +2,18 @@ import {
   EXERCISE_SOURCE_KEYS,
   FIX_SOURCE_KEYS,
   FRAMEWORK_SOURCE_KEYS,
+  MAINSTREAM_LANGUAGES,
   LINEAGE_SOURCE_KEYS,
   MISSING_LINE_SOURCE_KEYS,
   NAME_FUNCTION_SOURCE_KEYS,
   PROFILE_VERSION,
   STACK_LANGUAGES,
   STACK_SOURCE_KEYS,
+  VULNERABLE_LINE_SOURCE_KEYS,
   type ParsedSource,
 } from "./domain";
 import { fail } from "./errors";
+import { CWE_ID, GHSA_ID, type AdvisorySnapshot } from "./vulnerable-line";
 import {
   bool,
   count,
@@ -137,6 +140,24 @@ export const validateFixSource = (value: unknown, snapshotId: string, datasets: 
   gitId(source.fixBlob);
   text(source.bugId);
   if (!(STACK_LANGUAGES as readonly unknown[]).includes(source.language)) fail();
+  const changedLine = positiveInteger(source.changedLine);
+  const windowStart = positiveInteger(source.windowStart);
+  if (windowStart > changedLine || source.fixCommit === source.commit || source.fixBlob === source.blob) fail();
+  return source as ParsedSource;
+};
+
+/**
+ * A file before a one-line fix a reviewed GitHub advisory links (#59): as a fix round's, but the record is the advisory,
+ * filed under one of the snapshot's ecosystems and a CWE the snapshot gives a hint for.
+ */
+export const validateVulnerableLineSource = (value: unknown, snapshotId: string, advisories: AdvisorySnapshot): ParsedSource => {
+  const source = record(value, VULNERABLE_LINE_SOURCE_KEYS);
+  if (source.discoverySource !== "GITHUB_ADVISORY" || !GHSA_ID.test(text(source.advisory))
+    || !advisories.ecosystems.has(text(source.ecosystem)) || !CWE_ID.test(text(source.cwe)) || !advisories.cwes.has(text(source.cwe))) fail();
+  validateBaseSource(source, snapshotId, "FIX_COMMIT", gitId(source.fixCommit));
+  gitId(source.fixBlob);
+  text(source.packageName);
+  if (!(MAINSTREAM_LANGUAGES as readonly unknown[]).includes(source.language)) fail();
   const changedLine = positiveInteger(source.changedLine);
   const windowStart = positiveInteger(source.windowStart);
   if (windowStart > changedLine || source.fixCommit === source.commit || source.fixBlob === source.blob) fail();

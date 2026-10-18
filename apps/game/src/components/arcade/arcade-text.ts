@@ -47,6 +47,7 @@ export const PANE_CAPTIONS: Readonly<Partial<Record<RoundModeKind, string>>> = O
   "name-function": "The function's name is hidden as mystery; pick the name its author gave it.",
   framework: "Every framework's name is hidden as mystery; the app is the same in each.",
   exercise: "Every exercise's name is hidden as mystery; pick the exercise this solves.",
+  "vulnerable-line": "Lines are numbered; each option names one.",
 });
 
 /** What the player sees when the server can no longer continue this game, for example after it restarts. */

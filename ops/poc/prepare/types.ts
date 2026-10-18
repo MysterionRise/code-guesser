@@ -3,8 +3,10 @@ import type { CapacityMeter, createCapacityMeter } from "./capacity";
 import type { ComposedExperiment, composeExperimentArtifact } from "./compose";
 import type { CuratedDeckId } from "./curated-deck-ids";
 import type { CuratedFile } from "./github-files";
+import type { AdvisoryFix, AdvisoryPointer } from "./github-advisories";
 import type { BoundFix, DatasetBug, FixPointer } from "./github-fixes";
 import type { GitHubQueryClassification } from "./github-search";
+import type { AdvisoryEcosystem } from "../../../packages/artifact/src/index";
 import type { CrawlProfile, FixDataset, StackLanguage } from "./profile";
 import type { StagedRunReport } from "./report-store";
 import type { ProjectRoundInput } from "./project-rounds";
@@ -53,7 +55,11 @@ export interface PreparationDependencies {
   readDatasetBugs(options: Context & Readonly<{ dataset: FixDataset }>): Promise<StageResult<readonly DatasetBug[]>>;
   /** One blob of a dataset's repository: a patch, or the record of a bug's commits. */
   readDatasetBlob(options: Context & Readonly<{ repository: string; blob: string }>): Promise<StageResult<Uint8Array>>;
-  /** A dataset's one-line fix, confirmed against its upstream repository. */
+  /** One page of an ecosystem's reviewed GitHub advisories published in a window (#59). */
+  readAdvisories(options: Context & Readonly<{ ecosystem: AdvisoryEcosystem; published: string }>): Promise<StageResult<readonly AdvisoryPointer[]>>;
+  /** An advisory's fix commit, when it replaces one line of code (#59). */
+  readAdvisoryFix(options: Context & Readonly<{ repository: string; commit: string }>): Promise<StageResult<AdvisoryFix>>;
+  /** A dataset's or an advisory's one-line fix, confirmed against its upstream repository. */
   bindFixCommit(options: Context & Readonly<{ pointer: FixPointer }>): Promise<StageResult<BoundFix>>;
   /** One curated file's verified bytes, read before its licence and author are bound. */
   readCuratedFile(options: Context & Readonly<{ repository: string; commit: string; path: string }>): Promise<StageResult<Readonly<{ blob: string; bytes: Uint8Array }>>>;

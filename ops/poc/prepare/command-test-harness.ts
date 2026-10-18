@@ -8,7 +8,7 @@ import { createCapacityMeter, type CapacityMeter } from "./capacity";
 import type { GitHubQueryClassification } from "./github-search";
 import { parseCrawlProfile, poolSizes, STACK_LANGUAGES, type CrawlProfile, type StackLanguage } from "./profile";
 import type { PreparationDependencies } from "./index";
-import type { FixHarnessData } from "./testdata/deck-builders";
+import type { AdvisoryHarnessData, FixHarnessData } from "./testdata/deck-builders";
 
 const profilePath = new URL("../profiles/local-real-rounds.v5.json", import.meta.url);
 
@@ -57,6 +57,7 @@ interface HarnessState {
   /** Curated files the stub serves, as `owner/name:path` to source text. */
   readonly curatedFiles: ReadonlyMap<string, string>;
   readonly fix: FixHarnessData | undefined;
+  readonly advisories: AdvisoryHarnessData | undefined;
 }
 
 export interface HarnessCandidate { readonly id: number; readonly queryId: string; readonly repository: string; readonly subject: string }
@@ -91,7 +92,9 @@ const harnessRows = (): HarnessState["rows"] => Object.fromEntries(STACK_LANGUAG
   return [language, [...popular, ...ordinary]];
 })) as unknown as HarnessState["rows"];
 
-const makeState = (profile: CrawlProfile, curatedFiles: ReadonlyMap<string, string> = new Map(), fix?: FixHarnessData): HarnessState => ({
+const makeState = (
+  profile: CrawlProfile, curatedFiles: ReadonlyMap<string, string> = new Map(), fix?: FixHarnessData, advisories?: AdvisoryHarnessData,
+): HarnessState => ({
   profile,
   calls: [],
   dependencyMeters: [],
@@ -102,6 +105,7 @@ const makeState = (profile: CrawlProfile, curatedFiles: ReadonlyMap<string, stri
   rows: harnessRows(),
   curatedFiles,
   fix,
+  advisories,
 });
 
 const makeFoundationDependencies = (
@@ -176,7 +180,8 @@ const makeGitHubDependencies = (
 const makeStackDependencies = (
   state: HarnessState,
 ): Pick<PreparationDependencies, "collectStackMetadata" | "fetchStackBlob" | "revalidateStackCandidate" | "validateLanguageCandidate"
-  | "bindCuratedFile" | "listCuratedDirectory" | "readCuratedFile" | "readDatasetBugs" | "readDatasetBlob" | "bindFixCommit"> => ({
+  | "bindCuratedFile" | "listCuratedDirectory" | "readCuratedFile" | "readDatasetBugs" | "readDatasetBlob" | "readAdvisories"
+  | "readAdvisoryFix" | "bindFixCommit"> => ({
   collectStackMetadata: async ({ configuration, capacity }) => {
     state.calls.push(`metadata:${configuration}`);
     state.dependencyMeters.push(capacity);
@@ -235,10 +240,23 @@ const makeStackDependencies = (
     if (text === undefined) throw new Error("FIX_DATASET_BLOB");
     return accepted(new TextEncoder().encode(text), "8");
   },
+  readAdvisories: async ({ ecosystem, published, capacity }) => {
+    state.calls.push(`advisories:${ecosystem}:${published}`);
+    state.dependencyMeters.push(capacity);
+    return accepted((state.advisories?.listed ?? []).filter((advisory) => advisory.ecosystem === ecosystem
+      && published === state.advisories!.published.get(advisory.advisory)), "8");
+  },
+  readAdvisoryFix: async ({ repository, commit, capacity }) => {
+    state.calls.push(`advisory-fix:${repository}`);
+    state.dependencyMeters.push(capacity);
+    const fix = state.advisories?.fixes.find(({ fixCommit }) => fixCommit === commit) ?? (() => { throw new Error("VULNERABLE_CHANGE"); })();
+    return accepted({ repository: fix.repository, language: fix.language, fix: { path: fix.path, buggyLine: fix.buggyLine, fixedLine: fix.fixedLine } }, "8");
+  },
   bindFixCommit: async ({ pointer, capacity }) => {
     state.calls.push(`fix:${pointer.bug}`);
     state.dependencyMeters.push(capacity);
-    const fix = state.fix?.fixes.find(({ fixCommit }) => fixCommit === pointer.fixCommit) ?? (() => { throw new Error("FIX_PARENT"); })();
+    const fix = [...state.fix?.fixes ?? [], ...state.advisories?.fixes ?? []].find(({ fixCommit }) => fixCommit === pointer.fixCommit)
+      ?? (() => { throw new Error("FIX_PARENT"); })();
     return accepted({ ...pointer, commit: fix.parent, buggyBlob: createHash("sha1").update(`buggy-${fix.bug}`).digest("hex"),
       fixBlob: createHash("sha1").update(`fixed-${fix.bug}`).digest("hex"), bytes: new TextEncoder().encode(fix.text),
       changedLine: fix.changedLine, licenseName: "MIT License", licenseSpdx: "MIT",
@@ -257,6 +275,7 @@ const CURATED_STUBS = Object.freeze({
   "name-function": { kind: "NAME_FUNCTION", call: "name-function" },
   framework: { kind: "FRAMEWORK", call: "framework" },
   exercise: { kind: "EXERCISE", call: "exercise" },
+  "vulnerable-line": { kind: "VULNERABLE_LINE", call: "vulnerable-line" },
 } as const);
 
 const makeArtifactDependencies = (
@@ -329,10 +348,10 @@ const makeOutputDependencies = (
 
 export const makeHarness = async (
   overrides: Partial<PreparationDependencies> = {},
-  options: Readonly<{ profile?: CrawlProfile; curatedFiles?: ReadonlyMap<string, string>; fix?: FixHarnessData }> = {},
+  options: Readonly<{ profile?: CrawlProfile; curatedFiles?: ReadonlyMap<string, string>; fix?: FixHarnessData; advisories?: AdvisoryHarnessData }> = {},
 ): Promise<CommandHarness> => {
   const profile = options.profile ?? await loadProfile();
-  const state = makeState(profile, options.curatedFiles, options.fix);
+  const state = makeState(profile, options.curatedFiles, options.fix, options.advisories);
   const base: PreparationDependencies = {
     ...makeFoundationDependencies(state),
     ...makeGitHubDependencies(state),

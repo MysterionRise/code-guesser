@@ -55,10 +55,25 @@ const pathHistoryAllowed = (url: URL): boolean => {
     && Number.isInteger(perPage) && perPage >= 1 && perPage <= 10;
 };
 
+const ADVISORY_ECOSYSTEMS = new Set(["pip", "npm", "go", "maven", "rubygems", "rust"]);
+/**
+ * One page of reviewed GitHub advisories (#59): `advisories?type=reviewed&ecosystem=<one>&published=<day>..<day>`,
+ * in publication order, a hundred to a page, with no other parameter. A deck reads the first page of each window.
+ */
+const advisoryListingAllowed = (url: URL): boolean => {
+  const params = url.searchParams;
+  return url.pathname === "/advisories"
+    && [...params.keys()].sort().join("|") === "direction|ecosystem|per_page|published|sort|type"
+    && [...params.keys()].length === 6
+    && params.get("type") === "reviewed" && ADVISORY_ECOSYSTEMS.has(params.get("ecosystem") ?? "")
+    && /^\d{4}-\d{2}-\d{2}\.\.\d{4}-\d{2}-\d{2}$/u.test(params.get("published") ?? "")
+    && params.get("sort") === "published" && params.get("direction") === "asc" && params.get("per_page") === "100";
+};
+
 const pathAllowed = (provider: Provider, url: URL): boolean => {
   if (provider === "github") {
     if (url.hostname !== "api.github.com") return false;
-    return url.pathname === "/search/commits" || /^\/repos\/[^/]+\/[^/]+(?:\/)?$/u.test(url.pathname)
+    return url.pathname === "/search/commits" || advisoryListingAllowed(url) || /^\/repos\/[^/]+\/[^/]+(?:\/)?$/u.test(url.pathname)
       || /^\/repos\/[^/]+\/[^/]+\/(?:commits\/[0-9a-f]{40}|git\/(?:commits|trees|blobs)\/[0-9a-f]{40}|license|contents(?:\/.*)?)$/u.test(url.pathname)
       || pathHistoryAllowed(url);
   }

@@ -1,7 +1,7 @@
 import { CAPACITY_CEILINGS, STACK_RELEASE, STACK_REVISION, type CeilingKey } from "../limits";
 import {
-  AUTHORSHIP_CLAIM, MAINSTREAM_LANGUAGES, PROFILE_VERSION, ROUNDS_PER_LANGUAGE, STACK_LANGUAGES, isLanguageSelection, spellsFramework,
-  copyNamesExercise, type DeckId, type StackLanguage,
+  ADVISORY_ECOSYSTEMS, AUTHORSHIP_CLAIM, CWE_ID, MAINSTREAM_LANGUAGES, PROFILE_VERSION, ROUNDS_PER_LANGUAGE, STACK_LANGUAGES, isLanguageSelection,
+  spellsFramework, copyNamesExercise, type AdvisoryEcosystem, type DeckId, type StackLanguage,
 } from "../../../packages/artifact/src/index";
 import { isKnownFramework } from "./framework-markers";
 
@@ -243,6 +243,24 @@ export interface ExerciseDeck {
 }
 /** Options per exercise round: one whole family. */
 export const EXERCISE_FAMILY_SIZE = 4;
+/**
+ * "Spot the vulnerable line" (#59): one-line fixes that reviewed GitHub advisories link, one round per repository.
+ * Each ecosystem's advisories are listed once per `published` window, the first page of 100 in publication order, so
+ * the listing needs no cursor and reads the same at any time but for withdrawn or amended advisories.
+ */
+export interface VulnerableLineDeck {
+  readonly rounds: number;
+  readonly ecosystems: readonly AdvisoryEcosystem[];
+  /** Publication windows, `YYYY-MM-DD..YYYY-MM-DD`, in order and apart. */
+  readonly published: readonly string[];
+  /** At most this many fix commits are read; most change more than one line. */
+  readonly commitReads: number;
+  /** The CWEs a round may name, in id order, each with its hint's plain words. */
+  readonly cwes: readonly Readonly<{ id: string; hint: string }>[];
+  readonly templates: Readonly<{ title: string; description: string; prompt: string; evidence: string; explanation: string }>;
+}
+/** The most fix commits a vulnerable-line deck may read. */
+export const VULNERABLE_COMMIT_READS_MAXIMUM = 600;
 
 /** The languages whose functions "Name the function" can find. */
 export const NAME_FUNCTION_LANGUAGES: readonly StackLanguage[] = Object.freeze(["Java", "Go", "Python"]);
@@ -259,6 +277,7 @@ export interface CuratedProfile {
   readonly "name-function"?: NameFunctionDeck;
   readonly framework?: FrameworkDeck;
   readonly exercise?: ExerciseDeck;
+  readonly "vulnerable-line"?: VulnerableLineDeck;
 }
 
 /** Options per algorithm round: one whole family. */
@@ -290,6 +309,7 @@ export const poolSizes = (profile: CrawlProfile): Readonly<Record<DeckId, number
   "name-function": profile.curated?.["name-function"]?.rounds ?? 0,
   framework: profile.curated?.framework?.rounds ?? 0,
   exercise: profile.curated?.exercise?.rounds ?? 0,
+  "vulnerable-line": profile.curated?.["vulnerable-line"]?.rounds ?? 0,
 });
 
 export class CrawlProfileError extends Error {
@@ -792,9 +812,52 @@ const parseFixDeck = (value: unknown): FixDeck => {
   });
 };
 
+const DAY = /^(\d{4})-(\d{2})-(\d{2})$/u;
+/** A calendar day that survives a round trip, as its UTC midnight. */
+const day = (value: string): number => {
+  const match = DAY.exec(value) ?? fail();
+  const time = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  return new Date(time).toISOString().slice(0, 10) === value ? time : fail();
+};
+
+const parseVulnerableLineDeck = (value: unknown): VulnerableLineDeck => {
+  const deck = exactRecord(value, ["rounds", "ecosystems", "published", "commitReads", "cwes", "templates"]);
+  const rounds = integer(deck.rounds);
+  if (rounds % FIX_OPTIONS !== 0 || rounds < 8 || rounds > 40) fail();
+  const ecosystems = uniqueTexts(deck.ecosystems);
+  if (ecosystems.some((ecosystem) => !(ADVISORY_ECOSYSTEMS as readonly string[]).includes(ecosystem))) fail();
+  const published = uniqueTexts(deck.published);
+  let previous = -Infinity;
+  for (const window of published) {
+    const [from, to, extra] = window.split("..");
+    if (from === undefined || to === undefined || extra !== undefined || day(from) > day(to) || day(from) <= previous) fail();
+    previous = day(to!);
+  }
+  const commitReads = integer(deck.commitReads);
+  if (commitReads < rounds || commitReads > VULNERABLE_COMMIT_READS_MAXIMUM) fail();
+  const cwes = (Array.isArray(deck.cwes) && deck.cwes.length > 0 ? deck.cwes : fail()).map((entry: unknown) => {
+    const cwe = exactRecord(entry, ["id", "hint"]);
+    if (!CWE_ID.test(text(cwe.id))) fail();
+    const hint = text(cwe.hint);
+    // A hint is one plain sentence about the weakness, and says nothing of anyone's authorship.
+    if (!/^[A-Z][^{}]*\.$/u.test(hint) || AUTHORSHIP_CLAIM.test(hint)) fail();
+    return Object.freeze({ id: cwe.id as string, hint });
+  });
+  if (cwes.some(({ id }, index) => index > 0 && Number(id.slice(4)) <= Number(cwes[index - 1]!.id.slice(4)))) fail();
+  const templates = exactRecord(deck.templates, ["title", "description", "prompt", "evidence", "explanation"]);
+  return Object.freeze({
+    rounds, ecosystems: Object.freeze(ecosystems as readonly AdvisoryEcosystem[]), published, commitReads, cwes: Object.freeze(cwes),
+    templates: Object.freeze({
+      title: text(templates.title), description: text(templates.description), prompt: placeholderText(templates.prompt, []),
+      evidence: placeholderText(templates.evidence, ["advisory", "cwe", "repository", "line"]),
+      explanation: placeholderText(templates.explanation, []),
+    }),
+  });
+};
+
 /** The curated pins, and each deck built from them that the profile configures. */
 const parseCurated = (value: unknown): CuratedProfile => {
-  const decks = (["algorithm", "output", "fix", "missing-line", "name-function", "framework", "exercise"] as const).filter((key) => isRecord(value) && Object.hasOwn(value, key));
+  const decks = (["algorithm", "output", "fix", "missing-line", "name-function", "framework", "exercise", "vulnerable-line"] as const).filter((key) => isRecord(value) && Object.hasOwn(value, key));
   const curated = exactRecord(value, ["repositories", ...decks]);
   const repositories = parseCuratedRepositories(curated.repositories);
   return Object.freeze({
@@ -806,6 +869,7 @@ const parseCurated = (value: unknown): CuratedProfile => {
     ...(decks.includes("name-function") ? { "name-function": parseNameFunctionDeck(curated["name-function"], repositories) } : {}),
     ...(decks.includes("framework") ? { framework: parseFrameworkDeck(curated.framework, repositories) } : {}),
     ...(decks.includes("exercise") ? { exercise: parseExerciseDeck(curated.exercise, repositories) } : {}),
+    ...(decks.includes("vulnerable-line") ? { "vulnerable-line": parseVulnerableLineDeck(curated["vulnerable-line"]) } : {}),
   });
 };
 

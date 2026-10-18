@@ -9,3 +9,4 @@ export * from "./name-function";
 export * from "./question-layer";
 export * from "./source";
 export * from "./validation";
+export * from "./vulnerable-line";
