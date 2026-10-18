@@ -1,0 +1,2158 @@
+{
+  "profileVersion": "local-real-rounds.v6",
+  "github": {
+    "apiVersion": "2022-11-28",
+    "queries": [
+      {
+        "id": "refactor-facebook",
+        "query": "refactor org:facebook committer-date:2026-07-01..2026-07-31 merge:false is:public",
+        "sort": "committer-date",
+        "order": "desc"
+      },
+      {
+        "id": "refactor-google",
+        "query": "refactor org:google committer-date:2026-09-01..2026-09-07 merge:false is:public",
+        "sort": "committer-date",
+        "order": "desc"
+      },
+      {
+        "id": "refactor-vercel",
+        "query": "refactor org:vercel committer-date:2026-08-01..2026-08-31 merge:false is:public",
+        "sort": "committer-date",
+        "order": "desc"
+      },
+      {
+        "id": "refactor-github",
+        "query": "refactor org:github committer-date:2026-08-01..2026-08-31 merge:false is:public",
+        "sort": "committer-date",
+        "order": "desc"
+      },
+      {
+        "id": "refactor-microsoft",
+        "query": "refactor org:microsoft committer-date:2026-09-08..2026-09-14 merge:false is:public",
+        "sort": "committer-date",
+        "order": "desc"
+      },
+      {
+        "id": "refactor-kubernetes",
+        "query": "refactor org:kubernetes committer-date:2026-08-01..2026-08-31 merge:false is:public",
+        "sort": "committer-date",
+        "order": "desc"
+      },
+      {
+        "id": "refactor-rust-lang",
+        "query": "refactor org:rust-lang committer-date:2026-08-01..2026-08-31 merge:false is:public",
+        "sort": "committer-date",
+        "order": "desc"
+      },
+      {
+        "id": "refactor-django",
+        "query": "refactor org:django committer-date:2026-06-01..2026-08-31 merge:false is:public",
+        "sort": "committer-date",
+        "order": "desc"
+      }
+    ]
+  },
+  "stack": {
+    "release": "v2.2.0",
+    "revision": "e565caa3a78c2423bd374333a472b049eb090e47",
+    "configurations": [
+      {
+        "language": "Python",
+        "extensions": [
+          ".py"
+        ]
+      },
+      {
+        "language": "Ruby",
+        "extensions": [
+          ".rb"
+        ]
+      },
+      {
+        "language": "TypeScript",
+        "extensions": [
+          ".ts",
+          ".tsx"
+        ]
+      },
+      {
+        "language": "JavaScript",
+        "extensions": [
+          ".js"
+        ]
+      },
+      {
+        "language": "Go",
+        "extensions": [
+          ".go"
+        ]
+      },
+      {
+        "language": "Rust",
+        "extensions": [
+          ".rs"
+        ]
+      },
+      {
+        "language": "Java",
+        "extensions": [
+          ".java"
+        ]
+      },
+      {
+        "language": "C#",
+        "extensions": [
+          ".cs"
+        ]
+      },
+      {
+        "language": "Kotlin",
+        "extensions": [
+          ".kt"
+        ]
+      },
+      {
+        "language": "Swift",
+        "extensions": [
+          ".swift"
+        ]
+      },
+      {
+        "language": "C",
+        "extensions": [
+          ".c"
+        ]
+      },
+      {
+        "language": "C++",
+        "extensions": [
+          ".cpp",
+          ".cc",
+          ".cxx",
+          ".hpp"
+        ]
+      },
+      {
+        "language": "Haskell",
+        "extensions": [
+          ".hs"
+        ],
+        "projectDeck": false
+      },
+      {
+        "language": "Elm",
+        "extensions": [
+          ".elm"
+        ],
+        "projectDeck": false
+      },
+      {
+        "language": "OCaml",
+        "extensions": [
+          ".ml"
+        ],
+        "projectDeck": false
+      },
+      {
+        "language": "F#",
+        "extensions": [
+          ".fs"
+        ],
+        "projectDeck": false
+      },
+      {
+        "language": "Erlang",
+        "extensions": [
+          ".erl"
+        ],
+        "projectDeck": false
+      },
+      {
+        "language": "Prolog",
+        "extensions": [
+          ".pl",
+          ".pro"
+        ],
+        "projectDeck": false
+      },
+      {
+        "language": "Clojure",
+        "extensions": [
+          ".clj",
+          ".cljc"
+        ],
+        "projectDeck": false
+      },
+      {
+        "language": "Racket",
+        "extensions": [
+          ".rkt"
+        ],
+        "projectDeck": false
+      },
+      {
+        "language": "Julia",
+        "extensions": [
+          ".jl"
+        ],
+        "projectDeck": false
+      },
+      {
+        "language": "MATLAB",
+        "extensions": [
+          ".m"
+        ],
+        "projectDeck": false
+      },
+      {
+        "language": "Ada",
+        "extensions": [
+          ".adb"
+        ],
+        "projectDeck": false
+      },
+      {
+        "language": "Pascal",
+        "extensions": [
+          ".pas",
+          ".pp"
+        ],
+        "projectDeck": false
+      },
+      {
+        "language": "Elixir",
+        "extensions": [
+          ".ex",
+          ".exs"
+        ],
+        "projectDeck": false
+      },
+      {
+        "language": "Crystal",
+        "extensions": [
+          ".cr"
+        ],
+        "projectDeck": false
+      }
+    ]
+  },
+  "licenses": [
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "MIT",
+    "Python-2.0"
+  ],
+  "templates": {
+    "project": {
+      "title": "Which project?",
+      "description": "Read code from a well-known open-source project and pick which one it is.",
+      "prompt": "Which project is this code from?",
+      "fileClue": "The file is named {file}.",
+      "popularityClue": "Its repository has about {stars} GitHub star events.",
+      "evidence": "This is {path} in {repository}.",
+      "explanation": "The answer is the repository The Stack v2 recorded for this file, confirmed against GitHub."
+    },
+    "language": {
+      "title": "Which language?",
+      "description": "Name the programming language from a short real excerpt.",
+      "prompt": "Which programming language is this?",
+      "syntaxClue": "Look for {syntax} in the code.",
+      "evidence": "The file is {path}; its extension and The Stack v2 both say {language}.",
+      "explanation": "The answer is the file's recorded language, confirmed by its extension."
+    },
+    "beforeAfter": {
+      "title": "Before or after?",
+      "description": "See one stretch of code before and after a real refactor, and pick the newer version.",
+      "prompt": "Which version came after the commit?",
+      "laterA": "A is the newer version",
+      "laterB": "B is the newer version",
+      "subjectClue": "The commit message begins: {subject}",
+      "linesClue": "The commit removed {removed} of these lines and added {added}.",
+      "evidence": "Commit {commit} changed version {earlier} into version {later}.",
+      "explanation": "The answer comes from the commit's recorded parent, not from which version reads better."
+    }
+  },
+  "deduplication": [
+    "repository",
+    "commit",
+    "path",
+    "blob",
+    "rawContentHash",
+    "excerptHash"
+  ],
+  "capacity": {
+    "githubPages": 3,
+    "githubResults": 300,
+    "stackRowsPerLanguage": 100000,
+    "stackMetadataBytes": 469762048,
+    "blobAttempts": 400,
+    "successfulBlobs": 200,
+    "perBlobBytes": 262144,
+    "totalBlobBytes": 33554432,
+    "concurrentRequests": 4,
+    "requestCount": 5000,
+    "responseBytes": 8388608,
+    "waitMilliseconds": 15000,
+    "totalWaitMilliseconds": 30000,
+    "temporaryDiskBytes": 33554432
+  },
+  "screening": {
+    "excerptLines": 18,
+    "excerptBytes": 4096,
+    "minimumExcerptBytes": 120,
+    "generatedScanLines": 30,
+    "subjectMaxLength": 90,
+    "changeWindowLines": 24,
+    "changeContextLines": 4,
+    "maxChangedLines": 12
+  },
+  "selection": {
+    "beforeAfterPool": 10,
+    "minimumStarEvents": 1000,
+    "popularRepositories": 24,
+    "filesPerRepository": 3,
+    "ordinaryRows": 200
+  },
+  "curated": {
+    "repositories": [
+      {
+        "repository": "TheAlgorithms/Python",
+        "commit": "3935d286dfa3d258ab77c22d584202141a3eb1b9",
+        "language": "Python"
+      },
+      {
+        "repository": "TheAlgorithms/Go",
+        "commit": "5ba447ec5ff3d1213de65b92e726ee74c5d5cc19",
+        "language": "Go"
+      },
+      {
+        "repository": "TheAlgorithms/Java",
+        "commit": "e43ec3897e48f23843972d02cd05a5bb1b6864a2",
+        "language": "Java"
+      },
+      {
+        "repository": "tastejs/todomvc",
+        "commit": "ff43b02e59dfa604386bb382034b2cd07c2bcd8a",
+        "language": "JavaScript",
+        "license": {
+          "spdx": "MIT",
+          "path": "license.md",
+          "blob": "9275d4371020294b6a107e454a0d1819f8b71c31"
+        }
+      },
+      {
+        "repository": "exercism/python",
+        "commit": "6105f6d9d3ef66ce3d5c8f529d2882af3d76b706",
+        "language": "Python"
+      },
+      {
+        "repository": "exercism/go",
+        "commit": "acdacf1d5721454b98fa6a263f1a73e1f3e96756",
+        "language": "Go"
+      },
+      {
+        "repository": "exercism/rust",
+        "commit": "cc099ae090a6acbe6f53f1e36325263046ba333e",
+        "language": "Rust"
+      },
+      {
+        "repository": "exercism/ruby",
+        "commit": "9de6794a21f4ebb9cba5fa99a222373356bfded1",
+        "language": "Ruby"
+      },
+      {
+        "repository": "exercism/javascript",
+        "commit": "65a60cac2145e8c6549de39e807753e577a02f8d",
+        "language": "JavaScript"
+      },
+      {
+        "repository": "exercism/csharp",
+        "commit": "70c7481992b8d74961a33872404a4ebb2f0b5e5b",
+        "language": "C#"
+      }
+    ],
+    "algorithm": {
+      "rounds": 24,
+      "templates": {
+        "title": "Which algorithm?",
+        "description": "Read a classic algorithm with its name hidden, and pick which one it is.",
+        "prompt": "Which algorithm is this?",
+        "evidence": "This is {path} in {repository}; its own name, hidden here, is {name}.",
+        "explanation": "The answer is the algorithm the repository files this code under; the code's own names for it are hidden."
+      },
+      "families": [
+        {
+          "id": "simple-sorts",
+          "note": "All four sort by comparing items one pair at a time; look at which items move, and where to.",
+          "algorithms": [
+            {
+              "id": "bubble-sort",
+              "label": "Bubble sort",
+              "names": [
+                "bubble_sort",
+                "bubblesort"
+              ],
+              "idea": "It repeatedly swaps neighbours that are out of order, so the largest items drift to the end.",
+              "complexity": "O(n²) comparisons; a pass with no swaps can end it early.",
+              "files": {
+                "TheAlgorithms/Python": {
+                  "path": "sorts/bubble_sort.py",
+                  "symbols": []
+                },
+                "TheAlgorithms/Go": {
+                  "path": "sort/bubblesort.go",
+                  "symbols": [
+                    "Bubble"
+                  ]
+                },
+                "TheAlgorithms/Java": {
+                  "path": "src/main/java/com/thealgorithms/sorts/BubbleSort.java",
+                  "symbols": []
+                }
+              }
+            },
+            {
+              "id": "insertion-sort",
+              "label": "Insertion sort",
+              "names": [
+                "insertion_sort",
+                "insertionsort"
+              ],
+              "idea": "It grows a sorted prefix, sliding each new item left until it fits.",
+              "complexity": "O(n²) at worst, close to O(n) when the input is nearly sorted.",
+              "files": {
+                "TheAlgorithms/Python": {
+                  "path": "sorts/insertion_sort.py",
+                  "symbols": []
+                },
+                "TheAlgorithms/Go": {
+                  "path": "sort/insertionsort.go",
+                  "symbols": [
+                    "Insertion"
+                  ]
+                },
+                "TheAlgorithms/Java": {
+                  "path": "src/main/java/com/thealgorithms/sorts/InsertionSort.java",
+                  "symbols": []
+                }
+              }
+            },
+            {
+              "id": "selection-sort",
+              "label": "Selection sort",
+              "names": [
+                "selection_sort",
+                "selectionsort"
+              ],
+              "idea": "It finds the smallest remaining item and swaps it into the next position.",
+              "complexity": "Always O(n²) comparisons, but at most n swaps.",
+              "files": {
+                "TheAlgorithms/Python": {
+                  "path": "sorts/selection_sort.py",
+                  "symbols": []
+                },
+                "TheAlgorithms/Go": {
+                  "path": "sort/selectionsort.go",
+                  "symbols": [
+                    "Selection"
+                  ]
+                },
+                "TheAlgorithms/Java": {
+                  "path": "src/main/java/com/thealgorithms/sorts/SelectionSort.java",
+                  "symbols": []
+                }
+              }
+            },
+            {
+              "id": "cocktail-shaker-sort",
+              "label": "Cocktail shaker sort",
+              "names": [
+                "cocktail_shaker_sort",
+                "cocktailshakersort",
+                "cocktail_sort",
+                "cocktailsort"
+              ],
+              "idea": "It sweeps forwards and then backwards, swapping neighbours on both passes.",
+              "complexity": "O(n²), with fewer passes than a one-way sweep on some inputs.",
+              "files": {
+                "TheAlgorithms/Python": {
+                  "path": "sorts/cocktail_shaker_sort.py",
+                  "symbols": []
+                },
+                "TheAlgorithms/Go": {
+                  "path": "sort/cocktailsort.go",
+                  "symbols": [
+                    "Cocktail"
+                  ]
+                },
+                "TheAlgorithms/Java": {
+                  "path": "src/main/java/com/thealgorithms/sorts/CocktailShakerSort.java",
+                  "symbols": []
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": "fast-sorts",
+          "note": "All four sort in O(n log n) time on typical input; look at how each one divides the work.",
+          "algorithms": [
+            {
+              "id": "quick-sort",
+              "label": "Quicksort",
+              "names": [
+                "quick_sort",
+                "quicksort"
+              ],
+              "idea": "It picks a pivot, splits the rest into smaller and larger items, then recurses on each side.",
+              "complexity": "O(n log n) on average, O(n²) with consistently bad pivots.",
+              "files": {
+                "TheAlgorithms/Python": {
+                  "path": "sorts/quick_sort.py",
+                  "symbols": []
+                },
+                "TheAlgorithms/Go": {
+                  "path": "sort/quicksort.go",
+                  "symbols": []
+                },
+                "TheAlgorithms/Java": {
+                  "path": "src/main/java/com/thealgorithms/sorts/QuickSort.java",
+                  "symbols": []
+                }
+              }
+            },
+            {
+              "id": "merge-sort",
+              "label": "Merge sort",
+              "names": [
+                "merge_sort",
+                "mergesort"
+              ],
+              "idea": "It halves the input, sorts each half, and then combines the two sorted halves.",
+              "complexity": "O(n log n) every time, with O(n) extra memory.",
+              "files": {
+                "TheAlgorithms/Python": {
+                  "path": "sorts/merge_sort.py",
+                  "symbols": []
+                },
+                "TheAlgorithms/Go": {
+                  "path": "sort/mergesort.go",
+                  "symbols": [
+                    "Merge",
+                    "MergeIter",
+                    "ParallelMerge"
+                  ]
+                },
+                "TheAlgorithms/Java": {
+                  "path": "src/main/java/com/thealgorithms/sorts/MergeSort.java",
+                  "symbols": []
+                }
+              }
+            },
+            {
+              "id": "heap-sort",
+              "label": "Heapsort",
+              "names": [
+                "heap_sort",
+                "heapsort"
+              ],
+              "idea": "It arranges the items as a binary heap, then repeatedly moves the largest one to the end.",
+              "complexity": "O(n log n) every time, in place.",
+              "files": {
+                "TheAlgorithms/Python": {
+                  "path": "sorts/heap_sort.py",
+                  "symbols": []
+                },
+                "TheAlgorithms/Go": {
+                  "path": "sort/heapsort.go",
+                  "symbols": []
+                },
+                "TheAlgorithms/Java": {
+                  "path": "src/main/java/com/thealgorithms/sorts/HeapSort.java",
+                  "symbols": []
+                }
+              }
+            },
+            {
+              "id": "shell-sort",
+              "label": "Shell sort",
+              "names": [
+                "shell_sort",
+                "shellsort"
+              ],
+              "idea": "It sorts items a gap apart, shrinking the gap until neighbours are compared.",
+              "complexity": "Depends on the gap sequence; often about O(n^1.3).",
+              "files": {
+                "TheAlgorithms/Python": {
+                  "path": "sorts/shell_sort.py",
+                  "symbols": []
+                },
+                "TheAlgorithms/Go": {
+                  "path": "sort/shellsort.go",
+                  "symbols": [
+                    "Shell"
+                  ]
+                },
+                "TheAlgorithms/Java": {
+                  "path": "src/main/java/com/thealgorithms/sorts/ShellSort.java",
+                  "symbols": []
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": "distribution-sorts",
+          "note": "None of the four compares two items with each other; look at what the slots or tallies are keyed by.",
+          "algorithms": [
+            {
+              "id": "counting-sort",
+              "label": "Counting sort",
+              "names": [
+                "counting_sort",
+                "countingsort"
+              ],
+              "idea": "It tallies how often each value occurs, then rebuilds the output from the tallies.",
+              "complexity": "O(n + k), where k is the range of values.",
+              "files": {
+                "TheAlgorithms/Python": {
+                  "path": "sorts/counting_sort.py",
+                  "symbols": []
+                },
+                "TheAlgorithms/Go": {
+                  "path": "sort/countingsort.go",
+                  "symbols": [
+                    "Count"
+                  ]
+                },
+                "TheAlgorithms/Java": {
+                  "path": "src/main/java/com/thealgorithms/sorts/CountingSort.java",
+                  "symbols": []
+                }
+              }
+            },
+            {
+              "id": "radix-sort",
+              "label": "Radix sort",
+              "names": [
+                "radix_sort",
+                "radixsort"
+              ],
+              "idea": "It sorts by one digit at a time, least significant first, keeping each pass stable.",
+              "complexity": "O(d·(n + b)) for d digits in base b.",
+              "files": {
+                "TheAlgorithms/Python": {
+                  "path": "sorts/radix_sort.py",
+                  "symbols": []
+                },
+                "TheAlgorithms/Go": {
+                  "path": "sort/radixsort.go",
+                  "symbols": []
+                },
+                "TheAlgorithms/Java": {
+                  "path": "src/main/java/com/thealgorithms/sorts/RadixSort.java",
+                  "symbols": []
+                }
+              }
+            },
+            {
+              "id": "bucket-sort",
+              "label": "Bucket sort",
+              "names": [
+                "bucket_sort",
+                "bucketsort"
+              ],
+              "idea": "It scatters values into ranges, sorts each range, and joins them.",
+              "complexity": "O(n) on average for evenly spread input, O(n²) at worst.",
+              "files": {
+                "TheAlgorithms/Python": {
+                  "path": "sorts/bucket_sort.py",
+                  "symbols": []
+                },
+                "TheAlgorithms/Go": {
+                  "path": "sort/bucketsort.go",
+                  "symbols": [
+                    "Bucket"
+                  ]
+                },
+                "TheAlgorithms/Java": {
+                  "path": "src/main/java/com/thealgorithms/sorts/BucketSort.java",
+                  "symbols": []
+                }
+              }
+            },
+            {
+              "id": "pigeonhole-sort",
+              "label": "Pigeonhole sort",
+              "names": [
+                "pigeonhole_sort",
+                "pigeonholesort",
+                "pigeon_sort"
+              ],
+              "idea": "It makes one slot per possible value, drops each item into its slot, then reads the slots in order.",
+              "complexity": "O(n + range), practical only when the range is small.",
+              "files": {
+                "TheAlgorithms/Python": {
+                  "path": "sorts/pigeonhole_sort.py",
+                  "symbols": []
+                },
+                "TheAlgorithms/Go": {
+                  "path": "sort/pigeonholesort.go",
+                  "symbols": [
+                    "Pigeonhole"
+                  ]
+                },
+                "TheAlgorithms/Java": {
+                  "path": "src/main/java/com/thealgorithms/sorts/PigeonholeSort.java",
+                  "symbols": []
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": "searches",
+          "note": "All four look for a target in a list; look at how each picks the next position to check.",
+          "algorithms": [
+            {
+              "id": "binary-search",
+              "label": "Binary search",
+              "names": [
+                "binary_search",
+                "binarysearch"
+              ],
+              "idea": "It compares with the middle item and throws away the half that cannot hold the target.",
+              "complexity": "O(log n) comparisons on a sorted list.",
+              "files": {
+                "TheAlgorithms/Python": {
+                  "path": "searches/binary_search.py",
+                  "symbols": []
+                },
+                "TheAlgorithms/Go": {
+                  "path": "search/binary.go",
+                  "symbols": [
+                    "Binary",
+                    "BinaryIterative"
+                  ]
+                },
+                "TheAlgorithms/Java": {
+                  "path": "src/main/java/com/thealgorithms/searches/BinarySearch.java",
+                  "symbols": []
+                }
+              }
+            },
+            {
+              "id": "linear-search",
+              "label": "Linear search",
+              "names": [
+                "linear_search",
+                "linearsearch"
+              ],
+              "idea": "It checks each item in turn until it finds the target.",
+              "complexity": "O(n); the list need not be sorted.",
+              "files": {
+                "TheAlgorithms/Python": {
+                  "path": "searches/linear_search.py",
+                  "symbols": []
+                },
+                "TheAlgorithms/Go": {
+                  "path": "search/linear.go",
+                  "symbols": [
+                    "Linear"
+                  ]
+                },
+                "TheAlgorithms/Java": {
+                  "path": "src/main/java/com/thealgorithms/searches/LinearSearch.java",
+                  "symbols": []
+                }
+              }
+            },
+            {
+              "id": "jump-search",
+              "label": "Jump search",
+              "names": [
+                "jump_search",
+                "jumpsearch"
+              ],
+              "idea": "It leaps ahead a fixed block at a time, then steps back through one block.",
+              "complexity": "O(√n) on a sorted list.",
+              "files": {
+                "TheAlgorithms/Python": {
+                  "path": "searches/jump_search.py",
+                  "symbols": []
+                },
+                "TheAlgorithms/Go": {
+                  "path": "search/jump.go",
+                  "symbols": [
+                    "Jump"
+                  ]
+                },
+                "TheAlgorithms/Java": {
+                  "path": "src/main/java/com/thealgorithms/searches/JumpSearch.java",
+                  "symbols": []
+                }
+              }
+            },
+            {
+              "id": "interpolation-search",
+              "label": "Interpolation search",
+              "names": [
+                "interpolation_search",
+                "interpolationsearch"
+              ],
+              "idea": "It estimates where the target should sit from its value, like opening a dictionary near the right letter.",
+              "complexity": "O(log log n) on evenly spread data, O(n) at worst.",
+              "files": {
+                "TheAlgorithms/Python": {
+                  "path": "searches/interpolation_search.py",
+                  "symbols": []
+                },
+                "TheAlgorithms/Go": {
+                  "path": "search/interpolation.go",
+                  "symbols": [
+                    "Interpolation"
+                  ]
+                },
+                "TheAlgorithms/Java": {
+                  "path": "src/main/java/com/thealgorithms/searches/InterpolationSearch.java",
+                  "symbols": []
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": "graph-walks",
+          "note": "All four walk a graph from a start vertex; look at the order in which vertices leave the frontier.",
+          "algorithms": [
+            {
+              "id": "breadth-first-search",
+              "label": "Breadth-first search",
+              "names": [
+                "breadth_first_search",
+                "breadthfirstsearch",
+                "bfs"
+              ],
+              "idea": "It explores vertices in rings, every neighbour before any neighbour's neighbour, using a queue.",
+              "complexity": "O(V + E).",
+              "files": {
+                "TheAlgorithms/Python": {
+                  "path": "graphs/breadth_first_search.py",
+                  "symbols": []
+                },
+                "TheAlgorithms/Go": {
+                  "path": "graph/breadthfirstsearch.go",
+                  "symbols": []
+                },
+                "TheAlgorithms/Java": {
+                  "path": "src/main/java/com/thealgorithms/searches/BreadthFirstSearch.java",
+                  "symbols": []
+                }
+              }
+            },
+            {
+              "id": "depth-first-search",
+              "label": "Depth-first search",
+              "names": [
+                "depth_first_search",
+                "depthfirstsearch",
+                "dfs"
+              ],
+              "idea": "It follows one path as far as it goes before backtracking, using a stack or recursion.",
+              "complexity": "O(V + E).",
+              "files": {
+                "TheAlgorithms/Python": {
+                  "path": "graphs/depth_first_search.py",
+                  "symbols": []
+                },
+                "TheAlgorithms/Go": {
+                  "path": "graph/depthfirstsearch.go",
+                  "symbols": []
+                },
+                "TheAlgorithms/Java": {
+                  "path": "src/main/java/com/thealgorithms/searches/DepthFirstSearch.java",
+                  "symbols": []
+                }
+              }
+            },
+            {
+              "id": "dijkstra",
+              "label": "Dijkstra's algorithm",
+              "names": [
+                "dijkstra"
+              ],
+              "idea": "It always settles the closest unsettled vertex next, keeping tentative distances in a priority queue.",
+              "complexity": "O((V + E) log V) with a heap.",
+              "files": {
+                "TheAlgorithms/Python": {
+                  "path": "graphs/dijkstra.py",
+                  "symbols": []
+                },
+                "TheAlgorithms/Go": {
+                  "path": "graph/dijkstra.go",
+                  "symbols": []
+                },
+                "TheAlgorithms/Java": {
+                  "path": "src/main/java/com/thealgorithms/datastructures/graphs/DijkstraAlgorithm.java",
+                  "symbols": []
+                }
+              }
+            },
+            {
+              "id": "bellman-ford",
+              "label": "Bellman–Ford",
+              "names": [
+                "bellman_ford",
+                "bellmanford"
+              ],
+              "idea": "It relaxes every edge again and again, V − 1 times, and can detect negative cycles.",
+              "complexity": "O(V·E).",
+              "files": {
+                "TheAlgorithms/Python": {
+                  "path": "graphs/bellman_ford.py",
+                  "symbols": []
+                },
+                "TheAlgorithms/Go": {
+                  "path": "graph/bellmanford.go",
+                  "symbols": []
+                },
+                "TheAlgorithms/Java": {
+                  "path": "src/main/java/com/thealgorithms/datastructures/graphs/BellmanFord.java",
+                  "symbols": []
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": "dynamic-programming",
+          "note": "All four fill a table of answers to smaller subproblems; look at what each cell stands for.",
+          "algorithms": [
+            {
+              "id": "knapsack",
+              "label": "0/1 knapsack",
+              "names": [
+                "knapsack"
+              ],
+              "idea": "It decides, item by item, whether taking the item beats leaving it, under a weight limit.",
+              "complexity": "O(n·W) for n items and capacity W.",
+              "files": {
+                "TheAlgorithms/Python": {
+                  "path": "dynamic_programming/knapsack.py",
+                  "symbols": []
+                },
+                "TheAlgorithms/Go": {
+                  "path": "dynamic/knapsack.go",
+                  "symbols": []
+                },
+                "TheAlgorithms/Java": {
+                  "path": "src/main/java/com/thealgorithms/dynamicprogramming/Knapsack.java",
+                  "symbols": []
+                }
+              }
+            },
+            {
+              "id": "longest-common-subsequence",
+              "label": "Longest common subsequence",
+              "names": [
+                "longest_common_subsequence",
+                "longestcommonsubsequence",
+                "lcs"
+              ],
+              "idea": "It compares two sequences, extending matches diagonally through a grid.",
+              "complexity": "O(n·m) for sequences of length n and m.",
+              "files": {
+                "TheAlgorithms/Python": {
+                  "path": "dynamic_programming/longest_common_subsequence.py",
+                  "symbols": []
+                },
+                "TheAlgorithms/Go": {
+                  "path": "dynamic/longestcommonsubsequence.go",
+                  "symbols": []
+                },
+                "TheAlgorithms/Java": {
+                  "path": "src/main/java/com/thealgorithms/dynamicprogramming/LongestCommonSubsequence.java",
+                  "symbols": []
+                }
+              }
+            },
+            {
+              "id": "edit-distance",
+              "label": "Edit distance",
+              "names": [
+                "edit_distance",
+                "editdistance",
+                "levenshtein"
+              ],
+              "idea": "It counts the fewest insertions, deletions, and substitutions that turn one string into another.",
+              "complexity": "O(n·m).",
+              "files": {
+                "TheAlgorithms/Python": {
+                  "path": "dynamic_programming/edit_distance.py",
+                  "symbols": []
+                },
+                "TheAlgorithms/Go": {
+                  "path": "dynamic/editdistance.go",
+                  "symbols": []
+                },
+                "TheAlgorithms/Java": {
+                  "path": "src/main/java/com/thealgorithms/dynamicprogramming/EditDistance.java",
+                  "symbols": []
+                }
+              }
+            },
+            {
+              "id": "coin-change",
+              "label": "Coin change",
+              "names": [
+                "coin_change",
+                "coinchange"
+              ],
+              "idea": "It counts the ways, or the fewest coins, to make each amount from smaller amounts.",
+              "complexity": "O(n·A) for n coin values and amount A.",
+              "files": {
+                "TheAlgorithms/Python": {
+                  "path": "dynamic_programming/minimum_coin_change.py",
+                  "symbols": [
+                    "dp_count"
+                  ]
+                },
+                "TheAlgorithms/Go": {
+                  "path": "dynamic/coinchange.go",
+                  "symbols": []
+                },
+                "TheAlgorithms/Java": {
+                  "path": "src/main/java/com/thealgorithms/dynamicprogramming/CoinChange.java",
+                  "symbols": []
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": "number-theory",
+          "note": "All four work with whole numbers and divisibility; look at what each loop narrows down.",
+          "algorithms": [
+            {
+              "id": "euclid-gcd",
+              "label": "Euclid's algorithm",
+              "names": [
+                "greatest_common_divisor",
+                "gcd",
+                "euclid"
+              ],
+              "idea": "It replaces the pair (a, b) with (b, a mod b) until the remainder is zero.",
+              "complexity": "O(log min(a, b)) steps.",
+              "files": {
+                "TheAlgorithms/Python": {
+                  "path": "maths/greatest_common_divisor.py",
+                  "symbols": []
+                },
+                "TheAlgorithms/Go": {
+                  "path": "math/gcd/gcd.go",
+                  "symbols": [
+                    "Recursive"
+                  ]
+                },
+                "TheAlgorithms/Java": {
+                  "path": "src/main/java/com/thealgorithms/maths/GCD.java",
+                  "symbols": []
+                }
+              }
+            },
+            {
+              "id": "sieve-of-eratosthenes",
+              "label": "Sieve of Eratosthenes",
+              "names": [
+                "sieve",
+                "eratosthenes"
+              ],
+              "idea": "It crosses out every multiple of each prime it finds, starting from that prime's square.",
+              "complexity": "O(n log log n).",
+              "files": {
+                "TheAlgorithms/Python": {
+                  "path": "maths/sieve_of_eratosthenes.py",
+                  "symbols": []
+                },
+                "TheAlgorithms/Go": {
+                  "path": "math/prime/sieve.go",
+                  "symbols": []
+                },
+                "TheAlgorithms/Java": {
+                  "path": "src/main/java/com/thealgorithms/maths/SieveOfEratosthenes.java",
+                  "symbols": []
+                }
+              }
+            },
+            {
+              "id": "exponentiation-by-squaring",
+              "label": "Exponentiation by squaring",
+              "names": [
+                "binary_exponentiation",
+                "binaryexponentiation",
+                "binary_exp",
+                "fast_exponent",
+                "fastexponent"
+              ],
+              "idea": "It squares the base and halves the exponent, multiplying the base in when the exponent is odd.",
+              "complexity": "O(log n) multiplications.",
+              "files": {
+                "TheAlgorithms/Python": {
+                  "path": "maths/binary_exponentiation.py",
+                  "symbols": []
+                },
+                "TheAlgorithms/Go": {
+                  "path": "math/power/fastexponent.go",
+                  "symbols": [
+                    "IterativePower",
+                    "RecursivePower",
+                    "RecursivePower1"
+                  ]
+                },
+                "TheAlgorithms/Java": {
+                  "path": "src/main/java/com/thealgorithms/divideandconquer/BinaryExponentiation.java",
+                  "symbols": []
+                }
+              }
+            },
+            {
+              "id": "prime-factorization",
+              "label": "Prime factorization",
+              "names": [
+                "prime_factors",
+                "prime_factorization",
+                "primefactorization"
+              ],
+              "idea": "It divides out the smallest divisor again and again, collecting each one.",
+              "complexity": "O(√n) trial divisions.",
+              "files": {
+                "TheAlgorithms/Python": {
+                  "path": "maths/prime_factors.py",
+                  "symbols": []
+                },
+                "TheAlgorithms/Go": {
+                  "path": "math/prime/primefactorization.go",
+                  "symbols": [
+                    "Factorize"
+                  ]
+                },
+                "TheAlgorithms/Java": {
+                  "path": "src/main/java/com/thealgorithms/maths/Prime/PrimeFactorization.java",
+                  "symbols": []
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": "string-matching",
+          "note": "All four look for a pattern inside a text; look at what happens after a mismatch.",
+          "algorithms": [
+            {
+              "id": "knuth-morris-pratt",
+              "label": "Knuth–Morris–Pratt",
+              "names": [
+                "knuth_morris_pratt",
+                "knuthmorrispratt",
+                "kmp"
+              ],
+              "idea": "It precomputes how far the pattern overlaps itself, so a mismatch never re-reads the text.",
+              "complexity": "O(n + m).",
+              "files": {
+                "TheAlgorithms/Python": {
+                  "path": "strings/knuth_morris_pratt.py",
+                  "symbols": []
+                },
+                "TheAlgorithms/Go": {
+                  "path": "strings/kmp/kmp.go",
+                  "symbols": []
+                },
+                "TheAlgorithms/Java": {
+                  "path": "src/main/java/com/thealgorithms/strings/KMP.java",
+                  "symbols": []
+                }
+              }
+            },
+            {
+              "id": "rabin-karp",
+              "label": "Rabin–Karp",
+              "names": [
+                "rabin_karp",
+                "rabinkarp"
+              ],
+              "idea": "It compares rolling hashes of each window before checking characters.",
+              "complexity": "O(n + m) on average.",
+              "files": {
+                "TheAlgorithms/Python": {
+                  "path": "strings/rabin_karp.py",
+                  "symbols": []
+                },
+                "TheAlgorithms/Java": {
+                  "path": "src/main/java/com/thealgorithms/strings/RabinKarp.java",
+                  "symbols": []
+                }
+              }
+            },
+            {
+              "id": "boyer-moore",
+              "label": "Boyer–Moore",
+              "names": [
+                "boyer_moore",
+                "boyermoore"
+              ],
+              "idea": "It compares from the end of the pattern and skips ahead using the mismatched character.",
+              "complexity": "Sublinear on typical text, O(n·m) at worst.",
+              "files": {
+                "TheAlgorithms/Python": {
+                  "path": "strings/boyer_moore_search.py",
+                  "symbols": []
+                },
+                "TheAlgorithms/Go": {
+                  "path": "strings/search/boyermoore.go",
+                  "symbols": []
+                },
+                "TheAlgorithms/Java": {
+                  "path": "src/main/java/com/thealgorithms/searches/BoyerMoore.java",
+                  "symbols": []
+                }
+              }
+            },
+            {
+              "id": "z-algorithm",
+              "label": "Z-algorithm",
+              "names": [
+                "z_function",
+                "zfunction",
+                "z_algorithm",
+                "zalgorithm"
+              ],
+              "idea": "It records, for each position, how long a prefix of the text starts there.",
+              "complexity": "O(n + m).",
+              "files": {
+                "TheAlgorithms/Python": {
+                  "path": "strings/z_function.py",
+                  "symbols": []
+                },
+                "TheAlgorithms/Java": {
+                  "path": "src/main/java/com/thealgorithms/strings/ZAlgorithm.java",
+                  "symbols": []
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "output": {
+      "rounds": 24,
+      "repository": "TheAlgorithms/Python",
+      "directories": [
+        "maths",
+        "strings",
+        "conversions",
+        "bit_manipulation",
+        "dynamic_programming",
+        "searches"
+      ],
+      "fileReads": 200,
+      "templates": {
+        "title": "Predict the output",
+        "description": "Read a short Python function and predict what one call of it returns.",
+        "prompt": "What does the last line show?",
+        "evidence": "The docstring in {path} of {repository} records {call} as {output}; the repository's tests run every docstring example.",
+        "explanation": "The answer is the result the function's own doctest records, which the repository's CI checks. The code is the function as it stands at the pinned commit, without its docstring and comments; nothing here ran it."
+      }
+    },
+    "fix": {
+      "rounds": 24,
+      "datasets": [
+        {
+          "id": "defects4j",
+          "repository": "rjust/defects4j",
+          "commit": "8c16da8230843cdc918eaf4ddb449637f02b83c6",
+          "projects": [
+            {
+              "name": "Cli",
+              "repository": "apache/commons-cli",
+              "language": "Java"
+            },
+            {
+              "name": "Closure",
+              "repository": "google/closure-compiler",
+              "language": "Java"
+            },
+            {
+              "name": "Codec",
+              "repository": "apache/commons-codec",
+              "language": "Java"
+            },
+            {
+              "name": "Collections",
+              "repository": "apache/commons-collections",
+              "language": "Java"
+            },
+            {
+              "name": "Compress",
+              "repository": "apache/commons-compress",
+              "language": "Java"
+            },
+            {
+              "name": "Csv",
+              "repository": "apache/commons-csv",
+              "language": "Java"
+            },
+            {
+              "name": "Gson",
+              "repository": "google/gson",
+              "language": "Java"
+            },
+            {
+              "name": "JacksonCore",
+              "repository": "FasterXML/jackson-core",
+              "language": "Java"
+            },
+            {
+              "name": "JacksonDatabind",
+              "repository": "FasterXML/jackson-databind",
+              "language": "Java"
+            },
+            {
+              "name": "Jsoup",
+              "repository": "jhy/jsoup",
+              "language": "Java"
+            },
+            {
+              "name": "JxPath",
+              "repository": "apache/commons-jxpath",
+              "language": "Java"
+            },
+            {
+              "name": "Lang",
+              "repository": "apache/commons-lang",
+              "language": "Java"
+            },
+            {
+              "name": "Math",
+              "repository": "apache/commons-math",
+              "language": "Java"
+            },
+            {
+              "name": "Mockito",
+              "repository": "mockito/mockito",
+              "language": "Java"
+            },
+            {
+              "name": "Time",
+              "repository": "JodaOrg/joda-time",
+              "language": "Java"
+            }
+          ]
+        },
+        {
+          "id": "bugsinpy",
+          "repository": "soarsmu/BugsInPy",
+          "commit": "11c5f1eea954a42132cfd06bf257766a7963e0fd",
+          "projects": [
+            {
+              "name": "PySnooper",
+              "repository": "cool-RR/PySnooper",
+              "language": "Python"
+            },
+            {
+              "name": "black",
+              "repository": "psf/black",
+              "language": "Python"
+            },
+            {
+              "name": "cookiecutter",
+              "repository": "cookiecutter/cookiecutter",
+              "language": "Python"
+            },
+            {
+              "name": "fastapi",
+              "repository": "fastapi/fastapi",
+              "language": "Python"
+            },
+            {
+              "name": "httpie",
+              "repository": "httpie/cli",
+              "language": "Python"
+            },
+            {
+              "name": "keras",
+              "repository": "keras-team/keras",
+              "language": "Python"
+            },
+            {
+              "name": "luigi",
+              "repository": "spotify/luigi",
+              "language": "Python"
+            },
+            {
+              "name": "pandas",
+              "repository": "pandas-dev/pandas",
+              "language": "Python"
+            },
+            {
+              "name": "sanic",
+              "repository": "sanic-org/sanic",
+              "language": "Python"
+            },
+            {
+              "name": "scrapy",
+              "repository": "scrapy/scrapy",
+              "language": "Python"
+            },
+            {
+              "name": "spacy",
+              "repository": "explosion/spaCy",
+              "language": "Python"
+            },
+            {
+              "name": "thefuck",
+              "repository": "nvbn/thefuck",
+              "language": "Python"
+            },
+            {
+              "name": "tornado",
+              "repository": "tornadoweb/tornado",
+              "language": "Python"
+            }
+          ]
+        }
+      ],
+      "patchReads": 240,
+      "perRepository": 3,
+      "templates": {
+        "title": "Spot the fix",
+        "description": "Read code just before a real one-line bug fix, and pick the line the fix changed.",
+        "prompt": "Which line did the fix change?",
+        "evidence": "{dataset} records bug {bug} in {repository}, with a test that fails before the fix; the fix changed line {line} of this excerpt.",
+        "explanation": "The answer is the one line the upstream fix commit changed in this file, which the bug dataset records and its tests confirm."
+      }
+    },
+    "missing-line": {
+      "rounds": 24,
+      "repository": "TheAlgorithms/Python",
+      "directories": [
+        "sorts",
+        "ciphers",
+        "graphs",
+        "matrix",
+        "backtracking",
+        "greedy_methods"
+      ],
+      "fileReads": 120,
+      "windowLines": 12,
+      "templates": {
+        "title": "Missing line",
+        "description": "One line of a real function is hidden; pick the line that fills the gap.",
+        "prompt": "Which line fills the gap?",
+        "evidence": "Line {line} of {path} in {repository} reads this way.",
+        "explanation": "The answer is the file's own line; the others are lines from elsewhere in the same file."
+      }
+    },
+    "name-function": {
+      "rounds": 24,
+      "sources": [
+        {
+          "repository": "TheAlgorithms/Java",
+          "directories": [
+            "src/main/java/com/thealgorithms/maths",
+            "src/main/java/com/thealgorithms/strings",
+            "src/main/java/com/thealgorithms/bitmanipulation",
+            "src/main/java/com/thealgorithms/conversions",
+            "src/main/java/com/thealgorithms/others",
+            "src/main/java/com/thealgorithms/ciphers",
+            "src/main/java/com/thealgorithms/datastructures/trees",
+            "src/main/java/com/thealgorithms/datastructures/lists",
+            "src/main/java/com/thealgorithms/stacks",
+            "src/main/java/com/thealgorithms/backtracking",
+            "src/main/java/com/thealgorithms/greedyalgorithms",
+            "src/main/java/com/thealgorithms/matrix",
+            "src/main/java/com/thealgorithms/misc",
+            "src/main/java/com/thealgorithms/geometry",
+            "src/main/java/com/thealgorithms/searches",
+            "src/main/java/com/thealgorithms/sorts"
+          ]
+        },
+        {
+          "repository": "TheAlgorithms/Go",
+          "directories": [
+            "math",
+            "dynamic",
+            "graph",
+            "math/matrix",
+            "math/binary",
+            "conversion",
+            "structure/linkedlist",
+            "structure/tree",
+            "strings",
+            "sort",
+            "search",
+            "math/prime",
+            "math/gcd",
+            "graph/coloring"
+          ]
+        }
+      ],
+      "fileReads": 240,
+      "functionLines": 24,
+      "templates": {
+        "title": "Name the function",
+        "description": "A real function with its name hidden; pick the name its author gave it.",
+        "prompt": "What did its author name this function?",
+        "evidence": "{path} in {repository} declares it as {name}.",
+        "explanation": "The answer is the name its author gave it; the others are functions declared beside it in the same file."
+      }
+    },
+    "framework": {
+      "rounds": 32,
+      "repository": "tastejs/todomvc",
+      "roundsPerFramework": 2,
+      "windowLines": 14,
+      "families": [
+        {
+          "id": "components",
+          "note": "All four build the page from components that update the view when their state changes.",
+          "frameworks": [
+            {
+              "id": "react",
+              "label": "React",
+              "names": [
+                "React"
+              ],
+              "symbols": [],
+              "idea": "Components are plain functions that keep their state in hooks and return markup written inside the script.",
+              "examples": [
+                "examples/react"
+              ],
+              "files": [
+                "examples/react/src/todo/components/item.jsx",
+                "examples/react/src/todo/components/main.jsx",
+                "examples/react/src/todo/components/footer.jsx",
+                "examples/react/src/todo/components/input.jsx"
+              ]
+            },
+            {
+              "id": "vue",
+              "label": "Vue",
+              "names": [
+                "Vue"
+              ],
+              "symbols": [],
+              "idea": "Templates put directives on ordinary HTML attributes, and the script declares reactive refs and emits events.",
+              "examples": [
+                "examples/vue"
+              ],
+              "files": [
+                "examples/vue/src/components/TodoItem.vue",
+                "examples/vue/src/components/TodoFooter.vue",
+                "examples/vue/src/components/TodoHeader.vue",
+                "examples/vue/src/components/TodosComponent.vue"
+              ]
+            },
+            {
+              "id": "svelte",
+              "label": "Svelte",
+              "names": [
+                "Svelte"
+              ],
+              "symbols": [],
+              "idea": "A compiler turns plain variables into reactive state, and template blocks open with a hash and close with a slash.",
+              "examples": [
+                "examples/svelte"
+              ],
+              "files": [
+                "examples/svelte/src/Item.svelte",
+                "examples/svelte/src/App.svelte",
+                "examples/svelte/src/Footer.svelte",
+                "examples/svelte/src/Header.svelte"
+              ]
+            },
+            {
+              "id": "angular",
+              "label": "Angular",
+              "names": [
+                "Angular"
+              ],
+              "symbols": [],
+              "idea": "Classes carry decorators, and templates bind events in parentheses and properties in square brackets.",
+              "examples": [
+                "examples/angular"
+              ],
+              "files": [
+                "examples/angular/src/app/todo-item/todo-item.component.ts",
+                "examples/angular/src/app/todo-item/todo-item.component.html",
+                "examples/angular/src/app/todo-list/todo-list.component.ts",
+                "examples/angular/src/app/footer/footer.component.ts"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "classics",
+          "note": "All four come from the first wave of front-end frameworks, with models, views, and bindings between them.",
+          "frameworks": [
+            {
+              "id": "backbone",
+              "label": "Backbone",
+              "names": [
+                "Backbone"
+              ],
+              "symbols": [],
+              "idea": "Views extend a base class, list their DOM events as selector strings, and listen to their models for changes.",
+              "examples": [
+                "examples/backbone"
+              ],
+              "files": [
+                "examples/backbone/src/views/todo-view.js",
+                "examples/backbone/src/views/app-view.js",
+                "examples/backbone/src/routers/router.js"
+              ]
+            },
+            {
+              "id": "ember",
+              "label": "Ember",
+              "names": [
+                "Ember",
+                "emberjs",
+                "glimmer"
+              ],
+              "symbols": [],
+              "idea": "Components are classes with tracked properties, and their templates use curly-brace helpers and modifiers.",
+              "examples": [
+                "examples/emberjs/todomvc"
+              ],
+              "files": [
+                "examples/emberjs/todomvc/app/components/todo-item.gjs",
+                "examples/emberjs/todomvc/app/components/create.gjs",
+                "examples/emberjs/todomvc/app/components/todo-list.gjs",
+                "examples/emberjs/todomvc/app/components/footer.gjs"
+              ]
+            },
+            {
+              "id": "knockout",
+              "label": "Knockout",
+              "names": [
+                "Knockout",
+                "knockoutjs"
+              ],
+              "symbols": [],
+              "idea": "View models hold observables that are read by calling them, and the page binds to them through data attributes.",
+              "examples": [
+                "examples/knockoutjs",
+                "examples/knockoutjs_require"
+              ],
+              "files": [
+                "examples/knockoutjs/js/app.js",
+                "examples/knockoutjs_require/js/extends/handlers.js",
+                "examples/knockoutjs_require/js/viewmodels/todo.js"
+              ]
+            },
+            {
+              "id": "angularjs",
+              "label": "AngularJS",
+              "names": [
+                "AngularJS"
+              ],
+              "symbols": [],
+              "idea": "Controllers receive services injected by name, and everything a template sees lives on one shared scope object.",
+              "examples": [
+                "examples/angularjs_require",
+                "examples/typescript-angular"
+              ],
+              "files": [
+                "examples/angularjs_require/js/controllers/todo.js",
+                "examples/angularjs_require/js/directives/todoFocus.js",
+                "examples/typescript-angular/js/controllers/TodoCtrl.ts"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "light",
+          "note": "All four are small libraries that render views from plain functions or templates.",
+          "frameworks": [
+            {
+              "id": "preact",
+              "label": "Preact",
+              "names": [
+                "Preact"
+              ],
+              "symbols": [],
+              "idea": "Function components keep their state in hooks and return markup written inside the script, from a library of a few kilobytes.",
+              "examples": [
+                "examples/preact"
+              ],
+              "files": [
+                "examples/preact/src/app/item.js",
+                "examples/preact/src/app/main.js",
+                "examples/preact/src/app/app.js",
+                "examples/preact/src/app/footer.js"
+              ]
+            },
+            {
+              "id": "lit",
+              "label": "Lit",
+              "names": [
+                "Lit"
+              ],
+              "symbols": [],
+              "idea": "Custom elements extend one base class and render templates written as tagged template literals.",
+              "examples": [
+                "examples/lit"
+              ],
+              "files": [
+                "examples/lit/src/lib/todo-item.ts",
+                "examples/lit/src/lib/todo-list.ts",
+                "examples/lit/src/lib/todo-form.ts",
+                "examples/lit/src/lib/todo-footer.ts"
+              ]
+            },
+            {
+              "id": "mithril",
+              "label": "Mithril",
+              "names": [
+                "Mithril"
+              ],
+              "symbols": [],
+              "idea": "Views are trees of calls to one short function that takes a selector, attributes, and children.",
+              "examples": [
+                "examples/mithril"
+              ],
+              "files": [
+                "examples/mithril/js/views/main-view.js",
+                "examples/mithril/js/controllers/todo.js",
+                "examples/mithril/js/views/footer-view.js"
+              ]
+            },
+            {
+              "id": "ractive",
+              "label": "Ractive",
+              "names": [
+                "Ractive"
+              ],
+              "symbols": [],
+              "idea": "One instance owns a mustache template and a data object that code reads and writes by keypath strings.",
+              "examples": [
+                "examples/ractive"
+              ],
+              "files": [
+                "examples/ractive/js/app.js",
+                "examples/ractive/index.html"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "toolkits",
+          "note": "All four are older toolkits that build a page from widgets, controls, or extended base views.",
+          "frameworks": [
+            {
+              "id": "dojo",
+              "label": "Dojo",
+              "names": [
+                "Dojo",
+                "dijit",
+                "dojox"
+              ],
+              "symbols": [],
+              "idea": "Widgets are declared from a list of mixins, and keep their callbacks bound to themselves through a helper.",
+              "examples": [
+                "examples/dojo"
+              ],
+              "files": [
+                "examples/dojo/js/todo/widgets/Todo.js",
+                "examples/dojo/js/todo/widgets/TodoEnter.js",
+                "examples/dojo/js/todo/widgets/Todos.js",
+                "examples/dojo/js/todo/widgets/CSSToggleWidget.js"
+              ]
+            },
+            {
+              "id": "closure",
+              "label": "Closure",
+              "names": [
+                "Closure"
+              ],
+              "symbols": [],
+              "idea": "Classes are constructor functions joined by explicit inheritance calls, under one long global namespace.",
+              "examples": [
+                "examples/closure"
+              ],
+              "files": [
+                "examples/closure/js/todomvc/view/ToDoItemControl.js",
+                "examples/closure/js/todomvc/view/ToDoItemControlRenderer.js",
+                "examples/closure/js/app.js",
+                "examples/closure/js/todomvc/model/ToDoItemStore.js"
+              ]
+            },
+            {
+              "id": "canjs",
+              "label": "CanJS",
+              "names": [
+                "CanJS"
+              ],
+              "symbols": [
+                "can"
+              ],
+              "idea": "Components extend a base with a tag name, and observable objects are read and written through one accessor.",
+              "examples": [
+                "examples/canjs",
+                "examples/canjs_require"
+              ],
+              "files": [
+                "examples/canjs/js/components/todo-app.js",
+                "examples/canjs/js/models/todo.js",
+                "examples/canjs_require/js/components/todo-app.js"
+              ]
+            },
+            {
+              "id": "marionette",
+              "label": "Marionette",
+              "names": [
+                "Marionette"
+              ],
+              "symbols": [],
+              "idea": "Views extend a base class with named UI elements and regions, and talk to each other through channels.",
+              "examples": [
+                "examples/backbone_marionette"
+              ],
+              "files": [
+                "examples/backbone_marionette/js/TodoMVC.TodoList.Views.js",
+                "examples/backbone_marionette/js/TodoMVC.Router.js",
+                "examples/backbone_marionette/js/TodoMVC.Layout.js"
+              ]
+            }
+          ]
+        }
+      ],
+      "templates": {
+        "title": "Which framework?",
+        "description": "The same to-do app in sixteen front-end frameworks, every name hidden: tell them apart by their idioms.",
+        "prompt": "Which framework is this to-do app written with?",
+        "evidence": "This is {path} in {repository}, the example built with {name}.",
+        "explanation": "Every example builds the same to-do app, so the task and its names carry no clue; only how each framework writes it does."
+      }
+    },
+    "exercise": {
+      "rounds": 48,
+      "roundsPerExercise": 2,
+      "tracks": [
+        {
+          "repository": "exercism/python",
+          "solution": "exercises/practice/{slug}/.meta/example.py"
+        },
+        {
+          "repository": "exercism/go",
+          "solution": "exercises/practice/{slug}/.meta/example.go"
+        },
+        {
+          "repository": "exercism/rust",
+          "solution": "exercises/practice/{slug}/.meta/example.rs"
+        },
+        {
+          "repository": "exercism/ruby",
+          "solution": "exercises/practice/{slug}/.meta/example.rb"
+        },
+        {
+          "repository": "exercism/javascript",
+          "solution": "exercises/practice/{slug}/.meta/proof.ci.js"
+        },
+        {
+          "repository": "exercism/csharp",
+          "solution": "exercises/practice/{slug}/.meta/Example.cs"
+        }
+      ],
+      "families": [
+        {
+          "id": "words",
+          "note": "All four read the letters of a word or phrase and compare them.",
+          "exercises": [
+            {
+              "id": "isogram",
+              "label": "Isogram",
+              "names": [
+                "isogram"
+              ],
+              "symbols": [],
+              "idea": "No letter may appear more than once, ignoring spaces and hyphens.",
+              "detail": "It takes a word or phrase and returns true or false."
+            },
+            {
+              "id": "pangram",
+              "label": "Pangram",
+              "names": [
+                "pangram"
+              ],
+              "symbols": [],
+              "idea": "Every letter of the alphabet must appear at least once.",
+              "detail": "It takes a sentence and returns true or false."
+            },
+            {
+              "id": "anagram",
+              "label": "Anagram",
+              "names": [
+                "anagram"
+              ],
+              "symbols": [],
+              "idea": "It keeps the candidates made of exactly the target's letters, but never the target itself.",
+              "detail": "It takes a word and a list of words, and returns a list."
+            },
+            {
+              "id": "acronym",
+              "label": "Acronym",
+              "names": [
+                "acronym"
+              ],
+              "symbols": [],
+              "idea": "It joins the first letter of every word, in capitals.",
+              "detail": "It takes a phrase and returns a short string of capitals."
+            }
+          ]
+        },
+        {
+          "id": "arithmetic",
+          "note": "All four do arithmetic on whole integers: their digits, divisors, or steps.",
+          "exercises": [
+            {
+              "id": "armstrong-numbers",
+              "label": "Armstrong numbers",
+              "names": [
+                "armstrong"
+              ],
+              "symbols": [],
+              "idea": "Its digits, each raised to the power of the digit count, add up to the value itself.",
+              "detail": "It takes an integer and returns true or false."
+            },
+            {
+              "id": "perfect-numbers",
+              "label": "Perfect numbers",
+              "names": [
+                "perfect"
+              ],
+              "symbols": [],
+              "idea": "It compares an integer with the sum of its divisors below it.",
+              "detail": "It takes an integer and returns one of three classes, or an error."
+            },
+            {
+              "id": "collatz-conjecture",
+              "label": "Collatz conjecture",
+              "names": [
+                "collatz",
+                "conjecture"
+              ],
+              "symbols": [],
+              "idea": "It halves an even value and triples an odd one plus one, counting steps until it reaches one.",
+              "detail": "It takes an integer and returns a count of steps, or an error."
+            },
+            {
+              "id": "leap",
+              "label": "Leap",
+              "names": [
+                "leap"
+              ],
+              "symbols": [],
+              "idea": "Divisible by four, except centuries that are not divisible by four hundred.",
+              "detail": "It takes a year and returns true or false."
+            }
+          ]
+        },
+        {
+          "id": "ciphers",
+          "note": "All four turn letters into other letters by a rule, and most can undo it.",
+          "exercises": [
+            {
+              "id": "atbash-cipher",
+              "label": "Atbash cipher",
+              "names": [
+                "atbash"
+              ],
+              "symbols": [],
+              "idea": "It swaps each letter for its mirror in the alphabet, a for z, and groups the output in fives.",
+              "detail": "It takes text and returns the encoded text."
+            },
+            {
+              "id": "rotational-cipher",
+              "label": "Rotational cipher",
+              "names": [
+                "rotational"
+              ],
+              "symbols": [],
+              "idea": "It shifts each letter a fixed number of places along the alphabet, wrapping around.",
+              "detail": "It takes text and a shift, and returns the shifted text."
+            },
+            {
+              "id": "affine-cipher",
+              "label": "Affine cipher",
+              "names": [
+                "affine"
+              ],
+              "symbols": [],
+              "idea": "It maps each letter's index i to (a·i + b) mod 26, with a coprime to 26.",
+              "detail": "It takes text and two keys, and returns encoded or decoded text."
+            },
+            {
+              "id": "rail-fence-cipher",
+              "label": "Rail fence cipher",
+              "names": [
+                "railfence"
+              ],
+              "symbols": [],
+              "idea": "It writes the message in a zigzag over several rows, then reads the rows off one after another.",
+              "detail": "It takes text and a number of rows."
+            }
+          ]
+        },
+        {
+          "id": "grids",
+          "note": "All four read or build a grid of rows and columns.",
+          "exercises": [
+            {
+              "id": "minesweeper",
+              "label": "Minesweeper",
+              "names": [
+                "minesweeper"
+              ],
+              "symbols": [],
+              "idea": "It counts, for every empty cell, the mines in the eight cells around it.",
+              "detail": "It takes the rows of a board and returns the annotated rows."
+            },
+            {
+              "id": "saddle-points",
+              "label": "Saddle points",
+              "names": [
+                "saddle"
+              ],
+              "symbols": [],
+              "idea": "It finds the cells that are the largest in their row and the smallest in their column.",
+              "detail": "It takes a grid of integers and returns positions."
+            },
+            {
+              "id": "matrix",
+              "label": "Matrix",
+              "names": [
+                "matrix"
+              ],
+              "symbols": [],
+              "idea": "It parses rows of integers out of a string and hands back one row or one column.",
+              "detail": "It takes a string of lines and an index."
+            },
+            {
+              "id": "word-search",
+              "label": "Word search",
+              "names": [
+                "wordsearch"
+              ],
+              "symbols": [],
+              "idea": "It finds where each given term starts and ends in a grid, in any of eight directions.",
+              "detail": "It takes a grid of letters and a list of terms, and returns positions."
+            }
+          ]
+        },
+        {
+          "id": "replies",
+          "note": "All four answer with fixed English sentences built from their input.",
+          "exercises": [
+            {
+              "id": "bob",
+              "label": "Bob",
+              "names": [
+                "bob"
+              ],
+              "symbols": [],
+              "idea": "It answers a remark differently for a question, a shout, silence, or anything else.",
+              "detail": "It takes a remark and returns one of five replies."
+            },
+            {
+              "id": "raindrops",
+              "label": "Raindrops",
+              "names": [
+                "raindrops"
+              ],
+              "symbols": [],
+              "idea": "It turns an integer into sounds by which of three, five, and seven divide it.",
+              "detail": "It takes an integer and returns a string."
+            },
+            {
+              "id": "two-fer",
+              "label": "Two-fer",
+              "names": [
+                "twofer"
+              ],
+              "symbols": [],
+              "idea": "It hands out one for a named person, or for you when there is no name, and one for me.",
+              "detail": "It takes an optional name and returns a sentence."
+            },
+            {
+              "id": "proverb",
+              "label": "Proverb",
+              "names": [
+                "proverb"
+              ],
+              "symbols": [],
+              "idea": "It chains lines saying that for want of one thing, the next was lost.",
+              "detail": "It takes a list of things and returns lines of text."
+            }
+          ]
+        },
+        {
+          "id": "series",
+          "note": "All four compute one integer from a count or a limit.",
+          "exercises": [
+            {
+              "id": "sum-of-multiples",
+              "label": "Sum of multiples",
+              "names": [
+                "sumofmultiples"
+              ],
+              "symbols": [],
+              "idea": "It adds every integer below a limit that one of the given factors divides, counting each once.",
+              "detail": "It takes a limit and a list of factors, and returns a total."
+            },
+            {
+              "id": "difference-of-squares",
+              "label": "Difference of squares",
+              "names": [
+                "differenceofsquares"
+              ],
+              "symbols": [],
+              "idea": "For the first n integers, it takes the square of their sum minus the sum of each one squared.",
+              "detail": "It takes a count and returns an integer."
+            },
+            {
+              "id": "nth-prime",
+              "label": "Nth prime",
+              "names": [
+                "nthprime"
+              ],
+              "symbols": [],
+              "idea": "It finds the n-th integer greater than one that only one and itself divide.",
+              "detail": "It takes a position and returns an integer, or an error."
+            },
+            {
+              "id": "grains",
+              "label": "Grains",
+              "names": [
+                "grains"
+              ],
+              "symbols": [],
+              "idea": "It doubles a count on each of the 64 cells of a chessboard, and can total them.",
+              "detail": "It takes a cell number and returns a count, or an error."
+            }
+          ]
+        }
+      ],
+      "templates": {
+        "title": "Which exercise?",
+        "description": "A reference solution to an Exercism practice exercise, every name hidden: pick the exercise it solves.",
+        "prompt": "Which exercise does this code solve?",
+        "evidence": "This is {path} in {repository}, the track's reference solution to {name}.",
+        "explanation": "The answer is the exercise whose directory holds this solution; the other three come from the same family of exercises."
+      }
+    }
+  }
+}

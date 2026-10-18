@@ -6,7 +6,7 @@ import {
   LINEAGE_SOURCE_KEYS,
   MISSING_LINE_SOURCE_KEYS,
   NAME_FUNCTION_SOURCE_KEYS,
-  PROFILE_VERSION,
+  PROFILE_VERSIONS,
   STACK_LANGUAGES,
   STACK_SOURCE_KEYS,
   VULNERABLE_LINE_SOURCE_KEYS,
@@ -71,7 +71,8 @@ const validateBaseSource = (source: JsonRecord, snapshotId: string, authorBasis 
   gitId(source.commit);
   sha256(source.rawContentHash);
   sha256(source.excerptHash);
-  if (source.profileVersion !== PROFILE_VERSION || source.crawlSnapshotId !== snapshotId) fail();
+  // The artifact parser also requires every source's version to be its snapshot's.
+  if (!(PROFILE_VERSIONS as readonly unknown[]).includes(source.profileVersion) || source.crawlSnapshotId !== snapshotId) fail();
   validateGitHubBinding(source, authorCommit);
 };
 

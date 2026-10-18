@@ -139,6 +139,7 @@ describe("Stack metadata worker bridge", () => {
   });
 
   it("spawns only the locked uv worker with non-secret stdin and a credential-scoped environment", async () => {
+    const { capacity } = await loadProfile();
     const calls: any[] = [];
     const rows = await collectStackMetadata(await setup({
       runWorker: async (request: unknown) => {
@@ -161,13 +162,13 @@ describe("Stack metadata worker bridge", () => {
         revision: "e565caa3a78c2423bd374333a472b049eb090e47",
         rowLimit: 1,
         perBlobByteLimit: 262_144,
-        requestLimit: CAPACITY_CEILINGS.requestCount,
-        networkByteLimit: CAPACITY_CEILINGS.stackMetadataBytes,
+        requestLimit: capacity.requestCount,
+        networkByteLimit: capacity.stackMetadataBytes,
         temporaryDiskBytes: 33_554_432,
         sample: { licenses: ["Apache-2.0", "BSD-3-Clause", "MIT"], minimumStarEvents: 1000, popularRepositories: 24,
           rowsPerRepository: 3, ordinaryRows: 200 },
       }) + "\n",
-      stdoutByteLimit: CAPACITY_CEILINGS.stackMetadataBytes,
+      stdoutByteLimit: capacity.stackMetadataBytes,
       stderrByteLimit: 4096,
     });
     expect(rows).toEqual([metadataRow()]);
@@ -176,6 +177,7 @@ describe("Stack metadata worker bridge", () => {
   });
 
   it("passes only the remaining request, network-byte, and temporary-disk budgets to the worker", async () => {
+    const { capacity } = await loadProfile();
     const calls: any[] = [];
     const options = await setup({
       configuration: "TypeScript",
@@ -192,15 +194,15 @@ describe("Stack metadata worker bridge", () => {
     release();
 
     expect(JSON.parse(calls[0].stdin)).toMatchObject({
-      requestLimit: CAPACITY_CEILINGS.requestCount - 5,
-      networkByteLimit: CAPACITY_CEILINGS.stackMetadataBytes - 1000,
+      requestLimit: capacity.requestCount - 5,
+      networkByteLimit: capacity.stackMetadataBytes - 1000,
       temporaryDiskBytes: 33_553_408,
     });
-    expect(calls[0].stdoutByteLimit).toBe(CAPACITY_CEILINGS.stackMetadataBytes - 1000);
+    expect(calls[0].stdoutByteLimit).toBe(capacity.stackMetadataBytes - 1000);
 
     let spawns = 0;
     const exhausted = await setup({ runWorker: async () => { spawns += 1; return { exitCode: 0, stdout: ndjson(metadataRow()), stderr: new Uint8Array() }; } });
-    for (let index = 0; index < CAPACITY_CEILINGS.requestCount; index += 1) exhausted.capacity.beginRequest().release();
+    for (let index = 0; index < exhausted.profile.capacity.requestCount; index += 1) exhausted.capacity.beginRequest().release();
     await expect(collectStackMetadata(exhausted)).rejects.toMatchObject({ code: "LIMIT_REJECTED" });
     expect(spawns).toBe(0);
   });

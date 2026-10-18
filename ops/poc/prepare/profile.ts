@@ -1,7 +1,7 @@
 import { CAPACITY_CEILINGS, STACK_RELEASE, STACK_REVISION, type CeilingKey } from "../limits";
 import {
-  ADVISORY_ECOSYSTEMS, AUTHORSHIP_CLAIM, CWE_ID, MAINSTREAM_LANGUAGES, PROFILE_VERSION, ROUNDS_PER_LANGUAGE, STACK_LANGUAGES, isLanguageSelection,
-  spellsFramework, copyNamesExercise, type AdvisoryEcosystem, type DeckId, type StackLanguage,
+  ADVISORY_ECOSYSTEMS, AUTHORSHIP_CLAIM, CWE_ID, MAINSTREAM_LANGUAGES, PROFILE_VERSION, PROFILE_VERSIONS, ROUNDS_PER_LANGUAGE, STACK_LANGUAGES, isLanguageSelection,
+  spellsFramework, copyNamesExercise, type AdvisoryEcosystem, type DeckId, type ProfileVersion, type StackLanguage,
 } from "../../../packages/artifact/src/index";
 import { isKnownFramework } from "./framework-markers";
 
@@ -28,7 +28,7 @@ export const STACK_EXTENSIONS: Readonly<Record<StackLanguage, readonly string[]>
 });
 
 export interface CrawlProfile {
-  readonly profileVersion: typeof PROFILE_VERSION;
+  readonly profileVersion: ProfileVersion;
   /** Commit searches that feed the before-or-after deck. */
   readonly github: Readonly<{ apiVersion: "2022-11-28"; queries: readonly ProfileQuery[] }>;
   readonly stack: Readonly<{
@@ -881,13 +881,13 @@ export const parseCrawlProfile = (value: unknown): CrawlProfile => {
     "profileVersion", "github", "stack", "licenses", "templates", "deduplication", "capacity", "screening", "selection",
     ...(curated ? ["curated"] : []),
   ]);
-  if (root.profileVersion !== PROFILE_VERSION) fail();
+  const profileVersion = PROFILE_VERSIONS.find((known) => known === root.profileVersion) ?? fail();
   const github = exactRecord(root.github, ["apiVersion", "queries"]);
   if (github.apiVersion !== "2022-11-28") fail();
   const stack = exactRecord(root.stack, ["release", "revision", "configurations"]);
   if (stack.release !== STACK_RELEASE || stack.revision !== STACK_REVISION) fail();
   return deepFreeze({
-    profileVersion: PROFILE_VERSION,
+    profileVersion,
     github: Object.freeze({ apiVersion: "2022-11-28" as const, queries: parseQueries(github.queries) }),
     stack: Object.freeze({ release: STACK_RELEASE, revision: STACK_REVISION, configurations: parseConfigurations(stack.configurations) }),
     licenses: uniqueTexts(root.licenses),
