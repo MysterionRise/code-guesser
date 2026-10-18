@@ -2,7 +2,9 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
-import { BEFORE_AFTER_CANDIDATE_IDS, LANGUAGE_PAIRS, parseArtifactDecks, spellsFramework, type ParsedDeck, type ParsedFixture } from "../src/index";
+import {
+  BEFORE_AFTER_CANDIDATE_IDS, LANGUAGE_PAIRS, parseArtifactDecks, showsLabelStem, spellsFramework, type ParsedDeck, type ParsedFixture,
+} from "../src/index";
 import {
   LINE_FEATURES, TOLERANCE, accuracy, alphabeticalSolver, answerOf, chance, frequencySolver, labelWordSolver, lineFeatureSolver,
   memoryPlayer, optionKey, pairLengthSolver, paneLines, paneOverlapSolver, paneSizeSolver, proseLines, raritySolver,
@@ -126,6 +128,22 @@ describe("deck leakage", () => {
   // rule some out. The dry run measured 42% in game two against replaying reveals' 37% (#81).
   it.runIf(deck("framework") !== undefined).fails("remembering framework reveals earns little beyond replaying them (#81)", () => {
     memoryWithinReplay(deck("framework")!.fixtures);
+  });
+
+  it.runIf(deck("exercise") !== undefined)("exercise options are whole families, each member answered equally, and no pane shows a label word (#58)", () => {
+    const { fixtures } = deck("exercise")!;
+    const limit = chance(fixtures[0]!) + TOLERANCE;
+    const length = (direction: 1 | -1) => (_fixture: ParsedFixture, label: string) => direction * label.length;
+    for (const solver of [sameOptionsSolver(fixtures), frequencySolver(fixtures), raritySolver(fixtures), alphabeticalSolver, length(1), length(-1),
+      labelWordSolver(1), labelWordSolver(-1)]) {
+      expect(accuracy(fixtures, solver)).toBeLessThanOrEqual(limit);
+    }
+    expect(fixtures.every((fixture) => fixture.candidates.every(({ label }) => !showsLabelStem(fixture.panes[0]!.text, label)))).toBe(true);
+  });
+
+  // As with algorithm families: the dry run measured 36.5% in game two against replaying reveals' 32.8% (#81).
+  it.runIf(deck("exercise") !== undefined).fails("remembering exercise reveals earns little beyond replaying them (#81)", () => {
+    memoryWithinReplay(deck("exercise")!.fixtures);
   });
 
   it.runIf(deck("output") !== undefined)("output answers fill every rank in shown and text order, so no fixed position or extreme finds them", () => {

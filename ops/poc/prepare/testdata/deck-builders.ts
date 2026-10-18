@@ -8,6 +8,7 @@ import { gapChoices, gapSlack } from "../missing-line-window";
 import { generateMissingLineRounds, type MissingLineCandidate } from "../missing-line-rounds";
 import { nameChoices, nameExtremeLimits, nameSlack } from "../name-function-window";
 import { generateNameFunctionRounds, type NameFunctionCandidate } from "../name-function-rounds";
+import { generateExerciseRounds, type ExerciseCandidate } from "../exercise-rounds";
 import { generateFixRounds, type FixCandidate } from "../fix-rounds";
 import { generateFrameworkRounds, type FrameworkCandidate } from "../framework-rounds";
 import { frameworkWindow } from "../framework-window";
@@ -17,7 +18,7 @@ import { fixExtremeLimits, fixSlack, labelStems } from "../model";
 import { balancedChoice } from "../round-helpers";
 import { FIX_WINDOW_LINES } from "../select-fix";
 import { generateBeforeAfterRounds } from "../before-after-rounds";
-import { algorithmWindow } from "../function-windows";
+import { algorithmWindow, exerciseWindow } from "../function-windows";
 import { canonicalBytes, canonicalHash } from "../canonical";
 import type { ComposeOptions } from "../compose";
 import type { GitHubAdmissionCandidate } from "../github-admission";
@@ -343,6 +344,8 @@ export const composeInput = (
         ? { "name-function": generateNameFunctionRounds({ profile, candidates: nameFunctionCandidates(profile, snapshotId) }) } : {}),
       ...(profile.curated?.framework
         ? { framework: generateFrameworkRounds({ profile, candidates: frameworkCandidates(profile, snapshotId) }) } : {}),
+      ...(profile.curated?.exercise
+        ? { exercise: generateExerciseRounds({ profile, candidates: exerciseCandidates(profile, snapshotId) }) } : {}),
     },
     candidates,
   };
@@ -390,7 +393,7 @@ export const CURATED_SECTION = Object.freeze({
 export const loadCuratedProfile = (
   selection: Readonly<Record<string, number>> = {},
   decks: Readonly<{ algorithm?: boolean; output?: boolean; fix?: boolean; "missing-line"?: boolean; "name-function"?: boolean;
-    framework?: boolean }> = { algorithm: true },
+    framework?: boolean; exercise?: boolean }> = { algorithm: true },
 ): CrawlProfile => {
   const raw = JSON.parse(readFileSync(new URL("../../profiles/local-real-rounds.v5.json", import.meta.url), "utf8"));
   const curated = { repositories: [...CURATED_REPOSITORIES, ...(decks.framework ? [FRAMEWORK_REPOSITORY] : [])],
@@ -398,7 +401,8 @@ export const loadCuratedProfile = (
     ...(decks.output ? { output: OUTPUT_SECTION } : {}), ...(decks.fix ? { fix: FIX_SECTION } : {}),
     ...(decks["missing-line"] ? { "missing-line": MISSING_LINE_SECTION } : {}),
     ...(decks["name-function"] ? { "name-function": NAME_FUNCTION_SECTION } : {}),
-    ...(decks.framework ? { framework: FRAMEWORK_SECTION } : {}) };
+    ...(decks.framework ? { framework: FRAMEWORK_SECTION } : {}),
+    ...(decks.exercise ? { exercise: EXERCISE_SECTION } : {}) };
   return parseCrawlProfile({ ...raw, selection: { ...raw.selection, ...selection }, curated: structuredClone(curated) });
 };
 
@@ -635,6 +639,112 @@ export const frameworkCandidates = (profile: CrawlProfile, snapshotId: string): 
       excerptHash: sha256(window.excerpt), marker: window.markers[0]!, crawlSnapshotId: snapshotId,
     });
   }));
+};
+
+/** An eight-round exercise deck (#58): two families of four, one round each, from the Python and Go pins' solutions. */
+export const EXERCISE_SECTION = Object.freeze({
+  rounds: 8,
+  roundsPerExercise: 1,
+  tracks: [
+    { repository: "algos/python", solution: "exercises/practice/{slug}/.meta/example.py" },
+    { repository: "algos/go", solution: "exercises/practice/{slug}/.meta/example.go" },
+  ],
+  families: [
+    { id: "words", note: "All four read the letters of a word or phrase.", exercises: [
+      { id: "isogram", label: "Isogram", names: ["isogram"], symbols: [], idea: "No letter may appear twice.", detail: "It takes a phrase and returns true or false." },
+      { id: "pangram", label: "Pangram", names: ["pangram"], symbols: [], idea: "Every letter of the alphabet must appear.", detail: "It takes a sentence and returns true or false." },
+      { id: "anagram", label: "Anagram", names: ["anagram"], symbols: [], idea: "It keeps the words made of the same letters as the target.", detail: "It takes a word and a list, and returns a list." },
+      { id: "acronym", label: "Acronym", names: ["acronym"], symbols: [], idea: "It joins the first letter of every word.", detail: "It takes a phrase and returns a short string." },
+    ] },
+    { id: "numbers", note: "All four do arithmetic on whole integers.", exercises: [
+      { id: "armstrong-numbers", label: "Armstrong numbers", names: ["armstrong"], symbols: [], idea: "Its digits, each raised to the digit count, add up to it.", detail: "It takes a number and returns true or false." },
+      { id: "perfect-numbers", label: "Perfect numbers", names: ["perfect"], symbols: [], idea: "It compares a number with the sum of its divisors.", detail: "It takes a number and returns one of three classes." },
+      { id: "collatz-conjecture", label: "Collatz conjecture", names: ["collatz", "conjecture"], symbols: [], idea: "It halves an even value and triples an odd one plus one, until it reaches one.", detail: "It takes a number and returns a count." },
+      { id: "leap", label: "Leap", names: ["leap"], symbols: [], idea: "Divisible by four, except centuries not divisible by four hundred.", detail: "It takes a year and returns true or false." },
+    ] },
+  ],
+  templates: {
+    title: "Which exercise?",
+    description: "A reference solution to an Exercism exercise, every name hidden: pick the exercise it solves.",
+    prompt: "Which exercise does this code solve?",
+    evidence: "This is {path} in {repository}, the reference solution to {name}.",
+    explanation: "The answer is the exercise whose directory holds this solution.",
+  },
+});
+
+const pythonSolutions: Readonly<Record<string, readonly string[]>> = {
+  isogram: ["def is_isogram(phrase):", "    letters = [char.lower() for char in phrase if char.isalpha()]", "    seen = set()",
+    "    for letter in letters:", "        if letter in seen:", "            return False", "        seen.add(letter)", "    return True"],
+  pangram: ["from string import ascii_lowercase", "", "", "def is_pangram(sentence):",
+    "    present = {char for char in sentence.lower() if char.isalpha()}",
+    "    missing = [letter for letter in ascii_lowercase if letter not in present]", "    return len(missing) == 0"],
+  anagram: ["def find_anagrams(word, candidates):", "    def letters(text):", "        return sorted(text.lower())", "",
+    "    target = letters(word)", "    return [candidate for candidate in candidates",
+    "            if candidate.lower() != word.lower() and letters(candidate) == target]"],
+  acronym: ["import re", "", "", "def abbreviate(words):", "    parts = re.findall(r\"[A-Za-z][A-Za-z']*\", words)",
+    "    initials = [part[0].upper() for part in parts]", "    return \"\".join(initials)"],
+  "armstrong-numbers": ["def is_armstrong_number(number):", "    digits = [int(digit) for digit in str(number)]", "    power = len(digits)",
+    "    total = sum(digit ** power for digit in digits)", "    return total == number"],
+  "perfect-numbers": ["def classify(number):", "    if number < 1:", "        raise ValueError(\"only positive integers\")",
+    "    aliquot = sum(divisor for divisor in range(1, number) if number % divisor == 0)", "    if aliquot == number:",
+    "        return \"perfect\"", "    return \"abundant\" if aliquot > number else \"deficient\""],
+  "collatz-conjecture": ["def steps(number):", "    if number < 1:", "        raise ValueError(\"Only positive integers are allowed\")",
+    "    count = 0", "    while number != 1:", "        number = number // 2 if number % 2 == 0 else 3 * number + 1", "        count += 1",
+    "    return count"],
+  leap: ["def leap_year(year):", "    def divisible(divisor):", "        return year % divisor == 0", "", "    if divisible(400):",
+    "        return True", "    if divisible(100):", "        return False", "    return divisible(4)"],
+};
+const goSolutions: Readonly<Record<string, readonly string[]>> = {
+  pangram: ["package pangram", "", "import \"strings\"", "", "func IsPangram(input string) bool {", "\tlower := strings.ToLower(input)",
+    "\tfor letter := 'a'; letter <= 'z'; letter++ {", "\t\tif !strings.ContainsRune(lower, letter) {", "\t\t\treturn false", "\t\t}", "\t}",
+    "\treturn true", "}"],
+  acronym: ["package acronym", "", "import \"strings\"", "", "func Abbreviate(s string) string {",
+    "\tfields := strings.FieldsFunc(s, func(r rune) bool { return r == ' ' || r == '-' || r == '_' })", "\tvar initials strings.Builder",
+    "\tfor _, field := range fields {", "\t\tinitials.WriteString(strings.ToUpper(field[:1]))", "\t}", "\treturn initials.String()", "}"],
+  "perfect-numbers": ["package perfect", "", "type Classification int", "", "const (", "\tClassificationDeficient Classification = iota",
+    "\tClassificationPerfect", "\tClassificationAbundant", ")", "", "func Classify(n int64) Classification {", "\tvar sum int64",
+    "\tfor d := int64(1); d < n; d++ {", "\t\tif n%d == 0 {", "\t\t\tsum += d", "\t\t}", "\t}", "\tif sum == n {",
+    "\t\treturn ClassificationPerfect", "\t}", "\tif sum > n {", "\t\treturn ClassificationAbundant", "\t}", "\treturn ClassificationDeficient", "}"],
+  leap: ["package leap", "", "func divisible(year, by int) bool {", "\treturn year%by == 0", "}", "", "func IsLeapYear(year int) bool {",
+    "\treturn divisible(year, 4) && (!divisible(year, 100) || divisible(year, 400))", "}"],
+};
+
+/** Reference solutions for the test deck: Python for every exercise, Go for those whose turn tries Go first. */
+export const exerciseFiles = (): ReadonlyMap<string, string> => new Map([
+  ...Object.entries(pythonSolutions).map(([slug, lines]) => [`algos/python:exercises/practice/${slug}/.meta/example.py`, lines.join("\n")] as const),
+  ...Object.entries(goSolutions).map(([slug, lines]) => [`algos/go:exercises/practice/${slug}/.meta/example.go`, lines.join("\n")] as const),
+]);
+
+/** Bound exercise candidates for the small profile, chosen as the selector chooses: tracks take turns being tried first. */
+export const exerciseCandidates = (profile: CrawlProfile, snapshotId: string, files = exerciseFiles()): readonly ExerciseCandidate[] => {
+  const deck = profile.curated!.exercise!;
+  const limits = { maxLines: profile.screening.excerptLines, maxBytes: profile.screening.excerptBytes, minBytes: profile.screening.minimumExcerptBytes };
+  let turn = 0;
+  return deck.families.flatMap((family) => {
+    const terms = {
+      names: family.exercises.flatMap(({ label, names }) => [label, ...names]), symbols: family.exercises.flatMap(({ symbols }) => symbols),
+      stems: family.exercises.flatMap(({ label }) => labelStems(label)),
+    };
+    return family.exercises.map((entry) => {
+      const order = deck.tracks.map((_, index) => deck.tracks[(turn + index) % deck.tracks.length]!);
+      turn += 1;
+      for (const track of order) {
+        const path = track.solution.replace("{slug}", entry.id);
+        const text = files.get(`${track.repository}:${path}`);
+        const pin = CURATED_REPOSITORIES.find(({ repository }) => repository === track.repository)!;
+        const window = text === undefined ? undefined : exerciseWindow(text, pin.language, terms, limits, [entry.label, ...entry.names]);
+        if (!text || !window) continue;
+        return Object.freeze({
+          familyId: family.id, exercise: entry.id, language: pin.language, repository: pin.repository, commit: pin.commit, path,
+          blob: sha1(`blob ${text}`), rawContentHash: sha256(text), licenseName: "MIT License", licenseSpdx: "MIT",
+          licenseFileUrl: `https://github.com/${pin.repository}/blob/${pin.commit}/LICENSE`, authorName: "Curated Author",
+          authorLogin: "curated-author", authorCommit: "c".repeat(40), windowStart: window.windowStart, excerpt: window.excerpt,
+          excerptHash: sha256(window.excerpt), crawlSnapshotId: snapshotId,
+        });
+      }
+      throw new Error(`no solution for ${entry.id}`);
+    });
+  });
 };
 
 /** An eight-round output deck over the curated Python pin's `maths` and `strings` directories. */

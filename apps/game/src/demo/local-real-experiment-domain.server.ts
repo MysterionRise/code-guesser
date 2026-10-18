@@ -26,6 +26,7 @@ export const RULE_SEMANTICS: Readonly<Record<FixtureKind, string>> = Object.free
   MISSING_LINE: "curated-missing-line.v1",
   NAME_FUNCTION: "curated-name-function.v1",
   FRAMEWORK: "curated-framework.v1",
+  EXERCISE: "curated-exercise.v1",
   FIX: "dataset-one-line-fix.v3",
 });
 

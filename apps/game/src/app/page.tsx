@@ -23,6 +23,7 @@ const DECK_TAGS: Readonly<Record<string, string>> = Object.freeze({
   "missing-line": "Reason",
   "name-function": "Reason",
   framework: "Recognise",
+  exercise: "Recognise",
 });
 
 interface PageProps {
