@@ -1,6 +1,8 @@
+import { composeExperimentArtifact } from "./compose";
+import { ExperimentRecordError, parseExperimentArtifact, sharedOptionWords } from "./model";
 import { generateProjectRounds, namedByTemplates, optionDetail, projectRoundAllowed, ProjectRoundsError } from "./project-rounds";
 import { MAINSTREAM_LANGUAGES } from "./profile";
-import { loadDeckProfile, projectRoundInputs, snapshotIdFor } from "./testdata/deck-builders";
+import { composeInput, loadDeckProfile, projectRoundInputs, sha256, snapshotIdFor } from "./testdata/deck-builders";
 
 const testModuleName: string = "vitest";
 const { describe, expect, it } = await import(testModuleName) as any;
@@ -8,6 +10,7 @@ const { describe, expect, it } = await import(testModuleName) as any;
 const profile = loadDeckProfile();
 const snapshotId = snapshotIdFor(profile);
 const rounds = () => projectRoundInputs(profile, snapshotId);
+const v6 = loadDeckProfile("local-real-rounds.v6");
 
 describe("project rounds", () => {
   it("offers every round of a language the same four repositories, so none appears more often", () => {
@@ -54,6 +57,52 @@ describe("project rounds", () => {
       ? { ...round, distractors: [{ repository: "pkg/compute", description: null }, ...round.distractors.slice(1)] }
       : round);
     expect(() => generateProjectRounds({ profile, rounds: leaking })).toThrow(ProjectRoundsError);
+  });
+
+  it("finds the distinctive words a pane shares with an option's name and description (#77)", () => {
+    // The three rounds #77 found, each echoing its own option.
+    expect(sharedOptionWords("let client = Aws::SQS::Client.new(region: 'us-west-2')", "awsdocs/aws-doc-sdk-examples",
+      "Welcome to the AWS Code Examples Repository.")).toEqual(["aws"]);
+    expect(sharedOptionWords("pub enum Utility {\n    Static(Static),\n}", "tailwindlabs/tailwindcss",
+      "A utility-first CSS framework for rapid UI development.")).toEqual(["utili"]);
+    expect(sharedOptionWords("class Layout extends React.Component {", "gatsbyjs/gatsby",
+      "React-based framework with performance, scalability, and security built in.")).toEqual(["react"]);
+    // Common code and English words, short words, and numbers tie a pane to nothing.
+    expect(sharedOptionWords("for (const item of items) return value + 10;", "orbitlabs/quasar", "A tool for the items you return in 10 ms.")).toEqual([]);
+  });
+
+  it("from profile v6 on, refuses a round whose code shares a word with any option, and v5 does not (#77)", () => {
+    const v6Rounds = () => projectRoundInputs(v6, snapshotIdFor(v6));
+    expect(generateProjectRounds({ profile: v6, rounds: v6Rounds() }).fixtures).toHaveLength(24);
+    // A decoy whose description names something the first round's code does.
+    const echoing = (inputs: ReturnType<typeof rounds>) => inputs.map((round, index) => index === 0
+      ? { ...round, candidate: { ...round.candidate, excerpt: `${round.candidate.excerpt}\nharvest_crop()`,
+        excerptHash: sha256(`${round.candidate.excerpt}\nharvest_crop()`) },
+        distractors: [{ ...round.distractors[0]!, description: "Harvests every crop." }, ...round.distractors.slice(1)] }
+      : round);
+    expect(() => generateProjectRounds({ profile: v6, rounds: echoing(v6Rounds()) })).toThrow("PROJECT_WORDS_SHOWN");
+    expect(generateProjectRounds({ profile, rounds: echoing(rounds()) }).fixtures).toHaveLength(24);
+  });
+
+  it("parses a v6 project round only when its pane names no option, even inside a word, and shares no word with one (#77)", () => {
+    const composed = new Map([profile, v6].map((from) => [from, composeExperimentArtifact(composeInput(from)).artifact] as const));
+    const artifact = (from: typeof profile): any => structuredClone(composed.get(from));
+    const withPane = (value: any, extra: (fixture: any) => string, detail?: string) => {
+      const fixture = value.decks.find(({ id }: any) => id === "project").fixtures[0];
+      fixture.panes[0].text = `${fixture.panes[0].text}\n${extra(fixture)}`;
+      fixture.source.excerptHash = sha256(fixture.panes[0].text);
+      if (detail !== undefined) fixture.candidates.find(({ id }: any) => id !== fixture.correctCandidateId).detail = detail;
+      return value;
+    };
+    const decoyName = (fixture: any) => fixture.candidates.find(({ id }: any) => id !== fixture.correctCandidateId).label.split("/")[1];
+    // `Aws::SQS` beside a decoy that reads "AWS"; a decoy's name inside an identifier.
+    const aws = (value: any) => withPane(value, () => "client = Aws::SQS::Client.new", "Welcome to the AWS Code Examples Repository.");
+    const inside = (value: any) => withPane(value, (fixture) => `run_${decoyName(fixture)}_job()`);
+    expect(() => parseExperimentArtifact(artifact(v6))).not.toThrow();
+    for (const mutate of [aws, inside]) {
+      expect(() => parseExperimentArtifact(mutate(artifact(v6)))).toThrow(ExperimentRecordError);
+      expect(() => parseExperimentArtifact(mutate(artifact(profile)))).not.toThrow();
+    }
   });
 
   it("never offers a repository the deck's own wording names", () => {

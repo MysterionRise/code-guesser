@@ -202,6 +202,52 @@ const logLines = (calls: readonly string[]): string[] =>
     expect((harness.reports[0] as any).diagnostics).toContainEqual({ stage: "SCREENING", reasonCode: "PROJECT_NAME_IN_EXCERPT", count: 1 });
   });
 
+  it("from profile v6 on, holds each project pane to no word of any option's name or description (#77)", async () => {
+    // python-pop-0's first file calls `launch`, which its description names; python-pop-2's description names
+    // `compute`, which python-pop-1's file calls, so it is no decoy and python-pop-4 is offered instead.
+    const python = [
+      harnessRow("Python", "python-pop-0", { starEventsCount: 9000, excerpt: "value = launch(1)" }),
+      harnessRow("Python", "python-pop-0b", { repository: "python-org/python-pop-0", starEventsCount: 9000, excerpt: "value = start(1)" }),
+      ...popularRows("Python").slice(1),
+      harnessRow("Python", "python-pop-4", { starEventsCount: 4500 }),
+    ];
+    const rows = stackRowsWith(ordinaryRows("Python"));
+    rows.Python = [...python, ...ordinaryRows("Python")];
+    const descriptions: Readonly<Record<string, string>> = { "python-org/python-pop-0": "Launches rockets.", "python-org/python-pop-2": "Compute engines." };
+    const run = async (profileVersion: "local-real-rounds.v5" | "local-real-rounds.v6") => {
+      const offered: string[] = [];
+      let harness: Awaited<ReturnType<typeof makeHarness>>;
+      harness = await makeHarness({
+        collectStackMetadata: metadataFrom(rows),
+        describeRepository: async ({ repository }) => {
+          harness.calls.push(`describe:${repository}`);
+          return accepted({ description: descriptions[repository] ?? `About ${repository.split("/")[1]}`, fork: false, archived: false }, "2");
+        },
+        generateProject: ({ profile, rounds }) => {
+          for (const round of rounds.filter(({ candidate }) => (candidate as any).detectedLanguage === "Python")) {
+            offered.push(String((round.candidate as any).repository), ...round.distractors.map((option) => option.repository));
+          }
+          return { fixtures: Array(2 * profile.stack.configurations.length).fill({ kind: "PROJECT" }) } as any;
+        },
+      }, { profile: await loadProfile(profileVersion) });
+      await prepareLocalExperiment(harness.dependencies);
+      return { harness, offered: new Set(offered) };
+    };
+    const v5 = await run("local-real-rounds.v5");
+    expect(v5.harness.calls.filter((call) => call.startsWith("fetch:python-pop-0"))).toHaveLength(1);
+    expect(v5.offered).toContain("python-org/python-pop-2");
+
+    const { harness, offered } = await run("local-real-rounds.v6");
+    // Each repository is described once, before any of its files is fetched.
+    const describes = harness.calls.filter((call) => call.startsWith("describe:python-org/"));
+    expect(new Set(describes).size).toBe(describes.length);
+    expect(harness.calls.indexOf("describe:python-org/python-pop-0")).toBeLessThan(harness.calls.findIndex((call) => call.startsWith("fetch:python-pop-0:")));
+    expect(harness.calls.filter((call) => call.startsWith("fetch:python-pop-0"))).toHaveLength(2);
+    expect(offered).toEqual(new Set(["python-org/python-pop-0", "python-org/python-pop-1", "python-org/python-pop-3", "python-org/python-pop-4"]));
+    expect((harness.reports[0] as any).diagnostics).toContainEqual({ stage: "SCREENING", reasonCode: "PROJECT_WORDS_IN_EXCERPT", count: 2 });
+    expect(logLines(harness.calls)).toContain("log:PREPARATION_DECKS project,language,before-after");
+  });
+
   it("offers a repository in one language's project rounds only", async () => {
     // python-org/python-pop-2 also has a popular Ruby file; it stays a Python decoy and Ruby offers its own repositories.
     const rows = stackRowsWith(ordinaryRows("Python"));

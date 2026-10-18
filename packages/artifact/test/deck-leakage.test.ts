@@ -90,8 +90,9 @@ describe("deck leakage", () => {
       .toBeLessThanOrEqual(limit);
   });
 
-  // #77: three panes still echo their own option's name or description (`Aws::SQS`, `Utility`, `React.Component`);
-  // replacing them needs files the journal does not hold.
+  // #77: three panes still echo their own option's name or description (`Aws::SQS`, `Utility`, `React.Component`).
+  // From v6 on no pane shares a distinctive word with any option (`sharedOptionWords`), so this passes from the v6
+  // run on, when it becomes a plain `it`.
   it.runIf(deck("project") !== undefined).fails("project panes share no telling words with any option (#77)", () => {
     const { fixtures } = deck("project")!;
     expect(accuracy(fixtures, paneOverlapSolver)).toBeLessThanOrEqual(chance(fixtures[0]!) + TOLERANCE);

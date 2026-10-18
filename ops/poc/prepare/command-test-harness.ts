@@ -1,4 +1,4 @@
-import { LANGUAGE_SLUGS } from "../../../packages/artifact/src/index";
+import { LANGUAGE_SLUGS, type ProfileVersion } from "../../../packages/artifact/src/index";
 import { createRunReport } from "./run-report";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
@@ -22,8 +22,9 @@ export const accepted = <Value>(value: Value, digit = "a") => ({
  * The run's profile without its curated section, and with a before-or-after pool of five; the Stack decks hold
  * two rounds per language. Curated decks are tested with the profiles `loadCuratedProfile` builds.
  */
-export const loadProfile = async (): Promise<CrawlProfile> => {
-  const raw = JSON.parse(await readFile(profilePath, "utf8"));
+/** The v5 profile without its curated section; `profileVersion` reads it as a later version. */
+export const loadProfile = async (profileVersion: ProfileVersion = "local-real-rounds.v5"): Promise<CrawlProfile> => {
+  const raw = { ...JSON.parse(await readFile(profilePath, "utf8")), profileVersion };
   delete raw.curated;
   raw.selection = { ...raw.selection, beforeAfterPool: 5 };
   return parseCrawlProfile(raw);

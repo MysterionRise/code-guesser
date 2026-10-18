@@ -39,6 +39,7 @@ import { familyDeckRule, type FamilyMember } from "./family";
 import { parseFrameworks, validateFramework, type CuratedFramework } from "./framework";
 import { missingLineDeckRule, validateMissingLine } from "./missing-line";
 import { nameFunctionDeckRule, validateNameFunction } from "./name-function";
+import { mentionsRepository, namesRepository, sharedOptionWords } from "./project";
 import {
   pinKey, validateCuratedSource, validateExerciseSource, validateFixSource, validateFrameworkSource, validateLineageSource, validateMissingLineSource, validateNameFunctionSource,
   validateStackSource, validateVulnerableLineSource, type StackIdentity,
@@ -74,12 +75,6 @@ const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u;
 export const AUTHORSHIP_CLAIM = /\b(?:human[- ]written|written by (?:a |an )?human|a human wrote|human-only|ai[- ]generated|code style (?:shows|proves|indicates)|(?:ai|authorship|gpt|llm|chatgpt)[- ](?:code |content |text |writing )?detect(?:or|ors|ion))\b/iu;
 
 const escape = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
-/** Case-insensitive whole-word owner, name, or `owner/name`. */
-export const mentionsRepository = (haystack: string, repository: string): boolean => {
-  const [owner, name] = repository.split("/") as [string, string];
-  return [repository, owner, name].some((value) =>
-    new RegExp(`(^|[^A-Za-z0-9_])${escape(value)}([^A-Za-z0-9_]|$)`, "iu").test(haystack));
-};
 /** Case-sensitive whole-word language label; `+` and `#` count as word characters for C++ and C#. */
 export const mentionsLabel = (haystack: string, label: string): boolean =>
   new RegExp(`(^|[^A-Za-z0-9_+#])${escape(label)}([^A-Za-z0-9_+#]|$)`, "u").test(haystack);
@@ -346,14 +341,21 @@ type Semantics = Readonly<{
   source: ParsedSource;
 }>;
 
-/** The answer is the recorded repository, and no pre-answer text other than the labels names a candidate. */
-const validateProject = ({ panes, prompt, candidates, clues, correctCandidateId, source }: Semantics): void => {
+/**
+ * The answer is the recorded repository, and no pre-answer text other than the labels names a candidate. From v6 on
+ * (#77), a name counts inside identifiers and by its distinctive parts too, and the pane shares no distinctive word
+ * with any option's name or description.
+ */
+const validateProject = ({ snapshot, panes, prompt, candidates, clues, correctCandidateId, source }: Semantics): void => {
   if (candidates.some(({ id, label }) => !REPOSITORY.test(label) || id !== projectCandidateId(label))) fail();
   const correct = candidates.find(({ id }) => id === correctCandidateId) ?? fail();
   if (correct.label !== source.repository || panes[0]!.label !== null || source.excerptHash !== rawHash(panes[0]!.text)) fail();
+  const strict = profileAtLeast(snapshot.profileVersion, "local-real-rounds.v6");
+  const names = strict ? namesRepository : mentionsRepository;
   for (const part of [panes[0]!.text, prompt, ...clues]) {
-    if (candidates.some(({ label }) => mentionsRepository(part, label))) fail();
+    if (candidates.some(({ label }) => names(part, label))) fail();
   }
+  if (strict && candidates.some(({ label, detail }) => sharedOptionWords(panes[0]!.text, label, detail).length > 0)) fail();
 };
 
 /**

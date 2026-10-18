@@ -6,6 +6,7 @@ export * from "./family";
 export * from "./framework";
 export * from "./missing-line";
 export * from "./name-function";
+export * from "./project";
 export * from "./question-layer";
 export * from "./source";
 export * from "./validation";
