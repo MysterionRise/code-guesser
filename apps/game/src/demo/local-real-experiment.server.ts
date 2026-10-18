@@ -9,6 +9,7 @@ import type {
   RevealResponse,
 } from "../components/arcade/arcade-session";
 import {
+  LINE_KINDS,
   createPublicModeContract,
   type PublicModeContract,
   type PublicRoundInput,
@@ -229,9 +230,9 @@ const dealFrom = (derived: DerivedDeck, artifact: JsonRecord, random: () => numb
     ...publicRound,
     mode: {
       ...publicRound.mode,
-      // Two options keep their natural A-then-B order and a fix round's lines their line order, which the deck
-      // already balances; other four-option rounds are reshuffled every session.
-      candidates: publicRound.mode.candidates.length > 2 && publicRound.mode.kind !== "fix"
+      // Two options keep their natural A-then-B order and a fix or vulnerable-line round's lines their line order,
+      // which the deck already balances; other four-option rounds are reshuffled every session.
+      candidates: publicRound.mode.candidates.length > 2 && !LINE_KINDS.has(publicRound.mode.kind)
         ? shuffle(publicRound.mode.candidates, random) : [...publicRound.mode.candidates],
     },
   }));

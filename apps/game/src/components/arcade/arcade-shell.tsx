@@ -18,7 +18,7 @@ import {
 import { SESSION_ENDED_MESSAGE, points } from "./arcade-text";
 import { CodePanes } from "./code-panes";
 import { HintBar } from "./hint-bar";
-import { optionLine, type PublicModeContract } from "./mode-contract";
+import { LINE_KINDS, optionLine, type PublicModeContract } from "./mode-contract";
 import { ArcadeHeader, RoundTrack } from "./round-header";
 import { QuestionScaffold, markedLines } from "./question-layer";
 import { RoundReveal } from "./round-reveal";
@@ -58,13 +58,14 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
   // Long lines scroll by default; a player can wrap them, and the choice holds across rounds (#46).
   const [wrap, setWrap] = React.useState(false);
   const round = mode.rounds[session.roundIndex]!;
-  // A fix round's options point at pane lines: the pane numbers its lines, each option shows its line's code, and
-  // the line under the focused or chosen option (or, once revealed, the answer) is highlighted.
+  // A fix or vulnerable-line round's options point at pane lines: the pane numbers its lines, each option shows its
+  // line's code, and the line under the focused or chosen option (or, once revealed, the answer) is highlighted.
   // A Marker hunt layer's hint points at lines, so its round numbers them too (#128).
-  const numbered = (round.mode.kind === "fix" || round.scaffold?.design === "marker-hunt") && round.content.panes.length === 1;
+  const lines = LINE_KINDS.has(round.mode.kind);
+  const numbered = (lines || round.scaffold?.design === "marker-hunt") && round.content.panes.length === 1;
   const paneLines = numbered ? round.content.panes[0]!.text.split("\n") : [];
   const labelOf = (candidateId: string | null) => round.mode.candidates.find((candidate) => candidate.candidateId === candidateId)?.label ?? "";
-  const highlighted = numbered && round.mode.kind === "fix"
+  const highlighted = numbered && lines
     ? optionLine(labelOf(session.reveal?.answerCandidateId ?? focusedCandidate ?? (selection === "" ? null : selection)))
     : undefined;
   const roundTitle = React.useRef<HTMLHeadingElement>(null);
@@ -213,7 +214,7 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
               void submit(target.value);
             }
           }}>
-          <AnswerOptions round={round} numbered={numbered && round.mode.kind === "fix"} paneLines={paneLines} selection={selection}
+          <AnswerOptions round={round} numbered={numbered && lines} paneLines={paneLines} selection={selection}
             answerCandidateId={session.reveal?.answerCandidateId ?? null} lockedCandidateId={session.lockedCandidateId}
             disabled={session.reveal !== null || busy} onSelect={setSelection} onFocusCandidate={setFocusedCandidate} />
 

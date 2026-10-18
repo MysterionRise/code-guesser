@@ -28,6 +28,7 @@ export const RULE_SEMANTICS: Readonly<Record<FixtureKind, string>> = Object.free
   FRAMEWORK: "curated-framework.v1",
   EXERCISE: "curated-exercise.v1",
   FIX: "dataset-one-line-fix.v3",
+  VULNERABLE_LINE: "advisory-one-line-fix.v1",
 });
 
 export interface PrivateReveal {

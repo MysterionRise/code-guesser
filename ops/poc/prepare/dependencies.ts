@@ -3,6 +3,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { readAdvisories, readAdvisoryFix } from "./github-advisories";
 import { bindFixCommit, readDatasetBlob, readDatasetBugs } from "./github-fixes";
 import { generateBeforeAfterRounds } from "./before-after-rounds";
 import { publishArtifact } from "./artifact-store";
@@ -183,6 +184,14 @@ export const defaultDependencies = (options: DependencyOptions = { journal: "fre
   readDatasetBlob: (options) => {
     const runtime = runtimeOf(options);
     return stage(runtime, () => readDatasetBlob({ profile: options.profile, transport: runtime.transport, retry: runtime.retry }, options));
+  },
+  readAdvisories: (options) => {
+    const runtime = runtimeOf(options);
+    return stage(runtime, () => readAdvisories({ profile: options.profile, transport: runtime.transport, retry: runtime.retry }, options));
+  },
+  readAdvisoryFix: (options) => {
+    const runtime = runtimeOf(options);
+    return stage(runtime, () => readAdvisoryFix({ profile: options.profile, transport: runtime.transport, retry: runtime.retry }, options));
   },
   bindFixCommit: (options) => {
     const runtime = runtimeOf(options);

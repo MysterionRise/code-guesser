@@ -18,7 +18,7 @@ import {
   type ExperimentArtifact,
   type ExperimentFixture,
 } from "./model";
-import { showsFrameworkSymbol, spellsFramework } from "../../../packages/artifact/src/index";
+import { namesAdvisory, showsFrameworkSymbol, spellsFramework } from "../../../packages/artifact/src/index";
 import { namesExercise } from "./exercise-rounds";
 import {
   STACK_LANGUAGES, mentionsLabel, poolSizes, type AlgorithmEntry, type CrawlProfile, type ExerciseEntry, type FrameworkEntry,
@@ -64,7 +64,7 @@ export const containsProtected = (publicText: string, value: string): boolean =>
 export const PROTECTED_SOURCE_KEYS = [
   "repository", "repositoryUrl", "authorName", "authorLogin", "authorSourceUrl", "path",
   "blob", "rawContentHash", "licenseName", "licenseSpdx", "licenseFileUrl", "commit",
-  "commitUrl", "blobUrl",
+  "commitUrl", "blobUrl", "advisory",
 ] as const;
 
 const parseResponseHashes = (values: readonly string[]): readonly string[] => {
@@ -136,6 +136,8 @@ const requireOwnCandidatesAbsent = (
       const entry = exerciseEntries.find((known) => known.label === label);
       return entry === undefined || namesExercise(value, [entry], part === "PANES");
     })) fail(`PUBLIC_CONTAINMENT_CANDIDATE_IN_${part}`);
+    // An advisory id, a CVE id, or the advisory's package would let a player look the fix up.
+    if (fixture.kind === "VULNERABLE_LINE" && namesAdvisory(value, String(fixture.source.packageName))) fail(`PUBLIC_CONTAINMENT_ADVISORY_IN_${part}`);
   }
 };
 
@@ -186,8 +188,8 @@ const deckTemplate = (profile: CrawlProfile, id: DeckId): Readonly<{ title: stri
   isCuratedDeck(id) ? profile.curated?.[id]?.templates ?? fail() : profile.templates[TEMPLATE_KEYS[id]];
 
 /**
- * The curated repositories' pins, the algorithms and frameworks a round may offer, and the bug datasets, so the parser
- * can check rounds.
+ * The curated repositories' pins, the algorithms and frameworks a round may offer, the bug datasets, and the
+ * advisories' ecosystems and CWE hints, so the parser can check rounds.
  */
 const curatedSnapshot = (profile: CrawlProfile) => {
   if (!profile.curated) return {};
@@ -205,9 +207,12 @@ const curatedSnapshot = (profile: CrawlProfile) => {
   const exercises = profile.curated.exercise?.families.flatMap((family) => family.exercises.map((entry) => Object.freeze({
     id: entry.id, label: entry.label, family: family.id, names: entry.names, symbols: entry.symbols,
   }))).sort((left, right) => left.id < right.id ? -1 : 1);
+  const vulnerable = profile.curated["vulnerable-line"];
+  const advisories = vulnerable && Object.freeze({ ecosystems: vulnerable.ecosystems, published: vulnerable.published,
+    cwes: Object.freeze(vulnerable.cwes.map(({ id, hint }) => Object.freeze({ id, hint }))) });
   return { curated: Object.freeze({ pins: Object.freeze(pins), ...(algorithms ? { algorithms: Object.freeze(algorithms) } : {}),
     ...(datasets ? { datasets: Object.freeze(datasets) } : {}), ...(frameworks ? { frameworks: Object.freeze(frameworks) } : {}),
-    ...(exercises ? { exercises: Object.freeze(exercises) } : {}) }) };
+    ...(exercises ? { exercises: Object.freeze(exercises) } : {}), ...(advisories ? { advisories } : {}) }) };
 };
 
 export const composeExperimentArtifact = (options: ComposeOptions): ComposedExperiment => {

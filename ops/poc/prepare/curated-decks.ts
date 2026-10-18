@@ -16,7 +16,9 @@ import { selectFramework } from "./select-framework";
 import { selectMissingLine } from "./select-missing-line";
 import { selectNameFunction } from "./select-name-function";
 import { selectOutput } from "./select-output";
+import { selectVulnerableLine } from "./select-vulnerable-line";
 import type { Context, PreparationDependencies } from "./types";
+import { generateVulnerableLineRounds } from "./vulnerable-line-rounds";
 
 /**
  * The curated decks (#36): each one is an entry here, run in this order after the Stack and search decks. The
@@ -87,6 +89,12 @@ export const CURATED_DECKS: readonly CuratedDeck[] = Object.freeze([
     configured: (profile) => profile.curated?.exercise !== undefined,
     select: selectExercise,
     generate: generateExerciseRounds,
+  }),
+  deck({
+    id: "vulnerable-line",
+    configured: (profile) => profile.curated?.["vulnerable-line"] !== undefined,
+    select: selectVulnerableLine,
+    generate: generateVulnerableLineRounds,
   }),
 ]);
 

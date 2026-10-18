@@ -3,10 +3,13 @@ export interface Candidate { candidateId: string; label: string; detail: string 
 export interface PublicClue { order: 1 | 2 }
 export interface Pane { label: string | null; text: string }
 export type RoundModeKind = "project" | "language" | "before-after" | "algorithm" | "output" | "fix" | "missing-line" | "name-function"
-  | "framework" | "exercise";
+  | "framework" | "exercise" | "vulnerable-line";
 const ROUND_KINDS: readonly RoundModeKind[] = [
   "project", "language", "before-after", "algorithm", "output", "fix", "missing-line", "name-function", "framework", "exercise",
+  "vulnerable-line",
 ];
+/** Kinds whose options name lines of the pane: a fix round's, and a vulnerable-line round's (#59). */
+export const LINE_KINDS: ReadonlySet<RoundModeKind> = new Set<RoundModeKind>(["fix", "vulnerable-line"]);
 /** A fix round's options name pane lines, `Line 7`; any other label names none. */
 export const optionLine = (label: string): number | undefined => {
   const line = /^Line ([1-9][0-9]*)$/u.exec(label)?.[1];

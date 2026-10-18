@@ -356,6 +356,19 @@ gate: changing queries, retries, ceilings, deck rules, or running
       - `family.ts` holds the rules both family decks share: whole-family options, members spelled by word, and
         each member answered equally often (`familyDeckRule`).
       - Goes live with the v6 run (#129). Dry run: `docs/review/evidence/2026-10-15-exercise-dry-run.md`.
+    - **Spot the vulnerable line (#59), deferred past v1.0:** a Reason deck of one-line fixes that reviewed GitHub
+      advisories link. `github-advisories.ts` (listings and the one-line commit check), `select-vulnerable-line.ts`,
+      `vulnerable-line-rounds.ts`, and `packages/artifact/src/vulnerable-line.ts` (kind `VULNERABLE_LINE`, deck
+      `vulnerable-line`). Rounds look and balance like fix rounds (`fixWindows`, `pairedDecoys`, `linesBalanced`).
+      - Each ecosystem is listed once per `published` window, the first page of 100 oldest first, so no cursor is
+        needed; the request policy allows exactly that listing. An advisory needs one fix commit, a CWE the profile
+        gives a hint for, and no withdrawal; one round per repository.
+      - The commit must replace one line of one source file, beside tests, notes, and manifests only; the fix binder
+        (`bindFixCommit`) then confirms it against the files. Hint 1 names the CWE; nothing before the answer holds
+        an advisory or CVE id or the package. A round whose line is the busiest or longest option in every window is
+        refused, since security fixes sit on such lines.
+      - The dry run measured about 87 commit reads per balanced round, so the owner deferred it on 2026-10-18; the
+        v6 profile leaves it out. Dry run: `docs/review/evidence/2026-10-18-vulnerable-line-dry-run.md`.
     - **Registry (#36):** `ops/poc/prepare/curated-decks.ts` lists them in
       run order (`configured`, `select`, `generate`); ids live in
       `curated-deck-ids.ts`, and a deck's profile section is keyed by its id
@@ -520,7 +533,9 @@ when the preparer throws a code this section does not name.
     not answered equally often), `FRAMEWORK_NAME_SHOWN` (a pane, prompt, or hint still
     names a framework), `EXERCISE_FAMILY_UNBALANCED` (a family's exercises are not each
     answered equally often from different tracks), `EXERCISE_NAME_SHOWN` (a pane, prompt, or
-    hint names an option), `TEMPLATE_PLACEHOLDER_REJECTED`.
+    hint names an option), `VULNERABLE_LINE_RANK_UNBALANCED` (vulnerable-line answers not balanced
+    as fix answers are), `VULNERABLE_LINE_ADVISORY_SHOWN` (a pane, prompt, or hint holds an advisory
+    or CVE id or the package), `TEMPLATE_PLACEHOLDER_REJECTED`.
 - Publication: `HASH_MISMATCH`, `INVALID_ARTIFACT`, `INVALID_HASH`, and
   `REPORT_*_FAILED` (staging, committing, rolling back, or finalizing the
   report). The previous artifact and pin stay.
@@ -628,6 +643,15 @@ add up.
   masking. `EXERCISE_SCREEN`: screened bytes that differ from the bound file's. `EXERCISE_FAMILY_SHORT`:
   a family dropped whole because one of its exercises found too few tracks. A track without the
   exercise fails admission at its path, under `FILE_*`.
+- Vulnerable line (#59): `VULNERABLE_ADVISORY_SHAPE`, an advisory listing that is not a page of
+  reviewed advisories in its window and order. Before any commit is read: `VULNERABLE_WITHDRAWN`,
+  `VULNERABLE_REFERENCES` (not exactly one fix commit), `VULNERABLE_CWE` (no CWE the profile has a
+  hint for), and `REPOSITORY_REPEATED`. The commit: `VULNERABLE_PARENT` (a merge), `VULNERABLE_CHANGE`
+  (code beyond one replaced line, the usual case), `VULNERABLE_LANGUAGE` (a file of a language with no
+  rule, such as PHP), `VULNERABLE_VERSION` (a version bump); then the fix binder's `FIX_*` checks.
+  The file: `VULNERABLE_PACKAGE_SHOWN` (every window names the package), `VULNERABLE_STANDS_OUT` (the
+  line is the busiest, longest, most indented, or most rarely worded option in every window).
+  `VULNERABLE_RANKS_UNBALANCED`: no choice of windows balances the deck.
 - `FIX_PATCH_WIDE`: a dataset patch that changes more than one line (most).
   - `FIX_CLAIM`: the fix's lines, which the reveal quotes, claim something
     about authorship (#32).

@@ -70,6 +70,7 @@ describe("deck leakage", () => {
   it.runIf(deck("output") !== undefined)("remembering output or fix reveals earns nothing beyond replaying them", () => {
     memoryWithinReplay(deck("output")!.fixtures);
     if (deck("fix") !== undefined) memoryWithinReplay(deck("fix")!.fixtures);
+    if (deck("vulnerable-line") !== undefined) memoryWithinReplay(deck("vulnerable-line")!.fixtures);
   });
 
   // #81: six families of four, each member the answer once, so three reveals in a family give the fourth away;
@@ -166,35 +167,38 @@ describe("deck leakage", () => {
     expect(accuracy(fixtures, (fixture, label) => transformsArguments(fixture, label) ? 1 : 0)).toBeLessThanOrEqual(chance(fixtures[0]!) + TOLERANCE);
   });
 
-  it.runIf(deck("fix") !== undefined)("fix answers take every position, centrality, and nearly every length rank equally", () => {
-    const { fixtures } = deck("fix")!;
-    const limit = chance(fixtures[0]!) + TOLERANCE;
-    const lineOf = (label: string) => Number(label.slice("Line ".length));
-    const paneOf = (fixture: ParsedFixture) => fixture.panes[0]!.text.split("\n");
-    const solvers = [
-      ...[0, 1, 2, 3].map((index) => (fixture: ParsedFixture, label: string) => fixture.candidates.findIndex((option) => option.label === label) === index ? 1 : 0),
-      (fixture: ParsedFixture, label: string) => -Math.abs(2 * lineOf(label) - paneOf(fixture).length - 1),
-      (fixture: ParsedFixture, label: string) => Math.abs(2 * lineOf(label) - paneOf(fixture).length - 1),
-      (fixture: ParsedFixture, label: string) => paneOf(fixture)[lineOf(label) - 1]!.trim().length,
-      (fixture: ParsedFixture, label: string) => -paneOf(fixture)[lineOf(label) - 1]!.trim().length,
-    ];
-    for (const solver of solvers) expect(accuracy(fixtures, solver)).toBeLessThanOrEqual(limit);
-  });
+  // A vulnerable-line deck (#59) offers lines as the fix deck does, and is held to the same solvers.
+  for (const id of ["fix", "vulnerable-line"] as const) {
+    it.runIf(deck(id) !== undefined)(`${id} answers take every position, centrality, and nearly every length rank equally`, () => {
+      const { fixtures } = deck(id)!;
+      const limit = chance(fixtures[0]!) + TOLERANCE;
+      const lineOf = (label: string) => Number(label.slice("Line ".length));
+      const paneOf = (fixture: ParsedFixture) => fixture.panes[0]!.text.split("\n");
+      const solvers = [
+        ...[0, 1, 2, 3].map((index) => (fixture: ParsedFixture, label: string) => fixture.candidates.findIndex((option) => option.label === label) === index ? 1 : 0),
+        (fixture: ParsedFixture, label: string) => -Math.abs(2 * lineOf(label) - paneOf(fixture).length - 1),
+        (fixture: ParsedFixture, label: string) => Math.abs(2 * lineOf(label) - paneOf(fixture).length - 1),
+        (fixture: ParsedFixture, label: string) => paneOf(fixture)[lineOf(label) - 1]!.trim().length,
+        (fixture: ParsedFixture, label: string) => -paneOf(fixture)[lineOf(label) - 1]!.trim().length,
+      ];
+      for (const solver of solvers) expect(accuracy(fixtures, solver)).toBeLessThanOrEqual(limit);
+    });
 
-  it.runIf(deck("fix") !== undefined)("fix answers are no extreme of any line feature, no option is prose, and the hint's pair hides the longer line", () => {
-    const { fixtures } = deck("fix")!;
-    const limit = chance(fixtures[0]!) + TOLERANCE;
-    // The busiest line (most operators and brackets), the longest, the most indented, the one with most words used
-    // once, and the reverse of each, ties split.
-    for (const feature of Object.keys(LINE_FEATURES)) {
-      for (const direction of [1, -1] as const) expect(accuracy(fixtures, lineFeatureSolver(feature, direction))).toBeLessThanOrEqual(limit);
-    }
-    // No option is a comment or docstring line a player could rule out, judged from the pane alone.
-    expect(fixtures.flatMap((fixture) => fixture.candidates.filter(({ label }) => proseLines(paneLines(fixture)).has(Number(label.slice("Line ".length))))))
-      .toEqual([]);
-    // After the second hint two options are left: picking the longer or the shorter is a coin toss.
-    for (const direction of [1, -1] as const) expect(accuracy(fixtures, pairLengthSolver(direction))).toBeLessThanOrEqual(0.5 + TOLERANCE);
-  });
+    it.runIf(deck(id) !== undefined)(`${id} answers are no extreme of any line feature, no option is prose, and the hint's pair hides the longer line`, () => {
+      const { fixtures } = deck(id)!;
+      const limit = chance(fixtures[0]!) + TOLERANCE;
+      // The busiest line (most operators and brackets), the longest, the most indented, the one with most words used
+      // once, and the reverse of each, ties split.
+      for (const feature of Object.keys(LINE_FEATURES)) {
+        for (const direction of [1, -1] as const) expect(accuracy(fixtures, lineFeatureSolver(feature, direction))).toBeLessThanOrEqual(limit);
+      }
+      // No option is a comment or docstring line a player could rule out, judged from the pane alone.
+      expect(fixtures.flatMap((fixture) => fixture.candidates.filter(({ label }) => proseLines(paneLines(fixture)).has(Number(label.slice("Line ".length))))))
+        .toEqual([]);
+      // After the second hint two options are left: picking the longer or the shorter is a coin toss.
+      for (const direction of [1, -1] as const) expect(accuracy(fixtures, pairLengthSolver(direction))).toBeLessThanOrEqual(0.5 + TOLERANCE);
+    });
+  }
 
   // #75: the newer pane is usually the bigger one (75% by lines, 80% by characters); balancing it needs commits
   // the journal does not hold.

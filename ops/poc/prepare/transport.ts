@@ -74,6 +74,7 @@ export interface BoundedTransport {
 
 const pathTemplate = (provider: Provider, pathname: string): string => {
   if (provider === "github" && pathname === "/search/commits") return "/search/commits";
+  if (provider === "github" && pathname === "/advisories") return "/advisories";
   if (provider === "github") return "/repos/{owner}/{repository}/{resource}";
   if (provider === "huggingFace") return `/datasets/${STACK_DATASET}/{resource}`;
   return "/content/{object}";

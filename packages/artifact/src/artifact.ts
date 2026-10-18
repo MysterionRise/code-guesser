@@ -39,8 +39,9 @@ import { missingLineDeckRule, validateMissingLine } from "./missing-line";
 import { nameFunctionDeckRule, validateNameFunction } from "./name-function";
 import {
   pinKey, validateCuratedSource, validateExerciseSource, validateFixSource, validateFrameworkSource, validateLineageSource, validateMissingLineSource, validateNameFunctionSource,
-  validateStackSource, type StackIdentity,
+  validateStackSource, validateVulnerableLineSource, type StackIdentity,
 } from "./source";
+import { namesAdvisory, parseAdvisorySnapshot, vulnerableLineHint, type AdvisorySnapshot } from "./vulnerable-line";
 import {
   canonicalHash,
   codeText,
@@ -282,6 +283,8 @@ interface Snapshot {
   readonly frameworks: ReadonlyMap<string, CuratedFramework>;
   /** The exercises an exercise round may offer, by id (#58). */
   readonly exercises: ReadonlyMap<string, FamilyMember>;
+  /** The ecosystems vulnerable-line advisories come from, and the hint each CWE gives (#59). */
+  readonly advisories: AdvisorySnapshot;
 }
 
 type Semantics = Readonly<{
@@ -381,10 +384,10 @@ const validateOutput = ({ panes, candidates, clues, correctCandidateId, source }
 };
 
 /**
- * Options name four non-blank lines of the pane in line order; the answer is the line the fix changed, counted
- * from the pane's first line; the first hint names the change's kind and the second the answer and one option.
+ * A fix or vulnerable-line round: options name four non-blank lines of the pane in line order; the answer is the line
+ * the fix changed, counted from the pane's first line; and the second hint names the answer and one option.
  */
-const validateFix = ({ panes, candidates, clues, correctCandidateId, source }: Semantics): void => {
+const validateFixLines = ({ panes, candidates, clues, correctCandidateId, source }: Semantics): void => {
   const lines = panes[0]!.text.split("\n");
   const numbers = candidates.map(({ id, label }) => {
     const line = Number(/^Line ([1-9][0-9]*)$/u.exec(label)?.[1] ?? fail());
@@ -394,10 +397,27 @@ const validateFix = ({ panes, candidates, clues, correctCandidateId, source }: S
   if (numbers.some((line, index) => index > 0 && line <= numbers[index - 1]!)) fail();
   const answer = Number(source.changedLine) - Number(source.windowStart) + 1;
   if (correctCandidateId !== fixCandidateId(answer) || source.excerptHash !== rawHash(panes[0]!.text)) fail();
-  if (!(Object.values(FIX_CHANGE_HINTS) as readonly string[]).includes(clues[0]!)) fail();
   const pair = /^It is line ([1-9][0-9]*) or line ([1-9][0-9]*)\.$/u.exec(clues[1]!) ?? fail();
   const named = [Number(pair[1]), Number(pair[2])];
   if (named[0]! >= named[1]! || !named.includes(answer) || named.some((line) => !numbers.includes(line))) fail();
+};
+
+/** A fix round's lines, and a first hint that names the change's kind. */
+const validateFix = (semantics: Semantics): void => {
+  validateFixLines(semantics);
+  if (!(Object.values(FIX_CHANGE_HINTS) as readonly string[]).includes(semantics.clues[0]!)) fail();
+};
+
+/**
+ * A vulnerable-line round's lines as a fix round's (#59); the first hint names the advisory's CWE, and no text shown
+ * before the answer holds an advisory or CVE id or the package the advisory was filed under.
+ */
+const validateVulnerableLine = (semantics: Semantics): void => {
+  validateFixLines(semantics);
+  const { snapshot, panes, prompt, clues, source } = semantics;
+  const cwe = String(source.cwe);
+  if (clues[0] !== vulnerableLineHint(cwe, snapshot.advisories.cwes.get(cwe) ?? fail())) fail();
+  if ([panes[0]!.text, prompt, ...clues].some((part) => namesAdvisory(part, String(source.packageName)))) fail();
 };
 
 const VALIDATORS: Readonly<Record<FixtureKind, (semantics: Semantics) => void>> = Object.freeze({
@@ -406,6 +426,7 @@ const VALIDATORS: Readonly<Record<FixtureKind, (semantics: Semantics) => void>> 
   NAME_FUNCTION: (semantics: Semantics) => validateNameFunction(semantics),
   FRAMEWORK: (semantics: Semantics) => validateFramework({ ...semantics, frameworks: semantics.snapshot.frameworks }),
   EXERCISE: (semantics: Semantics) => validateExercise({ ...semantics, exercises: semantics.snapshot.exercises }),
+  VULNERABLE_LINE: validateVulnerableLine,
 });
 
 /** Where each kind's source comes from, and the check that binds it to this snapshot. */
@@ -420,6 +441,7 @@ const SOURCE_VALIDATORS: Readonly<Record<FixtureKind, (value: unknown, snapshot:
   NAME_FUNCTION: (value: unknown, snapshot: Snapshot) => validateNameFunctionSource(value, snapshot.id, snapshot.pins),
   FRAMEWORK: (value: unknown, snapshot: Snapshot) => validateFrameworkSource(value, snapshot.id, snapshot.pins),
   EXERCISE: (value: unknown, snapshot: Snapshot) => validateExerciseSource(value, snapshot.id, snapshot.pins),
+  VULNERABLE_LINE: (value: unknown, snapshot: Snapshot) => validateVulnerableLineSource(value, snapshot.id, snapshot.advisories),
 });
 
 /** Rules a whole deck must keep beyond its rounds' own. */
@@ -445,29 +467,35 @@ const DECK_RULES: Readonly<Partial<Record<DeckId, (fixtures: readonly ParsedFixt
       if (Math.max(...ranks) - Math.min(...ranks) > 1) fail();
     }
   },
-  // By position and by distance from the pane's middle, every rank holds the answer equally often; by length and by
-  // complexity, nearly. Picking the line with the most or least of a feature, ties split, scores little better than
-  // chance, and after the second hint the answer is the longer of its pair in about half the deck.
-  fix: (fixtures: readonly ParsedFixture[]) => {
-    const counts = FIX_ORDERS.map(() => [0, 0, 0, 0]);
-    const limits = fixExtremeLimits(fixtures.length);
-    const extremes = limits.map(() => 0);
-    let longer = 0;
-    for (const fixture of fixtures) {
-      const lines = fixture.candidates.map(({ label }) => Number(label.slice("Line ".length)));
-      const answer = lines[fixture.candidates.findIndex(({ id }) => id === fixture.correctCandidateId)]!;
-      const pane = fixture.panes[0]!.text.split("\n");
-      fixRanks(answer, lines, pane).forEach((rank, order) => { counts[order]![rank]! += 1; });
-      fixExtremeScores(answer, lines, pane).forEach((score, index) => { extremes[index]! += score; });
-      const pair = /^It is line ([1-9][0-9]*) or line ([1-9][0-9]*)\.$/u.exec(fixture.clues[1]!)!.slice(1).map(Number);
-      longer += pairLongerScore(answer, pair.find((line) => line !== answer)!, pane);
-    }
-    const slack = fixSlack(fixtures.length);
-    if (counts.some((ranks, order) => Math.max(...ranks) > Math.ceil(fixtures.length / 4) + slack[order]!)
-      || extremes.some((score, index) => score > limits[index]! + SCORE_TOLERANCE)
-      || Math.abs(longer - fixtures.length / 2) > pairSlack(fixtures.length)) fail();
-  },
+  fix: (fixtures: readonly ParsedFixture[]) => fixDeckRule(fixtures),
+  "vulnerable-line": (fixtures: readonly ParsedFixture[]) => fixDeckRule(fixtures),
 });
+
+/**
+ * A fix or vulnerable-line deck: by position and by distance from the pane's middle, every rank holds the answer
+ * equally often; by length and by complexity, nearly. Picking the line with the most or least of a feature, ties
+ * split, scores little better than chance, and after the second hint the answer is the longer of its pair in about
+ * half the deck.
+ */
+const fixDeckRule = (fixtures: readonly ParsedFixture[]): void => {
+  const counts = FIX_ORDERS.map(() => [0, 0, 0, 0]);
+  const limits = fixExtremeLimits(fixtures.length);
+  const extremes = limits.map(() => 0);
+  let longer = 0;
+  for (const fixture of fixtures) {
+    const lines = fixture.candidates.map(({ label }) => Number(label.slice("Line ".length)));
+    const answer = lines[fixture.candidates.findIndex(({ id }) => id === fixture.correctCandidateId)]!;
+    const pane = fixture.panes[0]!.text.split("\n");
+    fixRanks(answer, lines, pane).forEach((rank, order) => { counts[order]![rank]! += 1; });
+    fixExtremeScores(answer, lines, pane).forEach((score, index) => { extremes[index]! += score; });
+    const pair = /^It is line ([1-9][0-9]*) or line ([1-9][0-9]*)\.$/u.exec(fixture.clues[1]!)!.slice(1).map(Number);
+    longer += pairLongerScore(answer, pair.find((line) => line !== answer)!, pane);
+  }
+  const slack = fixSlack(fixtures.length);
+  if (counts.some((ranks, order) => Math.max(...ranks) > Math.ceil(fixtures.length / 4) + slack[order]!)
+    || extremes.some((score, index) => score > limits[index]! + SCORE_TOLERANCE)
+    || Math.abs(longer - fixtures.length / 2) > pairSlack(fixtures.length)) fail();
+};
 
 const parseAttribution = (value: unknown, source: ParsedSource): string => {
   const attribution = text(value);
@@ -623,8 +651,9 @@ const parseDatasets = (value: unknown): ReadonlySet<string> => {
   if (ids.length === 0 || ids.some((id, index) => index > 0 && id <= ids[index - 1]!)) fail();
   return new Set(ids);
 };
-const parseCurated = (value: unknown): Pick<Snapshot, "pins" | "algorithms" | "datasets" | "frameworks" | "exercises"> => {
-  const optional = ["algorithms", "datasets", "frameworks", "exercises"].filter((key) => typeof value === "object" && value !== null && Object.hasOwn(value, key));
+const NO_ADVISORIES: AdvisorySnapshot = Object.freeze({ ecosystems: new Set<string>(), cwes: new Map<string, string>() });
+const parseCurated = (value: unknown): Pick<Snapshot, "pins" | "algorithms" | "datasets" | "frameworks" | "exercises" | "advisories"> => {
+  const optional = ["algorithms", "datasets", "frameworks", "exercises", "advisories"].filter((key) => typeof value === "object" && value !== null && Object.hasOwn(value, key));
   const curated = record(value, ["pins", ...optional]);
   const pins = parsePins(curated.pins);
   return Object.freeze({
@@ -635,6 +664,7 @@ const parseCurated = (value: unknown): Pick<Snapshot, "pins" | "algorithms" | "d
       ? parseFrameworks(curated.frameworks, (entry) => record(entry, ["id", "label", "family", "names", "symbols"])) : new Map(),
     exercises: optional.includes("exercises")
       ? parseExercises(curated.exercises, (entry) => record(entry, ["id", "label", "family", "names", "symbols"])) : new Map(),
+    advisories: optional.includes("advisories") ? parseAdvisorySnapshot(curated.advisories, record) : NO_ADVISORIES,
   });
 };
 
@@ -656,7 +686,7 @@ const parseSnapshot = (value: unknown, profileHash: string): Snapshot => {
   return Object.freeze({ id, queryIds, stack: identity,
     ...(curated ? parseCurated(snapshot.curated)
       : { pins: new Set<string>(), algorithms: new Map<string, CuratedAlgorithm>(), datasets: new Set<string>(), frameworks: new Map(),
-        exercises: new Map() }) });
+        exercises: new Map(), advisories: NO_ADVISORIES }) });
 };
 
 export const ARTIFACT_KEYS = ["schemaVersion", "contentClass", "profileHash", "crawlSnapshot", "decks"] as const;

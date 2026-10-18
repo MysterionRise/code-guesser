@@ -24,6 +24,7 @@ const DECK_TAGS: Readonly<Record<string, string>> = Object.freeze({
   "name-function": "Reason",
   framework: "Recognise",
   exercise: "Recognise",
+  "vulnerable-line": "Reason",
 });
 
 interface PageProps {

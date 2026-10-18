@@ -72,9 +72,12 @@ export const readDatasetBlob = async (options: GitReaderOptions, target: Readonl
   return git.blob(target.blob);
 };
 
-/** A bug a dataset records as fixed by changing one line, with the upstream repository its code comes from. */
+/**
+ * A fix some record says changed one line, with the upstream repository its code comes from: a bug a dataset records
+ * (`dataset` its id, `bug` its name), or a reviewed advisory's fix commit (`advisory`, and the advisory's id).
+ */
 export interface FixPointer {
-  readonly dataset: FixDataset["id"];
+  readonly dataset: FixDataset["id"] | "advisory";
   readonly bug: string;
   readonly repository: string;
   readonly language: StackLanguage;
