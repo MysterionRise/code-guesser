@@ -27,6 +27,9 @@ export const ARTIFACT_SCHEMA_VERSIONS = Object.freeze({
   "local-real-rounds.v6": "local-experiment-artifact.v5",
 } as const);
 export type ArtifactSchemaVersion = typeof ARTIFACT_SCHEMA_VERSIONS[ProfileVersion];
+/** Whether a profile or snapshot version is `minimum` or later: a rule added for a run holds for that run's profile on. */
+export const profileAtLeast = (version: ProfileVersion, minimum: ProfileVersion): boolean =>
+  PROFILE_VERSIONS.indexOf(version) >= PROFILE_VERSIONS.indexOf(minimum);
 /** The profile the preparer runs, and its artifact's schema; the v1.0 data run moves both to v6. */
 export const PROFILE_VERSION: ProfileVersion = "local-real-rounds.v5";
 export const ARTIFACT_SCHEMA_VERSION: ArtifactSchemaVersion = ARTIFACT_SCHEMA_VERSIONS[PROFILE_VERSION];
@@ -222,7 +225,7 @@ export interface ParsedSource extends JsonRecord {
   readonly licenseName: string;
   readonly licenseSpdx: string;
   readonly blobUrl: string;
-  readonly profileVersion: string;
+  readonly profileVersion: ProfileVersion;
   readonly crawlSnapshotId: string;
   readonly configuration?: StackLanguage;
   readonly parentExcerptHash?: string;

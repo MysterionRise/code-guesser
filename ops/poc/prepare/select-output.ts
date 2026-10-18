@@ -4,7 +4,8 @@ import { CROSS_DECK_KEYS_BY_KIND, DEDUPLICATION_KEYS_BY_KIND } from "../../../pa
 import { DECK_SHORT, noteRejection, rejectCandidate, type DeckAttempts, type DeckOutcome, type RunState } from "./diagnostics";
 import { doctestFunctions, roundExamples, type DoctestExample, type DoctestFunction } from "./doctest-parse";
 import { looksGenerated } from "./excerpt-window";
-import { balancedAnswers, outputPane, type OutputCandidate } from "./output-rounds";
+import { askable, balancedAnswers, outputPane, type OutputCandidate } from "./output-rounds";
+import type { ProfileVersion } from "./model";
 import { sha256 } from "./round-helpers";
 import { addHashes, collidesWithSelected, revealsProtected, unreportable } from "./selection";
 import type { Context, PreparationDependencies } from "./types";
@@ -24,11 +25,16 @@ const roundModule = (path: string): boolean => {
 const examplesKey = (name: string, examples: readonly DoctestExample[]): string =>
   examples.map(({ call, output }) => `${call.slice(name.length)}\u0000${output}`).sort().join("\n");
 
-/** The file's first function with four askable examples not already in the deck. */
-const roundFrom = (functions: readonly DoctestFunction[], seen: ReadonlySet<string>) => {
+/**
+ * The file's first function with four examples not already in the deck, at least one of which a round may ask
+ * about: a function whose every result rearranges its input (`xor_swap`) gives itself away whichever call it shows.
+ */
+const roundFrom = (functions: readonly DoctestFunction[], seen: ReadonlySet<string>, version: ProfileVersion) => {
   for (const candidate of functions) {
     const examples = roundExamples(candidate.examples);
-    if (examples && !seen.has(examplesKey(candidate.name, examples))) return { function: candidate, examples, key: examplesKey(candidate.name, examples) };
+    if (examples && !seen.has(examplesKey(candidate.name, examples)) && examples.some((_, index) => askable(examples, index, version))) {
+      return { function: candidate, examples, key: examplesKey(candidate.name, examples) };
+    }
   }
   return undefined;
 };
@@ -100,7 +106,7 @@ export const selectOutput = async (
     try {
       const screened = screenBlob({ path, bytes: read.bytes }, seen);
       if (looksGenerated(screened.text, profile.screening.generatedScanLines)) fail("GENERATED_CONTENT");
-      round = roundFrom(doctestFunctions(screened.text, limits), examplesSeen) ?? fail("OUTPUT_NO_DOCTEST");
+      round = roundFrom(doctestFunctions(screened.text, limits), examplesSeen, profile.profileVersion) ?? fail("OUTPUT_NO_DOCTEST");
       const longest = Math.max(...round.examples.map(({ call }) => Buffer.byteLength(outputPane(round!.function.code, call))));
       if (longest > profile.screening.excerptBytes) fail("OUTPUT_PANE_SIZE");
     } catch (error) {
@@ -141,7 +147,7 @@ export const selectOutput = async (
     }
   }
   if (rounds.length < deck.rounds) return { skipped: DECK_SHORT };
-  const answers = balancedAnswers(rounds.map(({ examples }) => examples));
+  const answers = balancedAnswers(rounds.map(({ examples }) => examples), profile.profileVersion);
   if (!answers) {
     noteRejection(state, "SELECTION", new Error("OUTPUT_RANKS_UNBALANCED"));
     return { skipped: DECK_SHORT };

@@ -16,7 +16,7 @@ import { frameworkWindow } from "../framework-window";
 import { changeKind, fixWindows } from "../fix-window";
 import type { AdvisoryPointer } from "../github-advisories";
 import type { DatasetBug } from "../github-fixes";
-import { fixExtremeLimits, fixSlack, labelStems } from "../model";
+import { fixExtremeLimits, fixSlack, labelStems, type ProfileVersion } from "../model";
 import { balancedChoice } from "../round-helpers";
 import { FIX_WINDOW_LINES } from "../select-fix";
 import { generateBeforeAfterRounds } from "../before-after-rounds";
@@ -393,11 +393,15 @@ export const CURATED_SECTION = Object.freeze({
   },
 });
 
-/** The deck profile with the curated section: it configures an eight-round algorithm deck. */
+/**
+ * The deck profile with the curated section: it configures an eight-round algorithm deck. `profileVersion` reads the
+ * same profile as a later version, for rules that hold from that version on.
+ */
 export const loadCuratedProfile = (
   selection: Readonly<Record<string, number>> = {},
   decks: Readonly<{ algorithm?: boolean; output?: boolean; fix?: boolean; "missing-line"?: boolean; "name-function"?: boolean;
     framework?: boolean; exercise?: boolean; "vulnerable-line"?: boolean }> = { algorithm: true },
+  profileVersion: ProfileVersion = "local-real-rounds.v5",
 ): CrawlProfile => {
   const raw = JSON.parse(readFileSync(new URL("../../profiles/local-real-rounds.v5.json", import.meta.url), "utf8"));
   const curated = { repositories: [...CURATED_REPOSITORIES, ...(decks.framework ? [FRAMEWORK_REPOSITORY] : [])],
@@ -408,7 +412,7 @@ export const loadCuratedProfile = (
     ...(decks.framework ? { framework: FRAMEWORK_SECTION } : {}),
     ...(decks.exercise ? { exercise: EXERCISE_SECTION } : {}),
     ...(decks["vulnerable-line"] ? { "vulnerable-line": VULNERABLE_LINE_SECTION } : {}) };
-  return parseCrawlProfile({ ...raw, selection: { ...raw.selection, ...selection }, curated: structuredClone(curated) });
+  return parseCrawlProfile({ ...raw, profileVersion, selection: { ...raw.selection, ...selection }, curated: structuredClone(curated) });
 };
 
 /** An eight-round missing-line deck over the curated Python pin's `utils` directory (#57). */
@@ -783,6 +787,10 @@ export const outputFiles = (): ReadonlyMap<string, string> => new Map([
   ["algos/python:maths/test_add.py", doctested("add_9", "value", "    return value + 9", [1, 2, 3, 4].map((value) => [String(value), String(value + 9)] as const))],
 ]);
 
+/** A number module whose every doctest swaps its two arguments, so each call gives its result away (#78). */
+export const swapOutputFile = (): readonly [string, string] => ["algos/python:maths/xor_swap.py", doctested("xor_swap", "a: int, b: int",
+  "    a ^= b\n    b ^= a\n    a ^= b\n    return a, b", [[1, 2], [3, 4], [5, 6], [7, 9]].map(([a, b]) => [`${a}, ${b}`, `(${b}, ${a})`] as const))];
+
 /** Bound output candidates for the small profile: the first eight usable files in hash order, answers balanced over every rank. */
 export const outputCandidates = (profile: CrawlProfile, snapshotId: string): readonly OutputCandidate[] => {
   const files = [...outputFiles()].filter(([key]) => !key.includes("/test_") && !key.endsWith("notes.py"))
@@ -791,7 +799,7 @@ export const outputCandidates = (profile: CrawlProfile, snapshotId: string): rea
       const found = doctestFunctions(text, { maxLines: profile.screening.excerptLines })[0]!;
       return { key, text, found, examples: roundExamples(found.examples)! };
     });
-  const answers = balancedAnswers(files.map(({ examples }) => examples))!;
+  const answers = balancedAnswers(files.map(({ examples }) => examples), profile.profileVersion)!;
   return files.map(({ key, text, found, examples }, index) => {
     const path = key.slice("algos/python:".length);
     const answer = examples[answers[index]!]!;

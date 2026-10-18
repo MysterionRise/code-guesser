@@ -80,7 +80,13 @@ gate: changing queries, retries, ceilings, deck rules, or running
     its schema: v5 with `local-experiment-artifact.v4`, v6 with `.v5`. The parser holds an artifact to its
     snapshot's version, in its schema and every source.
   - The preparer still runs v5 (`PROFILE_VERSION`), so `--offline` keeps rebuilding the committed artifact byte for
-    byte. Rules for v6 apply to v6 artifacts only; the data-run PR switches the preparer to v6.
+    byte. Rules for v6 apply to v6 artifacts only (`profileAtLeast`); the data-run PR switches the preparer to v6.
+  - v6 rules so far:
+    - **#78, output answers read off the call:** `transformsArgument` reads an output off its call when it
+      reorders the call's numbers or, not being a number, is a piece of the arguments or an anagram of a string
+      argument. No answer may be the only such option (`transformGivesAway`), and picking that option scores at most
+      chance and a tenth over a deck's worded rounds (`transformScore`, `transformLimit`). The answer search
+      budgets it, and the parser checks both.
 - The server holds each game's progress (#96): `dealGame` seals it in a signed
   token (`local-real-experiment-session.server.ts`), and the hint and answer
   server actions take one step each. A ledger refuses an older token, so a
@@ -532,7 +538,9 @@ when the preparer throws a code this section does not name.
     the public field that collided.
   - A round generator's own check: `*_ROUNDS_REJECTED`,
     `ALGORITHM_NAME_SHOWN`, `ALGORITHM_FAMILY_UNBALANCED`,
-    `OUTPUT_ANSWER_ECHOED`, `OUTPUT_RANK_UNBALANCED`, `FIX_RANK_UNBALANCED`,
+    `OUTPUT_ANSWER_ECHOED`, `OUTPUT_ANSWER_TRANSFORMED` (v6: the answer alone reads
+    off its call's arguments), `OUTPUT_TRANSFORM_UNBALANCED` (v6: picking such an
+    option beats chance and a tenth), `OUTPUT_RANK_UNBALANCED`, `FIX_RANK_UNBALANCED`,
     `FIX_REPOSITORY_REPEATED`, `MISSING_LINE_RANK_UNBALANCED`,
     `MISSING_LINE_HINT_DECIDES` (no other option does what the answer
     does, so the first hint would pick it), `NAME_FUNCTION_RANK_UNBALANCED`,
@@ -622,10 +630,12 @@ add up.
   dropped whole because one of its algorithms found no file.
   `ALGORITHM_SCREEN`: screened bytes that differ from the bound file's.
 - `OUTPUT_NO_DOCTEST`: a file with no function a round can ask about (most
-  files). `OUTPUT_PANE_SIZE`: a pane over the byte limit.
+  files; from v6, also one whose every call gives its result away, #78).
+  `OUTPUT_PANE_SIZE`: a pane over the byte limit.
   `OUTPUT_FILE_CHANGED`: the file bound differs from the file read.
   `OUTPUT_RANKS_UNBALANCED`: no choice of answers fills every rank in both
-  orders, so the output deck is skipped.
+  orders (and, from v6, keeps the transform solver in bounds), so the output
+  deck is skipped.
 - `MISSING_LINE_NO_GAP` (#57): a file with no line a round can hide, in a
   window that holds it away from both edges, with three same-indent decoys
   from elsewhere in the file. `MISSING_LINE_FILE_CHANGED`: the file bound

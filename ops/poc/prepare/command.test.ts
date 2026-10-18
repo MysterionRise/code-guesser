@@ -10,7 +10,7 @@ import { GitHubSearchError } from "./github-search";
 import { JournalError, openJournal } from "./journal";
 import { HARNESS_CANDIDATES, accepted, classificationsFor, harnessRow, hash, loadProfile, makeHarness } from "./command-test-harness";
 import {
-  CURATED_REPOSITORIES, CURATED_SECTION, FIX_SECTION, OUTPUT_SECTION, advisoryHarnessData, curatedFiles, exerciseFiles, fixHarnessData, frameworkFiles, loadCuratedProfile, missingLineFiles, nameFunctionFiles, outputFiles, sha256,
+  CURATED_REPOSITORIES, CURATED_SECTION, FIX_SECTION, OUTPUT_SECTION, advisoryHarnessData, curatedFiles, exerciseFiles, fixHarnessData, frameworkFiles, loadCuratedProfile, missingLineFiles, nameFunctionFiles, outputFiles, sha256, swapOutputFile,
 } from "./testdata/deck-builders";
 import { LANGUAGE_SLUGS } from "../../../packages/artifact/src/index";
 import { MAINSTREAM_LANGUAGES, parseCrawlProfile } from "./profile";
@@ -269,6 +269,21 @@ const logLines = (calls: readonly string[]): string[] =>
     expect(harness.calls).toContain("output:8");
     expect(harness.calls).toContain(`compose:${STACK_POOL}/${STACK_POOL}/5/8/8`);
     expect(logLines(harness.calls)).toContain("log:PREPARATION_DECKS project,language,before-after,algorithm,output");
+  });
+
+  it("from profile v6 on, never binds a function whose every call rearranges its arguments (#78)", async () => {
+    const files = new Map([...curatedFiles(), ...outputFiles(), swapOutputFile()]);
+    const bound = async (version: "local-real-rounds.v5" | "local-real-rounds.v6") => {
+      const harness = await makeHarness({}, { profile: loadCuratedProfile({ beforeAfterPool: 5 }, { algorithm: true, output: true }, version), curatedFiles: files });
+      await prepareLocalExperiment(harness.dependencies);
+      expect(harness.calls).toContain("read:algos/python:maths/xor_swap.py");
+      return { harness, swap: harness.calls.includes("curated:algos/python:maths/xor_swap.py") };
+    };
+    expect((await bound("local-real-rounds.v5")).swap).toBe(true);
+    const { harness, swap } = await bound("local-real-rounds.v6");
+    expect(swap).toBe(false);
+    expect(logLines(harness.calls)).toContain("log:PREPARATION_DECKS project,language,before-after,algorithm,output");
+    expect((harness.reports[0] as any).diagnostics).toContainEqual({ stage: "SCREENING", reasonCode: "OUTPUT_NO_DOCTEST", count: 2 });
   });
 
   it("skips files another deck shows, and skips the output deck alone when its reads run out", async () => {

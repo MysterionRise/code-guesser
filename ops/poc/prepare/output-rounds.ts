@@ -2,7 +2,8 @@ import { canonicalHash } from "./canonical";
 import type { DoctestExample } from "./doctest-parse";
 import { deepFreeze } from "./model-validation";
 import {
-  OUTPUT_HINT, OUTPUT_ORDERS, OUTPUT_SOURCE_KEYS, echoesArgument, outputCandidateId, outputOrder, outputShape, type ExperimentFixture,
+  OUTPUT_HINT, OUTPUT_ORDERS, OUTPUT_SOURCE_KEYS, SCORE_TOLERANCE, echoesArgument, numericOutputs, outputCandidateId, outputOrder, outputShape,
+  profileAtLeast, transformGivesAway, transformLimit, transformScore, type ExperimentFixture, type ProfileVersion,
 } from "./model";
 import { OUTPUT_OPTIONS, type CrawlProfile } from "./profile";
 import { attributionFor, balancedChoice, fill, orderedPool, roundIdFor, sha256, shuffled, type GeneratedRounds } from "./round-helpers";
@@ -71,17 +72,35 @@ export const answerRanks = (candidate: Pick<OutputCandidate, "answer" | "decoys"
 };
 
 /**
- * One answer per round, as an index into that round's examples, such that the answers fill every rank equally in
- * each order a solver might rank options by (numeric, else by length; and plain text), and no answer repeats one of
- * its call's arguments. Each round has four examples and the pool a multiple of four rounds. Deterministic;
- * undefined when no such choice exists.
+ * Whether a round may ask about one of its examples: its result does not repeat one of the call's arguments and, from
+ * profile v6 on (#78), is not the only one of the four outputs that the arguments give away by case, rearrangement, or
+ * reordering.
  */
-export const balancedAnswers = (rounds: readonly (readonly DoctestExample[])[]): readonly number[] | undefined => {
+export const askable = (examples: readonly DoctestExample[], index: number, version: ProfileVersion): boolean => {
+  const { call, output } = examples[index]!;
+  return !echoesArgument(call, output) && !(profileAtLeast(version, "local-real-rounds.v6")
+    && transformGivesAway(call, output, examples.map((example) => example.output)));
+};
+
+/**
+ * One answer per round, as an index into that round's examples, such that the answers fill every rank equally in
+ * each order a solver might rank options by (numeric, else by length; and plain text), and every answer is askable.
+ * From profile v6 on, picking the option that transforms the call's arguments also scores no more than chance and a
+ * tenth over the rounds whose outputs are not numbers (#78). Each round has four examples and the pool a multiple of
+ * four rounds. Deterministic; undefined when no such choice exists.
+ */
+export const balancedAnswers = (rounds: readonly (readonly DoctestExample[])[], version: ProfileVersion): readonly number[] | undefined => {
   if (rounds.some((examples) => examples.length !== OUTPUT_OPTIONS)) return undefined;
-  return balancedChoice(rounds.map((examples) => {
+  const choices = rounds.map((examples) => {
     const outputs = examples.map(({ output }) => output);
-    return examples.map(({ call, output }) => echoesArgument(call, output) ? undefined : OUTPUT_ORDERS.map((order) => order(outputs).indexOf(output)));
-  }), OUTPUT_OPTIONS);
+    return examples.map(({ output }, index) => askable(examples, index, version)
+      ? OUTPUT_ORDERS.map((order) => order(outputs).indexOf(output)) : undefined);
+  });
+  if (!profileAtLeast(version, "local-real-rounds.v6")) return balancedChoice(choices, OUTPUT_OPTIONS);
+  const worded = rounds.map((examples) => !numericOutputs(examples.map(({ output }) => output)));
+  const costs = rounds.map((examples, round) => examples.map(({ call, output }) =>
+    [worded[round] ? transformScore(call, output, examples.map((example) => example.output)) : 0]));
+  return balancedChoice(choices, OUTPUT_OPTIONS, [], { costs, limits: [transformLimit(worded.filter(Boolean).length)] });
 };
 
 const fixtureFor = (candidate: OutputCandidate, profile: CrawlProfile): ExperimentFixture => {
@@ -91,6 +110,7 @@ const fixtureFor = (candidate: OutputCandidate, profile: CrawlProfile): Experime
     || new Set(examples.map(({ output }) => outputShape(output))).size !== 1
     || examples.some(({ call }) => !call.startsWith(`${candidate.functionName}(`))) fail();
   if (echoesArgument(candidate.answer.call, candidate.answer.output)) fail("OUTPUT_ANSWER_ECHOED");
+  if (!askable(examples, 0, profile.profileVersion)) fail("OUTPUT_ANSWER_TRANSFORMED");
   const text = outputPane(candidate.code, candidate.answer.call);
   if (candidate.excerpt !== text || sha256(text) !== candidate.excerptHash) fail();
   const source = sourceFor(candidate, profile);
@@ -136,5 +156,11 @@ export const generateOutputRounds = (options: Readonly<{ profile: CrawlProfile; 
   for (const key of ["path", "blob", "rawContentHash", "excerptHash"] as const) {
     if (new Set(candidates.map((candidate) => candidate[key])).size !== candidates.length) fail();
   }
-  return orderedPool(candidates.map((candidate) => fixtureFor(candidate, profile)));
+  const fixtures = candidates.map((candidate) => fixtureFor(candidate, profile));
+  if (profileAtLeast(profile.profileVersion, "local-real-rounds.v6")) {
+    const worded = candidates.map(({ answer, decoys }) => [answer, ...decoys]).filter((examples) => !numericOutputs(examples.map(({ output }) => output)));
+    const score = worded.reduce((sum, examples) => sum + transformScore(examples[0]!.call, examples[0]!.output, examples.map(({ output }) => output)), 0);
+    if (score > transformLimit(worded.length) + SCORE_TOLERANCE) fail("OUTPUT_TRANSFORM_UNBALANCED");
+  }
+  return orderedPool(fixtures);
 };
