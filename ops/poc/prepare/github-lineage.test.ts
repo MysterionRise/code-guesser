@@ -484,4 +484,54 @@ describe("GitHub immutable lineage adapter", () => {
     responses.get(key)[field] = value;
     await expect(invoke(responses)).rejects.toBeInstanceOf(lineageModule.GitHubLineageError);
   });
+
+  describe("from profile v6 on (#75)", () => {
+    const v6 = async () => parseCrawlProfile({ ...JSON.parse(await readFile(new URL("../profiles/local-real-rounds.v5.json", import.meta.url), "utf8")),
+      profileVersion: "local-real-rounds.v6" });
+    const bind = async (responses: Map<string, any>, options: Readonly<{ v5?: boolean; admitGrowth?: (growth: readonly number[]) => boolean }> = {}) => {
+      const requests: string[] = [];
+      const result = bindGitHubLineage({
+        profile: options.v5 ? await profile() : await v6(), candidates: [candidate],
+        ...(options.admitGrowth ? { admitGrowth: options.admitGrowth } : {}),
+        transport: { requestJson: async ({ url }: { url: string }) => { requests.push(url); return structuredClone(responses.get(url)); } },
+        retry: { execute: async (operation: () => Promise<unknown>) => operation() },
+      });
+      return { result: result.then((value: unknown) => value, (error: any) => ({ code: error.code })), requests };
+    };
+    const withPatch = (responses: Map<string, any>, patch: string) => {
+      responses.get(`${api}/commits/${ids.childCommit}`).files[0].patch = patch;
+      return responses;
+    };
+    const lines = (...body: readonly string[]) => encoder.encode(["export function value() {", ...body, "}", ""].join("\n"));
+
+    it("skips a change to comments alone by its patch, before any tree or blob", async () => {
+      const responses = withPatch(responsesForBytes(lines("  // one", "  return 1;"), lines("  // two", "  return 1;")), "@@ -2 +2 @@\n-  // one\n+  // two");
+      const v6Run = await bind(responses);
+      expect(await v6Run.result).toEqual({ code: "LINEAGE_PROSE_ONLY" });
+      expect(v6Run.requests).toHaveLength(1);
+      const v5Run = await bind(responses, { v5: true });
+      expect(await v5Run.result).toHaveLength(1);
+    });
+
+    it("refuses a change to string text alone once both versions are read", async () => {
+      const responses = responsesForBytes(lines("  return \"Say hi\";"), lines("  return \"Say hello\";"));
+      const v6Run = await bind(responses);
+      expect(await v6Run.result).toEqual({ code: "LINEAGE_PROSE_ONLY" });
+      expect(v6Run.requests).toHaveLength(8);
+      expect(await (await bind(responses, { v5: true })).result).toHaveLength(1);
+      // A change to code binds.
+      expect(await (await bind(responsesForBytes(lines("  return 1;"), lines("  return 1 + 1;")))).result).toHaveLength(1);
+    });
+
+    it("asks the deck whether its patch's growth still fits, and skips the commit before its blobs when not", async () => {
+      const responses = withPatch(responsesForBytes(lines("  return 1;"), lines("  return 10;")), "@@ -2 +2 @@\n-  return 1;\n+  return 10;");
+      const asked: (readonly number[])[] = [];
+      const refused = await bind(responses, { admitGrowth: (growth) => { asked.push(growth); return false; } });
+      expect(await refused.result).toEqual({ code: "LINEAGE_SIZE_UNBALANCED" });
+      expect(refused.requests).toHaveLength(1);
+      expect(asked).toEqual([[1, 0, 1]]);
+      expect(await (await bind(responses, { admitGrowth: () => true })).result).toHaveLength(1);
+      expect(lineageModule.patchGrowth("@@ -1,2 +1 @@\n-a = compute(1)\n-b = a\n+b = compute(1)")).toEqual([-1, -1, 0]);
+    });
+  });
 });

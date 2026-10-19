@@ -1,7 +1,9 @@
 import { beforeAfterSubject, BeforeAfterRoundsError, generateBeforeAfterRounds } from "./before-after-rounds";
 import { BEFORE_AFTER_CANDIDATE_IDS } from "./model";
 import { sha256 } from "./round-helpers";
-import { commitCandidate, deckCandidates, loadDeckProfile, snapshotIdFor } from "./testdata/deck-builders";
+import { composeExperimentArtifact } from "./compose";
+import { ExperimentRecordError, parseExperimentArtifact } from "./model";
+import { commitCandidate, composeInput, deckCandidates, loadDeckProfile, snapshotIdFor } from "./testdata/deck-builders";
 
 const testModuleName: string = "vitest";
 const { describe, expect, it } = await import(testModuleName) as any;
@@ -11,6 +13,20 @@ const snapshotId = snapshotIdFor(profile);
 const pool = () => deckCandidates(profile, snapshotId).beforeAfter;
 
 describe("before-or-after rounds", () => {
+  it("from profile v6 on, refuses a pool whose later pane is the bigger, or the smaller, one in most rounds (#75)", () => {
+    const v6 = loadDeckProfile("local-real-rounds.v6");
+    // Ten commits that each fold a loop into a reduce: the later pane is the smaller one in all ten.
+    const folding = (from: typeof profile) => Array.from({ length: 10 }, (_, index) => commitCandidate({ profile: from, snapshotId: snapshotIdFor(from), index: 2 * index }));
+    expect(() => generateBeforeAfterRounds({ profile: v6, candidates: folding(v6) })).toThrow("BEFORE_AFTER_SIZE_UNBALANCED");
+    expect(generateBeforeAfterRounds({ profile, candidates: folding(profile) }).fixtures).toHaveLength(10);
+    expect(generateBeforeAfterRounds({ profile: v6, candidates: deckCandidates(v6, snapshotIdFor(v6)).beforeAfter }).fixtures).toHaveLength(10);
+    // The parser holds a v6 deck to it too, however its rounds were made.
+    const input = composeInput(v6);
+    const unbalanced = { ...input, decks: { ...input.decks, "before-after": generateBeforeAfterRounds({ profile, candidates: folding(v6) }) } };
+    expect(() => parseExperimentArtifact(composeExperimentArtifact(input).artifact)).not.toThrow();
+    expect(() => parseExperimentArtifact(composeExperimentArtifact(unbalanced).artifact)).toThrow(ExperimentRecordError);
+  });
+
   it("shows each commit's before and after code as panes A and B, the later one named by the answer", () => {
     const { fixtures } = generateBeforeAfterRounds({ profile, candidates: pool() });
     expect(fixtures).toHaveLength(10);

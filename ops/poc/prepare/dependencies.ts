@@ -145,7 +145,8 @@ export const defaultDependencies = (options: DependencyOptions = { journal: "fre
   bindGitHubLineage: (options) => {
     const runtime = runtimeOf(options);
     return stage(runtime, async () => (await bindGitHubLineage({ profile: options.profile,
-      candidates: [options.candidate as GitHubLineageCandidate], transport: runtime.transport, retry: runtime.retry }))[0]!);
+      candidates: [options.candidate as GitHubLineageCandidate], transport: runtime.transport, retry: runtime.retry,
+      ...(options.admitGrowth ? { admitGrowth: options.admitGrowth } : {}) }))[0]!);
   },
   admitGitHubCandidate: (options) => {
     const runtime = runtimeOf(options);

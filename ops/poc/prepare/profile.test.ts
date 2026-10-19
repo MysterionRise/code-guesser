@@ -23,7 +23,7 @@ describe("local crawl profile v6 (#129)", () => {
     expect(profile.licenses).toEqual(["Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "MIT", "Python-2.0"]);
     expect(profile.stack.configurations).toHaveLength(26);
     expect(profile.stack.configurations.slice(12).every(({ projectDeck }) => projectDeck === false)).toBe(true);
-    expect(poolSizes(profile)).toEqual({ project: 24, language: 52, "before-after": 10, algorithm: 24, output: 24, fix: 24, "missing-line": 24,
+    expect(poolSizes(profile)).toEqual({ project: 24, language: 52, "before-after": 20, algorithm: 24, output: 24, fix: 24, "missing-line": 24,
       "name-function": 24, framework: 32, exercise: 48, "vulnerable-line": 0 });
     expect(profile.capacity).toEqual(CAPACITY_CEILINGS);
   });

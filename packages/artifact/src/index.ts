@@ -1,4 +1,5 @@
 export * from "./artifact";
+export * from "./before-after";
 export * from "./domain";
 export * from "./errors";
 export * from "./exercise";

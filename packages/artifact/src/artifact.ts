@@ -39,6 +39,7 @@ import { familyDeckRule, type FamilyMember } from "./family";
 import { parseFrameworks, validateFramework, type CuratedFramework } from "./framework";
 import { missingLineDeckRule, validateMissingLine } from "./missing-line";
 import { nameFunctionDeckRule, validateNameFunction } from "./name-function";
+import { growthFits, paneGrowth } from "./before-after";
 import { sameFile, sameIdea } from "./ideas";
 import { mentionsRepository, namesRepository, sharedOptionWords } from "./project";
 import {
@@ -513,6 +514,13 @@ const DECK_RULES: Readonly<Partial<Record<DeckId, (fixtures: readonly ParsedFixt
   "before-after": (fixtures: readonly ParsedFixture[]) => {
     const aLater = fixtures.filter(({ correctCandidateId }) => correctCandidateId === BEFORE_AFTER_CANDIDATE_IDS[0]).length;
     if (Math.abs(2 * aLater - fixtures.length) > 1) fail();
+    // From v6 on, pane size carries no signal either (#75): the later pane is the bigger one in half the deck.
+    if (!profileAtLeast(fixtures[0]!.source.profileVersion, "local-real-rounds.v6")) return;
+    const growth = fixtures.map(({ panes, correctCandidateId }) => {
+      const later = correctCandidateId === BEFORE_AFTER_CANDIDATE_IDS[0] ? 0 : 1;
+      return paneGrowth(panes[1 - later]!.text, panes[later]!.text);
+    });
+    if (!growthFits(growth, fixtures.length)) fail();
   },
   // In the shown order (numeric, else by length) and in text order, every rank holds the answer equally often, so no
   // extreme and no fixed position finds it more often than chance.

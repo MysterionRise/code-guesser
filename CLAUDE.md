@@ -75,7 +75,8 @@ gate: changing queries, retries, ceilings, deck rules, or running
 - **Profile v6 (#129):** `ops/poc/profiles/local-real-rounds.v6.json` is the v1.0 data run's profile. It configures
   every v1.0 deck built so far (missing-line, name-function, framework, exercise), the seven rarer pairs for the
   language deck alone, the wider allowlist (BSD-2-Clause, ISC, Python-2.0), and the raised ceilings in
-  `ops/poc/limits.json` (5,000 requests, 448 MiB of Stack metadata, 400 blob attempts, 200 blobs, 32 MiB).
+  `ops/poc/limits.json` (5,000 requests, 448 MiB of Stack metadata, 400 blob attempts, 200 blobs, 32 MiB), and a
+  before-after pool of 20.
   - `PROFILE_VERSIONS` and `ARTIFACT_SCHEMA_VERSIONS` (`packages/artifact/src/domain.ts`) pair each profile with
     its schema: v5 with `local-experiment-artifact.v4`, v6 with `.v5`. The parser holds an artifact to its
     snapshot's version, in its schema and every source.
@@ -100,6 +101,12 @@ gate: changing queries, retries, ceilings, deck rules, or running
       `packages/artifact/src/ideas.ts`: every word of the shorter name, of two or more, is a word of the other), and
       none that agrees with a chosen function on two documented calls. One fix round per file: no two fixes in one
       file, or in files side by side named alike (`sameFile`), skipped before any upstream request.
+    - **#75, before-after pane sizes:** the later pane is the bigger one by characters in half the pool, give or
+      take one, and picking the pane with more lines or the longer changed line wins at most 60% (`growthFits` in
+      `packages/artifact/src/before-after.ts`). Once one side is full, a commit that would add to it is skipped by
+      its patch before any tree or blob (`patchGrowth`), then by its windows. A commit must change code: one whose
+      patch changes only comments, or whose files differ only in comments, docstrings, or string text
+      (`changesOnlyProse` in `code-skeleton.ts`), is refused. The v6 pool is 20 rounds.
     - Dry run of these rules on the v5 data: `docs/review/evidence/2026-10-19-v6-leak-rules-dry-run.md`.
 - The server holds each game's progress (#96): `dealGame` seals it in a signed
   token (`local-real-experiment-session.server.ts`), and the hint and answer
@@ -551,7 +558,8 @@ when the preparer throws a code this section does not name.
     `PUBLIC_CONTAINMENT_CANDIDATE_IN_<FIELD>`): names the protected value and
     the public field that collided.
   - A round generator's own check: `*_ROUNDS_REJECTED`, `PROJECT_WORDS_SHOWN`
-    (v6: a project pane shares a word with an option), `OUTPUT_IDEA_REPEATED` and
+    (v6: a project pane shares a word with an option), `BEFORE_AFTER_SIZE_UNBALANCED` (v6: the
+    later pane is the bigger one in more than half the pool and one, #75), `OUTPUT_IDEA_REPEATED` and
     `FIX_FILE_REPEATED` (v6: two rounds repeat one idea or one file, #84),
     `ALGORITHM_NAME_SHOWN`, `ALGORITHM_FAMILY_UNBALANCED`,
     `OUTPUT_ANSWER_ECHOED`, `OUTPUT_ANSWER_TRANSFORMED` (v6: the answer alone reads
@@ -611,6 +619,9 @@ add up.
   fix. For example:
   - `LINEAGE_CHANGE_WINDOW`: a commit whose change does not fit one
     before-and-after window.
+  - `LINEAGE_PROSE_ONLY` (v6, #75): a commit that changes only comments,
+    docstrings, or string text. `LINEAGE_SIZE_UNBALANCED` (v6): a commit whose
+    change would add to the pane-size side the deck has filled.
   - `ADMISSION_REPOSITORY_LICENSE`: a repository licence outside the
     allowlist.
   - `REVALIDATION_WINDOW`: a file with no code window past its preamble.

@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 import { isScreenablePath, screenBlob } from "@codeguessr/content/local-poc-support";
+import { profileAtLeast } from "../../../packages/artifact/src/index";
+import { changesOnlyProse, patchOnlyComments } from "./code-skeleton";
 import { changeWindows } from "./code-windows";
 import { gitReader, type CommitRecord, type GitMode } from "./github-git";
 import { looksGenerated } from "./excerpt-window";
@@ -18,6 +20,11 @@ export class GitHubLineageError extends Error {
 export interface GitHubLineageOptions {
   readonly profile: CrawlProfile;
   readonly candidates: readonly GitHubSearchCandidate[];
+  /**
+   * From profile v6 on (#75), whether the deck still has room for a change that grows its pane like this, estimated
+   * from the commit's patch (`paneGrowth`'s order) before the file's trees and blobs are read.
+   */
+  readonly admitGrowth?: (growth: readonly number[]) => boolean;
   readonly transport: Pick<BoundedTransport, "requestJson">;
   readonly retry: Pick<RetryController, "execute">;
   readonly seenNormalizedHashes?: ReadonlySet<string>;
@@ -86,7 +93,7 @@ const parseChangedPath = (
   api: string,
   web: string,
   limits: Readonly<{ maxChangedLines: number; changeWindowLines: number }>,
-): Readonly<{ path: string; blob: string }> => {
+): Readonly<{ path: string; blob: string; patch: string | undefined }> => {
   if (commit.parents.length !== 1 || commit.files.length === 0) fail("LINEAGE_CHANGED_PATH");
   // A recorded patch too large for one change window disqualifies its file before any blob is
   // fetched; an absent patch leaves the decision to the windows computed from the pinned blobs.
@@ -105,7 +112,22 @@ const parseChangedPath = (
     || file.blob_url !== `${web}/blob/${commit.sha}/${encoded}`
     || file.raw_url !== `${web}/raw/${commit.sha}/${encoded}`
     || file.contents_url !== `${api}/contents/${encoded}?ref=${commit.sha}`) fail("LINEAGE_CHANGED_PATH");
-  return Object.freeze({ path, blob });
+  return Object.freeze({ path, blob, patch: typeof file.patch === "string" ? file.patch : undefined });
+};
+
+/**
+ * How a patch's change grows its file, in `paneGrowth`'s measures: the characters and lines it adds against those it
+ * removes, and its longest added line against its longest removed one. The windows share their context lines, so
+ * this is how the later pane will compare with the earlier one, near enough to skip a commit before its blobs.
+ */
+export const patchGrowth = (patch: string): readonly number[] => {
+  const lines = patch.split("\n");
+  const side = (mark: string) => lines.filter((line) => line.startsWith(mark) && !line.startsWith(`${mark.repeat(3)} `)).map((line) => line.slice(1));
+  const [removed, added] = [side("-"), side("+")];
+  const characters = (changed: readonly string[]) => changed.reduce((sum, line) => sum + line.length + 1, 0);
+  const longest = (changed: readonly string[]) => Math.max(0, ...changed.map((line) => line.trim().length));
+  return Object.freeze([Math.sign(characters(added) - characters(removed)), Math.sign(added.length - removed.length),
+    Math.sign(longest(added) - longest(removed))]);
 };
 
 /** Both versions pass the content screen; the windows show the same stretch before and after the commit. */
@@ -126,7 +148,7 @@ const screenChange = (
     maxLines: screening.changeWindowLines, maxBytes: screening.excerptBytes,
     maxChangedLines: screening.maxChangedLines, contextLines: screening.changeContextLines,
   }) ?? fail("LINEAGE_CHANGE_WINDOW");
-  return Object.freeze({ parentHash, childHash, windows });
+  return Object.freeze({ parentHash, childHash, windows, parentText: parentScreen.text, childText: childScreen.text });
 };
 
 const bindCandidate = async (
@@ -138,6 +160,12 @@ const bindCandidate = async (
   if (candidate.repositoryUrl !== web || candidate.commitUrl !== `${web}/commit/${candidate.commit}`) fail("LINEAGE_BINDING");
   const child = await git.commit(candidate.commit);
   const changed = parseChangedPath(child, api, web, options.profile.screening);
+  // From v6 on (#75), a change to comments alone, or one the deck has no room for, is skipped before any tree or blob.
+  const strict = profileAtLeast(options.profile.profileVersion, "local-real-rounds.v6");
+  if (strict && changed.patch !== undefined) {
+    if (patchOnlyComments(changed.patch, changed.path)) fail("LINEAGE_PROSE_ONLY");
+    if (options.admitGrowth && !options.admitGrowth(patchGrowth(changed.patch))) fail("LINEAGE_SIZE_UNBALANCED");
+  }
   // Child side first: its tree binding and blob screening reject most candidates, and every
   // request they save is a request the run's ceiling keeps for the next candidate.
   const childPath = await git.resolvePath(child.tree, changed.path);
@@ -151,7 +179,9 @@ const bindCandidate = async (
   const parentPath = await git.resolvePath(parent.tree, changed.path);
   if (childPath.blob === parentPath.blob) fail("LINEAGE_BINDING");
   const parentBytes = await git.blob(parentPath.blob);
-  const { parentHash, childHash, windows } = screenChange(options, changed.path, parentBytes, childBytes);
+  const { parentHash, childHash, windows, parentText, childText } = screenChange(options, changed.path, parentBytes, childBytes);
+  // A round needs a change to code, not only to comments, docstrings, or string text (#75).
+  if (strict && changesOnlyProse(parentText, childText, changed.path)) fail("LINEAGE_PROSE_ONLY");
   return Object.freeze({
     ...candidate,
     path: changed.path,

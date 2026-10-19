@@ -41,7 +41,7 @@ export interface PreparationDependencies {
   screenGitHubRepository(options: Context & Readonly<{ repository: string }>): Promise<StageResult<unknown>>;
   /** A repository's public description and whether it is a fork or archived, for a project round's options. */
   describeRepository(options: Context & Readonly<{ repository: string }>): Promise<StageResult<RepositoryDescription>>;
-  bindGitHubLineage(options: Context & Readonly<{ candidate: unknown }>): Promise<StageResult<unknown>>;
+  bindGitHubLineage(options: Context & Readonly<{ candidate: unknown; admitGrowth?: (growth: readonly number[]) => boolean }>): Promise<StageResult<unknown>>;
   admitGitHubCandidate(options: Context & Readonly<{ candidate: unknown; crawlSnapshotId: string }>): Promise<StageResult<unknown>>;
   collectStackMetadata(options: Context & Readonly<{ configuration: StackLanguage }>): Promise<StageResult<readonly unknown[]>>;
   fetchStackBlob(options: Context & Readonly<{ row: unknown; limits: BlobLimits }>): Promise<StageResult<Readonly<{ byteLength: number }>>>;
