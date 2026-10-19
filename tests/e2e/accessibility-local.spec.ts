@@ -53,7 +53,7 @@ test("the deck chooser is keyboard operable with named links", async ({ page }) 
   await page.keyboard.press("Tab");
   await expect(links.nth(1)).toBeFocused();
   await page.keyboard.press("Enter");
-  await expect(page).toHaveURL(/\?deck=mixed$/u);
+  await expect(page).toHaveURL(/\?deck=mixed&deal=[0-9a-f]{8}&game=0$/u);
   await expect(page.getByText("Round 1 of 5")).toBeVisible();
 });
 

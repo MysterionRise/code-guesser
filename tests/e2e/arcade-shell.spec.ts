@@ -67,7 +67,9 @@ for (const deck of artifact.decks) {
     const full = fullPoints(deck);
     await page.goto("/");
     await page.getByRole("link", { name: titlePattern(deck.title) }).click();
-    await expect(page).toHaveURL(new RegExp(`\\?deck=${deck.id}$`, "u"));
+    // A deck's link starts a fresh seeded deal at its first game (#40).
+    await expect(page).toHaveURL(new RegExp(`\\?deck=${deck.id}&deal=[0-9a-f]{8}&game=0$`, "u"));
+    const seed = new URL(page.url()).searchParams.get("deal")!;
     await expect(page.getByText(/Local unreviewed experiment/)).toBeVisible();
     if (deck.id === "before-after") await expect(page.locator("figcaption")).toHaveText(["Version A", "Version B"]);
 
@@ -79,15 +81,15 @@ for (const deck of artifact.decks) {
     // A finished run offers a fresh deal and another deck, never a replay of the rounds it just revealed.
     await expect(page.getByRole("button", { name: "Play again" })).toHaveCount(0);
     const deal = page.getByRole("link", { name: "Deal new rounds" });
-    await expect(deal).toHaveAttribute("href", `/?deck=${deck.id}`);
+    await expect(deal).toHaveAttribute("href", `/?deck=${deck.id}&deal=${seed}&game=1`);
     await expect(deal).toHaveClass(/primary-action/u);
     await deal.click();
     await expect(page.getByText("Round 1 of 5")).toBeVisible();
     await expect(score(page)).toHaveText("Score: 0 pts");
     await expect(page.getByRole("heading", { name: /Nice read\.|Not this time\./u })).toHaveCount(0);
     const second = await answerRounds(page, full, false);
-    // Five rounds dealt in the same order again is at most a one-in-30,240 chance, even from the ten-round pool.
-    expect(second).not.toEqual(first);
+    // The deal's next game shares no round with its first, since every pool holds at least ten (#40).
+    expect(second.filter((roundId) => first.includes(roundId))).toEqual([]);
     await expect(page.getByText(new RegExp(`Run complete — ${points(5 * full)} points`, "u"))).toBeVisible();
 
     await page.getByRole("link", { name: "Choose another deck" }).click();
@@ -100,7 +102,7 @@ const deckOfRound = new Map(artifact.decks.flatMap((deck) => deck.fixtures.map((
 test("a mixed game deals one round from each of five decks, names each round's deck, and scores to its rounds' best (#56)", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("link", { name: /^Mixed/u }).click();
-  await expect(page).toHaveURL(/\?deck=mixed$/u);
+  await expect(page).toHaveURL(/\?deck=mixed&deal=[0-9a-f]{8}&game=0$/u);
   const decks: string[] = [];
   let best = 0;
   for (let index = 0; index < 5; index += 1) {
@@ -118,7 +120,7 @@ test("a mixed game deals one round from each of five decks, names each round's d
   expect(new Set(decks).size).toBe(5);
   await expect(score(page)).toHaveText(`Score: ${points(best)} pts`);
   await expect(page.getByText(new RegExp(`Run complete — ${points(best)} points`, "u"))).toBeVisible();
-  await expect(page.getByRole("link", { name: "Deal new rounds" })).toHaveAttribute("href", "/?deck=mixed");
+  await expect(page.getByRole("link", { name: "Deal new rounds" })).toHaveAttribute("href", /^\/\?deck=mixed&deal=[0-9a-f]{8}&game=1$/u);
 });
 
 test("today's five deals the same five, in the same order, on every load of the day (#74)", async ({ page }) => {
@@ -135,6 +137,21 @@ test("today's five deals the same five, in the same order, on every load of the 
   await page.reload();
   expect(await dealt()).toEqual(first);
   await expect(page.locator(".eyebrow .round-deck")).toHaveText(deckOfRound.get(first.round)!.title);
+});
+
+test("a seeded deal's game reloads to the same rounds and options, and says when it starts its deck over (#40)", async ({ page }) => {
+  await page.goto("/?deck=project&deal=0a1b2c3d&game=1");
+  const shown = async () => {
+    await expect(page.getByText("Round 1 of 5")).toBeVisible();
+    return { round: await currentRound(page), options: await page.locator(".candidate").allTextContents() };
+  };
+  const first = await shown();
+  await page.reload();
+  expect(await shown()).toEqual(first);
+  await expect(page.locator(".deal-note")).toHaveCount(0);
+  // The twenty-round before-after pool is spent after four games, so the fifth starts it over.
+  await page.goto("/?deck=before-after&deal=0a1b2c3d&game=4");
+  await expect(page.locator(".deal-note")).toHaveText("You’ve now seen every round in this deck, so this game starts it over.");
 });
 
 test("a deck query parameter preselects the deck, and a wrong answer scores zero and shows the right one", async ({ page }) => {

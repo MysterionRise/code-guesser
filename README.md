@@ -47,7 +47,9 @@ code by the v1.0 data run on 2026-10-19
 
 Every game deals five rounds from the pool at random. Four-option rounds
 reshuffle their options each time, except fix rounds, whose lines stay in line
-order.
+order. A deck's address carries its deal (`&deal=<seed>&game=<n>`), so a
+reload shows the same game, and "Deal new rounds" moves to the deal's next
+game, which shares no round with the earlier ones until the pool is spent.
 
 | Deck | You see | You pick from | Source |
 | --- | --- | --- | --- |

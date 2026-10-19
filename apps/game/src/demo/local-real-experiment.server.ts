@@ -43,6 +43,7 @@ import {
 import { CONTROL, type Arms } from "../experiment/arms";
 import type { EventSink } from "../experiment/event-store.server";
 import { elapsed, emitterFor, recordClientEvent, type ClientEventOutcome, type Emit } from "./local-real-experiment-events.server";
+import { mixedRounds, seededRandom, seriesRounds, shuffle, type DealSeries } from "./local-real-experiment-deal.server";
 import { roundHints, scaffoldOf, type RoundLayers } from "./local-real-experiment-layers.server";
 import type { RenderLimits } from "../genui/render-catalog";
 import { roundContext, type RoundContext } from "../genui/round-context.server";
@@ -80,9 +81,12 @@ export interface LocalRealExperiment {
    * Five rounds drawn at random from the deck's pool, or for the mix one round from each of five decks drawn at
    * random, each four-option round's options in a fresh order.
    */
-  readonly dealSession: (deckId: SessionDeckId, random?: () => number) => PublicModeContract;
-  /** A dealt session and the signed token that holds its progress, its arms, and whether it records events. */
-  readonly dealGame: (deckId: SessionDeckId, random?: () => number, now?: number, seal?: DealSeal) => DealtGame;
+  readonly dealSession: (deckId: SessionDeckId, random?: () => number, series?: DealSeries) => PublicModeContract;
+  /**
+   * A dealt session and the signed token that holds its progress, its arms, and whether it records events. A
+   * `series` deals that game of a seeded deal (#40), the same on every load.
+   */
+  readonly dealGame: (deckId: SessionDeckId, random?: () => number, now?: number, seal?: DealSeal, series?: DealSeries) => DealtGame;
   /** The next hint of the round being played, which lowers what a right answer scores. */
   readonly revealHint: (request: HintRequest, now?: number) => HintResponse;
   /** Locks in one answer for the round being played and reveals it, scored from the server's own state. */
@@ -152,6 +156,8 @@ export interface DealtGame {
   readonly sessionToken: string;
   /** The arms sealed into the token, so the page renders the game the experiment drew. */
   readonly arms: Arms;
+  /** Whether this game of a seeded deal reached the end of its deck's pool, so its rounds start over (#40). */
+  readonly wrapped: boolean;
 }
 
 interface DerivedRound {
@@ -227,20 +233,6 @@ const deriveDecks = (parsedDecks: readonly ParsedDeck[], artifact: JsonRecord): 
     deck: Object.freeze({ id: deck.id, title: deck.title, description: deck.description, poolSize: deck.fixtures.length }),
     rounds: Object.freeze(deck.fixtures.map((fixture) => deriveRound(fixture, artifact))),
   })));
-
-/** Fisher-Yates with an injectable source of randomness, so tests can deal a known session. */
-const shuffle = <Item>(items: readonly Item[], random: () => number): Item[] => {
-  const copy = [...items];
-  for (let index = copy.length - 1; index > 0; index -= 1) {
-    const other = Math.floor(random() * (index + 1));
-    [copy[index], copy[other]] = [copy[other]!, copy[index]!];
-  }
-  return copy;
-};
-
-/** The mix's rounds: five decks drawn at random, and one round drawn from each. */
-const mixedRounds = (decks: readonly DerivedDeck[], random: () => number): readonly DerivedRound[] =>
-  shuffle(decks, random).slice(0, ROUNDS_PER_SESSION).map(({ rounds }) => rounds[Math.floor(random() * rounds.length)]!);
 
 const dealFrom = (deck: SessionDeckId, pool: readonly DerivedRound[], artifact: JsonRecord, random: () => number): PublicModeContract => {
   const rounds = pool.slice(0, ROUNDS_PER_SESSION).map(({ publicRound }) => ({
@@ -402,13 +394,18 @@ export const createLocalRealExperiment = (
     if (Object.keys(privateReveals).length !== decks.reduce((total, { rounds }) => total + rounds.length, 0)) fail();
     const rounds = new Map(decks.flatMap((derived) => derived.rounds.map((round) => [round.publicRound.roundId, round] as const)));
     const deckTitles = new Map(decks.flatMap(({ deck, rounds: deckRounds }) => deckRounds.map(({ publicRound }) => [publicRound.roundId, deck.title] as const)));
-    const dealSession = (deckId: SessionDeckId, random: () => number = Math.random) => {
+    // A seeded deal's game takes its rounds from the seed's order of the pool, and its option order from the seed too.
+    const deal = (deckId: SessionDeckId, random: () => number, series?: DealSeries) => {
       if (deckId === MIXED_DECK || deckId === DAILY_DECK) {
-        return decks.length < ROUNDS_PER_SESSION ? fail() : dealFrom(deckId, mixedRounds(decks, random), artifact, random);
+        const draw = series ? seededRandom({ ...series, deck: deckId }) : random;
+        return { mode: decks.length < ROUNDS_PER_SESSION ? fail() : dealFrom(deckId, mixedRounds(decks, draw), artifact, draw), wrapped: false };
       }
       const derived = decks.find(({ deck }) => deck.id === deckId) ?? fail();
-      return dealFrom(deckId, shuffle(derived.rounds, random), artifact, random);
+      if (!series) return { mode: dealFrom(deckId, shuffle(derived.rounds, random), artifact, random), wrapped: false };
+      const { rounds: order, wrapped } = seriesRounds(derived.rounds, series.seed, deckId, series.game);
+      return { mode: dealFrom(deckId, order, artifact, seededRandom({ ...series, deck: deckId, options: true })), wrapped };
     };
+    const dealSession = (deckId: SessionDeckId, random: () => number = Math.random, series?: DealSeries) => deal(deckId, random, series).mode;
     // Each round scores up to its own top points, so a mixed game's best is the sum of its rounds'.
     const maximumOf = (state: GameState): number =>
       state.roundIds.reduce((total, roundId) => total + (rounds.get(roundId) ?? fail()).publicRound.points[0], 0);
@@ -420,8 +417,9 @@ export const createLocalRealExperiment = (
         : Object.freeze({ title: "Mixed", description: "Five rounds, each from a different deck.", deckCount: decks.length }),
       privateReveals,
       dealSession,
-      dealGame: (deckId: SessionDeckId, random: () => number = Math.random, now = Date.now(), seal: DealSeal = { arms: CONTROL, record: true }) => {
-        const dealt = dealSession(deckId, random);
+      dealGame: (deckId: SessionDeckId, random: () => number = Math.random, now = Date.now(), seal: DealSeal = { arms: CONTROL, record: true },
+        series?: DealSeries) => {
+        const { mode: dealt, wrapped } = deal(deckId, random, series);
         // A game that shows question layers carries each layered round's scaffold with the round (#128).
         const mode = seal.arms.layer !== "on" || !dealt.rounds.some(({ roundId }) => layers.has(roundId)) ? dealt
           : createPublicModeContract({ sessionContractVersionId: dealt.sessionContractVersionId, rounds: dealt.rounds.map((round) => {
@@ -438,7 +436,7 @@ export const createLocalRealExperiment = (
         const sessionToken = sealGame(state);
         recordStep(state, now);
         emit(state, "game_dealt", {}, now);
-        return Object.freeze({ mode, sessionToken, arms: state.arms });
+        return Object.freeze({ mode, sessionToken, arms: state.arms, wrapped });
       },
       revealHint: (value: HintRequest, now = Date.now()): HintResponse => {
         const request = strings(value, ["sessionToken", "roundId"]);
