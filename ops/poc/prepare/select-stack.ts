@@ -175,6 +175,7 @@ export const selectStack = async (
       const answered = new Set<string>();
       const answerOptions: RepositoryOption[] = [];
       const paneOf = (selection: StackSelection) => String(view(selection.candidate).excerpt);
+      const pathOf = (selection: StackSelection) => String(view(selection.candidate).path);
       for (const { repository, rows: files } of ranked) {
         if (answers.length >= ROUNDS_PER_LANGUAGE) break;
         const own = strict ? await described(repository) : undefined;
@@ -183,7 +184,10 @@ export const selectStack = async (
         for (const row of files.slice(0, profile.selection.filesPerRepository)) {
           const selection = await tryRow(row, language, answers, (candidate) => {
             if (!projectRoundAllowed(String(view(candidate).excerpt), String(view(candidate).path), [repository])) throw new Error("PROJECT_NAME_IN_EXCERPT");
-            // The language's other answer is an option of this round, and this repository one of that round's.
+            // The language's other answer is an option of this round, and this repository one of that round's: neither
+            // round's code or file name may name the other's repository, as the generator requires of every option.
+            if (strict && (!projectRoundAllowed(String(view(candidate).excerpt), String(view(candidate).path), answerOptions.map((other) => other.repository))
+              || answers.some((other) => !projectRoundAllowed(paneOf(other), pathOf(other), [repository])))) throw new Error("PROJECT_NAME_IN_EXCERPT");
             if (strict && ([option, ...answerOptions].some((other) => echoes(String(view(candidate).excerpt), other))
               || answers.some((other) => echoes(paneOf(other), option)))) throw new Error("PROJECT_WORDS_IN_EXCERPT");
           });

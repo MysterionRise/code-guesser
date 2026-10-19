@@ -203,12 +203,15 @@ const logLines = (calls: readonly string[]): string[] =>
   });
 
   it("from profile v6 on, holds each project pane to no word of any option's name or description (#77)", async () => {
-    // python-pop-0's first file calls `launch`, which its description names; python-pop-2's description names
-    // `compute`, which python-pop-1's file calls, so it is no decoy and python-pop-4 is offered instead.
+    // python-pop-0's first file calls `launch`, which its description names; python-pop-1's first file names
+    // python-pop-0, the language's other answer; python-pop-2's description names `compute`, which python-pop-1's
+    // file calls, so it is no decoy and python-pop-4 is offered instead.
     const python = [
       harnessRow("Python", "python-pop-0", { starEventsCount: 9000, excerpt: "value = launch(1)" }),
       harnessRow("Python", "python-pop-0b", { repository: "python-org/python-pop-0", starEventsCount: 9000, excerpt: "value = start(1)" }),
-      ...popularRows("Python").slice(1),
+      harnessRow("Python", "python-pop-1", { starEventsCount: 8000, excerpt: "import python_pop_0" }),
+      harnessRow("Python", "python-pop-1b", { repository: "python-org/python-pop-1", starEventsCount: 8000 }),
+      ...popularRows("Python").slice(2),
       harnessRow("Python", "python-pop-4", { starEventsCount: 4500 }),
     ];
     const rows = stackRowsWith(ordinaryRows("Python"));
@@ -243,7 +246,9 @@ const logLines = (calls: readonly string[]): string[] =>
     expect(new Set(describes).size).toBe(describes.length);
     expect(harness.calls.indexOf("describe:python-org/python-pop-0")).toBeLessThan(harness.calls.findIndex((call) => call.startsWith("fetch:python-pop-0:")));
     expect(harness.calls.filter((call) => call.startsWith("fetch:python-pop-0"))).toHaveLength(2);
+    expect(harness.calls.filter((call) => call.startsWith("fetch:python-pop-1"))).toHaveLength(2);
     expect(offered).toEqual(new Set(["python-org/python-pop-0", "python-org/python-pop-1", "python-org/python-pop-3", "python-org/python-pop-4"]));
+    expect((harness.reports[0] as any).diagnostics).toContainEqual({ stage: "SCREENING", reasonCode: "PROJECT_NAME_IN_EXCERPT", count: 1 });
     expect((harness.reports[0] as any).diagnostics).toContainEqual({ stage: "SCREENING", reasonCode: "PROJECT_WORDS_IN_EXCERPT", count: 2 });
     expect(logLines(harness.calls)).toContain("log:PREPARATION_DECKS project,language,before-after");
   });

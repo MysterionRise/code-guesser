@@ -91,8 +91,10 @@ gate: changing queries, retries, ceilings, deck rules, or running
       options as shown, owner, name, and description (`sharedOptionWords` in `packages/artifact/src/project.ts`:
       five-letter stems of words of three letters or more, common code and English words aside, the leakage
       test's overlap solver). A repository is described before its files are tried, an answer's pane is held to
-      its own words and the other answer's, and a decoy whose words an answer's pane shows is skipped. The
-      parser also reads names inside identifiers (`namesRepository`, now in `packages/artifact`).
+      its own words and the other answer's (and neither answer's code or file name may name the other), and a
+      decoy whose words an answer's pane shows is skipped. The parser also reads names inside identifiers
+      (`namesRepository`, now in `packages/artifact`).
+    - Dry run of both on the v5 data: `docs/review/evidence/2026-10-19-v6-leak-rules-dry-run.md`.
 - The server holds each game's progress (#96): `dealGame` seals it in a signed
   token (`local-real-experiment-session.server.ts`), and the hint and answer
   server actions take one step each. A ledger refuses an older token, so a
