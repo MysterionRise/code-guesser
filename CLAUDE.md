@@ -113,7 +113,7 @@ gate: changing queries, retries, ceilings, deck rules, or running
     - Dry run of these rules on the v5 data: `docs/review/evidence/2026-10-19-v6-leak-rules-dry-run.md`.
 - **Mixed and daily play (#56, #74):** `/?deck=mixed` deals one round from each of five decks drawn at random
   (`MIXED_DECK`, offered when the artifact holds five decks or more); `/?deck=daily` deals the same mix seeded by
-  the artifact's hash and the local date (`dailyRandom` in `local-real-experiment-daily.server.ts`). Both are
+  the artifact's hash and the local date (`dailyRandom` in `local-real-experiment-deal.server.ts`). Both are
   `SessionDeckId`s, sealed in the token and named in events; each round's eyebrow names its deck, and a game's
   `attainableMaximum` is the sum of its rounds' top points.
 - **Seeded deals (#40):** a deck's or the mix's address without `&deal=<8 hex>&game=<n>` redirects to a fresh seed's
