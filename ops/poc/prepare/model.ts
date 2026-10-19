@@ -35,7 +35,12 @@ export {
   labelWords,
   languageCandidateId,
   namesAlgorithm,
+  numericOutputs,
   showsLabelStem,
+  transformGivesAway,
+  transformLimit,
+  transformScore,
+  transformsArgument,
   mentionsRepository,
   outputCandidateId,
   outputOrder,
@@ -43,12 +48,14 @@ export {
   pairLongerScore,
   pairSlack,
   parseExperimentArtifact,
+  profileAtLeast,
   projectCandidateId,
   type DeckId,
   type ExperimentArtifact,
   type ExperimentDeck,
   type ExperimentFixture,
   type FixtureKind,
+  type ProfileVersion,
 } from "../../../packages/artifact/src/index";
 export { ExperimentRecordError } from "./model-validation";
 export { parseRunRecord, type RunRecord } from "./model-run";

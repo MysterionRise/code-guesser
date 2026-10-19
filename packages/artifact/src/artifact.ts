@@ -20,6 +20,7 @@ import {
   ROUNDS_PER_SESSION,
   STACK_LANGUAGES,
   isLanguageSelection,
+  profileAtLeast,
   type CandidateRecord,
   type DeckId,
   type ExperimentArtifact,
@@ -96,12 +97,15 @@ export const outputShape = (output: string): string => {
   if (/^(?:'[^']*'|"[^"]*")$/u.test(output)) return "str";
   return { "[": "list", "(": "tuple", "{": "mapping" }[output[0] ?? ""] ?? "other";
 };
+/** Whether every output option is a number. */
+export const numericOutputs = (labels: readonly string[]): boolean =>
+  labels.every((label) => Number.isFinite(Number(label)) && label.trim().length > 0);
 /**
  * Output options in the order a code-blind solver would rank them: by value when every option is a number,
  * otherwise by length and then text. An output deck spreads its answers evenly over these ranks.
  */
 export const outputOrder = (labels: readonly string[]): readonly string[] => {
-  const numeric = labels.every((label) => Number.isFinite(Number(label)) && label.trim().length > 0);
+  const numeric = numericOutputs(labels);
   return [...labels].sort((left, right) => numeric
     ? Number(left) - Number(right) || (left < right ? -1 : 1)
     : left.length - right.length || (left < right ? -1 : left > right ? 1 : 0));
@@ -120,6 +124,48 @@ export const echoesArgument = (call: string, output: string): boolean => {
   if (text !== undefined) return argumentsText.includes(`'${text}'`) || argumentsText.includes(`"${text}"`);
   return new RegExp(`(?<![\\w.-])${escape(output)}(?![\\w.])`, "u").test(argumentsText);
 };
+/** The string literals among a call's arguments, without their quotes. */
+const stringArguments = (argumentsText: string): readonly string[] =>
+  [...argumentsText.matchAll(/"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'/gu)].map((match) => match[1] ?? match[2] ?? "");
+/** The numbers a text shows, in value order: `(1, -1)` and `(-1, 1)` give the same. */
+const numbersIn = (value: string): string =>
+  (value.match(/-?\d+(?:\.\d+)?/gu) ?? []).map(Number).sort((left, right) => left - right).join(",");
+/** A text's letters in sorted order, case and spaces aside. */
+const sortedLetters = (value: string): string => [...value.toLocaleLowerCase("en-US").replace(/\s/gu, "")].sort().join("");
+/**
+ * Whether an output can be read off its call's arguments without reading the function (#78): the call's own numbers
+ * in some order (`xor_swap(-1, 1)` gives (1, -1)); or, for an output that is not a number, a case-blind piece of the
+ * arguments (`capitalize("a")` gives 'A') or a string argument's letters rearranged (`reverse_letters("nohtyP is
+ * nohtyP", 2)` gives 'Python is Python'). A number is not read as a piece of the arguments: 5 is no clue to `f(15)`.
+ */
+export const transformsArgument = (call: string, output: string): boolean => {
+  const argumentsText = call.slice(call.indexOf("("));
+  const numbers = numbersIn(output);
+  if (numbers.length > 0 && numbers === numbersIn(argumentsText)) return true;
+  if (outputShape(output) === "int" || outputShape(output) === "float") return false;
+  const text = /^(['"])(.*)\1$/su.exec(output)?.[2] ?? output;
+  return (text.length > 0 && argumentsText.toLocaleLowerCase("en-US").includes(text.toLocaleLowerCase("en-US")))
+    || stringArguments(argumentsText).some((argument) => argument.length > 1 && sortedLetters(argument) === sortedLetters(text));
+};
+/**
+ * Whether a call gives its answer away among these outputs: the answer transforms the call's arguments and no other
+ * output does, so picking the transform would win. When a decoy transforms them too, the transform points nowhere.
+ */
+export const transformGivesAway = (call: string, answer: string, outputs: readonly string[]): boolean =>
+  transformsArgument(call, answer) && !outputs.some((output) => output !== answer && transformsArgument(call, output));
+/**
+ * What a solver that picks the option transforming the call's arguments scores on one output round, ties split: a
+ * share of one when the answer is among the transforms, nothing when only decoys are, a quarter when no option is.
+ */
+export const transformScore = (call: string, answer: string, outputs: readonly string[]): number => {
+  const transforms = outputs.filter((output) => transformsArgument(call, output));
+  return transforms.length === 0 ? 1 / outputs.length : transforms.includes(answer) ? 1 / transforms.length : 0;
+};
+/**
+ * The most that solver may score over a deck's rounds whose outputs are not numbers (#78): chance and a tenth of
+ * them, the leakage test's bound. Numbers are left out, as no number is read as a piece of the arguments.
+ */
+export const transformLimit = (rounds: number): number => rounds * (1 / CANDIDATE_COUNTS.OUTPUT + 0.1);
 /** A hint that works one decoy: `call → output`. */
 export const OUTPUT_HINT = " → ";
 /** A fix round's options name lines of its pane, counted from one. */
@@ -364,9 +410,10 @@ const validateAlgorithm = ({ snapshot, panes, prompt, candidates, clues, correct
 
 /**
  * The pane is a function and one call of it, the last and only `>>>` line; the options are four outputs of one
- * shape; and each hint works a decoy (`call → output`), never the answer.
+ * shape; the answer neither repeats an argument nor, from v6 on, alone transforms the arguments (#78); and each hint
+ * works a decoy (`call → output`), never the answer.
  */
-const validateOutput = ({ panes, candidates, clues, correctCandidateId, source }: Semantics): void => {
+const validateOutput = ({ snapshot, panes, candidates, clues, correctCandidateId, source }: Semantics): void => {
   if (candidates.some(({ id, label }) => id !== outputCandidateId(label))) fail();
   const correct = candidates.find(({ id }) => id === correctCandidateId) ?? fail();
   if (new Set(candidates.map(({ label }) => outputShape(label))).size !== 1) fail();
@@ -376,7 +423,9 @@ const validateOutput = ({ panes, candidates, clues, correctCandidateId, source }
   const name = text(source.functionName);
   if (source.excerptHash !== rawHash(code) || lines.at(-1) !== `>>> ${call}` || lines.at(-2) !== ""
     || lines.filter((line) => line.trimStart().startsWith(">>>")).length !== 1
-    || !call.startsWith(`${name}(`) || !new RegExp(`^def ${escape(name)}\\b`, "mu").test(code) || echoesArgument(call, correct.label)) fail();
+    || !call.startsWith(`${name}(`) || !new RegExp(`^def ${escape(name)}\\b`, "mu").test(code) || echoesArgument(call, correct.label)
+    || (profileAtLeast(snapshot.profileVersion, "local-real-rounds.v6")
+      && transformGivesAway(call, correct.label, candidates.map(({ label }) => label)))) fail();
   const worked = clues.map((clue) => {
     const [hintCall, output, extra] = clue.split(OUTPUT_HINT);
     if (extra !== undefined || hintCall === undefined || output === undefined || !hintCall.startsWith(`${name}(`) || hintCall === call) fail();
@@ -469,6 +518,12 @@ const DECK_RULES: Readonly<Partial<Record<DeckId, (fixtures: readonly ParsedFixt
       }
       if (Math.max(...ranks) - Math.min(...ranks) > 1) fail();
     }
+    // From v6 on, picking the option that transforms the call's arguments wins little more than chance (#78).
+    if (!profileAtLeast(fixtures[0]!.source.profileVersion, "local-real-rounds.v6")) return;
+    const worded = fixtures.filter(({ candidates }) => !numericOutputs(candidates.map(({ label }) => label)));
+    const score = worded.reduce((sum, { source, candidates, correctCandidateId }) => sum + transformScore(text(source.call),
+      candidates.find(({ id }) => id === correctCandidateId)!.label, candidates.map(({ label }) => label)), 0);
+    if (score > transformLimit(worded.length) + SCORE_TOLERANCE) fail();
   },
   fix: (fixtures: readonly ParsedFixture[]) => fixDeckRule(fixtures),
   "vulnerable-line": (fixtures: readonly ParsedFixture[]) => fixDeckRule(fixtures),

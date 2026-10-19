@@ -161,7 +161,8 @@ describe("deck leakage", () => {
   });
 
   // #78: two functions (`xor_swap`, `reverse_letters`) return a rearrangement of their input whichever call a round
-  // shows; replacing them needs files the journal does not hold.
+  // shows. The v6 output rules (`transformGivesAway`, `transformLimit`) refuse such rounds and bound this solver, so
+  // this passes from the v6 run on, when it becomes a plain `it`.
   it.runIf(deck("output") !== undefined).fails("an output that rearranges the call's own arguments is no better a guess (#78)", () => {
     const fixtures = deck("output")!.fixtures.filter((fixture) => !fixture.candidates.every(({ label }) => Number.isFinite(Number(label))));
     expect(accuracy(fixtures, (fixture, label) => transformsArguments(fixture, label) ? 1 : 0)).toBeLessThanOrEqual(chance(fixtures[0]!) + TOLERANCE);
