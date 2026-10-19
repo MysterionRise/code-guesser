@@ -77,9 +77,34 @@ describe("server-only local real experiment authority v3", () => {
     expect(experiment.dealSession("before-after", seeded(3)).rounds[0].content.panes.map((pane: any) => pane.label)).toEqual(["A", "B"]);
   });
 
+  it("deals a seeded deal's games without repeats until the pool is spent, the same on every load (#40)", async () => {
+    const { seriesRounds } = await import("../src/demo/local-real-experiment-deal.server");
+    const pool = Array.from({ length: 24 }, (_, index) => index);
+    const games = Array.from({ length: 6 }, (_, game) => seriesRounds(pool, "0a1b2c3d", "project", game));
+    expect(games.map(({ rounds }) => new Set(rounds).size)).toEqual([5, 5, 5, 5, 5, 5]);
+    // Four games of a 24-round deck share no round; the fifth spends the pool and starts it over.
+    expect(new Set(games.slice(0, 4).flatMap(({ rounds }) => rounds)).size).toBe(20);
+    expect(games.map(({ wrapped }) => wrapped)).toEqual([false, false, false, false, true, false]);
+    expect(seriesRounds(pool, "0a1b2c3d", "project", 2)).toEqual(games[2]);
+    expect(seriesRounds(pool, "ffffffff", "project", 0).rounds).not.toEqual(games[0]!.rounds);
+    for (const [seed, game] of [["0A1B2C3D", 0], ["0a1b2c3", 0], ["0a1b2c3d", -1], ["0a1b2c3d", 1000], ["0a1b2c3d", 1.5]] as const) {
+      expect(() => seriesRounds(pool, seed, "project", game), `${seed} ${game}`).toThrow();
+    }
+    // The server deals the same game, options included, for the same seed and number, and the next game afresh.
+    const experiment = create(curatedArtifact());
+    const dealt = (game: number) => experiment.dealGame("project", Math.random, NOW, undefined, { seed: "0a1b2c3d", game });
+    const shown = (game: number) => dealt(game).mode.rounds.map((round: any) => `${round.roundId}:${round.mode.candidates.map(({ candidateId }: any) => candidateId).join(",")}`);
+    expect(shown(0)).toEqual(shown(0));
+    const ids = (game: number) => dealt(game).mode.rounds.map(({ roundId }: any) => roundId);
+    expect(ids(1).some((id: string) => ids(0).includes(id))).toBe(false);
+    expect(dealt(4).wrapped).toBe(true);
+    expect(dealt(0).wrapped).toBe(false);
+    expect(new Set(experiment.dealGame("mixed", Math.random, NOW, undefined, { seed: "0a1b2c3d", game: 0 }).mode.rounds.map((round: any) => round.mode.kind)).size).toBe(5);
+  });
+
   it("deals today's five the same on every load of a date, and differently the next day (#74)", async () => {
     const experiment = create(curatedArtifact());
-    const { dailyRandom: daily, localDate } = await import("../src/demo/local-real-experiment-daily.server");
+    const { dailyRandom: daily, localDate } = await import("../src/demo/local-real-experiment-deal.server");
     const dealt = (date: string) => experiment.dealGame("daily", daily(experiment.artifactHash, date), NOW).mode.rounds
       .map((round: any) => `${round.roundId}:${round.mode.candidates.map(({ candidateId }: any) => candidateId).join(",")}`);
     expect(dealt("2026-10-19")).toEqual(dealt("2026-10-19"));

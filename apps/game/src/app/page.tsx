@@ -1,4 +1,7 @@
+import { randomBytes } from "node:crypto";
+
 import { headers } from "next/headers";
+import { redirect } from "next/navigation";
 
 import { authorizeLocalExperimentReveal, revealLocalExperimentHint } from "./actions";
 import { ArtifactUnavailable } from "../demo/artifact-unavailable";
@@ -8,7 +11,7 @@ import {
   LOCAL_REAL_EXPERIMENT_NOTICE_LEAD,
   activeLocalRealExperiment,
 } from "../demo/local-real-experiment-loader.server";
-import { dailyRandom, localDate } from "../demo/local-real-experiment-daily.server";
+import { DEAL_SEED, MAXIMUM_GAME, dailyRandom, localDate, type DealSeries } from "../demo/local-real-experiment-deal.server";
 import type { LocalRealDeck, LocalRealMix } from "../demo/local-real-experiment.server";
 import { DAILY_DECK, MIXED_DECK, type SessionDeckId } from "../demo/local-real-experiment-domain.server";
 import { CONTROL, FACTORS, assignArms, labMode, labOverrides, parseDisabled, type Arms, type Level } from "../experiment/arms";
@@ -112,13 +115,14 @@ const THEME_LABELS: Readonly<Record<Level<"theme">, string>> = Object.freeze({
  * Lab mode's bar: switchers for the design (#114), with generative UI on, and the theme (#125). Players outside lab
  * mode never see it; their game's arms are the draw's.
  */
-function LabBar({ deck, arms, overrides, genuiEnabled }: {
+function LabBar({ deck, series, arms, overrides, genuiEnabled }: {
   readonly deck: GameSource;
+  readonly series: DealSeries | undefined;
   readonly arms: Arms;
   readonly overrides: Partial<Arms>;
   readonly genuiEnabled: boolean;
 }) {
-  const href = (change: Partial<Arms>) => `/?deck=${deck.id}${labQuery({ ...overrides, ...change })}`;
+  const href = (change: Partial<Arms>) => `${gameHref(deck.id, series)}${labQuery({ ...overrides, ...change })}`;
   const design: Design | null = arms.design === "off" ? null : arms.design;
   return (
     <div className="lab-bar">
@@ -145,20 +149,37 @@ function LabBar({ deck, arms, overrides, genuiEnabled }: {
  * A fresh five-round game from the deck's pool, dealt on every visit. The server holds its progress, the arms it
  * drew (#106), and whether it records events (#107); a browser that sends `Sec-GPC: 1` gets a game that records none.
  */
-function DealtSession({ deck, arms, record, overrides }: { readonly deck: GameSource; readonly arms: Arms; readonly record: boolean; readonly overrides: Partial<Arms> }) {
+/** A game's address: a seeded deal's game carries its seed and number (#40); today's five needs neither. */
+const gameHref = (deck: SessionDeckId, series: DealSeries | undefined): string =>
+  series ? `/?deck=${deck}&deal=${series.seed}&game=${series.game}` : `/?deck=${deck}`;
+
+/** The deal and game a page's address names, when both are well formed. */
+const seriesOf = (query: Readonly<Record<string, string | string[] | undefined>>): DealSeries | undefined => {
+  const game = typeof query.game === "string" && /^\d{1,3}$/u.test(query.game) ? Number(query.game) : Number.NaN;
+  return typeof query.deal === "string" && DEAL_SEED.test(query.deal) && game <= MAXIMUM_GAME ? { seed: query.deal, game } : undefined;
+};
+
+function DealtSession({ deck, series, arms, record, overrides }: {
+  readonly deck: GameSource; readonly series: DealSeries | undefined; readonly arms: Arms; readonly record: boolean; readonly overrides: Partial<Arms>;
+}) {
   const loaded = activeLocalRealExperiment();
   if (!loaded.ok) return null;
   // Today's five deals from the local date, so a reload or a new game that day deals the same five (#74).
   const random = deck.id === DAILY_DECK ? dailyRandom(loaded.experiment.artifactHash, localDate(new Date())) : Math.random;
-  const { mode, sessionToken } = loaded.experiment.dealGame(deck.id, random, Date.now(), { arms, record });
+  const { mode, sessionToken, wrapped } = loaded.experiment.dealGame(deck.id, random, Date.now(), { arms, record }, series);
+  // The next game of a seeded deal shares no round with this one until the pool is spent; today's five moves to a mix.
+  const next = series ? gameHref(deck.id, { ...series, game: Math.min(series.game + 1, MAXIMUM_GAME) }) : `/?deck=${MIXED_DECK}`;
   // A mixed game names each round's deck; a deck's own game needs no reminder.
   const roundDecks = deck.id === MIXED_DECK || deck.id === DAILY_DECK
     ? Object.fromEntries(loaded.experiment.decks.map(({ id, title }) => [id, title])) : undefined;
   return (
-    <DemoArcade key={sessionToken} mode={mode} sessionToken={sessionToken} deckTitle={deck.title} {...(roundDecks ? { roundDecks } : {})}
-      authorizeRevealAction={authorizeLocalExperimentReveal} revealHintAction={revealLocalExperimentHint}
-      chooseAnotherDeckHref="/" newGameHref={`/?deck=${deck.id === DAILY_DECK ? MIXED_DECK : deck.id}${labQuery(overrides)}`}
-      {...(arms.design === "off" ? {} : { genuiDesign: arms.design })} />
+    <>
+      {wrapped && <p className="deal-note">You’ve now seen every round in this deck, so this game starts it over.</p>}
+      <DemoArcade key={sessionToken} mode={mode} sessionToken={sessionToken} deckTitle={deck.title} {...(roundDecks ? { roundDecks } : {})}
+        authorizeRevealAction={authorizeLocalExperimentReveal} revealHintAction={revealLocalExperimentHint}
+        chooseAnotherDeckHref="/" newGameHref={`${next}${labQuery(overrides)}`}
+        {...(arms.design === "off" ? {} : { genuiDesign: arms.design })} />
+    </>
   );
 }
 
@@ -172,10 +193,16 @@ export default async function Page({ searchParams }: PageProps) {
   const overrides = lab ? labOverrides(query) : {};
   const arms = assignArms({ genuiEnabled, disabled: parseDisabled(process.env.EXPERIMENT_DISABLED), overrides });
   const record = (await headers()).get("sec-gpc") !== "1";
+  const series = seriesOf(query);
   const deck: GameSource | undefined = !loaded.ok || typeof requested !== "string" ? undefined
     : requested === MIXED_DECK ? (loaded.experiment.mixed ? { id: MIXED_DECK, title: loaded.experiment.mixed.title } : undefined)
       : requested === DAILY_DECK ? (loaded.experiment.mixed ? { id: DAILY_DECK, title: `Today’s five, ${localDate(new Date())}` } : undefined)
       : loaded.experiment.decks.find(({ id }) => id === requested);
+  // A deck's game is a game of a seeded deal (#40): an address without one starts a fresh deal at its first game, so a
+  // reload shows the same game and "Deal new rounds" the next. Today's five is seeded by its date instead.
+  if (deck && deck.id !== DAILY_DECK && series === undefined) {
+    redirect(`${gameHref(deck.id, { seed: randomBytes(4).toString("hex"), game: 0 })}${labQuery(overrides)}`);
+  }
   // A game shows the theme it drew (#125); the chooser, outside any game, keeps the original unless a tester picks one.
   const theme = deck ? arms.theme : overrides.theme ?? CONTROL.theme;
   return (
@@ -190,8 +217,8 @@ export default async function Page({ searchParams }: PageProps) {
           ? (
             <>
               <nav className="deck-nav" aria-label="Decks"><a href="/">All decks</a></nav>
-              {lab && <LabBar deck={deck} arms={arms} overrides={overrides} genuiEnabled={genuiEnabled} />}
-              <DealtSession deck={deck} arms={arms} record={record} overrides={overrides} />
+              {lab && <LabBar deck={deck} series={series} arms={arms} overrides={overrides} genuiEnabled={genuiEnabled} />}
+              <DealtSession deck={deck} series={deck.id === DAILY_DECK ? undefined : series} arms={arms} record={record} overrides={overrides} />
             </>
           )
           : <DeckChooser decks={loaded.experiment.decks} mixed={loaded.experiment.mixed} query={labQuery(overrides)} />}

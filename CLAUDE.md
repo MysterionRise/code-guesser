@@ -116,6 +116,10 @@ gate: changing queries, retries, ceilings, deck rules, or running
   the artifact's hash and the local date (`dailyRandom` in `local-real-experiment-daily.server.ts`). Both are
   `SessionDeckId`s, sealed in the token and named in events; each round's eyebrow names its deck, and a game's
   `attainableMaximum` is the sum of its rounds' top points.
+- **Seeded deals (#40):** a deck's or the mix's address without `&deal=<8 hex>&game=<n>` redirects to a fresh seed's
+  game 0. Game n takes positions 5n to 5n + 4 of the pool in the seed's order (`seriesRounds` in
+  `local-real-experiment-deal.server.ts`, a fresh order each pass), and its options in a seeded order, so a reload
+  deals the same game and "Deal new rounds" links to game n + 1. A game that starts a new pass shows a note.
 - The server holds each game's progress (#96): `dealGame` seals it in a signed
   token (`local-real-experiment-session.server.ts`), and the hint and answer
   server actions take one step each. A ledger refuses an older token, so a
