@@ -487,7 +487,10 @@ committed artifact), and re-record the media with `pnpm demo:record`:
 - `demo.gif`, the vertical headline clip, under 10 MB;
 - every other GIF under 4 MB.
 
-Add `DEMO_PORT=3300` if another local app holds port 3100.
+Add `DEMO_PORT=3300` if another local app holds port 3100. Scenes play fixed deals (`DEAL_SEEDS` in
+`ops/demo/record/scenes.ts`) with lab-mode picks of theme and layer, so a new artifact deals other first rounds: look
+at each before re-recording and pick another seed where one reads badly on a phone. `DEMO_BASE_URL` may point at a
+running `next start` with `EXPERIMENT_LAB=1`.
 
 ## Reading failures
 

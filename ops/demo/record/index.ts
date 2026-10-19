@@ -4,9 +4,10 @@
  * docs/media.
  * Run with `pnpm demo:record` after a verified preparation run.
  *
- * Set DEMO_BASE_URL to record an already running server; otherwise a Next dev
- * server is started on 127.0.0.1:3100 (or DEMO_PORT) for the duration of the run.
- * The recorder only records a server that serves CodeGuessr.
+ * Set DEMO_BASE_URL to record an already running server in lab mode
+ * (EXPERIMENT_LAB=1), since scenes pick their theme and question layer by query;
+ * otherwise a Next dev server is started on 127.0.0.1:3100 (or DEMO_PORT) for the
+ * duration of the run. The recorder only records a server that serves CodeGuessr.
  * Set DEMO_SCENES to a comma-separated list of scene ids to record a subset.
  */
 import { spawn, type ChildProcess } from "node:child_process";
@@ -18,7 +19,7 @@ import { fileURLToPath } from "node:url";
 import { chromium, type Page } from "@playwright/test";
 
 import { DEFAULT_GIF_OPTIONS, gifArguments, mp4Arguments } from "./encode";
-import { hideDevIndicator, setCaption, type CaptionStyle } from "./overlay";
+import { hideLocalTooling, setCaption, type CaptionStyle } from "./overlay";
 import { SCENES, type Scene, type Step } from "./scenes";
 
 const ROOT = fileURLToPath(new URL("../../../", import.meta.url));
@@ -101,9 +102,16 @@ const smoothScroll = async (page: Page, selector: string): Promise<void> => {
 
 const performStep = async (page: Page, context: StepContext, step: Step): Promise<void> => {
   switch (step.kind) {
-    case "goto":
+    case "goto": {
       await page.goto(`${context.baseUrl}${step.path}`, { waitUntil: "networkidle" });
+      // A theme is a lab pick; a server outside lab mode draws its own, and the scene's captions would not match.
+      const theme = new URLSearchParams(step.path.slice(step.path.indexOf("?") + 1)).get("theme");
+      const shown = await page.locator(".demo-page").getAttribute("data-theme", { timeout: STEP_TIMEOUT_MILLISECONDS });
+      if (theme !== null && step.path.includes("deck=") && shown !== theme) {
+        throw new Error(`${step.path} shows the ${shown ?? "default"} theme; record a server in lab mode (next dev, or EXPERIMENT_LAB=1)`);
+      }
       return;
+    }
     case "answer": {
       const roundId = await page.locator(".game-card").getAttribute("data-round-id", { timeout: STEP_TIMEOUT_MILLISECONDS });
       const label = roundId === null ? undefined : context.answers.get(roundId);
@@ -122,10 +130,13 @@ const performStep = async (page: Page, context: StepContext, step: Step): Promis
       await page.getByRole("link", { name: step.name }).first().click({ timeout: STEP_TIMEOUT_MILLISECONDS });
       await page.waitForLoadState("networkidle");
       return;
-    case "choose":
-      await page.getByRole("group", { name: "Choose one answer" }).getByRole("radio").nth(step.index)
-        .check({ timeout: STEP_TIMEOUT_MILLISECONDS });
+    case "choose": {
+      // A mixed game deals before-or-after rounds too, which offer two answers.
+      const radios = page.getByRole("group", { name: "Choose one answer" }).getByRole("radio");
+      await radios.first().waitFor({ state: "visible", timeout: STEP_TIMEOUT_MILLISECONDS });
+      await radios.nth(Math.min(step.index, await radios.count() - 1)).check({ timeout: STEP_TIMEOUT_MILLISECONDS });
       return;
+    }
     case "expectText":
       await page.getByText(new RegExp(step.pattern, "u")).first().waitFor({ state: "visible", timeout: STEP_TIMEOUT_MILLISECONDS });
       return;
@@ -164,7 +175,7 @@ const recordScene = async (scene: Scene, baseUrl: string, answers: ReadonlyMap<s
       // The screencast is captured at viewport (CSS pixel) size; a larger size only adds padding.
       recordVideo: { dir: WORK_DIRECTORY, size: viewport },
     });
-    await hideDevIndicator(context);
+    await hideLocalTooling(context);
     const page = await context.newPage();
     for (const step of scene.steps) await performStep(page, stepContext, step);
     const video = page.video();
