@@ -222,6 +222,34 @@ user agent, cookie, persistent id, chat text, round content, or the option
 chosen. A browser that sends `Sec-GPC: 1` gets a game that records nothing.
 Raw events are kept for 90 days and then rolled up into daily totals.
 
+`pnpm experiment:report` reads the log with no network and prints a Markdown
+report (`--json=<path>` also writes it as JSON):
+
+```bash
+EXPERIMENT_EVENTS_DIR=… pnpm experiment:report [--source=real|agent|synthetic] \
+  [--from=YYYY-MM-DD] [--to=YYYY-MM-DD] [--price-in=<USD/M>] [--price-out=<USD/M>]
+```
+
+- **Plan:** the report opens with its pre-registered plan.
+- **Primary metric:** the deal-again rate, the share of completed games whose
+  player dealt new rounds or chose another deck. Each level gets a Beta
+  posterior, a 95% interval, P(best), and its difference from control.
+- **Secondary metrics:** completion, hints per round, median time per round,
+  chat turns, fallbacks, p95 model latency, and cost per game, which needs the
+  model's prices.
+- **Guardrail:** accuracy against control. A level whose accuracy is clearly
+  higher may be leaking answers, and the report names the
+  `EXPERIMENT_DISABLED` value that switches it off.
+- **Stopping rule:** read the result when every level reaches its target or
+  after 56 days. The targets detect a 10-point rise over a 30% base rate with
+  power 0.8, at α 0.05 split over each factor's comparisons with control: 506
+  completed games per design, 475 per theme, and 356 per layer level. Layers
+  count only on decks that have them.
+- **Interactions:** two-way tables per pair of factors, descriptive only.
+
+It reads one source at a time and defaults to real games, so playtests never
+mix with them.
+
 For a production-mode local run:
 
 ```bash
@@ -448,6 +476,7 @@ Each path has a status:
 | `ops/poc/profiles` | Versioned crawl profiles | live |
 | `ops/poc/limits.json` | Pinned Stack revision and hard ceilings shared by Node (`limits.ts`) and Python | live |
 | `ops/demo/record` | Scripted README media recorder | PoC support |
+| `ops/experiment` | `experiment:report`: the experiment's report from the event log, with its statistics and pre-registered plan | live |
 | `ops/content` | The `acquire:content` operator command and its policy files. The containment test (`tests/containment/acquisition-boundary.test.mjs`) requires the script to exist | Contract-era |
 | `ops/tsconfig.json` | Type-checks everything under `ops/`; `pnpm typecheck` runs it | PoC support |
 | `tests` | Accessibility, browser, performance, and containment suites. They run in CI against the live game; the privacy and provenance checks date from the Contract era | PoC support |

@@ -261,6 +261,16 @@ gate: changing queries, retries, ceilings, deck rules, or running
     - `EXPERIMENT_SOURCE=agent|synthetic` tags playtests and tests.
     - SQLite waits for Node 24 (#21): Node 20 has no `node:sqlite`, so the
       store is JSONL behind the `EventStore` interface.
+  - **Report** (#108, `ops/experiment/`): `pnpm experiment:report` reads one source's raw days with the events
+    parser and prints Markdown (`--json=` writes JSON).
+    - Each factor's levels are compared on the deal-again rate of completed games: seeded Beta draws
+      (`statistics.ts`), 95% intervals, P(best) among levels with data, and the difference from control.
+    - The secondaries come beside it, and the accuracy guardrail flags a level clearly above control.
+    - Pre-registered targets (`PLAN`, `targetFor`): 10 points over 30%, power 0.8, Bonferroni over each factor's
+      comparisons, so 506 games per design, 475 per theme, and 356 per layer level. The read waits for every target or
+      day 56.
+    - Layers count only on decks in `question-layers.json`, and rolled-up totals are left out.
+    - Tests recover known effects from quota-built synthetic stores, and `events.spec.ts` reads the e2e store.
 - Question layers (#127, #128; v1.0): generative UI inside the question,
   written at preparation time and frozen in
   `apps/game/src/demo/generated/question-layers.json`, pinned by
