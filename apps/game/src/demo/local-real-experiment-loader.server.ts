@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { eventSinkFromEnv, type EventSink } from "../experiment/event-store.server";
-import { DECK_IDS } from "./local-real-experiment-domain.server";
+import { SESSION_DECK_IDS } from "./local-real-experiment-domain.server";
 import { loadQuestionLayers, type LayerLoadOptions } from "./local-real-experiment-layers.server";
 import { TRUSTED_ARTIFACT_HASH } from "./local-real-experiment.pin.server";
 import {
@@ -81,7 +81,7 @@ let active: LoadedLocalRealExperiment | undefined;
  */
 export const activeLocalRealExperiment = (): LoadedLocalRealExperiment => {
   if (active === undefined) {
-    active = loadLocalRealExperiment({ events: eventSinkFromEnv(DECK_IDS) });
+    active = loadLocalRealExperiment({ events: eventSinkFromEnv(SESSION_DECK_IDS) });
     if (!active.ok) console.error(`LOCAL_REAL_EXPERIMENT_UNAVAILABLE ${active.reason}`);
   }
   return active;

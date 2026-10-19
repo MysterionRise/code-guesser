@@ -95,6 +95,48 @@ for (const deck of artifact.decks) {
   });
 }
 
+const deckOfRound = new Map(artifact.decks.flatMap((deck) => deck.fixtures.map((fixture) => [fixture.roundId, deck] as const)));
+
+test("a mixed game deals one round from each of five decks, names each round's deck, and scores to its rounds' best (#56)", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("link", { name: /^Mixed/u }).click();
+  await expect(page).toHaveURL(/\?deck=mixed$/u);
+  const decks: string[] = [];
+  let best = 0;
+  for (let index = 0; index < 5; index += 1) {
+    if (index > 0) await page.getByRole("button", { name: "Next round" }).click();
+    await expect(page.getByText(`Round ${index + 1} of 5`)).toBeVisible();
+    const roundId = await currentRound(page);
+    const deck = deckOfRound.get(roundId)!;
+    decks.push(deck.id);
+    best += fullPoints(deck);
+    await expect(page.locator(".eyebrow .round-deck")).toHaveText(deck.title);
+    await page.getByLabel(answers.get(roundId)!, { exact: true }).check();
+    await page.getByRole("button", { name: "Lock in answer" }).click();
+    await expect(page.getByRole("heading", { name: "Nice read." })).toBeVisible();
+  }
+  expect(new Set(decks).size).toBe(5);
+  await expect(score(page)).toHaveText(`Score: ${points(best)} pts`);
+  await expect(page.getByText(new RegExp(`Run complete — ${points(best)} points`, "u"))).toBeVisible();
+  await expect(page.getByRole("link", { name: "Deal new rounds" })).toHaveAttribute("href", "/?deck=mixed");
+});
+
+test("today's five deals the same five, in the same order, on every load of the day (#74)", async ({ page }) => {
+  await page.goto("/");
+  const card = page.getByRole("link", { name: /^Today’s five/u });
+  await expect(card).toContainText(/\d{4}-\d{2}-\d{2}/u);
+  await card.click();
+  await expect(page).toHaveURL(/\?deck=daily$/u);
+  const dealt = async () => {
+    await expect(page.getByText("Round 1 of 5")).toBeVisible();
+    return { round: await currentRound(page), options: await page.locator(".candidate").allTextContents() };
+  };
+  const first = await dealt();
+  await page.reload();
+  expect(await dealt()).toEqual(first);
+  await expect(page.locator(".eyebrow .round-deck")).toHaveText(deckOfRound.get(first.round)!.title);
+});
+
 test("a deck query parameter preselects the deck, and a wrong answer scores zero and shows the right one", async ({ page }) => {
   await page.goto("/?deck=before-after");
   await expect(page.getByText("Round 1 of 5")).toBeVisible();

@@ -19,6 +19,7 @@ interface DemoArcadeProps {
   readonly chooseAnotherDeckHref?: string;
   readonly newGameHref?: string;
   readonly deckTitle?: string;
+  readonly roundDecks?: Readonly<Record<string, string>>;
   readonly genuiDesign?: Design;
 }
 

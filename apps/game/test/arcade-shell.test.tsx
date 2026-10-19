@@ -148,7 +148,7 @@ describe("static arcade shell", () => {
     expect(() => createPublicModeContract(input)).toThrow("a round may expose at most two clues");
   });
 
-  it("deals every session from one deck and accepts each deck's kind", () => {
+  it("accepts each deck's kind, and a mixed session of several (#56)", () => {
     for (const kind of ["project", "language", "before-after"] as const) {
       const deck = modeInput();
       deck.rounds.forEach((round) => { round.mode.kind = kind; });
@@ -156,7 +156,7 @@ describe("static arcade shell", () => {
     }
     const mixed = modeInput();
     mixed.rounds[0]!.mode.kind = "project";
-    expect(() => createPublicModeContract(mixed)).toThrow("a session deals from one deck");
+    expect(createPublicModeContract(mixed).rounds.map((round) => round.mode.kind)).toContain("project");
     const unknown = modeInput();
     unknown.rounds.forEach((round) => { round.mode.kind = "ai" as "language"; });
     expect(() => createPublicModeContract(unknown)).toThrow("unsupported round mode");

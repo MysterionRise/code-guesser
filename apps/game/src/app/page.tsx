@@ -8,7 +8,9 @@ import {
   LOCAL_REAL_EXPERIMENT_NOTICE_LEAD,
   activeLocalRealExperiment,
 } from "../demo/local-real-experiment-loader.server";
-import type { LocalRealDeck } from "../demo/local-real-experiment.server";
+import { dailyRandom, localDate } from "../demo/local-real-experiment-daily.server";
+import type { LocalRealDeck, LocalRealMix } from "../demo/local-real-experiment.server";
+import { DAILY_DECK, MIXED_DECK, type SessionDeckId } from "../demo/local-real-experiment-domain.server";
 import { CONTROL, FACTORS, assignArms, labMode, labOverrides, parseDisabled, type Arms, type Level } from "../experiment/arms";
 import { DESIGN_LABELS, READY_DESIGNS, type Design } from "../genui/designs";
 
@@ -31,8 +33,17 @@ interface PageProps {
   readonly searchParams: Promise<Readonly<Record<string, string | string[] | undefined>>>;
 }
 
-/** The chooser (#126): decks grouped by what they ask; in lab mode `query` carries the tester's picks onto each link. */
-function DeckChooser({ decks, query }: { readonly decks: readonly LocalRealDeck[]; readonly query: string }) {
+/** What a game is dealt from: a deck, or the mix of five (#56). */
+interface GameSource {
+  readonly id: SessionDeckId;
+  readonly title: string;
+}
+
+/**
+ * The chooser (#126): the mix first when the artifact offers one (#56), then decks grouped by what they ask; in lab
+ * mode `query` carries the tester's picks onto each link.
+ */
+function DeckChooser({ decks, mixed, query }: { readonly decks: readonly LocalRealDeck[]; readonly mixed: LocalRealMix | null; readonly query: string }) {
   const groups = (["Recognise", "Reason"] as const).map((tag) => ({ tag, decks: decks.filter(({ id }) => (DECK_TAGS[id] ?? "Reason") === tag) }))
     .filter(({ decks: grouped }) => grouped.length > 0);
   return (
@@ -42,6 +53,27 @@ function DeckChooser({ decks, query }: { readonly decks: readonly LocalRealDeck[
         {deckSummary(decks.length)} Each game deals five real rounds from the deck. Read the code, take up to two hints,
         and lock in your guess.
       </p>
+      {mixed && (
+        <section className="deck-group" aria-labelledby="deck-group-mixed">
+          <h2 id="deck-group-mixed" className="deck-group-title">Mixed<span className="deck-group-note">A taste of every kind.</span></h2>
+          <ul className="deck-list">
+            <li>
+              <a className="deck-card" href={`/?deck=${DAILY_DECK}${query}`}>
+                <span className="deck-title">Today’s five</span>{" "}
+                <span className="deck-description">The same mixed five all day, new tomorrow.</span>{" "}
+                <span className="deck-size">{localDate(new Date())}</span>
+              </a>
+            </li>
+            <li>
+              <a className="deck-card" href={`/?deck=${MIXED_DECK}${query}`}>
+                <span className="deck-title">{mixed.title}</span>{" "}
+                <span className="deck-description">{mixed.description}</span>{" "}
+                <span className="deck-size">Drawn from {mixed.deckCount} decks</span>
+              </a>
+            </li>
+          </ul>
+        </section>
+      )}
       {groups.map(({ tag, decks: grouped }) => (
         <section className="deck-group" key={tag} aria-labelledby={`deck-group-${tag}`}>
           <h2 id={`deck-group-${tag}`} className="deck-group-title">{tag}<span className="deck-group-note">{DECK_GROUP_NOTES[tag]}</span></h2>
@@ -81,7 +113,7 @@ const THEME_LABELS: Readonly<Record<Level<"theme">, string>> = Object.freeze({
  * mode never see it; their game's arms are the draw's.
  */
 function LabBar({ deck, arms, overrides, genuiEnabled }: {
-  readonly deck: LocalRealDeck;
+  readonly deck: GameSource;
   readonly arms: Arms;
   readonly overrides: Partial<Arms>;
   readonly genuiEnabled: boolean;
@@ -113,14 +145,19 @@ function LabBar({ deck, arms, overrides, genuiEnabled }: {
  * A fresh five-round game from the deck's pool, dealt on every visit. The server holds its progress, the arms it
  * drew (#106), and whether it records events (#107); a browser that sends `Sec-GPC: 1` gets a game that records none.
  */
-function DealtSession({ deck, arms, record, overrides }: { readonly deck: LocalRealDeck; readonly arms: Arms; readonly record: boolean; readonly overrides: Partial<Arms> }) {
+function DealtSession({ deck, arms, record, overrides }: { readonly deck: GameSource; readonly arms: Arms; readonly record: boolean; readonly overrides: Partial<Arms> }) {
   const loaded = activeLocalRealExperiment();
   if (!loaded.ok) return null;
-  const { mode, sessionToken } = loaded.experiment.dealGame(deck.id, Math.random, Date.now(), { arms, record });
+  // Today's five deals from the local date, so a reload or a new game that day deals the same five (#74).
+  const random = deck.id === DAILY_DECK ? dailyRandom(loaded.experiment.artifactHash, localDate(new Date())) : Math.random;
+  const { mode, sessionToken } = loaded.experiment.dealGame(deck.id, random, Date.now(), { arms, record });
+  // A mixed game names each round's deck; a deck's own game needs no reminder.
+  const roundDecks = deck.id === MIXED_DECK || deck.id === DAILY_DECK
+    ? Object.fromEntries(loaded.experiment.decks.map(({ id, title }) => [id, title])) : undefined;
   return (
-    <DemoArcade key={sessionToken} mode={mode} sessionToken={sessionToken} deckTitle={deck.title}
+    <DemoArcade key={sessionToken} mode={mode} sessionToken={sessionToken} deckTitle={deck.title} {...(roundDecks ? { roundDecks } : {})}
       authorizeRevealAction={authorizeLocalExperimentReveal} revealHintAction={revealLocalExperimentHint}
-      chooseAnotherDeckHref="/" newGameHref={`/?deck=${deck.id}${labQuery(overrides)}`}
+      chooseAnotherDeckHref="/" newGameHref={`/?deck=${deck.id === DAILY_DECK ? MIXED_DECK : deck.id}${labQuery(overrides)}`}
       {...(arms.design === "off" ? {} : { genuiDesign: arms.design })} />
   );
 }
@@ -135,9 +172,10 @@ export default async function Page({ searchParams }: PageProps) {
   const overrides = lab ? labOverrides(query) : {};
   const arms = assignArms({ genuiEnabled, disabled: parseDisabled(process.env.EXPERIMENT_DISABLED), overrides });
   const record = (await headers()).get("sec-gpc") !== "1";
-  const deck = loaded.ok && typeof requested === "string"
-    ? loaded.experiment.decks.find(({ id }) => id === requested)
-    : undefined;
+  const deck: GameSource | undefined = !loaded.ok || typeof requested !== "string" ? undefined
+    : requested === MIXED_DECK ? (loaded.experiment.mixed ? { id: MIXED_DECK, title: loaded.experiment.mixed.title } : undefined)
+      : requested === DAILY_DECK ? (loaded.experiment.mixed ? { id: DAILY_DECK, title: `Today’s five, ${localDate(new Date())}` } : undefined)
+      : loaded.experiment.decks.find(({ id }) => id === requested);
   // A game shows the theme it drew (#125); the chooser, outside any game, keeps the original unless a tester picks one.
   const theme = deck ? arms.theme : overrides.theme ?? CONTROL.theme;
   return (
@@ -156,7 +194,7 @@ export default async function Page({ searchParams }: PageProps) {
               <DealtSession deck={deck} arms={arms} record={record} overrides={overrides} />
             </>
           )
-          : <DeckChooser decks={loaded.experiment.decks} query={labQuery(overrides)} />}
+          : <DeckChooser decks={loaded.experiment.decks} mixed={loaded.experiment.mixed} query={labQuery(overrides)} />}
     </div>
   );
 }

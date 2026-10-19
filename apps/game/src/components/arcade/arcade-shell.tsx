@@ -38,11 +38,13 @@ interface ArcadeShellProps {
   newGameHref?: string;
   /** When set, the share line names the deck. */
   deckTitle?: string;
+  /** When set, as in a mixed game (#56), each round's eyebrow names its own deck, by round kind. */
+  roundDecks?: Readonly<Record<string, string>>;
   /** When set, a revealed round offers this generative design (#101, #114); the server decides with `GENUI_ENABLED`. */
   genuiDesign?: Design;
 }
 
-export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealHintAction, chooseAnotherDeckHref, newGameHref, deckTitle, genuiDesign }: ArcadeShellProps) {
+export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealHintAction, chooseAnotherDeckHref, newGameHref, deckTitle, roundDecks, genuiDesign }: ArcadeShellProps) {
   const [session, setSession] = React.useState(() => createArcadeSession(mode));
   const token = React.useRef(sessionToken);
   const currentToken = React.useCallback(() => token.current, []);
@@ -195,7 +197,8 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
       </ArcadeHeader>
 
       <section className="game-card" aria-labelledby="round-title" data-round-id={round.roundId}>
-        <p className="eyebrow">Round {session.roundIndex + 1} of {mode.rounds.length}</p>
+        <p className="eyebrow">Round {session.roundIndex + 1} of {mode.rounds.length}
+          {roundDecks?.[round.mode.kind] !== undefined && <> · <span className="round-deck">{roundDecks[round.mode.kind]}</span></>}</p>
         <h1 id="round-title" ref={roundTitle} tabIndex={-1}>{round.mode.prompt}</h1>
         {round.scaffold && <QuestionScaffold scaffold={round.scaffold} />}
         <CodePanes round={round} numbered={numbered} paneLines={paneLines} highlighted={highlighted} marked={markedLines(session.hintDetails)}
