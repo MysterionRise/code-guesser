@@ -31,7 +31,7 @@ export type ArtifactSchemaVersion = typeof ARTIFACT_SCHEMA_VERSIONS[ProfileVersi
 export const profileAtLeast = (version: ProfileVersion, minimum: ProfileVersion): boolean =>
   PROFILE_VERSIONS.indexOf(version) >= PROFILE_VERSIONS.indexOf(minimum);
 /** The profile the preparer runs, and its artifact's schema; the v1.0 data run moves both to v6. */
-export const PROFILE_VERSION: ProfileVersion = "local-real-rounds.v5";
+export const PROFILE_VERSION: ProfileVersion = "local-real-rounds.v6";
 export const ARTIFACT_SCHEMA_VERSION: ArtifactSchemaVersion = ARTIFACT_SCHEMA_VERSIONS[PROFILE_VERSION];
 export const CONTENT_CLASS = "LOCAL_UNREVIEWED_EXPERIMENT";
 /** A session deals this many rounds from a deck's pool. */

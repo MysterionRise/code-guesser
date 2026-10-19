@@ -76,7 +76,10 @@ export const lineFeatureSolver = (feature: string, direction: 1 | -1) => (fixtur
 export const proseLines = (pane: readonly string[]): ReadonlySet<number> => {
   const quotes = pane.map((line) => (line.match(/"""|'''/gu) ?? []).length);
   const first = quotes.findIndex((count) => count > 0);
-  let inside = quotes.reduce((sum, count) => sum + count, 0) % 2 === 1 && first >= 0 && /^\s*(?:"""|''')\s*$/u.test(pane[first]!);
+  // A quote on a line of its own just under a `def` or `class` line opens a docstring rather than closing one, as a
+  // window that ends inside a docstring shows.
+  const opens = pane.slice(0, Math.max(first, 0)).filter((line) => line.trim().length > 0).at(-1)?.trimEnd().endsWith(":") ?? false;
+  let inside = quotes.reduce((sum, count) => sum + count, 0) % 2 === 1 && first >= 0 && /^\s*(?:"""|''')\s*$/u.test(pane[first]!) && !opens;
   const prose = new Set<number>();
   pane.forEach((line, index) => {
     if (inside || /^\s*(?:#|\/\/|\/\*|\*|"""|''')/u.test(line)) prose.add(index + 1);

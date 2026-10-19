@@ -35,7 +35,7 @@ test("the permanent notice names every round source and wraps to at most five li
     await page.goto(path);
     const notice = page.locator(".demo-notice");
     await expect(notice).toContainText(/^Local unreviewed experiment\./u);
-    for (const source of ["The Stack v2", "GitHub", "TheAlgorithms", "Defects4J", "BugsInPy", "localhost", "Not approved beta content"]) {
+    for (const source of ["The Stack v2", "GitHub", "TheAlgorithms", "Defects4J", "BugsInPy", "TodoMVC", "Exercism", "localhost", "Not approved beta content"]) {
       await expect(notice).toContainText(source);
     }
     expect(await notice.evaluate(lines), path).toBeLessThanOrEqual(5);
