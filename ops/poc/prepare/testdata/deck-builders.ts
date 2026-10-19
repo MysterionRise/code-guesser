@@ -60,8 +60,10 @@ export const commitCandidate = (input: CommitCandidateInput): GitHubAdmissionCan
   const commit = sha1(`commit-${repository}-${index}`);
   const path = `src/compute_${index}.ts`;
   const blob = sha1(`blob-${repository}-${index}`);
-  const beforeExcerpt = `export function compute${index}(values: number[]): number {\n  let total = 0;\n  for (const value of values) {\n    total += value * ${index + 2};\n  }\n  return total;\n}`;
-  const afterExcerpt = `export function compute${index}(values: number[]): number {\n  return values.reduce((total, value) => total + value * ${index + 2}, 0);\n}`;
+  const loop = `export function compute${index}(values: number[]): number {\n  let total = 0;\n  for (const value of values) {\n    total += value * ${index + 2};\n  }\n  return total;\n}`;
+  const reduced = `export function compute${index}(values: number[]): number {\n  return values.reduce((total, value) => total + value * ${index + 2}, 0);\n}`;
+  // Even commits fold the loop into a reduce and odd ones unfold it, so the later pane is the bigger one in half (#75).
+  const [beforeExcerpt, afterExcerpt] = index % 2 === 0 ? [loop, reduced] : [reduced, loop];
   const commitUrl = `${repositoryUrl}/commit/${commit}`;
   const rawContentHash = sha256(`raw-${repository}-${index}`);
   const queryId = input.queryId ?? profile.github.queries[index % profile.github.queries.length]!.id;

@@ -6,7 +6,7 @@ import {
   BEFORE_AFTER_CANDIDATE_IDS, LANGUAGE_PAIRS, parseArtifactDecks, showsLabelStem, spellsFramework, type ParsedDeck, type ParsedFixture,
 } from "../src/index";
 import {
-  LINE_FEATURES, TOLERANCE, accuracy, alphabeticalSolver, answerOf, chance, frequencySolver, labelWordSolver, lineFeatureSolver,
+  LINE_FEATURES, TOLERANCE, accuracy, alphabeticalSolver, answerOf, chance, changedLineSolver, frequencySolver, labelWordSolver, lineFeatureSolver,
   memoryPlayer, optionKey, pairLengthSolver, paneLines, paneOverlapSolver, paneSizeSolver, proseLines, raritySolver,
   replayBaseline, sameOptionsSolver, transformsArguments,
 } from "./solvers";
@@ -202,13 +202,16 @@ describe("deck leakage", () => {
     });
   }
 
-  // #75: the newer pane is usually the bigger one (75% by lines, 80% by characters); balancing it needs commits
-  // the journal does not hold.
+  // #75: the newer pane is usually the bigger one (75% by lines, 80% by characters). From v6 on the selector and
+  // the parser balance it (`growthFits`), so this passes from the v6 run on, when it becomes a plain `it`.
   it.runIf(deck("before-after") !== undefined).fails("the newer version is not the bigger pane (#75)", () => {
     const { fixtures } = deck("before-after")!;
     const limit = chance(fixtures[0]!) + TOLERANCE;
     for (const measure of [(text: string) => text.split("\n").length, (text: string) => text.length]) {
       for (const direction of [1, -1]) expect(accuracy(fixtures, paneSizeSolver((text) => direction * measure(text)))).toBeLessThanOrEqual(limit);
+    }
+    for (const direction of [1, -1]) {
+      expect(accuracy(fixtures, (fixture, label) => direction * changedLineSolver(fixture, label))).toBeLessThanOrEqual(limit);
     }
   });
 

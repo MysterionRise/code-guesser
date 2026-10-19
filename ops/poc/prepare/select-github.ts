@@ -1,3 +1,4 @@
+import { growthFits, paneGrowth, profileAtLeast } from "../../../packages/artifact/src/index";
 import { beforeAfterSubject } from "./before-after-rounds";
 import { DECK_SHORT, noteRejection, rejectCandidate, type DeckAttempts, type DeckOutcome, type RunState } from "./diagnostics";
 import {
@@ -40,6 +41,11 @@ export const selectBeforeAfter = async (
   const { profile } = context;
   const target = profile.selection.beforeAfterPool;
   const chosen: unknown[] = [];
+  // From v6 on (#75), the later pane is the bigger one in half the deck: once one side is full, a commit that would
+  // add to it is skipped, first by its patch before its blobs are read, then by its windows.
+  const strict = profileAtLeast(profile.profileVersion, "local-real-rounds.v6");
+  const growth: (readonly number[])[] = [];
+  const fits = (signs: readonly number[]) => growthFits([...growth, signs], target);
   for (const candidate of interleaved(pool)) {
     if (chosen.length >= target) break;
     const repository = String(view(candidate).repository ?? "");
@@ -55,7 +61,7 @@ export const selectBeforeAfter = async (
     if (!(await screenRepository(candidate, "ADMISSION"))) continue;
     let lineage: StageResult<unknown>;
     try {
-      lineage = await deps.bindGitHubLineage({ ...context, candidate });
+      lineage = await deps.bindGitHubLineage({ ...context, candidate, ...(strict ? { admitGrowth: fits } : {}) });
       addHashes(hashes, lineage.acceptedResponseHashes);
     } catch (error) { rejectCandidate(state, "DISCOVERY", error); continue; }
     let admitted: unknown;
@@ -81,6 +87,12 @@ export const selectBeforeAfter = async (
       noteRejection(state, "SCREENING", new Error("PUBLIC_CONTAINMENT_REJECTED"));
       continue;
     }
+    const signs = paneGrowth(String(view(admitted).lineage?.beforeExcerpt ?? ""), String(view(admitted).lineage?.afterExcerpt ?? ""));
+    if (strict && !fits(signs)) {
+      noteRejection(state, "SCREENING", new Error("LINEAGE_SIZE_UNBALANCED"));
+      continue;
+    }
+    growth.push(signs);
     chosen.push(admitted);
   }
   return chosen.length < target ? { skipped: DECK_SHORT } : { candidates: Object.freeze(chosen) };

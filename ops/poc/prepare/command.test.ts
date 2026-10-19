@@ -176,6 +176,24 @@ const logLines = (calls: readonly string[]): string[] =>
     expect(report.counts.duplicatesRejected).toBe(0);
   });
 
+  it("from profile v6 on, keeps the later pane the bigger one in half the before-after deck (#75)", async () => {
+    // The harness's odd commits grow their line and its even ones shrink it; the growing ones come first.
+    const candidates = [1, 3, 5, 7, 9, 0, 2, 4].map((id) => ({ id, queryId: "refactor-facebook", repository: `org${id}/repo-${id}`, subject: `Refactor helper ${id}` }));
+    const run = async (profileVersion: "local-real-rounds.v5" | "local-real-rounds.v6") => {
+      const profile = await loadProfile(profileVersion);
+      const captured = beforeAfterIds();
+      const harness = await makeHarness({ searchGitHub: async () => accepted({ candidates, queryClassifications: classificationsFor(profile) }, "2"),
+        generateBeforeAfter: captured.generate }, { profile });
+      await prepareLocalExperiment(harness.dependencies);
+      return { harness, ids: captured.ids };
+    };
+    expect((await run("local-real-rounds.v5")).ids).toEqual([1, 3, 5, 7, 9]);
+    // Of five rounds, at most three may grow: the fourth and fifth growing commits wait for two that shrink.
+    const { harness, ids } = await run("local-real-rounds.v6");
+    expect(ids).toEqual([1, 3, 5, 0, 2]);
+    expect((harness.reports[0] as any).diagnostics).toContainEqual({ stage: "SCREENING", reasonCode: "LINEAGE_SIZE_UNBALANCED", count: 2 });
+  });
+
   it("skips a commit whose subject no hint could quote before spending any request on it", async () => {
     const profile = await loadProfile();
     const candidates = HARNESS_CANDIDATES.map((candidate) => candidate.id === 1 ? { ...candidate, subject: "Fix" } : candidate);

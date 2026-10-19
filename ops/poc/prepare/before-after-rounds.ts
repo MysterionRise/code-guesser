@@ -1,4 +1,4 @@
-import { AUTHORSHIP_CLAIM } from "../../../packages/artifact/src/index";
+import { AUTHORSHIP_CLAIM, growthFits, paneGrowth, profileAtLeast } from "../../../packages/artifact/src/index";
 import { canonicalHash } from "./canonical";
 import type { GitHubAdmissionCandidate } from "./github-admission";
 import { deepFreeze } from "./model-validation";
@@ -7,8 +7,8 @@ import type { CrawlProfile } from "./profile";
 import { attributionFor, fill, orderedPool, roundIdFor, sha256, type GeneratedRounds } from "./round-helpers";
 
 export class BeforeAfterRoundsError extends Error {
-  public constructor() {
-    super("BEFORE_AFTER_ROUNDS_REJECTED");
+  public constructor(code = "BEFORE_AFTER_ROUNDS_REJECTED") {
+    super(code);
     this.name = "BeforeAfterRoundsError";
   }
 }
@@ -18,7 +18,7 @@ export interface BeforeAfterRoundsOptions {
   readonly candidates: readonly GitHubAdmissionCandidate[];
 }
 
-const fail = (): never => { throw new BeforeAfterRoundsError(); };
+const fail = (code?: string): never => { throw new BeforeAfterRoundsError(code); };
 const PULL_REQUEST_SUFFIX = /\s*\((?:#\d+(?:,\s*)?)+\)$/u;
 const UNSAFE_SUBJECT = /https?:|www\.|@|[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+|\bco-authored-by\b|\bsigned-off-by\b/iu;
 
@@ -86,6 +86,11 @@ export const generateBeforeAfterRounds = (options: BeforeAfterRoundsOptions): Ge
   const ordered = [...options.candidates].sort((left, right) =>
     sha256(String(left.source.childBlob)) < sha256(String(right.source.childBlob)) ? -1 : 1);
   const fixtures = ordered.map((candidate, index) => fixtureFor(candidate, later(index), profile));
+  // From v6 on, pane size carries no signal (#75): the later pane is the bigger one in half the pool.
+  if (profileAtLeast(profile.profileVersion, "local-real-rounds.v6")
+    && !growthFits(ordered.map(({ lineage }) => paneGrowth(lineage.beforeExcerpt, lineage.afterExcerpt)), ordered.length)) {
+    fail("BEFORE_AFTER_SIZE_UNBALANCED");
+  }
   if (new Set(fixtures.map(({ source }) => source.crawlSnapshotId)).size !== 1) fail();
   for (const key of profile.deduplication) {
     const values = fixtures.map(({ source }) => String(source[key]));

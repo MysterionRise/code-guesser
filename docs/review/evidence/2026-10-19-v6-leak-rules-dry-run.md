@@ -6,10 +6,10 @@ artifact-published: false
 credential-material-recorded: false
 ---
 
-# The v6 leak rules on real data: a dry run (#77, #78, #84)
+# The v6 leak rules on real data: a dry run (#77, #78, #84, #75)
 
-The v6 rules for "Which project?" (#77), "Predict the output" (#78), and weak rounds (#84) apply to v6 artifacts
-only, so the committed v5 artifact still rebuilds byte for byte. To see them on real data before the v6 run, this dry run forced every v6
+The v6 rules for "Which project?" (#77), "Predict the output" (#78), weak rounds (#84), and "Before or after?" pane
+sizes (#75) apply to v6 artifacts only, so the committed v5 artifact still rebuilds byte for byte. To see them on real data before the v6 run, this dry run forced every v6
 rule on (a local edit to `profileAtLeast`, never committed) and replayed the v5 run with `--resume` in a separate
 worktree, on a copy of its journal. The journal answered what it held; only the files the new rules called for were
 fetched, read-only. Nothing was published or committed from the run.
@@ -21,6 +21,7 @@ fetched, read-only. Nothing was published or committed from the run.
 | 1, `--resume` | 2,109 | 233 | language, before-after, algorithm, output, fix; project refused in generation |
 | 2, `--resume` on run 1's journal | 2,087 | 10 | all six |
 | 3, `--resume` with #84's rules too, on run 2's journal | 2,185 | 116 | all six |
+| 4, `--resume` with #75's rules and a before-after pool of 24, on run 3's journal | 3,000 | 938 | five; fix skipped at the v5 profile's 3,000-request ceiling |
 
 The v5 run made 1,859 requests, so #77 and #78 cost about 230 more on these decks, and #84 about 100 more (run 3). Most went to describing
 repositories before trying their files, and to the files that replaced refused rounds.
@@ -74,6 +75,23 @@ Gone: `xor_swap(-1, 1)` and `reverse_letters("nohtyP is nohtyP", 2)`, whose ever
 One round of each pair #84 lists stays, as the rule intends: at most one per idea or file. Across all three
 rules the project deck replaced 10 of 24 rounds, the language deck 1, output 5, and fix 3. The overlap solver stays
 at 25%, and the transform solver is at 32.1% over 7 worded rounds.
+
+### Before or after? (#75), run 4
+
+| Solver | v5 artifact (10 rounds) | Run 4 (24 rounds) |
+| --- | --- | --- |
+| The bigger pane by characters | 80% | 54.2% |
+| The pane with more lines | 75% | 58.3% |
+| The pane with the longer changed line | 85% | 58.3% |
+
+- `LINEAGE_PROSE_ONLY` refused 12 commits that changed only comments, docstrings, or strings (the v5 deck held three:
+  a Go comment rewrite, a Python docstring tree, and a prompt string).
+- `LINEAGE_SIZE_UNBALANCED` skipped 52 commits whose side was full, nearly all by their patch, before any tree or blob.
+- The deck cost about 985 more requests than the v5 deck of 10, and later rounds cost the most, since the rarer
+  shrinking commits fill the last places. That ran the dry run into the v5 profile's 3,000-request ceiling, so the fix
+  deck, which runs after it, was skipped; the v6 ceiling is 5,000.
+- The v6 profile sets the pool at 20, the issue's floor, rather than 24: the v6 run's estimate is then about 4,300
+  requests against the 5,000 ceiling, against about 4,500 at 24, and a spent budget skips every later deck.
 
 ## For the v6 run
 

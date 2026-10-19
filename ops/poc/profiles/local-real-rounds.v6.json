@@ -310,7 +310,7 @@
     "maxChangedLines": 12
   },
   "selection": {
-    "beforeAfterPool": 10,
+    "beforeAfterPool": 20,
     "minimumStarEvents": 1000,
     "popularRepositories": 24,
     "filesPerRepository": 3,

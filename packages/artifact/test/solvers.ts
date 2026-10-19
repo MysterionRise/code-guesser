@@ -174,3 +174,10 @@ export const paneSizeSolver = (measure: (text: string) => number) => (fixture: P
   const index = fixture.candidates.findIndex((candidate) => candidate.label === label);
   return measure(fixture.panes[index]?.text ?? "");
 };
+/** Before-after: the pane whose longest line the other pane lacks is the longer reads as the newer version. */
+export const changedLineSolver = (fixture: ParsedFixture, label: string): number => {
+  const index = fixture.candidates.findIndex((candidate) => candidate.label === label);
+  const [pane, other] = [fixture.panes[index]?.text ?? "", fixture.panes[1 - index]?.text ?? ""];
+  const others = new Set(other.split("\n").map((line) => line.trim()));
+  return Math.max(0, ...pane.split("\n").map((line) => line.trim()).filter((line) => !others.has(line)).map((line) => line.length));
+};

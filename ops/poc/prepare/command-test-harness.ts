@@ -164,8 +164,10 @@ const makeGitHubDependencies = (
     state.calls.push(`lineage:${(candidate as any).id}`);
     state.dependencyMeters.push(capacity);
     const id = (candidate as any).id as number;
-    return accepted({ ...(candidate as object), beforeExcerpt: `total_${id} = sum_all(${id})`, afterExcerpt: `total_${id} = sum(${id})`,
-      excerpt: `total_${id} = sum(${id})`, commitMessage: (candidate as any).subject }, "3");
+    // Even commits shrink their line and odd ones grow it, so a v6 deck's pane sizes can balance (#75).
+    const after = id % 2 === 0 ? `total_${id} = sum(${id})` : `total_${id} = sum_all_items(${id})`;
+    return accepted({ ...(candidate as object), beforeExcerpt: `total_${id} = sum_all(${id})`, afterExcerpt: after,
+      excerpt: after, commitMessage: (candidate as any).subject }, "3");
   },
   admitGitHubCandidate: async ({ candidate, capacity }) => {
     state.calls.push(`admit:${(candidate as any).id}`);
