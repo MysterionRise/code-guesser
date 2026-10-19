@@ -87,6 +87,14 @@ gate: changing queries, retries, ceilings, deck rules, or running
       argument. No answer may be the only such option (`transformGivesAway`), and picking that option scores at most
       chance and a tenth over a deck's worded rounds (`transformScore`, `transformLimit`). The answer search
       budgets it, and the parser checks both.
+    - **#77, project panes that echo an option:** no pane shares a distinctive word with any of its round's
+      options as shown, owner, name, and description (`sharedOptionWords` in `packages/artifact/src/project.ts`:
+      five-letter stems of words of three letters or more, common code and English words aside, the leakage
+      test's overlap solver). A repository is described before its files are tried, an answer's pane is held to
+      its own words and the other answer's (and neither answer's code or file name may name the other), and a
+      decoy whose words an answer's pane shows is skipped. The parser also reads names inside identifiers
+      (`namesRepository`, now in `packages/artifact`).
+    - Dry run of both on the v5 data: `docs/review/evidence/2026-10-19-v6-leak-rules-dry-run.md`.
 - The server holds each game's progress (#96): `dealGame` seals it in a signed
   token (`local-real-experiment-session.server.ts`), and the hint and answer
   server actions take one step each. A ledger refuses an older token, so a
@@ -536,7 +544,8 @@ when the preparer throws a code this section does not name.
   - `PUBLIC_CONTAINMENT_<KEY>_IN_<FIELD>` (or
     `PUBLIC_CONTAINMENT_CANDIDATE_IN_<FIELD>`): names the protected value and
     the public field that collided.
-  - A round generator's own check: `*_ROUNDS_REJECTED`,
+  - A round generator's own check: `*_ROUNDS_REJECTED`, `PROJECT_WORDS_SHOWN`
+    (v6: a project pane shares a word with an option),
     `ALGORITHM_NAME_SHOWN`, `ALGORITHM_FAMILY_UNBALANCED`,
     `OUTPUT_ANSWER_ECHOED`, `OUTPUT_ANSWER_TRANSFORMED` (v6: the answer alone reads
     off its call's arguments), `OUTPUT_TRANSFORM_UNBALANCED` (v6: picking such an
@@ -622,6 +631,9 @@ add up.
 - `SUBJECT_UNUSABLE`: a commit subject no hint can quote.
 - `PROJECT_NAME_IN_EXCERPT`: code or a file name names an option, including
   a distinctive part of a name, such as `graphql` for graphql-ruby.
+  `PROJECT_WORDS_IN_EXCERPT` (v6, #77): code that shares a distinctive word
+  with an option's name or description, such as `Aws::SQS` beside "AWS Code
+  Examples"; an answer's file is refused, and a decoy is skipped.
   `PROJECT_NAMED_BY_TEMPLATE`: the deck's own wording names the repository.
 - `LANGUAGE_PAIR_AMBIGUOUS`: the code does not tell its language from the
   look-alike. `LANGUAGE_ROUNDS_REJECTED`: another language-round check.

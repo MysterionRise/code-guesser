@@ -1,4 +1,4 @@
-import type { ParsedFixture } from "../src/index";
+import { sharedOptionWords, type ParsedFixture } from "../src/index";
 
 /**
  * Solvers that never read the code as code: each sees what a player sees before answering (the options, their
@@ -109,22 +109,10 @@ export const transformsArguments = (fixture: ParsedFixture, label: string): bool
 
 /**
  * Project decks: how many five-letter word stems the pane shares with an option's name and description, common
- * code and English words aside.
+ * code and English words aside (`sharedOptionWords`, which v6 project rounds hold at none, #77).
  */
-const COMMON_WORDS: ReadonlySet<string> = new Set(("the and for with that this from are was were not but you your all any can has have had its "
-  + "into out use used one two get set new return returns true false null none nil self var let val const def func fun function class "
-  + "struct public private static final void int string bool boolean else elif then end import package module type types err error "
-  + "value values data list dict map key keys item items name names file files code index len length test tests our more most some "
-  + "only also each when what which who will would should could may might must than them they their there these those here how why "
-  + "make made just like about over under after before onto via per").split(" "));
-const stems = (text: string): ReadonlySet<string> => new Set(text.replace(/([a-z0-9])([A-Z])/gu, "$1 $2").replace(/([A-Z]+)([A-Z][a-z])/gu, "$1 $2")
-  .toLocaleLowerCase("en-US").split(/[^a-z0-9]+/u).filter((word) => word.length >= 3 && !COMMON_WORDS.has(word) && !/^\d+$/u.test(word))
-  .map((word) => word.slice(0, 5)));
-export const paneOverlapSolver = (fixture: ParsedFixture, label: string): number => {
-  const pane = stems(fixture.panes[0]!.text);
-  const option = fixture.candidates.find((candidate) => candidate.label === label)!;
-  return [...stems(`${label.replace("/", " ")} ${option.detail ?? ""}`)].filter((stem) => pane.has(stem)).length;
-};
+export const paneOverlapSolver = (fixture: ParsedFixture, label: string): number =>
+  sharedOptionWords(fixture.panes[0]!.text, label, fixture.candidates.find((candidate) => candidate.label === label)!.detail).length;
 
 /** A small deterministic generator, so simulated deals repeat exactly. */
 const seededRandom = (seed: number) => () => {

@@ -34,9 +34,9 @@ export const sha1 = (seed: string): string => createHash("sha1").update(seed).di
 export const sha256 = (value: string): string => createHash("sha256").update(value).digest("hex");
 
 /** The run's profile without its curated section: the three decks built from The Stack v2 and GitHub search. */
-export const loadDeckProfile = (): CrawlProfile => {
+export const loadDeckProfile = (profileVersion: ProfileVersion = "local-real-rounds.v5"): CrawlProfile => {
   const { curated: _curated, ...raw } = JSON.parse(readFileSync(new URL("../../profiles/local-real-rounds.v5.json", import.meta.url), "utf8"));
-  return parseCrawlProfile(raw);
+  return parseCrawlProfile({ ...raw, profileVersion });
 };
 
 export const RESPONSE_HASHES = Object.freeze([sha256("response-a"), sha256("response-b"), sha256("response-c")]);

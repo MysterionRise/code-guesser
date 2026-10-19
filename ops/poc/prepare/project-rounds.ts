@@ -1,14 +1,14 @@
 import { canonicalHash } from "./canonical";
 import { exactStackBindings } from "./language-rounds";
 import { deepFreeze } from "./model-validation";
-import { mentionsRepository, projectCandidateId, type ExperimentFixture } from "./model";
+import { namesRepository, profileAtLeast, projectCandidateId, sharedOptionWords, type ExperimentFixture } from "./model";
 import { poolSizes, type CrawlProfile } from "./profile";
 import { approximately, attributionFor, fill, orderedPool, roundIdFor, shuffled, sourceRecord, type GeneratedRounds } from "./round-helpers";
 import type { RevalidatedStackCandidate } from "./stack-revalidation";
 
 export class ProjectRoundsError extends Error {
-  public constructor() {
-    super("PROJECT_ROUNDS_REJECTED");
+  public constructor(code = "PROJECT_ROUNDS_REJECTED") {
+    super(code);
     this.name = "ProjectRoundsError";
   }
 }
@@ -31,7 +31,7 @@ export interface ProjectRoundsOptions {
   readonly rounds: readonly ProjectRoundInput[];
 }
 
-const fail = (): never => { throw new ProjectRoundsError(); };
+const fail = (code?: string): never => { throw new ProjectRoundsError(code); };
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u;
 const DISTRACTORS = 3;
 const MAXIMUM_DETAIL_LENGTH = 160;
@@ -45,28 +45,6 @@ export const optionDetail = (description: string | null): string | null => {
 };
 
 const fileName = (path: string): string => path.split("/").at(-1) ?? fail();
-
-const folded = (value: string): string => value.toLocaleLowerCase("en-US").replace(/[-_.]/gu, "");
-/** Parts of a repository name too common to give a project away: languages and words many names share. */
-const COMMON_NAME_PARTS: ReadonlySet<string> = new Set([
-  "python", "ruby", "java", "javascript", "typescript", "golang", "rust", "kotlin", "swift", "csharp", "android",
-  "core", "docs", "tools", "utils", "examples", "example", "framework", "project", "projects", "server", "client",
-  "library", "plugin", "plugins", "awesome", "sample", "samples", "official",
-]);
-/**
- * Whether code names a repository: its owner, name, or `owner/name` as a whole word; an owner or name of four
- * characters or more anywhere inside an identifier, so `deno_exe` names deno and `rustlings_run` names
- * rustlings; or a distinctive part of a hyphenated name, so `module GraphQL` names graphql-ruby. Short names
- * such as `go`, and common parts such as `ruby`, count only as whole names.
- */
-export const namesRepository = (text: string, repository: string): boolean => {
-  if (mentionsRepository(text, repository)) return true;
-  const haystack = folded(text);
-  const names = repository.split("/");
-  const parts = names.flatMap((name) => name.toLocaleLowerCase("en-US").split(/[-_.]/u))
-    .filter((part) => part.length >= 4 && !COMMON_NAME_PARTS.has(part));
-  return names.map(folded).some((name) => name.length >= 4 && haystack.includes(name)) || parts.some((part) => haystack.includes(part));
-};
 
 /**
  * Whether the deck's own wording names a repository: its prompt and hint templates, placeholders left out.
@@ -101,6 +79,9 @@ const fixtureFor = (input: ProjectRoundInput, profile: CrawlProfile): Experiment
   const candidates = shuffled(roundId, options, (option) => option.repository).map((option) => Object.freeze({
     id: projectCandidateId(option.repository), label: option.repository, detail: optionDetail(option.description),
   }));
+  // From v6 on, the code shares no distinctive word with any option as shown, its description included (#77).
+  if (profileAtLeast(profile.profileVersion, "local-real-rounds.v6")
+    && candidates.some(({ label, detail }) => sharedOptionWords(candidate.excerpt, label, detail).length > 0)) fail("PROJECT_WORDS_SHOWN");
   const panes = Object.freeze([Object.freeze({ label: null, text: candidate.excerpt })]);
   const clues = Object.freeze([
     fill(template.fileClue, { file: fileName(path) }),
