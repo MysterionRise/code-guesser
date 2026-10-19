@@ -90,10 +90,9 @@ describe("deck leakage", () => {
       .toBeLessThanOrEqual(limit);
   });
 
-  // #77: three panes still echo their own option's name or description (`Aws::SQS`, `Utility`, `React.Component`).
-  // From v6 on no pane shares a distinctive word with any option (`sharedOptionWords`), so this passes from the v6
-  // run on, when it becomes a plain `it`.
-  it.runIf(deck("project") !== undefined).fails("project panes share no telling words with any option (#77)", () => {
+  // #77: v5 panes echoed their own option's name or description (`Aws::SQS`, `Utility`, `React.Component`); from v6
+  // on no pane shares a distinctive word with any option (`sharedOptionWords`).
+  it.runIf(deck("project") !== undefined)("project panes share no telling words with any option (#77)", () => {
     const { fixtures } = deck("project")!;
     expect(accuracy(fixtures, paneOverlapSolver)).toBeLessThanOrEqual(chance(fixtures[0]!) + TOLERANCE);
   });
@@ -161,10 +160,9 @@ describe("deck leakage", () => {
     }
   });
 
-  // #78: two functions (`xor_swap`, `reverse_letters`) return a rearrangement of their input whichever call a round
-  // shows. The v6 output rules (`transformGivesAway`, `transformLimit`) refuse such rounds and bound this solver, so
-  // this passes from the v6 run on, when it becomes a plain `it`.
-  it.runIf(deck("output") !== undefined).fails("an output that rearranges the call's own arguments is no better a guess (#78)", () => {
+  // #78: the v5 deck held functions (`xor_swap`, `reverse_letters`) that rearrange their input whichever call a round
+  // shows; the v6 output rules (`transformGivesAway`, `transformLimit`) refuse such rounds and bound this solver.
+  it.runIf(deck("output") !== undefined)("an output that rearranges the call's own arguments is no better a guess (#78)", () => {
     const fixtures = deck("output")!.fixtures.filter((fixture) => !fixture.candidates.every(({ label }) => Number.isFinite(Number(label))));
     expect(accuracy(fixtures, (fixture, label) => transformsArguments(fixture, label) ? 1 : 0)).toBeLessThanOrEqual(chance(fixtures[0]!) + TOLERANCE);
   });
@@ -202,9 +200,9 @@ describe("deck leakage", () => {
     });
   }
 
-  // #75: the newer pane is usually the bigger one (75% by lines, 80% by characters). From v6 on the selector and
-  // the parser balance it (`growthFits`), so this passes from the v6 run on, when it becomes a plain `it`.
-  it.runIf(deck("before-after") !== undefined).fails("the newer version is not the bigger pane (#75)", () => {
+  // #75: in the v5 deck the newer pane was usually the bigger one (75% by lines, 80% by characters); from v6 on the
+  // selector and the parser balance it (`growthFits`).
+  it.runIf(deck("before-after") !== undefined)("the newer version is not the bigger pane (#75)", () => {
     const { fixtures } = deck("before-after")!;
     const limit = chance(fixtures[0]!) + TOLERANCE;
     for (const measure of [(text: string) => text.split("\n").length, (text: string) => text.length]) {

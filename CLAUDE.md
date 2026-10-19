@@ -3,19 +3,22 @@
 ## Mission
 
 A local-only "guess from the code" game. One preparation run crawls real
-open-source code before play and freezes six decks, each a pool of rounds
-from which every game deals five:
+open-source code before play and freezes ten decks (296 rounds since the v1.0
+data run), each a pool of rounds from which every game deals five:
 
 - "Which project?": 24 rounds of popular repositories from The Stack v2.
-- "Which language?": 24 rounds over twelve languages in look-alike pairs,
+- "Which language?": 52 rounds over 26 languages in look-alike pairs,
   from The Stack v2.
-- "Before or after?": 10 refactor commits from GitHub search.
+- "Before or after?": 20 refactor commits from GitHub search.
 - "Which algorithm?": 24 TheAlgorithms files (Python, Go, Java), names hidden
   as `mystery`, offered against their family of four.
 - "Predict the output": 24 TheAlgorithms/Python functions and one doctest
   call each, read as text and never run.
 - "Spot the fix": 24 one-line fixes that Defects4J and BugsInPy record,
   confirmed against each upstream fix commit.
+- "Missing line" and "Name the function": 24 rounds each from TheAlgorithms.
+- "Which framework?": 32 TodoMVC files; "Which exercise?": 48 Exercism
+  reference solutions.
 
 The goal is a demo on one machine, not public play.
 
@@ -67,9 +70,9 @@ gate: changing queries, retries, ceilings, deck rules, or running
   - #7 Phase 0, #8 Phase 1, #9 Phase 2, #10 Phase 3a;
   - Phase 3b on 2026-10-13: #12 curated sources, #13 algorithm, #14 output,
     #15 fix, #16 game UX, #17 go-live, #18 the vertical `demo.gif`.
-- The game plays profile `ops/poc/profiles/local-real-rounds.v5.json` and
-  artifact schema `local-experiment-artifact.v4` from the root-route deck
-  chooser (`/?deck=project|language|before-after|algorithm|output|fix`). A
+- The game plays profile `ops/poc/profiles/local-real-rounds.v6.json` and
+  artifact schema `local-experiment-artifact.v5` from the root-route deck
+  chooser (`/?deck=<deck id>`). A
   page load deals five rounds from the deck's pool; `dealGame` in
   `apps/game/src/demo/local-real-experiment.server.ts` does it server-side.
 - **Profile v6 (#129):** `ops/poc/profiles/local-real-rounds.v6.json` is the v1.0 data run's profile. It configures
@@ -80,8 +83,8 @@ gate: changing queries, retries, ceilings, deck rules, or running
   - `PROFILE_VERSIONS` and `ARTIFACT_SCHEMA_VERSIONS` (`packages/artifact/src/domain.ts`) pair each profile with
     its schema: v5 with `local-experiment-artifact.v4`, v6 with `.v5`. The parser holds an artifact to its
     snapshot's version, in its schema and every source.
-  - The preparer still runs v5 (`PROFILE_VERSION`), so `--offline` keeps rebuilding the committed artifact byte for
-    byte. Rules for v6 apply to v6 artifacts only (`profileAtLeast`); the data-run PR switches the preparer to v6.
+  - The preparer runs v6 (`PROFILE_VERSION`) since the data run (2026-10-19). Rules for v6 apply to v6 artifacts
+    only (`profileAtLeast`), and the parser still reads v5 artifacts.
   - v6 rules so far:
     - **#78, output answers read off the call:** `transformsArgument` reads an output off its call when it
       reorders the call's numbers or, not being a number, is a piece of the arguments or an anagram of a string
@@ -282,21 +285,23 @@ gate: changing queries, retries, ceilings, deck rules, or running
     same hint action with a `detail` beside the text (lines to mark, or a
     step-through). Marker hunt rounds number their lines; the genui guard's
     `boughtHints` are the game's own hints.
-  - Evidence: `docs/review/evidence/2026-10-15-question-layers-first-build.md`.
+  - Evidence: `docs/review/evidence/2026-10-15-question-layers-first-build.md`; the v6 artifact's layers (67 of
+    76 rounds kept) are in `docs/review/evidence/2026-10-19-v6-data-run.md`.
 - The committed artifact `apps/game/src/demo/generated/local-real-rounds.json`
-  came from the 2026-10-13 v5 run (1,859 of 3,000 requests), rebuilt
-  `--offline` with the algorithm and fix leak fixes (#76, #79) and, on
-  2026-10-15, the language option sets (#81).
+  came from the 2026-10-19 v6 data run (#129): a live run (4,089 of 5,000
+  requests), then a `--resume` (29 live) for requests the live run gave up
+  on a rate limit with its retries spent, which journals as of this run.
   - Its canonical SHA-256
-    `4747549666813ab44d60fca7df89152a65ea5cf91570b316d8d1539aacd4f90a` is
+    `1abc21f8b819f40e45dc690d63cf89ad2fa1b22355ffdc321d1ac1ffb09b9522` is
     pinned in `apps/game/src/demo/local-real-experiment.pin.server.ts`; the
     preparer writes the pin.
-  - Evidence: `docs/review/evidence/2026-10-13-v5-six-decks-run.md`,
-    `docs/review/evidence/2026-10-13-v5-leak-fixes-offline.md`, and
-    `docs/review/evidence/2026-10-15-language-pairing-offline.md`.
+  - Evidence: `docs/review/evidence/2026-10-19-v6-data-run.md`. The v5
+    artifact's runs are `docs/review/evidence/2026-10-13-v5-six-decks-run.md`
+    and the offline rebuilds after it.
   - The run's journal is in `ops/poc/stack/tmp/journal/run.jsonl` on this
     machine, so `STACK_V2_ACKNOWLEDGED_USABLE_REVISION=… pnpm prepare:poc
-    --offline` rebuilds it byte for byte with no network.
+    --offline` rebuilds it byte for byte with no network. The v5 journal is
+    `run.jsonl.v5-2026-10-15`.
   - The journal holds provider bodies, so it is gitignored and never
     committed; a fresh clone has none, and `--offline` or `--resume` fails
     with `JOURNAL_MISSING`. A fresh `pnpm prepare:poc` writes its own journal

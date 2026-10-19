@@ -85,9 +85,18 @@ export const canonicalHash = (value: unknown): string =>
 export const rawHash = (value: string): string =>
   createHash("sha256").update(value).digest("hex");
 
+/** Each needle's whole-word pattern, compiled once: the parser checks every protected value against every public text. */
+const protectedPatterns = new Map<string, RegExp>();
 export const containsProtected = (haystack: string, needle: string): boolean => {
-  const escaped = needle.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
-  return new RegExp(`(^|[^A-Za-z0-9_])${escaped}([^A-Za-z0-9_]|$)`, "u").test(haystack);
+  // A whole-word match is a substring first, so most pairs are settled without a pattern.
+  if (!haystack.includes(needle)) return false;
+  let pattern = protectedPatterns.get(needle);
+  if (pattern === undefined) {
+    const escaped = needle.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+    pattern = new RegExp(`(^|[^A-Za-z0-9_])${escaped}([^A-Za-z0-9_]|$)`, "u");
+    if (protectedPatterns.size < 10_000) protectedPatterns.set(needle, pattern);
+  }
+  return pattern.test(haystack);
 };
 
 const UTC_TIMESTAMP = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{6})?Z$/u;

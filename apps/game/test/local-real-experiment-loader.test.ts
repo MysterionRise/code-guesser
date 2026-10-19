@@ -90,15 +90,16 @@ describe("server-only local real experiment loader", () => {
   });
 
   it("names every round source and the unreviewed localhost status in a short permanent notice", () => {
-    for (const source of ["The Stack v2", "GitHub", "TheAlgorithms", "Defects4J", "BugsInPy"]) {
+    for (const source of ["The Stack v2", "GitHub", "TheAlgorithms", "Defects4J", "BugsInPy", "TodoMVC", "Exercism"]) {
       expect(LOCAL_REAL_EXPERIMENT_NOTICE).toContain(source);
     }
     expect(LOCAL_REAL_EXPERIMENT_NOTICE).toMatch(/^Local unreviewed experiment\./u);
     expect(LOCAL_REAL_EXPERIMENT_NOTICE).toMatch(/localhost/u);
     expect(LOCAL_REAL_EXPERIMENT_NOTICE).toMatch(/Not approved beta content/u);
     expect(LOCAL_REAL_EXPERIMENT_NOTICE).toBe(`${LOCAL_REAL_EXPERIMENT_NOTICE_LEAD} ${LOCAL_REAL_EXPERIMENT_NOTICE_BODY}`);
-    // The old notice ran to nine lines on a 320 px screen; the browser test holds this one to five.
-    expect(LOCAL_REAL_EXPERIMENT_NOTICE.length).toBeLessThanOrEqual(150);
+    // The old notice ran to nine lines on a 320 px screen; the browser test holds this one, with v1.0's two new
+    // sources, to five.
+    expect(LOCAL_REAL_EXPERIMENT_NOTICE.length).toBeLessThanOrEqual(170);
   });
 
   it("binds the root route and its reveal action to the local experiment loader", () => {

@@ -132,7 +132,11 @@ export const createPreparationRuntime = (
       lease.release();
       // A retryable failure (a timeout, a 5xx) is recorded as what it wrapped; an offline replay fails at once
       // instead of waiting to retry, and rejects the same candidate the live run rejected.
-      const failure = error instanceof RetryRequestError && error.cause instanceof TransportError ? error.cause : error;
+      // A rate limit asks for a retry with no failure of its own; it is recorded as a 429, so a run that could not
+      // retry it (its retries spent) replays offline as rejecting the same candidate.
+      const failure = error instanceof RetryRequestError
+        ? error.cause instanceof TransportError ? error.cause : error.cause === undefined ? statusError(input, 429) : error
+        : error;
       if (!recorded && failure instanceof TransportError && policy !== "sequence") {
         // A deterministic answer (missing, gone) replays on resume too. Any other failure, such as a timeout
         // or a refused request, replays only offline: a resumed run retries it, an offline one reproduces it.

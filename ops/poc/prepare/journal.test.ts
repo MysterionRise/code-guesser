@@ -167,6 +167,29 @@ describe("run journal", () => {
     expect(capacity.snapshot().requestCount).toBe(2);
   });
 
+  it("records a rate limit the run could not retry, so an offline replay rejects the same request and a resumed run asks again", async () => {
+    const profile = await loadProfile();
+    const path = journalPath();
+    let calls = 0;
+    // GitHub asks for a retry after a second; the caller's retries are spent, so the request is given up.
+    const limited = (async () => {
+      calls += 1;
+      return new Response("{}", { status: 429, headers: { "content-type": "application/json", "retry-after": "1" } });
+    }) as typeof fetch;
+    const journal = openJournal({ mode: "fresh", path });
+    const runtime = createPreparationRuntime(profile, { PATH: "/bin" }, capacityFor(profile), limited, journal);
+    await expect(runtime.transport.requestJson(commitRequest(profile, "f") as any)).rejects.toMatchObject({ name: "RetryRequestError" });
+    journal.markDiscoveryComplete();
+    expect(journal.finish()).toEqual({ mode: "fresh", replayed: 0, live: 1 });
+
+    const offline = createPreparationRuntime(profile, { PATH: "/bin" }, capacityFor(profile), refusingFetch, openJournal({ mode: "offline", path }));
+    await expect(offline.transport.requestJson(commitRequest(profile, "f") as any)).rejects.toMatchObject({ code: "UNSUPPORTED_STATUS", status: 429 });
+    const resumed = openJournal({ mode: "resume", path });
+    const again = createPreparationRuntime(profile, { PATH: "/bin" }, capacityFor(profile), limited, resumed);
+    await expect(again.transport.requestJson(commitRequest(profile, "f") as any)).rejects.toMatchObject({ name: "RetryRequestError" });
+    expect(calls).toBe(2);
+  });
+
   it("prefers a recorded answer to a failure kept for offline replay, and replays a timeout as a timeout", async () => {
     const profile = await loadProfile();
     const path = journalPath();

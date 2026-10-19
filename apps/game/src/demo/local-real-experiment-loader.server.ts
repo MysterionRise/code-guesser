@@ -16,8 +16,8 @@ import {
 /** The permanent notice's bold lead. */
 export const LOCAL_REAL_EXPERIMENT_NOTICE_LEAD = "Local unreviewed experiment.";
 /** The rest of the notice: every source a deck's rounds come from, localhost only, and not beta content. */
-export const LOCAL_REAL_EXPERIMENT_NOTICE_BODY = "Rounds from The Stack v2, GitHub, TheAlgorithms, Defects4J, and BugsInPy, "
-  + "for localhost only. Not approved beta content.";
+export const LOCAL_REAL_EXPERIMENT_NOTICE_BODY = "Rounds from The Stack v2, GitHub, TheAlgorithms, Defects4J, BugsInPy, TodoMVC, "
+  + "and Exercism, for localhost only. Not approved beta content.";
 /** Permanent notice shown above the experiment; short enough to wrap to five lines on a 320 px screen. */
 export const LOCAL_REAL_EXPERIMENT_NOTICE = `${LOCAL_REAL_EXPERIMENT_NOTICE_LEAD} ${LOCAL_REAL_EXPERIMENT_NOTICE_BODY}`;
 

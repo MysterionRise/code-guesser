@@ -49,9 +49,10 @@ test("the root route offers every deck under the permanent notice", async ({ pag
   await page.goto("/");
   await expect(page.getByText(/Local unreviewed experiment/)).toBeVisible();
   await expect(page.getByRole("heading", { level: 1, name: "Pick a deck" })).toBeVisible();
-  expect(artifact.decks.map(({ id }) => id)).toEqual(["project", "language", "before-after", "algorithm", "output", "fix"]);
+  expect(artifact.decks.map(({ id }) => id)).toEqual(["project", "language", "before-after", "algorithm", "output", "fix", "missing-line",
+    "name-function", "framework", "exercise"]);
   // The chooser, not the notice, counts the decks this artifact published.
-  await expect(page.locator(".deck-intro")).toContainText(/^Six decks to choose from\. Each game deals five real rounds/u);
+  await expect(page.locator(".deck-intro")).toContainText(/^Ten decks to choose from\. Each game deals five real rounds/u);
   for (const deck of artifact.decks) {
     const link = page.getByRole("link", { name: titlePattern(deck.title) });
     await expect(link).toBeVisible();
