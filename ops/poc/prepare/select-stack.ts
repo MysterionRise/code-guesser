@@ -3,6 +3,7 @@ import {
   DECK_SHORT, PreparationError, noteRejection, rejectCandidate, type DeckAttempts, type DeckOutcome, type DiagnosticStage, type RunState,
 } from "./diagnostics";
 import { ROUNDS_PER_LANGUAGE, profileAtLeast, sharedOptionWords } from "../../../packages/artifact/src/index";
+import { dataOnly, generatedPath } from "./excerpt-window";
 import { projectLanguages, type CrawlProfile, type StackLanguage } from "./profile";
 import { namedByTemplates, optionDetail, projectRoundAllowed, type RepositoryOption } from "./project-rounds";
 import {
@@ -86,6 +87,8 @@ export const selectStack = async (
   otherDecks: () => readonly unknown[],
 ): Promise<StackDecks> => {
   const { profile } = context;
+  // Rules added for the v1.0 run (#77, #84) hold from profile v6 on.
+  const strict = profileAtLeast(profile.profileVersion, "local-real-rounds.v6");
   const languages = profile.stack.configurations.map(({ language }) => language);
   const chosen: StackSelection[] = [];
   const chosenCandidates = (): unknown[] => chosen.map(({ candidate }) => candidate);
@@ -93,6 +96,8 @@ export const selectStack = async (
   /** Fetches, revalidates, and screens one row; undefined when any check rejects it. */
   const tryRow = async (row: unknown, language: StackLanguage, deck: readonly StackSelection[], screen: (candidate: unknown) => void) => {
     if (!licensesAllowed(profile, row)) { noteRejection(state, "SCREENING", new Error("LICENSE_REJECTED")); return undefined; }
+    // A file a generator wrote, such as a fuzzer's `someGen/test789.js`, is no round (#84); its path says so before any read.
+    if (strict && generatedPath(String(view(row).path))) { noteRejection(state, "SCREENING", new Error("GENERATED_PATH")); return undefined; }
     if (!(await screenRepository(row, "GITHUB_REVALIDATION"))) return undefined;
     let lease: ReturnType<typeof context.capacity.beginBlob>;
     try {
@@ -116,6 +121,8 @@ export const selectStack = async (
       stage = "SCREENING";
       state.screened += 1;
       if (unreportable(checked.value)) throw new Error("SOURCE_IDENTITY_UNREPORTABLE");
+      // A window that only declares data, such as a table of string constants, shows no idiom to recognise (#84).
+      if (strict && dataOnly(String(view(checked.value).excerpt))) throw new Error("DATA_ONLY_CONTENT");
       screen(checked.value);
       stage = "DEDUPLICATION";
       if (collidesWithSelected(profile, checked.value, deck.map(({ candidate }) => candidate), [...chosenCandidates(), ...otherDecks()])) {
@@ -148,7 +155,6 @@ export const selectStack = async (
 
   // From v6 on, no pane shares a distinctive word with any of its round's options as shown (#77). A repository is then
   // described before its files are tried, so a pane can be held to its own words; each description is read once.
-  const strict = profileAtLeast(profile.profileVersion, "local-real-rounds.v6");
   const descriptions = new Map<string, Awaited<ReturnType<typeof describe>>>();
   const described = async (repository: string) => {
     if (!descriptions.has(repository)) descriptions.set(repository, await describe(repository));

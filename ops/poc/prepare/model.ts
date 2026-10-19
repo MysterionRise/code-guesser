@@ -36,6 +36,8 @@ export {
   languageCandidateId,
   namesAlgorithm,
   numericOutputs,
+  sameFile,
+  sameIdea,
   sharedOptionWords,
   showsLabelStem,
   transformGivesAway,

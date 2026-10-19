@@ -6,10 +6,10 @@ artifact-published: false
 credential-material-recorded: false
 ---
 
-# The v6 leak rules on real data: a dry run (#77, #78)
+# The v6 leak rules on real data: a dry run (#77, #78, #84)
 
-The v6 rules for "Which project?" (#77) and "Predict the output" (#78) apply to v6 artifacts only, so the committed
-v5 artifact still rebuilds byte for byte. To see them on real data before the v6 run, this dry run forced every v6
+The v6 rules for "Which project?" (#77), "Predict the output" (#78), and weak rounds (#84) apply to v6 artifacts
+only, so the committed v5 artifact still rebuilds byte for byte. To see them on real data before the v6 run, this dry run forced every v6
 rule on (a local edit to `profileAtLeast`, never committed) and replayed the v5 run with `--resume` in a separate
 worktree, on a copy of its journal. The journal answered what it held; only the files the new rules called for were
 fetched, read-only. Nothing was published or committed from the run.
@@ -20,8 +20,9 @@ fetched, read-only. Nothing was published or committed from the run.
 | --- | --- | --- | --- |
 | 1, `--resume` | 2,109 | 233 | language, before-after, algorithm, output, fix; project refused in generation |
 | 2, `--resume` on run 1's journal | 2,087 | 10 | all six |
+| 3, `--resume` with #84's rules too, on run 2's journal | 2,185 | 116 | all six |
 
-The v5 run made 1,859 requests, so the rules cost about 230 more on these decks. Most went to describing
+The v5 run made 1,859 requests, so #77 and #78 cost about 230 more on these decks, and #84 about 100 more (run 3). Most went to describing
 repositories before trying their files, and to the files that replaced refused rounds.
 
 Run 1 refused the project deck in generation (`PROJECT_ROUNDS_REJECTED`). In run 1 one blob read failed with
@@ -61,11 +62,24 @@ Gone: `xor_swap(-1, 1)` and `reverse_letters("nohtyP is nohtyP", 2)`, whose ever
 (`'Hello world'`, `' hello world'`), so the clue points nowhere. New: `mode(["x", "y", "y", "z"])` and a
 `lin_search` call. The deck still balances every rank.
 
+### Weak rounds (#84), run 3
+
+| Rule | Refused | Effect |
+| --- | --- | --- |
+| A generator's file (`…Gen/`, `test<n>`), before any read | 1 | the fuzz test `someGen/test789.js` is gone |
+| A window half of whose lines only declare data | 6 | the C++ string table, the C globals, and the locale strings are gone; the highest share left is 0.33 |
+| One output round per idea | 3 | `binary_count_setbits` (agrees with `get_1s_count` on 25, 58, and 0) and `count_vowels_and_consonants` (named for `count_vowels`) are gone |
+| One fix round per file | 3 | one of luigi's two `scheduler.py` rounds and thefuck's `git_push_force.py` (beside `git_push.py`) are gone |
+
+One round of each pair #84 lists stays, as the rule intends: at most one per idea or file. Across all three
+rules the project deck replaced 10 of 24 rounds, the language deck 1, output 5, and fix 3. The overlap solver stays
+at 25%, and the transform solver is at 32.1% over 7 worded rounds.
+
 ## For the v6 run
 
 - **A worker failure with no stable code is not journaled.** The blob worker's `WORKER_STDERR` (stray stderr) is
   rejected without a journal entry, so `--offline` cannot replay past it and fails with `JOURNAL_MISS`. Run 1's
   journal could not be replayed offline for that reason. The data run's procedure covers it: after the live run, a
   `--resume` fetches what the journal lacks, and the two `--offline` replays then run on that journal.
-- The rules raised the cost of these decks by about 12%. The v6 profile's larger language deck and new decks are
+- The rules raised the cost of these decks by about 17%. The v6 profile's larger language deck and new decks are
   budgeted separately (#129).

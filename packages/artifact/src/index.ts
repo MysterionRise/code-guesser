@@ -4,6 +4,7 @@ export * from "./errors";
 export * from "./exercise";
 export * from "./family";
 export * from "./framework";
+export * from "./ideas";
 export * from "./missing-line";
 export * from "./name-function";
 export * from "./project";

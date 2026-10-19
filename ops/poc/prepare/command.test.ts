@@ -10,7 +10,7 @@ import { GitHubSearchError } from "./github-search";
 import { JournalError, openJournal } from "./journal";
 import { HARNESS_CANDIDATES, accepted, classificationsFor, harnessRow, hash, loadProfile, makeHarness } from "./command-test-harness";
 import {
-  CURATED_REPOSITORIES, CURATED_SECTION, FIX_SECTION, OUTPUT_SECTION, advisoryHarnessData, curatedFiles, exerciseFiles, fixHarnessData, frameworkFiles, loadCuratedProfile, missingLineFiles, nameFunctionFiles, outputFiles, sha256, swapOutputFile,
+  CURATED_REPOSITORIES, CURATED_SECTION, FIX_SECTION, OUTPUT_SECTION, advisoryHarnessData, curatedFiles, exerciseFiles, fixHarnessData, frameworkFiles, loadCuratedProfile, missingLineFiles, doctestedModule, nameFunctionFiles, outputFiles, sha256, swapOutputFile,
 } from "./testdata/deck-builders";
 import { LANGUAGE_SLUGS } from "../../../packages/artifact/src/index";
 import { MAINSTREAM_LANGUAGES, parseCrawlProfile } from "./profile";
@@ -253,6 +253,32 @@ const logLines = (calls: readonly string[]): string[] =>
     expect(logLines(harness.calls)).toContain("log:PREPARATION_DECKS project,language,before-after");
   });
 
+  it("from profile v6 on, skips a generator's file before reading it and a window that only declares data (#84)", async () => {
+    // A fuzzer's numbered file first in the language deck's Python order, and a table of constants as python-pop-0's first file.
+    const python = [
+      harnessRow("Python", "python-pop-0", { starEventsCount: 9000, excerpt: "FIRST = \"a\"\nSECOND = \"b\"\nTHIRD = 3" }),
+      harnessRow("Python", "python-pop-0b", { repository: "python-org/python-pop-0", starEventsCount: 9000 }),
+      ...popularRows("Python").slice(1),
+    ];
+    const rows = stackRowsWith(ordinaryRows("Python"));
+    rows.Python = [...python, harnessRow("Python", "py-gen", { path: "experiments/someGen/test789.py", stableRowId: "0" }), ...ordinaryRows("Python")];
+    const run = async (profileVersion: "local-real-rounds.v5" | "local-real-rounds.v6") => {
+      const harness = await makeHarness({ collectStackMetadata: metadataFrom(rows) }, { profile: await loadProfile(profileVersion) });
+      await prepareLocalExperiment(harness.dependencies);
+      return harness;
+    };
+    const v5 = await run("local-real-rounds.v5");
+    expect(v5.calls.some((call) => call.startsWith("fetch:py-gen:"))).toBe(true);
+    expect(v5.calls.filter((call) => call.startsWith("fetch:python-pop-0"))).toHaveLength(1);
+    const harness = await run("local-real-rounds.v6");
+    expect(harness.calls.some((call) => call.startsWith("fetch:py-gen:"))).toBe(false);
+    expect(harness.calls.filter((call) => call.startsWith("fetch:python-pop-0"))).toHaveLength(2);
+    const diagnostics = (harness.reports[0] as any).diagnostics;
+    expect(diagnostics).toContainEqual({ stage: "SCREENING", reasonCode: "GENERATED_PATH", count: 1 });
+    expect(diagnostics).toContainEqual({ stage: "SCREENING", reasonCode: "DATA_ONLY_CONTENT", count: 1 });
+    expect(logLines(harness.calls)).toContain("log:PREPARATION_DECKS project,language,before-after");
+  });
+
   it("offers a repository in one language's project rounds only", async () => {
     // python-org/python-pop-2 also has a popular Ruby file; it stays a Python decoy and Ruby offers its own repositories.
     const rows = stackRowsWith(ordinaryRows("Python"));
@@ -335,6 +361,45 @@ const logLines = (calls: readonly string[]): string[] =>
     expect(swap).toBe(false);
     expect(logLines(harness.calls)).toContain("log:PREPARATION_DECKS project,language,before-after,algorithm,output");
     expect((harness.reports[0] as any).diagnostics).toContainEqual({ stage: "SCREENING", reasonCode: "OUTPUT_NO_DOCTEST", count: 2 });
+  });
+
+  it("from profile v6 on, offers one output round per idea: a function that agrees with a chosen one on two calls is skipped (#84)", async () => {
+    // `sum_sixty` agrees with `add_60` on two calls, as two popcounts did; it is read eighth, after `add_60`.
+    const agreeing = ["algos/python:maths/sum_sixty.py", doctestedModule("sum_sixty", "value: int", "    return sum([value, 60])",
+      [["1", "61"], ["2", "62"], ["7", "67"], ["8", "68"]])] as const;
+    const files = new Map([...curatedFiles(), ...outputFiles(), agreeing]);
+    const bound = async (version: "local-real-rounds.v5" | "local-real-rounds.v6") => {
+      const harness = await makeHarness({}, { profile: loadCuratedProfile({ beforeAfterPool: 5 }, { algorithm: true, output: true }, version), curatedFiles: files });
+      await prepareLocalExperiment(harness.dependencies);
+      expect(harness.calls).toContain("read:algos/python:maths/sum_sixty.py");
+      return harness;
+    };
+    expect((await bound("local-real-rounds.v5")).calls).toContain("curated:algos/python:maths/sum_sixty.py");
+    const harness = await bound("local-real-rounds.v6");
+    expect(harness.calls).not.toContain("curated:algos/python:maths/sum_sixty.py");
+    expect(harness.calls).toContain("output:8");
+    expect((harness.reports[0] as any).diagnostics).toContainEqual({ stage: "SCREENING", reasonCode: "OUTPUT_IDEA_REPEATED", count: 1 });
+  });
+
+  it("from profile v6 on, offers one fix round per file, skipping another bug in it before any upstream request (#84)", async () => {
+    // Calc-4 changes the file Calc-3 does, and comes right after it in the Defects4J order.
+    const data = fixHarnessData();
+    const calc3 = data.bugs.find(({ bug }) => bug === "Calc-3")!;
+    const withRepeat = { ...data, bugs: [...data.bugs, { ...calc3, bug: "Calc-4" }] };
+    const run = async (version: "local-real-rounds.v5" | "local-real-rounds.v6") => {
+      const harness = await makeHarness({}, { profile: loadCuratedProfile({ beforeAfterPool: 5 }, { fix: true }, version), fix: withRepeat });
+      await prepareLocalExperiment(harness.dependencies);
+      // Calc-4 shares Calc-3's patch, which the harness logs under Calc-3; neither run binds it upstream.
+      expect(harness.calls).not.toContain("fix:Calc-4");
+      return harness;
+    };
+    expect((await run("local-real-rounds.v5")).reports[0]).toMatchObject({ diagnostics: expect.arrayContaining([
+      { stage: "ADMISSION", reasonCode: "FIX_RECORD_MISSING", count: 1 }]) });
+    const harness = await run("local-real-rounds.v6");
+    const diagnostics = (harness.reports[0] as any).diagnostics;
+    expect(diagnostics).toContainEqual({ stage: "SCREENING", reasonCode: "FIX_FILE_REPEATED", count: 1 });
+    expect(diagnostics.some(({ reasonCode }: any) => reasonCode === "FIX_RECORD_MISSING")).toBe(false);
+    expect(harness.calls).toContain("fix-deck:8");
   });
 
   it("skips files another deck shows, and skips the output deck alone when its reads run out", async () => {

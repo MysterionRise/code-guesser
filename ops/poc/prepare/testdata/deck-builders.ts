@@ -771,6 +771,9 @@ export const OUTPUT_SECTION = Object.freeze({
   },
 });
 
+/** A module with one function `name` and a doctest per example: `[argument, output]`. */
+export const doctestedModule = (name: string, parameter: string, body: string, examples: readonly (readonly [string, string])[]): string =>
+  doctested(name, parameter, body, examples);
 const doctested = (name: string, parameter: string, body: string, examples: readonly (readonly [string, string])[]): string =>
   `"""A small module."""\n\n\ndef ${name}(${parameter}):\n    """Example.\n\n${examples.map(([argument, output]) =>
     `    >>> ${name}(${argument})\n    ${output}\n`).join("")}    """\n    # Work it out.\n${body}\n`;

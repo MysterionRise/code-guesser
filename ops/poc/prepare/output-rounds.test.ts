@@ -173,6 +173,35 @@ describe("output rounds", () => {
     }
   });
 
+  it("from profile v6 on, offers one round per idea, and v5 does not ask (#84)", () => {
+    // The second number module renamed for the first one's idea: `add_60_more` beside `add_60`.
+    const numbers = (names: readonly string[]) => names.filter((name) => name.startsWith("add_"));
+    const [kept, moved] = numbers(pool().map(({ functionName }) => functionName)) as [string, string];
+    const renamed = <T>(value: T): T => JSON.parse(JSON.stringify(value).replaceAll(`${moved}(`, `${kept}_more(`));
+    const alikeCandidates = (candidates: ReturnType<typeof pool>) => candidates.map((candidate) => {
+      if (candidate.functionName !== moved) return candidate;
+      const changed = { ...renamed(candidate), functionName: `${kept}_more` };
+      return { ...changed, excerptHash: sha256(changed.excerpt) };
+    });
+    expect(() => generateOutputRounds({ profile: v6, candidates: alikeCandidates(outputCandidates(v6, snapshotIdFor(v6))) }))
+      .toThrow("OUTPUT_IDEA_REPEATED");
+    expect(generateOutputRounds({ profile, candidates: alikeCandidates(pool()) }).fixtures).toHaveLength(8);
+    // The parser holds a v6 deck to it too.
+    const composed = new Map([profile, v6].map((from) => [from, composeExperimentArtifact(composeInput(from)).artifact] as const));
+    const alike = (from: typeof profile): any => {
+      const value: any = structuredClone(composed.get(from));
+      const fixtures = value.decks.find(({ id }: any) => id === "output").fixtures;
+      const index = fixtures.findIndex(({ source }: any) => source.functionName === moved);
+      const changed = renamed(fixtures[index]);
+      changed.source.functionName = `${kept}_more`;
+      changed.source.excerptHash = sha256(changed.panes[0].text);
+      fixtures[index] = changed;
+      return value;
+    };
+    expect(() => parseExperimentArtifact(alike(v6))).toThrow(ExperimentRecordError);
+    expect(() => parseExperimentArtifact(alike(profile))).not.toThrow();
+  });
+
   it("gives code-blind solvers no edge over chance, including the largest, smallest, longest, and shortest output", () => {
     const { fixtures } = outputDeck();
     const limit = chance(fixtures[0]!) + TOLERANCE;

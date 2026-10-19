@@ -1,4 +1,4 @@
-import { firstCodeLine, looksGenerated } from "./excerpt-window";
+import { dataOnly, dataShare, firstCodeLine, generatedPath, looksGenerated } from "./excerpt-window";
 
 const testModuleName: string = "vitest";
 const { describe, expect, it } = await import(testModuleName) as any;
@@ -63,5 +63,30 @@ describe("first code line", () => {
   it("finds no code in a file of comments or an unclosed docstring", () => {
     expect(firstLine("# only a comment\n\n", "Python")).toBeUndefined();
     expect(firstLine('"""never closed\nstill docstring\n', "Python")).toBeUndefined();
+  });
+});
+
+describe("weak Stack windows (#84)", () => {
+  it("reads a window that only declares data as data, and code as code", () => {
+    // The three panes #84 found: a table of string constants, a run of C globals, and a locale's strings.
+    const constants = ["namespace {", "", ...["Name", "Pages", "Pid", "Tree"].map((field) =>
+      `static const char k${field}Field[] = "${field.toLowerCase()}";`)].join("\n");
+    const globals = "UINTN\n  gGpioPinMask = GPIO_PIN_MASK_AUTO;\n\nUINTN\n  gCodecSetupDelay = 0;\n\nBOOLEAN\n  gUseForcedCodec = FALSE;";
+    const locale = "const localeValues: Locale = {\n  locale: 'ur',\n  Pagination,\n  global: {\n    placeholder: 'منتخب کریں',\n  },\n"
+      + "  Table: {\n    filterTitle: 'فلٹر مینو',\n    filterReset: 'ری سیٹ کریں',\n    emptyText: 'کوئی ڈیٹا نہیں',\n  },\n};";
+    for (const text of [constants, globals, locale]) expect(dataOnly(text), text).toBe(true);
+    expect(dataShare(constants)).toBe(1);
+    const code = "def total(items):\n    result = 0\n    for item in items:\n        result += item.price\n    return result";
+    const mixed = "const LIMIT = 10;\nfunction clamp(value) {\n  if (value > LIMIT) return LIMIT;\n  return Math.max(value, 0);\n}";
+    for (const text of [code, mixed, ""]) expect(dataOnly(text), text).toBe(false);
+  });
+
+  it("reads a generator's directory or a numbered test file as generated, and nothing else", () => {
+    expect(generatedPath("experiments/some/someGen/test789.js")).toBe(true);
+    expect(generatedPath("src/parserGen/Lexer.java")).toBe(true);
+    expect(generatedPath("tests/test42.py")).toBe(true);
+    for (const path of ["src/codegen/emit.rs", "src/Generator.java", "tests/test_parser.py", "src/someGen.js", "tests/test.py"]) {
+      expect(generatedPath(path), path).toBe(false);
+    }
   });
 });
