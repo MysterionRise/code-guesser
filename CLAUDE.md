@@ -94,7 +94,13 @@ gate: changing queries, retries, ceilings, deck rules, or running
       its own words and the other answer's (and neither answer's code or file name may name the other), and a
       decoy whose words an answer's pane shows is skipped. The parser also reads names inside identifiers
       (`namesRepository`, now in `packages/artifact`).
-    - Dry run of both on the v5 data: `docs/review/evidence/2026-10-19-v6-leak-rules-dry-run.md`.
+    - **#84, weak rounds:** a Stack file under a generator's directory (`…Gen/`) or named `test<n>` is skipped before
+      it is read (`generatedPath`), and a window half of whose lines only declare data is refused (`dataOnly`, in
+      `excerpt-window.ts`). One output round per idea: no two functions named for one thing (`sameIdea` in
+      `packages/artifact/src/ideas.ts`: every word of the shorter name, of two or more, is a word of the other), and
+      none that agrees with a chosen function on two documented calls. One fix round per file: no two fixes in one
+      file, or in files side by side named alike (`sameFile`), skipped before any upstream request.
+    - Dry run of these rules on the v5 data: `docs/review/evidence/2026-10-19-v6-leak-rules-dry-run.md`.
 - The server holds each game's progress (#96): `dealGame` seals it in a signed
   token (`local-real-experiment-session.server.ts`), and the hint and answer
   server actions take one step each. A ledger refuses an older token, so a
@@ -545,7 +551,8 @@ when the preparer throws a code this section does not name.
     `PUBLIC_CONTAINMENT_CANDIDATE_IN_<FIELD>`): names the protected value and
     the public field that collided.
   - A round generator's own check: `*_ROUNDS_REJECTED`, `PROJECT_WORDS_SHOWN`
-    (v6: a project pane shares a word with an option),
+    (v6: a project pane shares a word with an option), `OUTPUT_IDEA_REPEATED` and
+    `FIX_FILE_REPEATED` (v6: two rounds repeat one idea or one file, #84),
     `ALGORITHM_NAME_SHOWN`, `ALGORITHM_FAMILY_UNBALANCED`,
     `OUTPUT_ANSWER_ECHOED`, `OUTPUT_ANSWER_TRANSFORMED` (v6: the answer alone reads
     off its call's arguments), `OUTPUT_TRANSFORM_UNBALANCED` (v6: picking such an
@@ -622,6 +629,9 @@ add up.
     vendor, and generated directories, lock files, minified files).
 - The blob worker: `WORKER_EXIT_<CODE>`, `BLOB_IDENTITY_REJECTED`,
   `BLOB_CAPACITY`, `NETWORK_BYTES`, `REDIRECT_REJECTED`.
+- `GENERATED_PATH` (v6, #84): a Stack file under a `…Gen` directory or named
+  `test<n>`, skipped before it is read. `DATA_ONLY_CONTENT` (v6): a window half
+  of whose lines only declare data, such as a table of string constants.
 - `REPOSITORY_SCREENED_OUT` counts later candidates of a repository already
   rejected once. `REPOSITORY_REPEATED`: a repository the deck already holds.
 - `SOURCE_DUPLICATE`, `PUBLIC_CONTAINMENT_REJECTED`,
@@ -645,6 +655,8 @@ add up.
   files; from v6, also one whose every call gives its result away, #78).
   `OUTPUT_PANE_SIZE`: a pane over the byte limit.
   `OUTPUT_FILE_CHANGED`: the file bound differs from the file read.
+  `OUTPUT_IDEA_REPEATED` (v6, #84): a function named for a chosen round's idea,
+  or agreeing with a chosen function on two documented calls.
   `OUTPUT_RANKS_UNBALANCED`: no choice of answers fills every rank in both
   orders (and, from v6, keeps the transform solver in bounds), so the output
   deck is skipped.
@@ -684,6 +696,8 @@ add up.
   line is the busiest, longest, most indented, or most rarely worded option in every window).
   `VULNERABLE_RANKS_UNBALANCED`: no choice of windows balances the deck.
 - `FIX_PATCH_WIDE`: a dataset patch that changes more than one line (most).
+  `FIX_FILE_REPEATED` (v6, #84): a fix in a file the deck already holds, or in
+  one beside it named alike, skipped before any upstream request.
   - `FIX_CLAIM`: the fix's lines, which the reveal quotes, claim something
     about authorship (#32).
   - `FIX_CHANGE`, `FIX_DIFF`, `FIX_PARENT`: the upstream fix commit changes

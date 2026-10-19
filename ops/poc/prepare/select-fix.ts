@@ -1,6 +1,6 @@
 import { screenBlob } from "@codeguessr/content/local-poc-support";
 
-import { AUTHORSHIP_CLAIM, CROSS_DECK_KEYS_BY_KIND, DEDUPLICATION_KEYS_BY_KIND } from "../../../packages/artifact/src/index";
+import { AUTHORSHIP_CLAIM, CROSS_DECK_KEYS_BY_KIND, DEDUPLICATION_KEYS_BY_KIND, profileAtLeast, sameFile } from "../../../packages/artifact/src/index";
 import { DECK_SHORT, noteRejection, rejectCandidate, type DeckAttempts, type DeckOutcome, type RunState } from "./diagnostics";
 import { looksGenerated } from "./excerpt-window";
 import { bugsInPyRevisions, defects4jRevisions, oneLineFix, type BugRevisions } from "./fix-patch";
@@ -77,6 +77,7 @@ export const selectFix = async (
     try { return decoder.decode(result.value); } catch { return fail("FIX_DATASET_ENCODING"); }
   };
   const tables = new Map<string, ReadonlyMap<string, BugRevisions>>();
+  const strict = profileAtLeast(profile.profileVersion, "local-real-rounds.v6");
   const perRepository = new Map<string, number>();
   const seen = new Set<string>();
   const rounds: PendingFix[] = [];
@@ -93,6 +94,12 @@ export const selectFix = async (
       const fix = oneLineFix(await text(dataset.repository, bug.patchBlob), dataset.id === "defects4j" ? "reverse" : "forward");
       if (!fix) {
         noteRejection(state, "SCREENING", new Error("FIX_PATCH_WIDE"));
+        continue;
+      }
+      // From v6 on, one round per file (#84): a fix in a file the deck already holds, or in one beside it named alike
+      // (thefuck's `rules/git_push.py` and `rules/git_push_force.py`), is skipped before any upstream request.
+      if (strict && rounds.some((other) => sameFile(other, { repository: project.repository, path: fix.path }))) {
+        noteRejection(state, "SCREENING", new Error("FIX_FILE_REPEATED"));
         continue;
       }
       let revisions: BugRevisions;

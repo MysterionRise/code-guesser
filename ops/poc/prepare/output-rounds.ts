@@ -3,7 +3,7 @@ import type { DoctestExample } from "./doctest-parse";
 import { deepFreeze } from "./model-validation";
 import {
   OUTPUT_HINT, OUTPUT_ORDERS, OUTPUT_SOURCE_KEYS, SCORE_TOLERANCE, echoesArgument, numericOutputs, outputCandidateId, outputOrder, outputShape,
-  profileAtLeast, transformGivesAway, transformLimit, transformScore, type ExperimentFixture, type ProfileVersion,
+  profileAtLeast, sameIdea, transformGivesAway, transformLimit, transformScore, type ExperimentFixture, type ProfileVersion,
 } from "./model";
 import { OUTPUT_OPTIONS, type CrawlProfile } from "./profile";
 import { attributionFor, balancedChoice, fill, orderedPool, roundIdFor, sha256, shuffled, type GeneratedRounds } from "./round-helpers";
@@ -161,6 +161,9 @@ export const generateOutputRounds = (options: Readonly<{ profile: CrawlProfile; 
     const worded = candidates.map(({ answer, decoys }) => [answer, ...decoys]).filter((examples) => !numericOutputs(examples.map(({ output }) => output)));
     const score = worded.reduce((sum, examples) => sum + transformScore(examples[0]!.call, examples[0]!.output, examples.map(({ output }) => output)), 0);
     if (score > transformLimit(worded.length) + SCORE_TOLERANCE) fail("OUTPUT_TRANSFORM_UNBALANCED");
+    if (candidates.some((left, index) => candidates.slice(index + 1).some((right) => sameIdea(left.functionName, right.functionName)))) {
+      fail("OUTPUT_IDEA_REPEATED");
+    }
   }
   return orderedPool(fixtures);
 };

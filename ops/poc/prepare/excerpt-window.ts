@@ -6,6 +6,35 @@ const GENERATED_MARKERS = /automatically generated|auto-generated|@generated|do 
 export const looksGenerated = (text: string, scanLines: number): boolean =>
   text.split(/\r?\n/u).slice(0, scanLines).some((line) => GENERATED_MARKERS.test(line));
 
+/** Whether a path is one a generator wrote (#84): a `…Gen` directory or a numbered `test<n>` file, as fuzzers write. */
+export const generatedPath = (path: string): boolean => {
+  const parts = path.split("/");
+  return parts.slice(0, -1).some((part) => /^[A-Za-z0-9_]*Gen$/u.test(part)) || /^test\d+\.[A-Za-z0-9]+$/u.test(parts.at(-1)!);
+};
+
+/** A value written out in full: a string, a number, a constant, a boolean or null, or an empty collection. */
+const LITERAL = String.raw`(?:'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|\x60[^\x60]*\x60|-?\d[\w.+-]*|true|false|null|nil|None|True|False|NULL|nullptr|[A-Z][A-Z0-9_]{2,}|\{\s*\}|\[\s*\])`;
+/** Lines that only declare data: a name, key, or index given a literal, a bare literal in a list, or a macro. */
+const DATA_LINES: readonly RegExp[] = Object.freeze([
+  new RegExp(String.raw`^(?:(?:static|const|final|public|private|protected|readonly|export|let|var|val|char|int|bool|string|auto|constexpr)\b[\w\s*\[\]<>:&]*?)?[\w$.\[\]"' ]+?\s*(?:=|:|=>)\s*${LITERAL}\s*[,;]?$`, "u"),
+  new RegExp(String.raw`^${LITERAL}\s*,?$`, "u"),
+  /^#define\s+\w+\s+\S.*$/u,
+  // A type on a line of its own, as C declares globals: `UINTN` above `gPinMask = GPIO_PIN_MASK_AUTO;`.
+  /^[A-Z][A-Z0-9_]*$/u,
+]);
+/** Lines that only open or close a block or a collection. */
+const STRUCTURE_LINE = /^[\w$"' .]*\s*[:=]?\s*[{[(]$|^[}\])][\s,;)\]}]*$/u;
+/** The share of a window's lines that only declare data, blank lines and lines that only open or close a block aside. */
+export const dataShare = (text: string): number => {
+  const lines = text.split("\n").map((line) => line.trim()).filter((line) => line.length > 0 && !STRUCTURE_LINE.test(line));
+  return lines.length === 0 ? 0 : lines.filter((line) => DATA_LINES.some((pattern) => pattern.test(line))).length / lines.length;
+};
+/**
+ * Whether a window is data rather than code (#84): half its lines or more only declare data, as a table of string
+ * constants, a run of globals, or a locale's strings do. Such a window shows no idiom to recognise.
+ */
+export const dataOnly = (text: string): boolean => dataShare(text) >= 0.5;
+
 /** The bounds of a code window: whole lines, at most `maxLines` and `maxBytes`, at least `minBytes`. */
 export interface ExcerptLimits {
   readonly maxLines: number;

@@ -3,7 +3,7 @@ import type { ChangeKind } from "./fix-window";
 import { deepFreeze } from "./model-validation";
 import {
   FIX_CHANGE_HINTS, FIX_ORDERS, FIX_SOURCE_KEYS, SCORE_TOLERANCE, fixCandidateId, fixExtremeLimits, fixExtremeScores, fixLineLabel,
-  fixPairHint, fixRanks, fixSlack, pairLongerScore, pairSlack, type ExperimentFixture,
+  fixPairHint, fixRanks, fixSlack, pairLongerScore, pairSlack, profileAtLeast, sameFile, type ExperimentFixture,
 } from "./model";
 import { FIX_OPTIONS, type CrawlProfile, type FixDataset, type StackLanguage } from "./profile";
 import { attributionFor, fill, orderedPool, roundIdFor, sha256, shuffled, type GeneratedRounds } from "./round-helpers";
@@ -177,6 +177,9 @@ export const generateFixRounds = (options: Readonly<{ profile: CrawlProfile; can
   for (const repository of new Set(candidates.map((candidate) => candidate.repository))) {
     if (candidates.filter((candidate) => candidate.repository === repository).length > deck.perRepository) fail("FIX_REPOSITORY_REPEATED");
   }
+  // From v6 on, one round per file, or per pair of files side by side named alike (#84).
+  if (profileAtLeast(profile.profileVersion, "local-real-rounds.v6")
+    && candidates.some((left, index) => candidates.slice(index + 1).some((right) => sameFile(left, right)))) fail("FIX_FILE_REPEATED");
   for (const key of ["bugId", "commit", "fixCommit", "excerptHash"] as const) {
     if (new Set(candidates.map((candidate) => candidate[key])).size !== candidates.length) fail();
   }

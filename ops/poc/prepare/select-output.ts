@@ -1,6 +1,6 @@
 import { screenBlob } from "@codeguessr/content/local-poc-support";
 
-import { CROSS_DECK_KEYS_BY_KIND, DEDUPLICATION_KEYS_BY_KIND } from "../../../packages/artifact/src/index";
+import { CROSS_DECK_KEYS_BY_KIND, DEDUPLICATION_KEYS_BY_KIND, profileAtLeast, sameIdea } from "../../../packages/artifact/src/index";
 import { DECK_SHORT, noteRejection, rejectCandidate, type DeckAttempts, type DeckOutcome, type RunState } from "./diagnostics";
 import { doctestFunctions, roundExamples, type DoctestExample, type DoctestFunction } from "./doctest-parse";
 import { looksGenerated } from "./excerpt-window";
@@ -37,6 +37,13 @@ const roundFrom = (functions: readonly DoctestFunction[], seen: ReadonlySet<stri
     }
   }
   return undefined;
+};
+
+/** How many calls two functions both document with the same arguments and the same result. */
+const agreeingCalls = (left: DoctestFunction, right: DoctestFunction): number => {
+  const results = new Map(left.examples.map(({ call, output }) => [call.slice(left.name.length), output]));
+  return new Set(right.examples.filter(({ call, output }) => results.get(call.slice(right.name.length)) === output)
+    .map(({ call }) => call.slice(right.name.length))).size;
 };
 
 /** A round with its function and four examples, before the deck picks which example it asks about. */
@@ -90,6 +97,8 @@ export const selectOutput = async (
   const examplesSeen = new Set<string>();
   const rounds: PendingRound[] = [];
   const limits = { maxLines: profile.screening.excerptLines };
+  const strict = profileAtLeast(profile.profileVersion, "local-real-rounds.v6");
+  const ideas: DoctestFunction[] = [];
 
   for (const path of order.slice(0, deck.fileReads)) {
     if (rounds.length >= deck.rounds) break;
@@ -107,6 +116,10 @@ export const selectOutput = async (
       const screened = screenBlob({ path, bytes: read.bytes }, seen);
       if (looksGenerated(screened.text, profile.screening.generatedScanLines)) fail("GENERATED_CONTENT");
       round = roundFrom(doctestFunctions(screened.text, limits), examplesSeen, profile.profileVersion) ?? fail("OUTPUT_NO_DOCTEST");
+      // From v6 on, one round per idea (#84): a function named for a chosen round's idea (`count_vowels` beside
+      // `count_vowels_and_consonants`), or one that agrees with a chosen function on two calls (two popcounts), repeats it.
+      const candidate = round.function;
+      if (strict && ideas.some((other) => sameIdea(other.name, candidate.name) || agreeingCalls(other, candidate) >= 2)) fail("OUTPUT_IDEA_REPEATED");
       const longest = Math.max(...round.examples.map(({ call }) => Buffer.byteLength(outputPane(round!.function.code, call))));
       if (longest > profile.screening.excerptBytes) fail("OUTPUT_PANE_SIZE");
     } catch (error) {
@@ -141,6 +154,7 @@ export const selectOutput = async (
       if (unreportable(pending)) fail("SOURCE_IDENTITY_UNREPORTABLE");
       state.screened += 1;
       examplesSeen.add(round.key);
+      ideas.push(round.function);
       rounds.push(pending);
     } catch (error) {
       rejectCandidate(state, "SCREENING", error);

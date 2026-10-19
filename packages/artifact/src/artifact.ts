@@ -39,6 +39,7 @@ import { familyDeckRule, type FamilyMember } from "./family";
 import { parseFrameworks, validateFramework, type CuratedFramework } from "./framework";
 import { missingLineDeckRule, validateMissingLine } from "./missing-line";
 import { nameFunctionDeckRule, validateNameFunction } from "./name-function";
+import { sameFile, sameIdea } from "./ideas";
 import { mentionsRepository, namesRepository, sharedOptionWords } from "./project";
 import {
   pinKey, validateCuratedSource, validateExerciseSource, validateFixSource, validateFrameworkSource, validateLineageSource, validateMissingLineSource, validateNameFunctionSource,
@@ -499,6 +500,10 @@ const SOURCE_VALIDATORS: Readonly<Record<FixtureKind, (value: unknown, snapshot:
 });
 
 /** Rules a whole deck must keep beyond its rounds' own. */
+/** Every unordered pair of a deck's rounds. */
+const pairs = (fixtures: readonly ParsedFixture[]): readonly (readonly [ParsedFixture, ParsedFixture])[] =>
+  fixtures.flatMap((left, index) => fixtures.slice(index + 1).map((right) => [left, right] as const));
+
 const DECK_RULES: Readonly<Partial<Record<DeckId, (fixtures: readonly ParsedFixture[]) => void>>> = Object.freeze({
   "missing-line": missingLineDeckRule,
   "name-function": nameFunctionDeckRule,
@@ -526,8 +531,15 @@ const DECK_RULES: Readonly<Partial<Record<DeckId, (fixtures: readonly ParsedFixt
     const score = worded.reduce((sum, { source, candidates, correctCandidateId }) => sum + transformScore(text(source.call),
       candidates.find(({ id }) => id === correctCandidateId)!.label, candidates.map(({ label }) => label)), 0);
     if (score > transformLimit(worded.length) + SCORE_TOLERANCE) fail();
+    // One round per idea (#84): no two functions are named for one thing.
+    if (pairs(fixtures).some(([left, right]) => sameIdea(text(left.source.functionName), text(right.source.functionName)))) fail();
   },
-  fix: (fixtures: readonly ParsedFixture[]) => fixDeckRule(fixtures),
+  fix: (fixtures: readonly ParsedFixture[]) => {
+    fixDeckRule(fixtures);
+    // From v6 on, one round per file (#84): no two rounds share a file or two files side by side named alike.
+    if (profileAtLeast(fixtures[0]!.source.profileVersion, "local-real-rounds.v6")
+      && pairs(fixtures).some(([left, right]) => sameFile(left.source, right.source))) fail();
+  },
   "vulnerable-line": (fixtures: readonly ParsedFixture[]) => fixDeckRule(fixtures),
 });
 

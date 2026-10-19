@@ -15,8 +15,30 @@ const profile = loadCuratedProfile({}, { fix: true });
 const snapshotId = snapshotIdFor(profile);
 const pool = () => fixCandidates(profile, snapshotId);
 const fixDeck = () => parseArtifactDecks(composeExperimentArtifact(composeInput(profile)).artifact).find(({ id }) => id === "fix")!;
+const v6 = loadCuratedProfile({}, { fix: true }, "local-real-rounds.v6");
 
 describe("fix rounds", () => {
+  it("from profile v6 on, offers one round per file, and v5 does not ask (#84)", () => {
+    // The second Calc round moved into the first one's file, as luigi's scheduler held two rounds.
+    const sameFile = (candidates: ReturnType<typeof pool>) => candidates.map((candidate, index) => index === 1 ? { ...candidate, path: candidates[0]!.path } : candidate);
+    expect(pool()[0]!.repository).toBe(pool()[1]!.repository);
+    expect(() => generateFixRounds({ profile: v6, candidates: sameFile(fixCandidates(v6, snapshotIdFor(v6))) })).toThrow("FIX_FILE_REPEATED");
+    expect(generateFixRounds({ profile, candidates: sameFile(pool()) }).fixtures).toHaveLength(8);
+    // The parser holds a v6 deck to it too.
+    const composed = new Map([profile, v6].map((from) => [from, composeExperimentArtifact(composeInput(from)).artifact] as const));
+    const moved = (from: typeof profile): any => {
+      const value: any = structuredClone(composed.get(from));
+      const fixtures = value.decks.find(({ id }: any) => id === "fix").fixtures;
+      const [first, second] = fixtures.filter(({ source }: any) => source.repository === fixtures[0].source.repository);
+      const fixture = fixtures.indexOf(second);
+      fixtures[fixture] = JSON.parse(JSON.stringify(second).replaceAll(second.source.path, first.source.path));
+      return value;
+    };
+    expect(() => parseExperimentArtifact(composed.get(v6))).not.toThrow();
+    expect(() => parseExperimentArtifact(moved(v6))).toThrow(ExperimentRecordError);
+    expect(() => parseExperimentArtifact(moved(profile))).not.toThrow();
+  });
+
   it("offers four lines in order, hints at the kind of change and then two lines, and credits the fix's author", () => {
     const { fixtures } = generateFixRounds({ profile, candidates: pool() });
     expect(fixtures).toHaveLength(8);
