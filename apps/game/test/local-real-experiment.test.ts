@@ -77,6 +77,43 @@ describe("server-only local real experiment authority v3", () => {
     expect(experiment.dealSession("before-after", seeded(3)).rounds[0].content.panes.map((pane: any) => pane.label)).toEqual(["A", "B"]);
   });
 
+  it("deals today's five the same on every load of a date, and differently the next day (#74)", async () => {
+    const experiment = create(curatedArtifact());
+    const { dailyRandom: daily, localDate } = await import("../src/demo/local-real-experiment-daily.server");
+    const dealt = (date: string) => experiment.dealGame("daily", daily(experiment.artifactHash, date), NOW).mode.rounds
+      .map((round: any) => `${round.roundId}:${round.mode.candidates.map(({ candidateId }: any) => candidateId).join(",")}`);
+    expect(dealt("2026-10-19")).toEqual(dealt("2026-10-19"));
+    expect(dealt("2026-10-20")).not.toEqual(dealt("2026-10-19"));
+    expect(new Set(experiment.dealSession("daily", daily(experiment.artifactHash, "2026-10-19")).rounds.map((round: any) => round.mode.kind)).size).toBe(5);
+    expect(payloadOf(experiment.dealGame("daily", daily(experiment.artifactHash, "2026-10-19"), NOW).sessionToken).deck).toBe("daily");
+    expect(() => daily(experiment.artifactHash, "19 October")).toThrow();
+    expect(localDate(new Date(2026, 0, 5, 23, 59))).toBe("2026-01-05");
+  });
+
+  it("deals a mixed game of five rounds from five different decks, scored to its own rounds' best (#56)", () => {
+    const experiment = create(curatedArtifact());
+    expect(experiment.decks.length).toBeGreaterThanOrEqual(5);
+    expect(experiment.mixed).toEqual({ title: "Mixed", description: "Five rounds, each from a different deck.", deckCount: experiment.decks.length });
+    expect(create().mixed).toBeNull();
+    const kinds = new Set<string>();
+    for (const seed of [1, 2, 3, 4]) {
+      const { mode, sessionToken } = experiment.dealGame("mixed", seeded(seed), NOW);
+      expect(new Set(mode.rounds.map((round: any) => round.mode.kind)).size).toBe(5);
+      mode.rounds.forEach((round: any) => kinds.add(round.mode.kind));
+      expect(payloadOf(sessionToken).deck).toBe("mixed");
+      // Two-option and four-option rounds score differently, so the best is the sum of the rounds' top points.
+      const best = mode.rounds.reduce((total: number, round: any) => total + round.points[0], 0);
+      let token = sessionToken;
+      for (const round of mode.rounds) {
+        const answered = answer(experiment, token, round);
+        expect(answered.ok).toBe(true);
+        expect(answered.reveal.result.attainableMaximum).toBe(best);
+        token = answered.sessionToken;
+      }
+    }
+    expect(kinds.size).toBe(experiment.decks.length);
+  });
+
   it("plays all six decks, and keeps a fix round's lines in line order while reshuffling other four-option rounds", () => {
     const experiment = create(curatedArtifact());
     expect(experiment.decks.map((deck: any) => `${deck.id}:${deck.poolSize}`))

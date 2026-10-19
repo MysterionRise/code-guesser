@@ -14,7 +14,15 @@ export {
   type ParsedFixture,
   type ParsedSource,
 } from "../../../../packages/artifact/src/index";
-import type { FixtureKind } from "../../../../packages/artifact/src/index";
+import { DECK_IDS, type DeckId, type FixtureKind } from "../../../../packages/artifact/src/index";
+
+/** A mixed game (#56): five rounds, each from a different deck. */
+export const MIXED_DECK = "mixed";
+/** Today's five (#74): the mixed game the local date deals, the same on every load that day. */
+export const DAILY_DECK = "daily";
+export type SessionDeckId = DeckId | typeof MIXED_DECK | typeof DAILY_DECK;
+/** What a game may be dealt from: a deck, the mix of them, or today's mix. */
+export const SESSION_DECK_IDS: readonly SessionDeckId[] = Object.freeze([...DECK_IDS, MIXED_DECK, DAILY_DECK]);
 
 /** What decides each kind's answer; part of every round's rules version. */
 export const RULE_SEMANTICS: Readonly<Record<FixtureKind, string>> = Object.freeze({

@@ -78,6 +78,15 @@ code under each line's own indentation.
 `algorithm`, `output`, `fix`, `missing-line`, `name-function`, `framework`,
 or `exercise`.
 
+Two cards come first in the chooser:
+
+- **Today's five** (`/?deck=daily`) deals a mixed game seeded by the artifact
+  and the local date. Every load that day deals the same five rounds in the
+  same order, and its share line carries the date.
+- **Mixed** (`/?deck=mixed`) deals one round from each of five decks drawn at
+  random. Each round's header names its deck, and the game scores up to the
+  sum of its rounds' top points.
+
 A leakage test (`packages/artifact/test/deck-leakage.test.ts`) checks that
 solvers which never read the code, or only skim it, stay within chance plus
 ten points:

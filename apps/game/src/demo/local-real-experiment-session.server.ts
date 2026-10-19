@@ -3,7 +3,7 @@ import "server-only";
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
 import { FACTORS, parseArms, type Arms } from "../experiment/arms";
-import { DECK_IDS, ROUNDS_PER_SESSION, type DeckId } from "./local-real-experiment-domain.server";
+import { ROUNDS_PER_SESSION, SESSION_DECK_IDS, type SessionDeckId } from "./local-real-experiment-domain.server";
 
 /**
  * A game's progress, held by the server: the browser carries it only as a signed token it cannot alter, and the
@@ -15,7 +15,7 @@ export interface GameState {
   /** Unguessable and random per deal; it links nothing beyond this one game. */
   readonly gameId: string;
   readonly artifactHash: string;
-  readonly deck: DeckId;
+  readonly deck: SessionDeckId;
   /** The dealt rounds, in play order. */
   readonly roundIds: readonly string[];
   /** Accepted transitions so far: every bought hint and every answer is one. */
@@ -102,7 +102,7 @@ const parseState = (value: unknown): GameState => {
     || state.version !== 2
     || typeof state.gameId !== "string" || !/^[0-9a-f]{32}$/u.test(state.gameId)
     || typeof state.artifactHash !== "string" || !/^[0-9a-f]{64}$/u.test(state.artifactHash)
-    || !DECK_IDS.includes(state.deck as DeckId)
+    || !SESSION_DECK_IDS.includes(state.deck as SessionDeckId)
     || !Array.isArray(state.roundIds) || state.roundIds.length !== ROUNDS_PER_SESSION
     || state.roundIds.some((id) => typeof id !== "string" || id.length === 0)
     || !isCount(state.step, ROUNDS_PER_SESSION * 3)

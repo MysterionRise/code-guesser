@@ -17,7 +17,7 @@ test("the deck chooser and every deck fit the minimum viewport", async ({ page }
   await expect(page.getByRole("main")).toBeVisible();
   await expect(page.getByRole("heading", { level: 1, name: "Pick a deck" })).toBeVisible();
   expect(await page.evaluate(noHorizontalScroll)).toBe(true);
-  for (const deck of deckIds) {
+  for (const deck of [...deckIds, "mixed", "daily"]) {
     await page.goto(`/?deck=${deck}`);
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
     await expect(page.getByText("Round 1 of 5")).toBeVisible();
@@ -46,13 +46,14 @@ test("the deck chooser is keyboard operable with named links", async ({ page }) 
   await page.goto("/");
   expect(await page.evaluate(prefersReducedMotion)).toBe(true);
   const links = page.getByRole("list").getByRole("link");
-  await expect(links).toHaveCount(deckIds.length);
+  // Today's five and the mix come first (#56, #74), then every deck.
+  await expect(links).toHaveCount(deckIds.length + 2);
   await page.keyboard.press("Tab");
   await expect(links.first()).toBeFocused();
   await page.keyboard.press("Tab");
   await expect(links.nth(1)).toBeFocused();
   await page.keyboard.press("Enter");
-  await expect(page).toHaveURL(new RegExp(`\\?deck=${deckIds[1]}$`, "u"));
+  await expect(page).toHaveURL(/\?deck=mixed$/u);
   await expect(page.getByText("Round 1 of 5")).toBeVisible();
 });
 

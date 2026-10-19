@@ -88,13 +88,12 @@ const scaffoldOf = (value: RoundScaffold): RoundScaffold => {
   throw new ArcadeShellRuleError("unsupported scaffold");
 };
 
-/** A session is five rounds of one deck; every round keeps its code, options, hints, and points. */
+/** A session is five rounds, of one deck or of five (#56); every round keeps its code, options, hints, and points. */
 export function createPublicModeContract(input: PublicModeContractInput): PublicModeContract {
   if (input.rounds.length !== SESSION_ROUNDS) throw new ArcadeShellRuleError("a session deals exactly five rounds");
   const roundIds = input.rounds.map((round) => canonical(round.roundId));
   if (new Set(roundIds).size !== roundIds.length) throw new ArcadeShellRuleError("round ids must be unique after canonicalization");
   if (input.rounds.some((round) => !ROUND_KINDS.includes(round.mode.kind))) throw new ArcadeShellRuleError("unsupported round mode");
-  if (new Set(input.rounds.map((round) => round.mode.kind)).size !== 1) throw new ArcadeShellRuleError("a session deals from one deck");
   const rounds = input.rounds.map((round) => {
     const { mode } = round;
     if (mode.clues.length > 2) throw new ArcadeShellRuleError("a round may expose at most two clues");
