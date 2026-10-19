@@ -149,8 +149,8 @@ test("a seeded deal's game reloads to the same rounds and options, and says when
   await page.reload();
   expect(await shown()).toEqual(first);
   await expect(page.locator(".deal-note")).toHaveCount(0);
-  // The ten-round before-after pool is spent after two games, so the third starts it over.
-  await page.goto("/?deck=before-after&deal=0a1b2c3d&game=2");
+  // The twenty-round before-after pool is spent after four games, so the fifth starts it over.
+  await page.goto("/?deck=before-after&deal=0a1b2c3d&game=4");
   await expect(page.locator(".deal-note")).toHaveText("You’ve now seen every round in this deck, so this game starts it over.");
 });
 
