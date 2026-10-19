@@ -42,14 +42,15 @@ const CAPTION_STYLES: Readonly<Record<CaptionStyle, Readonly<{ style: string; hi
 const DEV_INDICATOR_STYLE = "nextjs-portal{display:none !important}";
 
 /**
- * Hides the dev indicator from the first frame of every page. A stylesheet added this early does not survive the
- * page load, so an observer hides each `nextjs-portal` the moment it is attached.
+ * Hides local tooling from the first frame of every page: the Next dev indicator, and the Lab bar that lab mode (and
+ * so `next dev`) shows above a game, which players never see. A stylesheet added this early does not survive the page
+ * load, so an observer hides each one the moment it is attached.
  */
-export const hideDevIndicator = async (context: BrowserContext): Promise<void> => {
+export const hideLocalTooling = async (context: BrowserContext): Promise<void> => {
   // No named inner functions: the compiled script runs in the page, where bundler helpers such as `__name` do not exist.
   await context.addInitScript(() => {
     new MutationObserver(() => {
-      for (const portal of document.querySelectorAll<HTMLElement>("nextjs-portal")) portal.style.setProperty("display", "none", "important");
+      for (const tool of document.querySelectorAll<HTMLElement>("nextjs-portal, .lab-bar")) tool.style.setProperty("display", "none", "important");
     }).observe(document, { childList: true, subtree: true });
   });
 };
