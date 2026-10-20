@@ -67,9 +67,9 @@ const textStream = (text) => [
   "data: [DONE]\n\n",
 ].join("");
 
-/** An OpenAI-style stream that calls each tool once, then reports usage. */
-const toolCallStream = (calls) => [
-  chunk([{ index: 0, delta: { role: "assistant", content: "" }, finish_reason: null }]),
+/** An OpenAI-style stream that calls each tool once, then reports usage; `preface` is plain text sent before the calls. */
+const toolCallStream = (calls, preface = "") => [
+  chunk([{ index: 0, delta: { role: "assistant", content: preface }, finish_reason: null }]),
   ...calls.flatMap(({ name, args }, index) => [
     chunk([{ index: 0, delta: { tool_calls: [{ index, id: `call_${index}`, type: "function", function: { name, arguments: "" } }] }, finish_reason: null }]),
     chunk([{ index: 0, delta: { tool_calls: [{ index, function: { arguments: JSON.stringify(args) } }] }, finish_reason: null }]),
@@ -90,7 +90,8 @@ const readBody = (request) => new Promise((resolve, reject) => {
 /**
  * Starts the fake on a port (0 picks a free one). `control` sets what the next completions return: an HTTP
  * `status` to fail with, the tool `calls` to make every time, a `sequence` of call lists, one per request, or a
- * plain `text` reply with no tool call;
+ * plain `text` reply with no tool call; a `preface` is plain text sent ahead of the calls, as a model that talks to
+ * itself before calling its tools sends;
  * `requests` holds every completion request body received.
  */
 export const startFakeOpenRouter = async (port = 0) => {
@@ -129,7 +130,7 @@ export const startFakeOpenRouter = async (port = 0) => {
         : offered.has("offer_hint") ? DEFAULT_CALLS["host-before-lock"]
         : offered.has("takeaway") ? DEFAULT_CALLS["after-lock"] : DEFAULT_CALLS["before-lock"]);
       response.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
-      return response.end(toolCallStream(calls));
+      return response.end(toolCallStream(calls, typeof next.preface === "string" ? next.preface : ""));
     }
     response.writeHead(404);
     return response.end();

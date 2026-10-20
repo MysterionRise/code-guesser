@@ -5,6 +5,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { DECK_IDS, canonicalHash, serializeCanonical, type DeckId } from "../../../packages/artifact/src/index";
 import { QuestionsError, openRouterClient, type JournalMode } from "./client";
 import { prepareQuestions } from "./prepare";
+import { REVIEW_REFUSED } from "./reviewed";
 
 /**
  * `pnpm prepare:questions [--offline | --fresh] [--decks=algorithm,language] [--limit=N] [--model=id]` (#127).
@@ -91,7 +92,8 @@ export const runQuestionsCli = async (argv = process.argv.slice(2), log: (line: 
     mode: args.mode,
   });
   try {
-    const prepared = await prepareQuestions({ artifact, client, log, ...(args.decks ? { decks: args.decks } : {}), ...(args.limit ? { limit: args.limit } : {}) });
+    const prepared = await prepareQuestions({ artifact, client, log, reviewed: REVIEW_REFUSED,
+      ...(args.decks ? { decks: args.decks } : {}), ...(args.limit ? { limit: args.limit } : {}) });
     writeAtomically(REPORT_PATH, `${JSON.stringify({ model: client.model, decks: prepared.decks, calls: client.counts() }, null, 2)}\n`);
     if (args.limit === undefined) {
       writeAtomically(LAYERS_PATH, serializeCanonical(prepared.file));

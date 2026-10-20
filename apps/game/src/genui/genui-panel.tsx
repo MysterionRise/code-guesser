@@ -86,7 +86,7 @@ export default function GenuiPanel({ design, roundId, pick, phase, panes, option
     api: "/api/genui",
     prepareSendMessagesRequest: ({ messages }) => ({ body: { sessionToken: sessionToken(), roundId, design, messages } }),
   }), [roundId, design, sessionToken]);
-  const { messages, sendMessage, status, error } = useChat({ id: `genui-${roundId}`, transport });
+  const { messages, sendMessage, setMessages, status, error, clearError } = useChat({ id: `genui-${roundId}`, transport });
   const limits = React.useMemo(() => ({
     paneLineCounts: panes.map(({ text }) => text.split("\n").length),
     optionLabels,
@@ -107,6 +107,19 @@ export default function GenuiPanel({ design, roundId, pick, phase, panes, option
   }, [views.length, onRendered]);
   // A panel falls back at most once per round.
   const reported = React.useRef(false);
+  // A failed panel may be asked once more: a visualizer that falls back was a dead end in playtest run 2.
+  const [retried, setRetried] = React.useState(false);
+  const explain = () => {
+    onEvent?.({ type: "genui_interaction", action: "explain" });
+    void sendMessage({ text: explainRequest(pick) });
+    output.current?.focus();
+  };
+  const retry = () => {
+    setRetried(true);
+    clearError();
+    setMessages([]);
+    explain();
+  };
   React.useEffect(() => {
     if (!failed || reported.current) return;
     reported.current = true;
@@ -117,7 +130,7 @@ export default function GenuiPanel({ design, roundId, pick, phase, panes, option
     <section className="genui-panel" aria-labelledby={headingId} data-genui-status={failed ? "fallback" : status} data-genui-design={design}>
       <h3 id={headingId}>{PANEL_TEXT[design].heading}</h3>
       {messages.length === 0 && (
-        <button type="button" className="secondary-action" onClick={() => { onEvent?.({ type: "genui_interaction", action: "explain" }); void sendMessage({ text: explainRequest(pick) }); output.current?.focus(); }}>
+        <button type="button" className="secondary-action" onClick={explain}>
           {PANEL_TEXT[design].button}
         </button>
       )}
@@ -129,6 +142,7 @@ export default function GenuiPanel({ design, roundId, pick, phase, panes, option
             : <CatalogView key={index} call={view.call} panes={panes} />)}
         {failed && <p className="genui-status">{GENUI_FALLBACK_MESSAGE}</p>}
       </div>
+      {failed && !retried && <button type="button" className="secondary-action" onClick={retry}>Try again</button>}
     </section>
   );
 }

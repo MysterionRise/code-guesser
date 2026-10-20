@@ -216,7 +216,20 @@ gate: changing queries, retries, ceilings, deck rules, or running
       - the visualizer frame sizes itself from a game-owned height
         reporter;
       - focus moves to the explainer output.
-    - Open: #120 (model per design), #121 (page length), #122 (run 2).
+    - Run 2 (`docs/review/evidence/2026-10-20-agent-playtest-run-2.md`, $0.05) added themes, layers, and the new decks
+      and modes. The driver takes `theme` and `layer`, deals `mixed` and `daily`, and has `trace-step` and `click`.
+      - It found no leak in 28 host attacks. The composer is now the most accurate design (2 wrong claims in 184),
+        and the visualizer the least.
+      - Its fixes:
+        - the host shows plain text only when a reply has no component;
+        - after the lock the host is told the player's pick (`withPick` in `host-chat.tsx`);
+        - the host sends at most 16 messages (`HOST_HISTORY`, the route's cap);
+        - the paste check also reads hex, rot13, and reversed text;
+        - a failed panel offers "Try again" once;
+        - marked lines are named for screen readers, and layered rounds number their lines;
+        - a review-refused trace (`reviewed.ts`).
+    - Open: #120 (model per design), #159 (check traces against the code), #160 (the algorithm layer's fairness),
+      #161 (UI polish).
   - Composer and visualizer requests keep only the first panel or page
     (`ONE_ONLY`) and ask for `parallel_tool_calls: false`; live, Haiku
     sometimes wrote several pages at once.
@@ -292,10 +305,13 @@ gate: changing queries, retries, ceilings, deck rules, or running
     drawn `layer: on` carries each layered round's scaffold in its public
     round (`RoundScaffold`), and its hints are the layer's, sold through the
     same hint action with a `detail` beside the text (lines to mark, or a
-    step-through). Marker hunt rounds number their lines; the genui guard's
+    step-through). Layered rounds number their lines; the genui guard's
     `boughtHints` are the game's own hints.
   - Evidence: `docs/review/evidence/2026-10-15-question-layers-first-build.md`; the v6 artifact's layers (67 of
     76 rounds kept) are in `docs/review/evidence/2026-10-19-v6-data-run.md`.
+  - **Review refusals:** a layer a reader found wrong is listed in `ops/poc/questions/reviewed.ts` and never written
+    (`REVIEW_<code>` in the `QUESTIONS_DECK` line), since nothing runs a round's code to check a step-through. Agent
+    playtest run 2 refused the counting-sort trace, so 66 layers are published.
 - The committed artifact `apps/game/src/demo/generated/local-real-rounds.json`
   came from the 2026-10-19 v6 data run (#129): a live run (4,089 of 5,000
   requests), then a `--resume` (29 live) for requests the live run gave up

@@ -1,8 +1,9 @@
 # Agent playtests (#116)
 
 A Claude Code agent team plays the real game through `driver.mjs` and compares
-the four generative designs (#114, #115, #104, and the catalog explainer). The
-team is cheap and fast, and good at three things:
+the four generative designs (#114, #115, #104, and the catalog explainer), the
+themes (#125), and the question layers (#127, #128). The team is cheap and
+fast, and good at three things:
 - finding bugs and confusing UI;
 - judging which design explains a round better;
 - attacking the answer-lock guard.
@@ -15,10 +16,11 @@ their accuracy and "fun" are not a real player's; the real experiment is #106–
 1. **Serve the game** with generative UI and the OpenRouter key from its standard
    store:
 
-   Lab mode (`EXPERIMENT_LAB=1`) lets players pick designs with `?design=`; a
-   production build otherwise draws each game's design at random (#106). The
-   event log is optional; `EXPERIMENT_SOURCE=agent` keeps its events apart from
-   real games.
+   Lab mode (`EXPERIMENT_LAB=1`) lets players pick a design, theme, and layer
+   (`?design=`, `?theme=`, `?layer=`); a production build otherwise draws each
+   game's arms at random (#106). The event log is optional;
+   `EXPERIMENT_SOURCE=agent` keeps its events apart from real games, and
+   `pnpm experiment:report --dir=<run>/events --source=agent` reads them.
 
    ```bash
    pnpm --filter @codeguessr/game build
@@ -40,10 +42,13 @@ their accuracy and "fun" are not a real player's; the real experiment is #106–
 
    ```bash
    curl -s -X POST localhost:4100/sessions -d '{"name":"<persona>"}'
-   curl -s -X POST localhost:4100/sessions/<id>/start -d '{"deck":"algorithm","design":"composer"}'
+   curl -s -X POST localhost:4100/sessions/<id>/start \
+     -d '{"deck":"algorithm","design":"composer","theme":"paper","layer":"on"}'
    ```
 
-   `driver.mjs` lists every endpoint in its header.
+   `driver.mjs` lists every endpoint in its header. A deck may be any deck id,
+   `mixed`, or `daily`; `trace-step` steps a bought step-through, and `click`
+   presses a button or link by its name ("Deal new rounds").
 
 4. **Spawn the judges**, Claude Sonnet subagents, once the players finish. They
    read each player's findings and the driver's `<persona>.events.json` and
@@ -60,13 +65,16 @@ their accuracy and "fun" are not a real player's; the real experiment is #106–
 | `expert` | senior engineer; plays fast | technical accuracy: every claim in a panel checked against the code and the reveal |
 | `skimmer` | never reads code closely; clicks through | confusing UI, dead ends, slow or broken states |
 | `a11y` | keyboard and screen-reader user: `keys`, `aria`, no mouse-only reasoning | labels, focus order, announcements, colour-only meaning |
-| `red-team` | tries to get the answer before locking in | any leak: host jailbreaks, pasted code, prompt injection, anything the panel shows early |
+| `red-team` | tries to get the answer before locking in | any leak: host jailbreaks, pasted code, prompt injection, anything the panel shows early, and the question layers, guessed code-blind from the scaffold and each hint |
 
 ## What a player does
 
 - **Each design:** `catalog`, `composer`, `visualizer`, `host`.
   - Play at least two rounds, on different decks (`project`, `language`,
-    `before-after`, `algorithm`, `output`, `fix`).
+    `before-after`, `algorithm`, `output`, `fix`, `missing-line`,
+    `name-function`, `framework`, `exercise`, and the `mixed` and `daily`
+    games), across the themes, and with the layer on and off on `algorithm`
+    and `language`.
   - Use the design's features: explain or visualize after answering, step a
     visualizer, answer a composer quiz, chat with the host before and after
     locking in, and buy a hint the host offers.
@@ -76,7 +84,10 @@ their accuracy and "fun" are not a real player's; the real experiment is #106–
 - **Write `<persona>.findings.md`** in the run folder:
   - for each design: what worked; what confused or broke (with the session
     event that shows it); scores from 1 to 5 for clarity, helpfulness,
-    accuracy, and fun; and the single best and worst moment.
+    accuracy, and fun; and the single best and worst moment;
+  - for the question layers: scores for clarity, helpfulness, fairness (does
+    it give the answer away?), and fun, against the same deck with the layer
+    off; and for each theme, readability and anything broken;
   - a closing ranking of the four designs, with reasons.
 
 ## What the judges do

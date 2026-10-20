@@ -54,7 +54,10 @@ export function CodePanes({ round, numbered, paneLines, highlighted, marked = ne
                   return (
                     <span className={lineIndex + 1 === highlighted ? "code-line highlighted" : marked.has(lineIndex + 1) ? "code-line hinted" : "code-line"}
                       data-line={lineIndex + 1} key={lineIndex} style={hanging(line, wrap)}>
-                      <span className="line-number" aria-hidden="true">{lineIndex + 1}</span>{line}
+                      <span className="line-number" aria-hidden="true">{lineIndex + 1}</span>
+                      {/* The numbers are hidden from screen readers, so a hint's marked lines say so in words. */}
+                      {marked.has(lineIndex + 1) && lineIndex + 1 !== highlighted && <span className="visually-hidden">Marked line {lineIndex + 1}: </span>}
+                      {line}
                     </span>
                   );
                 })}
