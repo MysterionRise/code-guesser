@@ -6,10 +6,13 @@
  *
  * Endpoints (all JSON; POST bodies are JSON):
  *   POST /sessions                      {name}            -> {id}
- *   POST /sessions/:id/start            {deck, design}    -> state
+ *   POST /sessions/:id/start            {deck, design, theme, layer} -> state
+ *     (deck: a deck id, "mixed", or "daily"; design, theme, and layer are lab picks, so the game needs EXPERIMENT_LAB=1)
  *   GET  /sessions/:id/state                              -> state
- *     (state lists the code, options, hints, reveal, any panel, quiz, or host chat, and the page's enabled actions)
+ *     (state lists the theme, the code, any question layer, options, hints, reveal, any panel, quiz, or host chat, and
+ *     the page's enabled actions)
  *   POST /sessions/:id/hint                               -> state  (buys the round's next hint)
+ *   POST /sessions/:id/trace-step       {times, back}     -> state  (steps a bought step-through hint on, or back)
  *   POST /sessions/:id/answer           {label}           -> state  (locks in an option by its label)
  *   POST /sessions/:id/explain                            -> state  (asks the explainer or visualizer, waits for it)
  *   POST /sessions/:id/chat             {text}            -> state  (host design: sends a message, waits for the reply)
@@ -17,6 +20,8 @@
  *   POST /sessions/:id/visualizer-step  {times}           -> state  (presses the visualizer's Step button)
  *   POST /sessions/:id/quiz             {choice}          -> state  (composer design: picks a quiz choice)
  *   POST /sessions/:id/next                               -> state  (next round)
+ *   POST /sessions/:id/click            {name}            -> state  (presses a button or link by its name, e.g.
+ *                                                                    "Deal new rounds")
  *   POST /sessions/:id/keys             {keys: [..]}      -> {focused, state}  (keyboard play, e.g. "Tab", "Enter")
  *   GET  /sessions/:id/aria                               -> {snapshot}  (the page's accessibility tree)
  *   POST /sessions/:id/screenshot       {name}            -> {path}
@@ -41,6 +46,7 @@ mkdirSync(OUT, { recursive: true });
 
 const browser = await chromium.launch();
 const sessions = new Map();
+const taken = new Set();
 const log = (session, action, detail) => {
   session.events.push({ at: new Date().toISOString(), action, ...detail });
   writeFileSync(join(OUT, `${session.name}.events.json`), JSON.stringify(session.events, null, 2));
@@ -55,6 +61,7 @@ const stateOf = async (page) => {
   const frame = page.locator("iframe.visualizer-frame");
   return {
     url: page.url().replace(GAME, ""),
+    theme: await page.locator(".demo-page").getAttribute("data-theme").catch(() => null),
     round: await text(page.locator(".eyebrow")),
     score: await text(page.locator(".arcade-header .score")),
     prompt: await text(page.locator("#round-title")),
@@ -69,6 +76,14 @@ const stateOf = async (page) => {
       detail: item.querySelector(".candidate-detail")?.textContent ?? null,
       chosen: item.classList.contains("selected"),
       verdict: item.classList.contains("correct") ? "correct" : item.classList.contains("missed") ? "missed" : null,
+    }))),
+    // A question layer (#127, #128): the scaffold above the code, the lines a hint marks, and a step-through's frame.
+    scaffold: await text(page.locator(".question-scaffold")),
+    markedLines: await page.locator(".code-pane .code-line").evaluateAll((lines) =>
+      lines.flatMap((line, index) => line.classList.contains("hinted") ? [index + 1] : [])),
+    trace: await page.locator(".trace-stepper").evaluateAll((steppers) => steppers.map((stepper) => ({
+      input: stepper.querySelector(".trace-input")?.textContent ?? "",
+      frame: stepper.querySelector(".trace-frame")?.textContent ?? "",
     }))),
     hintCost: await text(page.locator(".hint-cost")),
     hints: await page.locator(".hints .hint").allInnerTexts(),
@@ -124,15 +139,23 @@ const awaitGenui = async (page, selector) => {
 };
 
 const actions = {
-  start: async (session, { deck, design }) => {
-    await session.page.goto(`${GAME}/?deck=${encodeURIComponent(deck)}${design ? `&design=${encodeURIComponent(design)}` : ""}`);
-    await session.page.getByText(/^Round 1 of 5$/u).waitFor();
+  start: async (session, { deck, design, theme, layer }) => {
+    const picks = Object.entries({ design, theme, layer }).filter(([, value]) => value)
+      .map(([name, value]) => `&${name}=${encodeURIComponent(String(value))}`).join("");
+    // The deck's address redirects to a fresh seeded deal (#40), carrying the lab picks along.
+    await session.page.goto(`${GAME}/?deck=${encodeURIComponent(deck)}${picks}`);
+    await session.page.locator(".eyebrow").filter({ hasText: /^Round 1 of 5/u }).waitFor();
   },
   hint: async ({ page }) => {
     await need(page, ".hint-button:not([disabled])", "no hint to buy: none left, or the answer is locked");
     const before = await page.locator(".hints .hint").count();
     await page.locator(".hint-button:not([disabled])").first().click();
     await page.waitForFunction((count) => document.querySelectorAll(".hints .hint").length > count, before, { timeout: 15_000 });
+  },
+  "trace-step": async ({ page }, { times = 1, back = false }) => {
+    await need(page, ".trace-stepper", "no step-through: buy the round's second hint first, on a layered algorithm round");
+    const button = page.locator(".trace-stepper").last().getByRole("button", { name: back ? "Back" : "Next step" });
+    for (let index = 0; index < Math.min(Number(times) || 1, 20) && await button.isEnabled(); index += 1) await button.click();
   },
   answer: async ({ page }, { label }) => {
     await need(page, ".candidate input:not([disabled])", "no open round: the answer is already locked");
@@ -167,6 +190,13 @@ const actions = {
     await need(page, ".composer-quiz", "no quiz: explain first in design=composer");
     await page.locator(".composer-quiz").getByLabel(String(choice), { exact: true }).check();
   },
+  click: async ({ page }, { name }) => {
+    const target = page.getByRole("button", { name: String(name), exact: true })
+      .or(page.getByRole("link", { name: String(name), exact: true })).first();
+    if ((await target.count()) === 0) throw new Unavailable(`no button or link named "${name}"`);
+    await target.click();
+    await page.waitForLoadState("domcontentloaded");
+  },
   next: async ({ page }) => {
     if ((await page.getByRole("button", { name: "Next round" }).count()) === 0) throw new Unavailable("no next round: answer first, or the game is complete");
     await page.getByRole("button", { name: "Next round" }).click();
@@ -191,12 +221,16 @@ createServer(async (request, response) => {
     if (root !== "sessions") return json(response, 404, { error: "see the header of ops/playtest/driver.mjs for endpoints" });
     if (request.method === "POST" && !id) {
       const body = await readBody(request);
-      const name = String(body.name ?? "player").replace(/[^a-z0-9-]/giu, "-").slice(0, 40);
+      const asked = String(body.name ?? "player").replace(/[^a-z0-9-]/giu, "-").slice(0, 40);
+      // A second session under a taken name gets its own files, so it can't write over the first one's events.
+      let name = asked;
+      for (let copy = 2; taken.has(name); copy += 1) name = `${asked}-${copy}`;
+      taken.add(name);
       const context = await browser.newContext({ viewport: { width: 1100, height: 1400 } });
       const session = { id: randomUUID().slice(0, 8), name, context, page: await context.newPage(), events: [] };
       session.page.on("pageerror", (error) => log(session, "page-error", { message: String(error).slice(0, 200) }));
       sessions.set(session.id, session);
-      return json(response, 200, { id: session.id });
+      return json(response, 200, { id: session.id, name });
     }
     const session = sessions.get(id);
     if (!session) return json(response, 404, { error: "unknown session" });

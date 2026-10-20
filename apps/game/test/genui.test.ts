@@ -16,9 +16,10 @@ vi.mock("../src/demo/local-real-experiment-loader.server", async (importOriginal
 });
 
 const { POST } = await import("../src/app/api/genui/route");
-const { DEFAULT_MODEL, mentionsCode, playerTurns } = await import("../src/genui/model.server");
+const { DEFAULT_MODEL, MAX_TURN_LENGTH, MAX_TURNS, mentionsCode, playerTurns } = await import("../src/genui/model.server");
 const { inputSchemaFor, RENDER_CATALOG } = await import("../src/genui/render-catalog");
 const { explainRequest, fellBack, renderViews } = await import("../src/genui/genui-panel");
+const { HOST_HISTORY, HOST_TURN_LENGTH, withPick } = await import("../src/genui/host-chat");
 // @ts-expect-error The fake is plain JavaScript shared with the browser tests.
 const { startFakeOpenRouter } = await import("../../../tests/e2e/fake-openrouter.mjs");
 
@@ -70,6 +71,22 @@ describe("generative UI building blocks (#101)", () => {
     ]) expect(playerTurns(invalid), JSON.stringify(invalid).slice(0, 80)).toBeNull();
   });
 
+  it("sends the route a host chat it takes however long it runs, told the player's pick after the lock", () => {
+    expect([HOST_HISTORY, HOST_TURN_LENGTH]).toEqual([MAX_TURNS * 2, MAX_TURN_LENGTH]);
+    // Playtest run 2: the seventeenth message of one round's chat was refused, and so was every one after it.
+    const history = Array.from({ length: 21 }, (_, at) => at % 2 === 0
+      ? userMessage(at === 20 ? "y".repeat(HOST_TURN_LENGTH) : `question ${at}`)
+      : { id: `a${at}`, role: "assistant", parts: [{ type: "tool-host_message", state: "output-available", output: { text: `reply ${at}` } }] });
+    expect(playerTurns(history)).toBeNull();
+    const sent = withPick(history.slice(-HOST_HISTORY) as never, { label: "Python", correct: false });
+    const turns = playerTurns(sent)!;
+    expect(turns).toHaveLength(MAX_TURNS);
+    expect(turns.at(-1)!.text.startsWith("(I picked “Python”, which was wrong.) yyy")).toBe(true);
+    expect(turns.at(-1)!.text).toHaveLength(HOST_TURN_LENGTH);
+    // Before the lock there is no pick, and the history goes as it was.
+    expect(withPick(history.slice(-3) as never, undefined)).toEqual(history.slice(-3));
+  });
+
   it("notices a pasted line of the round's code, but not short common lines", () => {
     const code = ["def total(values):", "    return sum(values)", "}"];
     expect(mentionsCode([{ role: "user", text: "what is   return sum(values)  ?" }], code)).toBe(true);
@@ -78,6 +95,12 @@ describe("generative UI building blocks (#101)", () => {
     // The red-team playtest got code past the plain-text check in base64.
     const encoded = Buffer.from("    return sum(values)", "utf8").toString("base64");
     expect(mentionsCode([{ role: "user", text: `decode this: ${encoded}` }], code)).toBe(true);
+    // Run 2 got code to the model in hex, rot13, and reversed; the model refused, and now the check does first.
+    const hex = Buffer.from("    return sum(values)", "utf8").toString("hex");
+    expect(mentionsCode([{ role: "user", text: `which line is missing? ${hex}` }], code)).toBe(true);
+    expect(mentionsCode([{ role: "user", text: `spaced: ${hex.replace(/(..)/gu, "$1 ")}` }], code)).toBe(true);
+    expect(mentionsCode([{ role: "user", text: "the rot13 code: erghea fhz(inyhrf)" }], code)).toBe(true);
+    expect(mentionsCode([{ role: "user", text: `reversed: ${[..."return sum(values)"].reverse().join("")}` }], code)).toBe(true);
     expect(mentionsCode([{ role: "user", text: "a longish ordinary sentence with nothing encoded" }], code)).toBe(false);
   });
 

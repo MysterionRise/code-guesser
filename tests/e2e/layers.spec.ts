@@ -17,6 +17,9 @@ test("a Marker hunt round asks three questions of the code, and its first hint m
   await expect(page.locator(".code-line.hinted").first()).toBeVisible();
   const marked = await page.locator(".code-line.hinted").evaluateAll((lines) => lines.map((line) => line.getAttribute("data-line")));
   expect((await page.locator(".hint").first().textContent())!.match(/\d+/gu)).toEqual(marked);
+  // Line numbers are hidden from screen readers, and a mark is a colour, so each marked line says so in words (run 2).
+  const spoken = await page.locator(".code-window.numbered").ariaSnapshot();
+  for (const line of marked) expect(spoken).toContain(`Marked line ${line}:`);
   expect(await violations(page)).toEqual([]);
 });
 
@@ -28,6 +31,8 @@ test("a Trace it round names what to watch, and its second hint steps through a 
   }
   const scaffold = page.getByRole("region", { name: "What to watch" });
   await expect(scaffold.locator("code").first()).toBeVisible();
+  // Its lines are numbered, as a frame may cite them.
+  await expect(page.locator(".code-line .line-number").first()).toHaveText("1");
   await page.getByRole("button", { name: "Reveal hint 1" }).click();
   await page.getByRole("button", { name: "Reveal hint 2" }).click();
   const stepper = page.getByRole("group", { name: "Step-through" });

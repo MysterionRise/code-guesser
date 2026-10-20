@@ -73,22 +73,24 @@ export const playerTurns = (messages: unknown): readonly PlayerTurn[] | null => 
 
 const collapse = (text: string): string => text.replace(/\s+/gu, " ").trim();
 
+const rot13 = (text: string): string => text.replace(/[A-Za-z]/gu, (letter) => {
+  const base = letter <= "Z" ? 65 : 97;
+  return String.fromCharCode(((letter.charCodeAt(0) - base + 13) % 26) + base);
+});
+
 /**
- * A turn as the paste check reads it: itself, plus any base64 run in it decoded. The red-team playtest got code
- * past the plain-text check by encoding it.
+ * A turn as the paste check reads it: itself, reversed, and in rot13, plus any base64 or hex run in it decoded. The
+ * red-team playtests got code past the plain-text check in base64 (run 1), and to the model in hex, rot13, and
+ * reversed (run 2), where only the model's refusal stopped it.
  */
 const readable = (text: string): string => {
-  const decoded = (text.match(/[A-Za-z0-9+/]{16,}={0,2}/gu) ?? []).map((run) => {
-    try {
-      return Buffer.from(run, "base64").toString("utf8");
-    } catch {
-      return "";
-    }
-  });
-  return [text, ...decoded].join("\n");
+  const base64 = (text.match(/[A-Za-z0-9+/]{16,}={0,2}/gu) ?? []).map((run) => Buffer.from(run, "base64").toString("utf8"));
+  const hex = (text.match(/(?:[0-9A-Fa-f]{2}[\s,]*){8,}/gu) ?? [])
+    .map((run) => Buffer.from(run.replace(/[^0-9A-Fa-f]/gu, ""), "hex").toString("utf8"));
+  return [text, [...text].reverse().join(""), rot13(text), ...base64, ...hex].join("\n");
 };
 
-/** Whether a player's turns quote a line of the round's code, as typed or base64-encoded. */
+/** Whether a player's turns quote a line of the round's code, as typed, reversed, in rot13, or base64- or hex-encoded. */
 export const mentionsCode = (turns: readonly PlayerTurn[], codeLines: readonly string[]): boolean => {
   const said = turns.filter(({ role }) => role === "user").map(({ text }) => collapse(readable(text))).join("\n");
   return codeLines.map(collapse).some((line) => line.length >= PASTE_LINE_LENGTH && said.includes(line));

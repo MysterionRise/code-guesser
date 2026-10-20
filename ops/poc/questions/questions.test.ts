@@ -107,6 +107,17 @@ describe("prepare:questions (#127)", () => {
     expect(second.lines).toEqual(["QUESTIONS_DECK algorithm attempted=2 kept=0 HINT_KEY=2"]);
   });
 
+  it("refuses a layer a review found wrong without writing it, so the round plays static and costs no call", async () => {
+    const [first, second] = decks.find(({ id }) => id === "algorithm")!.fixtures.map(({ roundId }) => roundId).sort();
+    const client = fakeClient();
+    const { lines, log } = logs();
+    const prepared = await prepareQuestions({ artifact, client, log, decks: ["algorithm"], limit: 2, reviewed: { [second!]: "TRACE_WRONG" } });
+    expect(prepared.file.layers.map(({ roundId }) => roundId)).toEqual([first]);
+    expect(lines).toEqual(["QUESTIONS_DECK algorithm attempted=2 kept=1 REVIEW_TRACE_WRONG=1"]);
+    // One writer and three solver calls, all for the first round.
+    expect(client.requests).toHaveLength(4);
+  });
+
   it("drops a whole deck whose scaffolds lift the answer too much on average, though no single round crosses its bound", async () => {
     const client = fakeClient({ solve: (aid) => (aid === 0 ? 0.25 : 0.45) });
     const { lines, log } = logs();

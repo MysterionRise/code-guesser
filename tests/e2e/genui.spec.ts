@@ -59,8 +59,20 @@ test("when the provider refuses, the explainer steps aside and the game plays on
   await expect(panel.getByText("The explainer isn’t available right now. The reveal above has the full answer.")).toBeVisible();
   await expect(panel).not.toContainText("fake provider body");
   await expect(page.getByText("The answer:")).toBeVisible();
+  // One more try is offered, so a failed panel is not a dead end (run 2); a second failure leaves the reveal for good.
+  await panel.getByRole("button", { name: "Try again" }).click();
+  await expect(panel.getByText("The explainer isn’t available right now. The reveal above has the full answer.")).toBeVisible();
+  await expect(panel.getByRole("button", { name: "Try again" })).toHaveCount(0);
   await page.getByRole("button", { name: "Next round" }).click();
   await expect(page.getByText("Round 2 of 5")).toBeVisible();
+  // A retry that works renders the panel.
+  await answerRound(page);
+  await panel.getByRole("button", { name: "Explain this round" }).click();
+  await expect(panel.getByRole("button", { name: "Try again" })).toBeVisible();
+  await request.post(`${fake}/control`, { data: {} });
+  await panel.getByRole("button", { name: "Try again" }).click();
+  await expect(panel.locator(".genui-takeaway")).toBeVisible();
+  await expect(panel).not.toContainText("isn’t available");
 });
 
 test("the composer design lays out its own panel, and the switcher moves between designs", async ({ page, request }) => {
@@ -116,6 +128,9 @@ test("the visualizer runs the model's page in a sandbox that can't reach the gam
 });
 
 test("the host chats during the round without the code, sells the next hint on request, and talks code after the lock", async ({ page, request }) => {
+  // The model talks to itself before its tool calls, as Claude Haiku did in playtest run 2; the player never reads it.
+  const preface = "The player wants tips. Per the rules, I can't see the code, so I should offer the hint.";
+  await request.post(`${fake}/control`, { data: { preface } });
   await page.goto("/?deck=project&design=host");
   await expect(page.getByText("Round 1 of 5")).toBeVisible();
   const host = page.getByRole("complementary", { name: "Host" });
@@ -124,6 +139,7 @@ test("the host chats during the round without the code, sells the next hint on r
   await host.getByRole("button", { name: "Send" }).click();
   await expect(host.locator(".host-turn.player")).toHaveText("You: Any tips?");
   await expect(host.locator(".genui-host")).toHaveText("I can't see the code yet, but I can cheer you on.");
+  await expect(host).not.toContainText("Per the rules");
   const offer = host.getByRole("button", { name: "Buy hint 1 (−200 pts)" });
   await offer.click();
   await expect(page.locator(".hints .hint")).toHaveCount(1);
@@ -131,16 +147,21 @@ test("the host chats during the round without the code, sells the next hint on r
   const before = await (await request.get(`${fake}/requests`)).json() as { body: { tools: { function: { name: string } }[] } }[];
   expect(before[0]!.body.tools.map(({ function: { name } }) => name)).toEqual(["host_message", "offer_hint"]);
 
-  await answerRound(page);
+  const answered = await answerRound(page);
   await expect(page.locator(".reveal .round-points")).toHaveText("+800 points (1 hint)");
   await expect(host).toContainText("The round is over: ask about the code.");
   await expect(host.getByRole("button", { name: /Buy hint/u })).toHaveCount(0);
   await host.getByLabel("Ask the host").fill("Why was that the answer?");
   await host.getByRole("button", { name: "Send" }).click();
   await expect(host.locator(".genui-takeaway")).toHaveText("Takeaway: Read the keywords before the punctuation.");
-  const after = await (await request.get(`${fake}/requests`)).json() as { body: { tools: { function: { name: string } }[] } }[];
+  await expect(host).not.toContainText("Per the rules");
+  const after = await (await request.get(`${fake}/requests`)).json() as { body: { tools: { function: { name: string } }[]; messages: { role: string; content: unknown }[] } }[];
   // After the lock the host answers in chat-sized pieces, not with the explainer's code views and tables.
   expect(after.at(-1)!.body.tools.map(({ function: { name } }) => name)).toEqual(["host_message", "takeaway", "signal_list"]);
+  // ...and is told the player's pick and verdict, which only the request carries; the transcript shows what was typed.
+  const label = answered.candidates.find(({ id }) => id === answered.correctCandidateId)!.label;
+  expect(JSON.stringify(after.at(-1)!.body.messages.at(-1))).toContain(`(I picked “${label}”, which was right.) Why was that the answer?`);
+  await expect(host.locator(".host-turn.player").last()).toHaveText("You: Why was that the answer?");
   await page.getByRole("button", { name: "Next round" }).click();
   await expect(page.getByRole("complementary", { name: "Host" }).locator(".host-turn")).toHaveCount(0);
 });

@@ -97,7 +97,7 @@ export const visualizerDocument = (html: string, palette: VisualizerPalette = TE
 <html lang="en"><head><meta http-equiv="Content-Security-Policy" content="${VISUALIZER_CSP}"><meta charset="utf-8">
 <style>body{margin:0;padding:12px;background:${palette.panel};color:${palette.text};font:14px/1.5 ui-sans-serif,system-ui,sans-serif}
 button{font:inherit;padding:6px 12px;border-radius:8px;border:1px solid ${palette.border};background:${palette.chip};color:${palette.accent};cursor:pointer}
-button:focus-visible{outline:3px solid ${palette.focus};outline-offset:2px}code,pre{font-family:ui-monospace,Menlo,monospace}</style>
+button:focus-visible{outline:3px solid ${palette.focus};outline-offset:2px}code,pre{font-family:ui-monospace,Menlo,monospace}pre{max-width:100%;overflow-x:auto}</style>
 </head><body>${html}<script>
 (() => { const report = () => parent.postMessage({ codeguessrVisualizerHeight: document.body.getBoundingClientRect().height }, "*");
   new ResizeObserver(report).observe(document.body); report(); })();
@@ -106,4 +106,6 @@ button:focus-visible{outline:3px solid ${palette.focus};outline-offset:2px}code,
 export const VISUALIZER_TOOL_DESCRIPTION = "Write one self-contained HTML page that visualizes this round's code at work. "
   + `Inline CSS and JavaScript only, at most ${MAX_VISUALIZER_BYTES} bytes. No external resources, links, URLs, network, storage, or `
   + "access to any other window. Give it Step, Back, and Reset buttons with text labels, and a status line that "
-  + "says in words what the current step shows.";
+  + "says in words what the current step shows. Show code one line per row, and keep the page within the frame's "
+  + "width. Keep the page's own background and text colours, which follow the player's theme; set colours only for "
+  + "highlights.";

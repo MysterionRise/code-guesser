@@ -64,7 +64,8 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
   // line's code, and the line under the focused or chosen option (or, once revealed, the answer) is highlighted.
   // A Marker hunt layer's hint points at lines, so its round numbers them too (#128).
   const lines = LINE_KINDS.has(round.mode.kind);
-  const numbered = (lines || round.scaffold?.design === "marker-hunt") && round.content.panes.length === 1;
+  // A layered round numbers its lines, since its hints may point at them (a Trace it frame cites "lines 15-16").
+  const numbered = (lines || round.scaffold !== undefined) && round.content.panes.length === 1;
   const paneLines = numbered ? round.content.panes[0]!.text.split("\n") : [];
   const labelOf = (candidateId: string | null) => round.mode.candidates.find((candidate) => candidate.candidateId === candidateId)?.label ?? "";
   const highlighted = numbered && lines
@@ -251,7 +252,7 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
               label: session.lockedCandidateId !== null || session.visibleHintCount >= round.mode.clues.length ? null
                 : `Buy hint ${session.visibleHintCount + 1} (−${points(round.points[session.visibleHintCount]! - round.points[session.visibleHintCount + 1]!)} pts)`,
               buy: () => { trackGenui({ type: "genui_interaction", action: "offer_hint" }); void requestHint(); },
-            }} onEvent={trackGenui} />
+            }} {...(session.reveal ? { pick: { label: labelOf(session.lockedCandidateId), correct: session.reveal.correct } } : {})} onEvent={trackGenui} />
         </React.Suspense>
       )}
     </main>

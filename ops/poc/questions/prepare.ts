@@ -20,6 +20,8 @@ export interface PrepareQuestionsOptions {
   readonly limit?: number;
   /** Rounds written at once. */
   readonly concurrency?: number;
+  /** Rounds whose layer a review refused, by round id, with the reason's code (`reviewed.ts`); none when unset. */
+  readonly reviewed?: Readonly<Record<string, string>>;
   readonly log: (line: string) => void;
 }
 
@@ -87,7 +89,11 @@ export const prepareQuestions = async (options: PrepareQuestionsOptions): Promis
   const reports: DeckReport[] = [];
   for (const deck of wanted) {
     const fixtures = [...deck.fixtures].sort((left, right) => left.roundId < right.roundId ? -1 : 1).slice(0, options.limit);
-    const outcomes = await pooled(fixtures, options.concurrency ?? 4, (fixture) => prepareRound(options.client, fixture, deck, context));
+    // A round a review refused is never written, so it costs no call and replays offline with no journal entry.
+    const outcomes = await pooled(fixtures, options.concurrency ?? 4, async (fixture): Promise<RoundOutcome> => {
+      const reviewed = options.reviewed?.[fixture.roundId];
+      return reviewed === undefined ? prepareRound(options.client, fixture, deck, context) : { fixture, code: `REVIEW_${reviewed}` };
+    });
     const audits = outcomes.flatMap(({ layer, audit }) => layer !== undefined && audit !== undefined ? [audit] : []);
     const summary = deckAudit(audits);
     const refused: Record<string, number> = {};
