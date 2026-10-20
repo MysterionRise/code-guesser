@@ -6,8 +6,12 @@ const violations = async (page: Page) => (await new AxeBuilder({ page }).withTag
   .map(({ id, nodes }) => `${id}: ${nodes.map(({ target }) => target.join(" ")).slice(0, 3).join(", ")}`);
 
 test("a Marker hunt round asks three questions of the code, and its first hint marks the deciding lines", async ({ page }) => {
-  await page.goto("/?deck=language&design=off&layer=on");
-  await expect(page.getByText("Round 1 of 5")).toBeVisible();
+  // Not every language round has a layer (the audit refuses some), so a fresh deal's first round may play static.
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    await page.goto("/?deck=language&design=off&layer=on");
+    await expect(page.getByText("Round 1 of 5")).toBeVisible();
+    if (await page.getByRole("region", { name: "Ask of the code" }).count() > 0) break;
+  }
   const scaffold = page.getByRole("region", { name: "Ask of the code" });
   await expect(scaffold.getByRole("listitem")).toHaveCount(3);
   // The round numbers its lines, so a hint can point at them.
