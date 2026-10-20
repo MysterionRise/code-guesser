@@ -1,3 +1,4 @@
+import { EventEmitter } from "node:events";
 import { mkdtempSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -16,11 +17,15 @@ import { LANGUAGE_SLUGS } from "../../../packages/artifact/src/index";
 import { MAINSTREAM_LANGUAGES, parseCrawlProfile } from "./profile";
 import { createRetryController, RetryError } from "./retry";
 import { createRunReport } from "./run-report";
-import { workerStage } from "./runtime";
+import { resumeMinute } from "./diagnostics";
+import { RunInterruptedError, workerStage } from "./runtime";
 import { collectStackMetadata, StackMetadataError, type StackMetadataRow } from "./stack-metadata";
 import { TransportError } from "./transport";
 import { journaledWorker } from "./worker-journal";
 import {
+  abortOnSignals,
+  exitCodeOf,
+  PreparationError,
   prepareLocalExperiment,
   projectPreparationEnvironment,
   runPreparationCli,
@@ -73,6 +78,10 @@ const searchWith = (queryClassifications: unknown): PreparationDependencies["sea
   candidates: HARNESS_CANDIDATES,
   queryClassifications,
 } as any, "2");
+/** A repository GET that GitHub refused at its rate limit, and the limit's reset: 16:04:01 UTC. */
+const REPOSITORY_403 = { provider: "github", hostClass: "github", method: "GET", pathTemplate: "/repos/{owner}/{repository}/{resource}",
+  statusClass: "4xx", reasonCode: "UNSUPPORTED_STATUS" } as const;
+const CHECKPOINT_RESET = Date.UTC(2026, 9, 20, 16, 4, 1);
 /** An offline journal that holds nothing, so every worker output the run asks it for is a miss. */
 const emptyOfflineJournal = () => {
   const path = join(mkdtempSync(join(tmpdir(), "codeguessr-offline-")), "run.jsonl");
@@ -1087,12 +1096,39 @@ const logLines = (calls: readonly string[]): string[] =>
   });
 
   it("prints the stable code and the accepted flags when it gets a mistyped flag, then exits non-zero", async () => {
-    for (const argv of [["--ofline"], ["--resume", "--offline"], ["offline"]]) {
+    for (const argv of [["--ofline"], ["--resume", "--offline"], ["offline"], ["--journal=../run.jsonl"], ["--profile=v7"]]) {
       process.argv.splice(0, process.argv.length, "node", "index.ts", ...argv);
       const logged: string[] = [];
       await expect(runPreparationCli((message) => { logged.push(message); })).rejects.toThrow("COMMAND_ARGUMENTS_REJECTED");
-      expect(logged).toEqual(["COMMAND_ARGUMENTS_REJECTED", "usage: pnpm prepare:poc [--resume | --offline]"]);
+      expect(logged).toEqual(["COMMAND_ARGUMENTS_REJECTED",
+        "usage: pnpm prepare:poc [--fresh | --resume | --offline] [--profile=<version>] [--journal=<name>]"]);
     }
+  });
+
+  it("exits 75 at a rate-limit checkpoint, 130 when interrupted, and 1 on any other failure", () => {
+    expect(exitCodeOf(new PreparationError("RATE_LIMIT_CHECKPOINT"))).toBe(75);
+    expect(exitCodeOf(new PreparationError("RUN_INTERRUPTED"))).toBe(130);
+    expect(exitCodeOf(new PreparationError("JOURNAL_MISS"))).toBe(1);
+    expect(exitCodeOf(new PreparationError())).toBe(1);
+    expect(exitCodeOf(new Error("COMMAND_ARGUMENTS_REJECTED"))).toBe(1);
+  });
+
+  it("aborts the run on the first SIGINT or SIGTERM and leaves a second signal to Node", () => {
+    for (const signal of ["SIGINT", "SIGTERM"]) {
+      const source = new EventEmitter();
+      const controller = new AbortController();
+      abortOnSignals(controller, source);
+      expect([source.listenerCount("SIGINT"), source.listenerCount("SIGTERM")]).toEqual([1, 1]);
+      source.emit(signal);
+      expect(controller.signal.aborted).toBe(true);
+      expect([source.listenerCount("SIGINT"), source.listenerCount("SIGTERM")]).toEqual([0, 0]);
+    }
+    const source = new EventEmitter();
+    const controller = new AbortController();
+    abortOnSignals(controller, source)();
+    source.emit("SIGINT");
+    expect(controller.signal.aborted).toBe(false);
+    expect(source.listenerCount("SIGINT")).toBe(0);
   });
 
   it("projects only AWS and provider-store values into the selected-blob worker", async () => {
@@ -1177,6 +1213,61 @@ const logLines = (calls: readonly string[]): string[] =>
       "log:PREPARATION_STAGE_FAILED STACK_METADATA JOURNAL_MISS none",
       "log:PREPARATION_FAILED",
     ]);
+  });
+
+  it.each([
+    ["a refused rate-limit retry", () => new RetryError("RATE_LIMIT_CHECKPOINT", new TransportError("UNSUPPORTED_STATUS", REPOSITORY_403, 403), CHECKPOINT_RESET), "4xx"],
+    ["a request held back near the limit", () => new RetryError("RETRY_SIGNAL_MISSING", new RetryError("RATE_LIMIT_CHECKPOINT", undefined, CHECKPOINT_RESET)), "none"],
+  ] as const)("stops the run at %s inside a candidate, journals it, and names the minute to resume", async (_name: string, checkpoint: () => Error, statusClass: string) => {
+    let lineageCalls = 0;
+    const closed: unknown[] = [];
+    const reports: any[] = [];
+    const harness = await makeHarness({
+      bindGitHubLineage: async () => { lineageCalls += 1; throw checkpoint(); },
+      finishRuntime: (runtime) => { closed.push(runtime); return "PREPARATION_JOURNAL mode=fresh replayed=0 live=12"; },
+      writeFailureReport: async (report) => { reports.push(report); },
+    });
+    const failure = await prepareLocalExperiment(harness.dependencies).catch((error: unknown) => error);
+    expect(failure).toMatchObject({ message: "PREPARATION_FAILED", stop: "RATE_LIMIT_CHECKPOINT" });
+    expect(exitCodeOf(failure)).toBe(75);
+    // The first refused candidate ends the run: no deck is skipped or shrunk, and nothing is published.
+    expect(lineageCalls).toBe(1);
+    expect(harness.calls.some((call) => call.startsWith("fetch:"))).toBe(false);
+    expect(harness.published).toEqual([]);
+    const lines = logLines(harness.calls);
+    expect(lines[0]).toBe(`log:PREPARATION_STAGE_FAILED ADMISSION RATE_LIMIT_CHECKPOINT ${statusClass}`);
+    expect(lines.some((line) => line.startsWith("log:PREPARATION_DECK_SKIPPED"))).toBe(false);
+    expect(lines.slice(-3)).toEqual([
+      "log:PREPARATION_JOURNAL mode=fresh replayed=0 live=12", "log:PREPARATION_RESUME_AFTER 2026-10-20T16:05Z", "log:PREPARATION_FAILED",
+    ]);
+    expect(closed).toHaveLength(1);
+    expect(reports[0]).toMatchObject({ stage: "ADMISSION", code: "RATE_LIMIT_CHECKPOINT", statusClass,
+      journal: "PREPARATION_JOURNAL mode=fresh replayed=0 live=12" });
+  });
+
+  it("stops an interrupted run at its next candidate, journals it, and exits 130", async () => {
+    let fetches = 0;
+    const closed: unknown[] = [];
+    const harness = await makeHarness({
+      fetchStackBlob: async () => { fetches += 1; throw new RetryError("RETRY_SIGNAL_MISSING", new RunInterruptedError()); },
+      finishRuntime: (runtime) => { closed.push(runtime); return "PREPARATION_JOURNAL mode=resume replayed=40 live=3"; },
+    });
+    const failure = await prepareLocalExperiment(harness.dependencies).catch((error: unknown) => error);
+    expect(failure).toMatchObject({ stop: "RUN_INTERRUPTED" });
+    expect(exitCodeOf(failure)).toBe(130);
+    expect(fetches).toBe(1);
+    expect(closed).toHaveLength(1);
+    const lines = logLines(harness.calls);
+    expect(lines[0]).toBe("log:PREPARATION_STAGE_FAILED BLOB_RETRIEVAL RUN_INTERRUPTED none");
+    expect(lines.slice(-2)).toEqual(["log:PREPARATION_JOURNAL mode=resume replayed=40 live=3", "log:PREPARATION_FAILED"]);
+  });
+
+  it("names the minute a checkpointed run may resume, rounded up, and nothing for any other stop", () => {
+    expect(resumeMinute(new RetryError("RATE_LIMIT_CHECKPOINT", undefined, Date.UTC(2026, 9, 20, 16, 4, 1)))).toBe("2026-10-20T16:05Z");
+    expect(resumeMinute(new RetryError("RATE_LIMIT_CHECKPOINT", undefined, Date.UTC(2026, 9, 20, 16, 4)))).toBe("2026-10-20T16:04Z");
+    expect(resumeMinute(new RetryError("RATE_LIMIT_CHECKPOINT", undefined, 9_000_000_000_000_000))).toBeUndefined();
+    expect(resumeMinute(new RunInterruptedError())).toBeUndefined();
+    expect(resumeMinute(undefined)).toBeUndefined();
   });
 
   it("publishes the decks filled before a run-wide budget ran out", async () => {

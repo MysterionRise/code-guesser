@@ -343,9 +343,10 @@ gate: changing queries, retries, ceilings, deck rules, or running
     `run.jsonl.v5-2026-10-15`.
   - The journal holds provider bodies, so it is gitignored and never
     committed; a fresh clone has none, and `--offline` or `--resume` fails
-    with `JOURNAL_MISSING`. A fresh `pnpm prepare:poc` writes its own journal
-    over `run.jsonl` when it ends, even when it fails, so copy `run.jsonl`
-    aside before one.
+    with `JOURNAL_MISSING`. A fresh run writes its own journal when it ends,
+    even when it fails, so it never starts over one (#54): `pnpm prepare:poc`
+    with no flag refuses with `JOURNAL_EXISTS` when `run.jsonl` exists, and
+    `--fresh` renames the old one to `run.jsonl.<UTC stamp>` first.
 - Done so far:
   - **Phase 0:** diagnostics, retries, yield, and UI quick wins.
   - **Phase 1:**
@@ -500,19 +501,29 @@ Iterate on deck rules with
 (no token, but it needs the local journal above); use `--resume` when a
 change needs responses the journal lacks.
 
-Live run (copy `run.jsonl` aside first, because a fresh run replaces it):
+Live run (`--fresh` because a journal exists; it renames `run.jsonl` to
+`run.jsonl.<UTC stamp>` and never deletes it):
 
 ```bash
 HF_TOKEN="$(cat ~/.cache/huggingface/token)" \
 GITHUB_TOKEN="$(gh auth token)" \
 STACK_V2_ACKNOWLEDGED_USABLE_REVISION=e565caa3a78c2423bd374333a472b049eb090e47 \
-pnpm prepare:poc
+pnpm prepare:poc --fresh
 ```
 
-Add `--resume` after a failed run to replay what the journal holds and fetch
-only the rest, or `--offline` to replay the journal with no network and no
-token (it fails with `JOURNAL_MISS` on anything unrecorded). The journal is
-`ops/poc/stack/tmp/journal/run.jsonl` (ignored).
+GitHub allows about 5,000 requests an hour. A run that spends them stops at
+`RATE_LIMIT_CHECKPOINT` (exit 75), journals what it has, and logs
+`PREPARATION_RESUME_AFTER <UTC minute>`. Run the same command with `--resume`
+instead of `--fresh` after that minute, one session per checkpoint, until
+`PREPARATION_COMPLETE`. `--resume` also continues any other failed run: it
+replays what the journal holds and fetches only the rest. `--offline` replays
+the journal with no network and no token (it fails with `JOURNAL_MISS` on
+anything unrecorded). The journal is `ops/poc/stack/tmp/journal/run.jsonl`
+(ignored); `--journal=<name>` names another file in that directory, and
+`--profile=<version>` runs another profile in `ops/poc/profiles`, so a dry run
+of a new profile can replay a copy of the journal beside the committed one.
+Ctrl-C stops a run as `RUN_INTERRUPTED` and still journals it; a second Ctrl-C
+ends the process at once.
 
 After a success the artifact and its pin are already written together. Check
 the `PREPARATION_DECKS` line for which decks published, read a few rounds of
@@ -543,8 +554,27 @@ when the preparer throws a code this section does not name.
 
 ### Codes that fail the run
 
-- `COMMAND_ARGUMENTS_REJECTED`: `prepare:poc` got something other than no
-  flag, `--resume`, or `--offline`; it prints the usage line.
+- `COMMAND_ARGUMENTS_REJECTED`: `prepare:poc` got something other than at
+  most one of `--fresh`, `--resume`, and `--offline`, with at most one
+  `--profile=<version>` (a version `PROFILE_VERSIONS` names) and one
+  `--journal=<name>` (a file name, no path); it prints the usage line.
+- Run stops end the run wherever they are thrown, even inside one candidate,
+  so they never shrink a deck. The pipeline still journals the run, logs the
+  failure line, and writes the failure report:
+  - `RATE_LIMIT_CHECKPOINT`: GitHub's rate limit is spent until a reset
+    beyond the fifteen-second wait. Either a refused rate-limit retry
+    (`PREPARATION_STAGE_FAILED <stage> RATE_LIMIT_CHECKPOINT 4xx`, the 403 or
+    429 its cause), or a live request held back because 25 or fewer core
+    requests were left (`none`). It logs `PREPARATION_RESUME_AFTER <minute>`,
+    the UTC minute the limit lifts, and exits 75; run `--resume` after it.
+  - `RUN_INTERRUPTED`: SIGINT or SIGTERM; the run stops at its next request
+    or worker run and exits 130.
+  - `JOURNAL_MISS` and `OFFLINE_NETWORK_REFUSED`, below.
+- `JOURNAL_EXISTS` (`PREFLIGHT`, before any request): a run with no journal
+  flag found a journal at its path, which it would replace. Run `--fresh` to
+  set it aside as `<name>.<UTC stamp>` (logged as
+  `PREPARATION_JOURNAL_SET_ASIDE <file>`), or `--resume`. `--fresh` refuses
+  the same way if that stamped name is taken.
 - `INVARIANT_REJECTED`: an internal consistency check failed, such as a
   revalidated Stack file whose language differs from its row.
   `UNCODED_<CLASS>` (for example `UNCODED_TYPEERROR`) is an error with no
@@ -652,11 +682,12 @@ are being selected.
   checks. The capacity meter's `BLOB_BYTES`, `RESPONSE_BYTES`, and
   `CONCURRENCY` reject the one request or blob that broke them;
   `GITHUB_PAGES` and `GITHUB_RESULTS` fail discovery.
-- `LOGICAL_RETRY_LIMIT`: a GitHub 5xx, network error, timeout, or rate limit
-  was retried once and failed again. `RUN_RETRY_LIMIT`, `TOTAL_WAIT_LIMIT`:
-  the run's five retries or 30 s of waiting were spent. `WAIT_LIMIT`: a retry
-  instruction longer than the fifteen-second wait. `RETRY_SIGNAL_MALFORMED`:
-  a retry instruction that was not a positive wait.
+- `LOGICAL_RETRY_LIMIT`: a GitHub 5xx, network error, or timeout was retried
+  once and failed again. `RUN_RETRY_LIMIT`, `TOTAL_WAIT_LIMIT`: the run's
+  five retries or 30 s of waiting were spent. `WAIT_LIMIT`: a retry
+  instruction longer than the fifteen-second wait. A rate limit refused any of
+  these ways stops the run at `RATE_LIMIT_CHECKPOINT` instead (#165).
+  `RETRY_SIGNAL_MALFORMED`: a retry instruction that was not a positive wait.
 
 ### Rejection aggregates
 

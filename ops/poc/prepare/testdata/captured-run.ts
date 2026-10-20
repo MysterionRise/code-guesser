@@ -6,6 +6,7 @@ import { projectPreparationEnvironment, type PreparationDependencies } from "../
 import { parseCrawlProfile, type CrawlProfile } from "../profile";
 import {
   createCapturedDependencies,
+  type CapturedCoreLimit,
   type CapturedDependencyState,
   type CapturedFailure,
 } from "./captured-dependencies";
@@ -17,7 +18,7 @@ import {
   CAPTURED_SENSITIVE_CANARIES,
 } from "./captured-values";
 
-export type { CapturedFailure } from "./captured-dependencies";
+export { isCoreRequest, type CapturedCoreLimit, type CapturedFailure } from "./captured-dependencies";
 
 export interface CapturedHarness {
   readonly dependencies: PreparationDependencies;
@@ -39,6 +40,8 @@ interface HarnessOptions {
   readonly executionId: string;
   readonly failure?: CapturedFailure;
   readonly providerIncompleteQueryId?: string;
+  readonly journal?: CapturedDependencyState["journal"];
+  readonly coreLimit?: CapturedCoreLimit;
 }
 
 const PROFILE_URL = new URL("../../profiles/local-real-rounds.v5.json", import.meta.url);
@@ -74,6 +77,8 @@ const createState = async (options: HarnessOptions): Promise<Readonly<{
     environment: capturedEnvironment(directory, options.failure),
     observedAt: options.observedAt, executionId: options.executionId,
     ...(options.failure ? { failure: options.failure } : {}),
+    ...(options.journal ? { journal: options.journal } : {}),
+    ...(options.coreLimit ? { coreLimit: options.coreLimit } : {}),
     events: [], logs: [], reports: [], requests: [], metadataConfigurations: [], selectedBlobRows: [], cleanups: 0,
   };
   return Object.freeze({ state, directory, initialArtifact: new Uint8Array(initialArtifact) });

@@ -391,30 +391,37 @@ Outputs:
 
 ### Resuming and replaying
 
-Every run journals the responses it accepts. Two flags reuse that journal:
+Every run journals the responses it accepts. The journal flags choose what a
+run does with it:
 
 | Command | What it does |
 | --- | --- |
-| `pnpm prepare:poc` | A fresh run that starts a new journal. |
-| `pnpm prepare:poc --resume` | Replays repository, commit, tree, blob, and licence responses and worker outputs, re-checks Stack access live, and fetches only what the journal lacks. Use it after a failed run. |
+| `pnpm prepare:poc` | A fresh run that starts a new journal. It refuses with `JOURNAL_EXISTS`, before any request, when a journal is already there. |
+| `pnpm prepare:poc --fresh` | The same, after renaming the old journal to `run.jsonl.<UTC stamp>`, such as `run.jsonl.20261020T150405Z`. It never deletes or replaces one. |
+| `pnpm prepare:poc --resume` | Replays repository, commit, tree, blob, and licence responses and worker outputs, re-checks Stack access live, and fetches only what the journal lacks. Use it after a failed run, and after each rate-limit checkpoint. |
 | `pnpm prepare:poc --offline` | Replays the journal only and needs no token; set only `STACK_V2_ACKNOWLEDGED_USABLE_REVISION`. A response the journal lacks fails the whole run with `JOURNAL_MISS` rather than touch the network or publish fewer decks. Use it to iterate on deck rules. |
+
+Two more flags go with any of these:
+
+- `--profile=<version>` runs another profile in `ops/poc/profiles`, such as
+  `--profile=local-real-rounds.v5`. Only versions the artifact package knows
+  are accepted.
+- `--journal=<name>` reads and writes another file in
+  `ops/poc/stack/tmp/journal/` (a file name, never a path), so a dry run can
+  replay a copy of the journal and leave `run.jsonl` alone.
 
 Replayed responses count against the same budgets as live ones, so an offline
 run predicts what a live run would spend.
 
-Both flags need a journal from an earlier live run on the same machine. The
-journal holds provider bodies (API responses and the code the run fetched), so
-it is gitignored and never committed. A fresh clone has none, and both flags
-fail there with `JOURNAL_MISSING`.
+`--resume` and `--offline` need a journal from an earlier live run on the same
+machine. The journal holds provider bodies (API responses and the code the run
+fetched), so it is gitignored and never committed. A fresh clone has none, and
+both flags fail there with `JOURNAL_MISSING`.
 
-A fresh run starts an empty journal and writes it over `run.jsonl` when it
-ends, even when it fails. That replaces the journal that rebuilds the
-committed artifact offline, so copy it aside first; it stays in the ignored
-directory, and copying it back restores it:
-
-```bash
-cp ops/poc/stack/tmp/journal/run.jsonl ops/poc/stack/tmp/journal/run.backup.jsonl
-```
+A fresh run writes its journal when it ends, even when it fails. So that it
+never replaces the journal that rebuilds the committed artifact offline, a run
+with no flag refuses to start over one, and `--fresh` sets the old one aside in
+the same ignored directory; renaming it back restores it.
 
 The journal also keeps failures:
 
@@ -422,6 +429,8 @@ The journal also keeps failures:
 - **Other failures** (a refusal, a 5xx, a timeout, a worker's coded exit)
   replay only offline. An offline replay therefore rejects the same
   candidates for the same reasons, while `--resume` tries those requests
+  again.
+- **Rate limits** are not kept: the run stops there, and the resumed run asks
   again.
 
 The journal stores structured `email` fields redacted and is checked against
@@ -431,6 +440,25 @@ A failed run logs `PREPARATION_STAGE_FAILED <stage> <reason-code> <status-class>
 and `PREPARATION_FAILURE_SITE <function>@<file>`. When selection fails it also
 logs `PREPARATION_COUNTS` and `PREPARATION_REJECTIONS` aggregates. It never logs
 a body, URL, identity, or credential.
+
+### Rate limits
+
+GitHub allows a token about 5,000 requests an hour, and a run can need more. A
+run that reaches the limit stops cleanly instead of rejecting every later
+candidate and publishing smaller decks:
+
+- It stops when GitHub refuses a request at its limit and the reset is beyond
+  the fifteen-second retry wait, or before sending a request when 25 or fewer
+  remain and the reset is that far off. It logs
+  `PREPARATION_STAGE_FAILED <stage> RATE_LIMIT_CHECKPOINT <status-class>`.
+- It journals everything it fetched, logs
+  `PREPARATION_RESUME_AFTER <UTC minute>`, and exits with status 75.
+- Run `--resume` after that minute. Each session replays the journal and spends
+  the new hour on the rest; repeat until `PREPARATION_COMPLETE`.
+
+Ctrl-C or SIGTERM stops a run the same way at its next request, as
+`RUN_INTERRUPTED` (exit status 130), and it still writes the journal; a second
+Ctrl-C ends the process at once.
 
 ## Guardrails
 
