@@ -276,8 +276,8 @@ gate: changing queries, retries, ceilings, deck rules, or running
       file per UTC day, rolled up into `totals.jsonl` after 90 days), and a
       deal under `Sec-GPC: 1` seals `record: false`;
     - `EXPERIMENT_SOURCE=agent|synthetic` tags playtests and tests.
-    - SQLite waits for Node 24 (#21): Node 20 has no `node:sqlite`, so the
-      store is JSONL behind the `EventStore` interface.
+    - The store is JSONL behind the `EventStore` interface. Node 24 (#21)
+      has `node:sqlite`, but nothing uses it yet.
   - **Report** (#108, `ops/experiment/`): `pnpm experiment:report` reads one source's raw days with the events
     parser and prints Markdown (`--json=` writes JSON).
     - Each factor's levels are compared on the deal-again rate of completed games: seeded Beta draws
@@ -774,6 +774,8 @@ add up.
   - `FIX_RANKS_UNBALANCED`: no choice of windows balances the deck.
 
 ## Commands
+
+Run them under Node 24.22.0, which `.nvmrc` pins (`nvm use`).
 
 ```bash
 pnpm exec vitest run ops/poc/prepare
