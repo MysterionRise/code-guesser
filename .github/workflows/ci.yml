@@ -39,6 +39,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # Fails on any high or critical advisory in the locked tree (#26); Dependabot (.github/dependabot.yml)
+      # proposes the updates that clear them.
+      - name: Dependency audit
+        run: pnpm audit --audit-level=high
+
       # The Node-to-Python seam test spawns the real locked workers in their offline request-check mode.
       # setup-uv publishes no major tags since v8, only immutable full-version tags.
       - uses: astral-sh/setup-uv@v10.3.0
