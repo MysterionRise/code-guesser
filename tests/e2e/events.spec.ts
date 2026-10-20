@@ -3,6 +3,7 @@ import { join, resolve } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 
 import { E2E_EVENTS_DIR } from "../../playwright.config";
+import { buildReport, readStore } from "../../ops/experiment/report";
 
 // The anonymous event log (#107): what a played game leaves in the store, read back from its files.
 const fake = `http://127.0.0.1:${Number(process.env.E2E_PORT ?? 3000) + 1}`;
@@ -60,6 +61,12 @@ test("a played game leaves its events under its sealed arms, with nothing that i
   expect(mine.find(({ type }) => type === "game_completed")).toMatchObject({ correct: 5, hints: 1 });
   expect(mine.find(({ type }) => type === "deal_again")).toMatchObject({ to: "chooser" });
   expect(JSON.stringify(mine)).not.toMatch(/127\.0\.0\.1|Mozilla|HeadlessChrome|Nice read/u);
+
+  // The experiment report (#108) reads the same store: every line passes its parser, and this game counts.
+  const report = buildReport({ read: readStore(E2E_EVENTS_DIR, "synthetic"), source: "synthetic", to: today(), layerDecks: [] });
+  expect(report.refused).toBe(0);
+  expect(report.completed).toBeGreaterThan(0);
+  expect(report.factors.find(({ factor }) => factor === "design")!.levels[0]!.primary.successes).toBeGreaterThan(0);
 });
 
 test("a generative panel's use and its model call land in the same game", async ({ page }) => {
