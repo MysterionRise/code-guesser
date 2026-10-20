@@ -506,7 +506,7 @@ Each path has a status:
 | `tests` | Accessibility, browser, performance, and containment suites. They run in CI against the live game; the privacy and provenance checks date from the Contract era | PoC support |
 | `.github/workflows/ci.yml` | CI: a dependency audit that fails on high or critical advisories, then every suite above, with no provider secrets and no live preparation | PoC support |
 | `.github/dependabot.yml` | Monthly version updates for npm, uv, and GitHub Actions, minor and patch grouped, at most five open pull requests per ecosystem | PoC support |
-| `vitest.config.mts` | Finds `*.test.ts` and `*.test.tsx` under `apps/`, `packages/`, and `ops/`, and compiles JSX with React's automatic runtime, since the tsconfig preserves JSX for Next.js | PoC support |
+| `vitest.config.mts` | Finds `*.test.ts` and `*.test.tsx` under `apps/`, `packages/`, and `ops/`, and compiles JSX with React's automatic runtime, since the tsconfig preserves JSX for Next.js. A test may take 30 s, as the preparer's synchronous composition tests take up to 12 s on CI | PoC support |
 | `playwright.config.ts` | The browser suites; starts a dev server on 127.0.0.1 (`E2E_PORT`, default 3000) | PoC support |
 | `tsconfig.base.json` | Compiler options every package and `ops/` extend | PoC support |
 | `compose.test.yaml` | A Postgres 16 test service. No script, test, or workflow uses it | Contract-era |
