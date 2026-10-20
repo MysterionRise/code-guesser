@@ -33,6 +33,7 @@ The goal is a demo on one machine, not public play.
 4. `docs/review/2026-10-13-next-sources-plan.md`: the plan for forges beyond
    GitHub (GitLab, Software Heritage) and the era deck.
 5. `README.md`: how to play, prepare, record, and verify.
+6. `docs/releases/v1.0.0.md`: what v1.0 adds, and its known limits.
 
 `docs/gangsta/` is the historical record of the signed-Contract process, which
 was retired on 2026-10-11. Use it for background on why rules exist, not as a
@@ -70,6 +71,9 @@ gate: changing queries, retries, ceilings, deck rules, or running
   - #7 Phase 0, #8 Phase 1, #9 Phase 2, #10 Phase 3a;
   - Phase 3b on 2026-10-13: #12 curated sources, #13 algorithm, #14 output,
     #15 fix, #16 game UX, #17 go-live, #18 the vertical `demo.gif`.
+- v1.0 (milestone #4, checklist #130) is merged too: #131–#162, from 2026-10-15 to 2026-10-20, on top of the
+  public-app Phases 1 and 2 (#110–#123). Its release notes are `docs/releases/v1.0.0.md`. The `v1.0.0` tag and GitHub
+  release wait for the owner's go-ahead.
 - The game plays profile `ops/poc/profiles/local-real-rounds.v6.json` and
   artifact schema `local-experiment-artifact.v5` from the root-route deck
   chooser (`/?deck=<deck id>`). A
@@ -478,14 +482,18 @@ gate: changing queries, retries, ceilings, deck rules, or running
 
 ## Next steps
 
-1. Phase 3c, in `docs/review/2026-10-13-next-sources-plan.md`: other forges
-   (GitLab, Software Heritage) and the "Which era?" deck. It has open decisions
-   (licence allowlist, accounts) to settle with the user first.
-2. The research note's backlog: guess the commit message (the user said "not
+1. Finish v1.0 (#130): the `v1.0.0` tag and GitHub release, with the owner's go-ahead. Owner decisions still open:
+   #120 (model per design) and #160 (the algorithm layer's fairness).
+2. The next release: hardening and hosting (#97–#100), then the deferred decks, "Spot the vulnerable line" (#59) and
+   "Which era?" (#60), and the other four question-layer designs (#128).
+3. Phase 3c, in `docs/review/2026-10-13-next-sources-plan.md`: other forges
+   (GitLab, Software Heritage). It has open decisions (licence allowlist,
+   accounts) to settle with the user first.
+4. The research note's backlog: guess the commit message (the user said "not
    now"), vulnerable or fixed.
 
-Ask before widening the licence allowlist, raising the 3,000-request ceiling,
-or adding a source not named in the research note.
+Ask before widening the licence allowlist, raising the request ceiling past 5,000 (`ops/poc/limits.json`), or adding a
+source not named in the research note or #129.
 
 Iterate on deck rules with
 `STACK_V2_ACKNOWLEDGED_USABLE_REVISION=e565caa3a78c2423bd374333a472b049eb090e47 pnpm prepare:poc --offline`

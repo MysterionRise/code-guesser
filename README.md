@@ -5,6 +5,8 @@
 CodeGuessr is “GeoGuessr for code”: read an unfamiliar excerpt of real
 open-source code, reveal clues if you need them, and guess.
 
+The current release is v1.0.0: [release notes](docs/releases/v1.0.0.md).
+
 ## See it in action
 
 <p align="center">
@@ -186,7 +188,8 @@ GENUI_ENABLED=1 OPENROUTER_API_KEY=… pnpm --filter @codeguessr/game dev
   - `off` plays the static game.
 - `OPENROUTER_MODEL` picks the model (default `anthropic/claude-haiku-5.5`).
 - Set spend limits on the OpenRouter key itself. When the key is refused, the
-  explainer steps aside and the game plays on.
+  explainer steps aside and the game plays on. A panel that fails offers
+  "Try again" once.
 - The model never sees a round's code before you answer, and it can only
   render a fixed set of components whose contents the server checks.
 - Requests ask OpenRouter for providers that neither store nor train on
@@ -269,6 +272,16 @@ is refused, and the rest are frozen in
 It needs `OPENROUTER_API_KEY` for new answers; `--offline` replays its journal.
 So far it covers Which algorithm? and Which language?. A game shows them when
 the experiment draws `layer: on`, or with `?layer=on` in lab mode.
+
+### Agent playtests
+
+`ops/playtest/driver.mjs` keeps real browser sessions on a running game behind
+a small JSON API, so Claude Code subagents can play it. The protocol in
+[`ops/playtest/README.md`](ops/playtest/README.md) uses five persona players
+on Claude Haiku and two judges on Claude Sonnet, one for explanations and one
+for UX. A run costs a few cents of OpenRouter. The latest is
+[run 2](docs/review/evidence/2026-10-20-agent-playtest-run-2.md), across every
+deck, theme, design, and question layer.
 
 ### Recording the demo
 
@@ -428,7 +441,11 @@ a body, URL, identity, or credential.
 - Credentials come only from standard stores and are never logged or
   committed.
 - Fetched code is only read, never run: doctests are parsed as text.
-- Gameplay never touches the network.
+- Gameplay never touches the network, unless generative UI is switched on.
+  Then the server calls OpenRouter only through the answer-lock guard, and the
+  model sees no code before the answer is locked.
+- Question layers are written before play, with the answers journaled, and
+  frozen beside the artifact.
 - Malformed provider data fails closed. Transient errors may be retried within
   the request budget.
 
@@ -475,7 +492,9 @@ Each path has a status:
 | `ops/poc/stack` | Locked Python workers for Stack metadata and selected blob retrieval. Its ignored `tmp/` holds the journal and run reports | live |
 | `ops/poc/profiles` | Versioned crawl profiles | live |
 | `ops/poc/limits.json` | Pinned Stack revision and hard ceilings shared by Node (`limits.ts`) and Python | live |
+| `ops/poc/questions` | `prepare:questions`: question layers a model drafts at preparation time, audited by a code-blind solver, journaled, and pinned | live |
 | `ops/demo/record` | Scripted README media recorder | PoC support |
+| `ops/playtest` | The agent playtest driver and protocol | PoC support |
 | `ops/experiment` | `experiment:report`: the experiment's report from the event log, with its statistics and pre-registered plan | live |
 | `ops/content` | The `acquire:content` operator command and its policy files. The containment test (`tests/containment/acquisition-boundary.test.mjs`) requires the script to exist | Contract-era |
 | `ops/tsconfig.json` | Type-checks everything under `ops/`; `pnpm typecheck` runs it | PoC support |
@@ -488,6 +507,7 @@ Each path has a status:
 | [`docs/architecture.md`](docs/architecture.md) | The flow from preparation to play, the artifact's shape, and a glossary of field names | live |
 | [`docs/review`](docs/review/README.md) | Current state, reviews, plans, and run evidence | live |
 | `docs/media` | README media, written by `pnpm demo:record` | PoC support |
+| [`docs/releases`](docs/releases/v1.0.0.md) | Release notes | live |
 | `docs/gangsta` | Historical record of the retired Contract process | Contract-era |
 
 Claude-based agents should start with [CLAUDE.md](CLAUDE.md).
