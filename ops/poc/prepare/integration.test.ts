@@ -1,3 +1,7 @@
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+
 const testModuleName: string = "vitest";
 const { describe, expect, it, vi } = await import(testModuleName) as any;
 import { MAINSTREAM_LANGUAGES } from "./profile";
@@ -14,6 +18,7 @@ const createCapturedHarness = captureModule.createCapturedHarness as (options: R
   failure?: CapturedFailure;
   providerIncompleteQueryId?: string;
 }>) => Promise<any>;
+const isCoreRequest = captureModule.isCoreRequest as (url: string) => boolean;
 const failureMatrix = [
   ["malformed", "github-search:GITHUB_SEARCH_REJECTED"],
   ["freshness", "preflight:REVISION_MISMATCH"],
@@ -161,6 +166,69 @@ describe("captured partial preparation", () => {
       });
     } finally {
       await harness.dispose();
+    }
+  });
+});
+
+describe("captured rate-limit checkpoint (#165)", () => {
+  const journalIn = (): string => join(mkdtempSync(join(tmpdir(), "codeguessr-checkpoint-")), "run.jsonl");
+  const run = (executionId: string, journal: Readonly<{ mode: "fresh" | "resume"; path: string }>, coreLimit?: unknown) =>
+    createCapturedHarness({ observedAt: "2026-07-31T12:00:00.000Z", executionId, journal, ...(coreLimit ? { coreLimit } : {}) } as any);
+
+  it.each([
+    // Another client spent the token's limit: GitHub still reports plenty left, then refuses with a 403.
+    ["refuses a request with a 403", (spent: number) => ({ requests: spent, reported: 5000 }), "4xx", 1],
+    // GitHub's own count reaches the reserve: the run holds the next request back instead of sending it.
+    ["reports too few requests left", (spent: number) => ({ requests: spent + 25, reported: spent + 25 }), "none", 0],
+  ] as const)("stops when GitHub %s, journals the run, and resumes to the artifact of an uninterrupted run", async (
+    _name: string, coreLimit: (spent: number) => unknown, statusClass: string, refused: number,
+  ) => {
+    const uninterrupted = await run("55555555-5555-4555-8555-555555555555", { mode: "fresh", path: journalIn() });
+    const path = journalIn();
+    try {
+      await rejectLiveNetwork(async (liveAttempts) => {
+        const expected = await prepareLocalExperiment(uninterrupted.dependencies);
+        const coreRequests = uninterrupted.requests.filter(isCoreRequest).length;
+        const spent = Math.floor(coreRequests / 2);
+
+        const limited = await run("66666666-6666-4666-8666-666666666666", { mode: "fresh", path }, coreLimit(spent));
+        try {
+          const failure = await prepareLocalExperiment(limited.dependencies).catch((error: unknown) => error);
+          expect(failure).toMatchObject({ message: "PREPARATION_FAILED", stop: "RATE_LIMIT_CHECKPOINT" });
+          expect(limited.requests.filter(isCoreRequest)).toHaveLength(spent + refused);
+          expect(limited.logs.find((line: string) => line.startsWith("PREPARATION_STAGE_FAILED ")))
+            .toMatch(new RegExp(`^PREPARATION_STAGE_FAILED [A-Z_]+ RATE_LIMIT_CHECKPOINT ${statusClass}$`, "u"));
+          // No candidate was rejected for the limit, so no deck ran short; nothing was published.
+          expect(limited.logs.some((line: string) => line.startsWith("PREPARATION_DECK_SKIPPED"))).toBe(false);
+          expect(limited.logs.join("\n")).not.toMatch(/=UNSUPPORTED_STATUS|RATE_LIMIT_CHECKPOINT=/u);
+          expect(limited.logs.slice(-3)).toEqual([
+            expect.stringMatching(/^PREPARATION_JOURNAL mode=fresh replayed=0 live=[1-9]\d*$/u),
+            expect.stringMatching(/^PREPARATION_RESUME_AFTER \d{4}-\d{2}-\d{2}T\d{2}:\d{2}Z$/u),
+            "PREPARATION_FAILED",
+          ]);
+          expect(limited.reports).toHaveLength(0);
+          expect([...await limited.readArtifact()]).toEqual([...limited.initialArtifact]);
+          expect(existsSync(path)).toBe(true);
+        } finally {
+          await limited.dispose();
+        }
+
+        // An hour later GitHub answers again: the resumed run replays what the journal holds and fetches the rest.
+        const resumed = await run("77777777-7777-4777-8777-777777777777", { mode: "resume", path });
+        try {
+          const result = await prepareLocalExperiment(resumed.dependencies);
+          expect(result.artifactHash).toBe(expected.artifactHash);
+          expect(await resumed.readArtifact()).toEqual(await uninterrupted.readArtifact());
+          expect(resumed.requests.filter(isCoreRequest)).toHaveLength(coreRequests - spent);
+          expect(resumed.logs.at(-1)).toBe("PREPARATION_COMPLETE");
+        } finally {
+          await resumed.dispose();
+        }
+        expect(liveAttempts).toEqual([]);
+      });
+    } finally {
+      await uninterrupted.dispose();
+      rmSync(dirname(path), { recursive: true, force: true });
     }
   });
 });

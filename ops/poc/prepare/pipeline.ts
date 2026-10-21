@@ -6,7 +6,7 @@ import { CURATED_DECK_IDS, type CuratedDeckId } from "./curated-deck-ids";
 import { CURATED_DECKS } from "./curated-decks";
 import {
   createDeckAttempts, createRunState, failureDiagnostic, failureSite, noteRejection, PreparationError, rejectionSummary,
-  reportedFailure, stableCode, uncodedDiagnostic, type DeckOutcome, type FailureStage, type RunState,
+  reportedFailure, resumeMinute, runStop, stableCode, uncodedDiagnostic, type DeckOutcome, type FailureStage, type RunState,
 } from "./diagnostics";
 import type { GitHubQueryClassification } from "./github-search";
 import { artifactFixtures, DECK_IDS, type DeckId } from "./model";
@@ -281,8 +281,10 @@ export const prepareLocalExperiment = async (deps: PreparationDependencies = def
     return Object.freeze({ artifactHash: composed.artifactHash, crawlSnapshotId, publication });
   } catch (error) {
     const stage = tracker.current();
-    // A retry wrapper is reported as the failure it wrapped: a revoked token is UNSUPPORTED_STATUS 4xx.
-    const failure = reportedFailure(error);
+    // A run stop is reported as itself, and a retry wrapper as the failure it wrapped: a revoked token is
+    // UNSUPPORTED_STATUS 4xx, and a refused rate-limit retry RATE_LIMIT_CHECKPOINT 4xx.
+    const stop = runStop(error);
+    const failure = stop ?? reportedFailure(error);
     const diagnostic = failureDiagnostic(failure) ?? uncodedDiagnostic(failure);
     deps.log(`PREPARATION_STAGE_FAILED ${stage} ${diagnostic.code} ${diagnostic.statusClass}`);
     const site = failureSite(failure);
@@ -300,7 +302,10 @@ export const prepareLocalExperiment = async (deps: PreparationDependencies = def
         await deps.writeFailureReport(failureReport(deps, { stage, ...diagnostic, site }, state, tracker.spent(), tracker.snapshot(), journal));
       } catch { deps.log("PREPARATION_FAILURE_REPORT_FAILED"); }
     }
+    // A checkpoint names the minute GitHub's limit lifts, after which `--resume` continues from the journal.
+    const resume = resumeMinute(stop);
+    if (resume) deps.log(`PREPARATION_RESUME_AFTER ${resume}`);
     deps.log("PREPARATION_FAILED");
-    throw new PreparationError();
+    throw new PreparationError(stop === undefined ? undefined : diagnostic.code);
   }
 };

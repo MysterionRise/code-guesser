@@ -118,7 +118,8 @@ describe("failure codes in CLAUDE.md", () => {
   it("collects the codes it must, so an empty result means something", () => {
     const thrown = thrownCodes(sources());
     for (const code of ["JOURNAL_MISS", "REVALIDATION_AUTHOR_CONTACT", "PERSONAL_DATA", "UNSUPPORTED_STATUS", "NETWORK",
-      "EXPERIMENT_RECORD_REJECTED", "FIX_DATASET_*", "BLOB_ATTEMPTS", "LANGUAGE_ROUNDS_REJECTED", "COMMAND_ARGUMENTS_REJECTED"]) {
+      "EXPERIMENT_RECORD_REJECTED", "FIX_DATASET_*", "BLOB_ATTEMPTS", "LANGUAGE_ROUNDS_REJECTED", "COMMAND_ARGUMENTS_REJECTED",
+      "RATE_LIMIT_CHECKPOINT", "RUN_INTERRUPTED", "JOURNAL_EXISTS"]) {
       expect(thrown.has(code), code).toBe(true);
     }
   });

@@ -8,7 +8,7 @@ import { canonicalBytes } from "./canonical";
  * The run journal keeps every provider response and worker output a run accepted, so a later run can
  * replay them instead of asking the network again.
  *
- * - `fresh` replays nothing and records everything.
+ * - `fresh` replays nothing and records everything. It never replaces a journal: `--fresh` sets one aside first.
  * - `resume` replays deterministic responses (repository, commit, tree, blob, and licence GETs, and
  *   worker outputs) and fetches the rest live: the Hugging Face access check always, and search pages
  *   unless the recorded run finished discovery.
@@ -127,6 +127,20 @@ const loadJournal = (path: string): LoadedJournal => {
   if (typeof header !== "object" || header === null || header.schema !== JOURNAL_SCHEMA
     || typeof header.discoveryComplete !== "boolean" || header.entries !== lines.length - 1) fail("JOURNAL_CORRUPT");
   return { entries: lines.slice(1).map((line) => parseEntry(parse(line))), discoveryComplete: header!.discoveryComplete as boolean };
+};
+
+/**
+ * Clears the way for a fresh journal, which replaces the file when the run ends (#54). A journal already there
+ * refuses the run with `JOURNAL_EXISTS`, unless `--fresh` set it aside: it is renamed to `<name>.<UTC stamp>`,
+ * never deleted or overwritten. Returns the name it was set aside under.
+ */
+export const clearJournalPath = (path: string, setAsideAt?: Date): string | undefined => {
+  if (!existsSync(path)) return undefined;
+  if (setAsideAt === undefined) return fail("JOURNAL_EXISTS");
+  const target = `${path}.${setAsideAt.toISOString().replace(/[-:]|\.\d{3}/gu, "")}`;
+  if (existsSync(target)) return fail("JOURNAL_EXISTS");
+  renameSync(path, target);
+  return target;
 };
 
 export const openJournal = (options: Readonly<{ mode: JournalMode; path: string }>): RunJournal => {

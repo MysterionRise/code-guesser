@@ -559,12 +559,12 @@ describe("GitHub commit search adapter", () => {
       expect(live.retry.state()).toEqual({ retries: 1, waitedMilliseconds: 1000 });
     });
 
-    it("fails closed with WAIT_LIMIT on an instruction longer than the signed single wait", async () => {
+    it("stops at a rate-limit checkpoint on an instruction longer than the signed single wait", async () => {
       const profile = await singleQueryProfile();
       const live = liveHarness([() => new Response(null, { status: 403, headers: { "retry-after": "16" } })]);
 
       await expect(crawlGitHubCommitSearch({ profile, transport: live.transport, retry: live.retry }))
-        .rejects.toMatchObject({ code: "WAIT_LIMIT" });
+        .rejects.toMatchObject({ code: "RATE_LIMIT_CHECKPOINT", cause: { status: 403, diagnostic: { statusClass: "4xx" } } });
       expect(live.fetches()).toBe(1);
       expect(live.waits).toEqual([]);
     });

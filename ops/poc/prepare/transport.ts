@@ -59,12 +59,24 @@ const FIRST_PAGE_NUMBER = 1;
 const MILLISECONDS_PER_SECOND = 1000;
 const RATE_LIMIT_STATUSES = new Set([403, 429]);
 const MALFORMED_RETRY_SIGNAL = "MALFORMED";
+/** GitHub's rate-limit resources are lower-case words such as `core` and `search`. */
+const RATE_LIMIT_RESOURCE = /^[a-z][a-z_]{0,63}$/u;
+
+/** What one GitHub response says of its rate-limit resource: the requests left, and when the window resets. */
+export interface RateLimitObservation {
+  readonly resource: string;
+  readonly remaining: number;
+  /** Epoch milliseconds. */
+  readonly resetAt: number;
+}
 
 export interface TransportOptions {
   readonly fetch: FetchLike;
   readonly limits: TransportLimits;
   readonly credentials?: CredentialPolicy;
   readonly now?: () => number;
+  /** Told the rate-limit headers of every GitHub response, whatever its status (#165). */
+  readonly observeRateLimit?: (observation: RateLimitObservation) => void;
 }
 
 export interface BoundedTransport {
@@ -189,6 +201,20 @@ const positiveInteger = (value: string | null): number | undefined => {
 };
 
 /**
+ * Reads `x-ratelimit-resource`, `-remaining`, and `-reset`. A response that lacks one, or whose value does not
+ * parse, says nothing: a refused request still reads its own retry instruction, which fails closed.
+ */
+export const rateLimitObservation = (headers: Headers): RateLimitObservation | undefined => {
+  const resource = headers.get("x-ratelimit-resource");
+  const remainingHeader = headers.get("x-ratelimit-remaining");
+  const remaining = remainingHeader === "0" ? 0 : positiveInteger(remainingHeader);
+  const reset = positiveInteger(headers.get("x-ratelimit-reset"));
+  if (resource === null || !RATE_LIMIT_RESOURCE.test(resource) || remaining === undefined || reset === undefined) return undefined;
+  const resetAt = reset * MILLISECONDS_PER_SECOND;
+  return Number.isSafeInteger(resetAt) ? Object.freeze({ resource, remaining, resetAt }) : undefined;
+};
+
+/**
  * Translates a GitHub rate-limit instruction into the retry controller's wait. Only an explicit
  * provider instruction yields a wait; an absent instruction returns undefined so the status still
  * fails closed, and a present-but-unusable instruction is surfaced as a malformed signal.
@@ -226,11 +252,19 @@ const fetchResponse = async (
     redirect: "manual",
     signal,
   });
+  if (request.provider === "github") {
+    const observation = rateLimitObservation(response.headers);
+    if (observation !== undefined) options.observeRateLimit?.(observation);
+  }
   if (request.provider === "github" && RATE_LIMIT_STATUSES.has(response.status)) {
-    const instruction = retryInstruction(response.headers, (options.now ?? Date.now)());
+    const now = (options.now ?? Date.now)();
+    const instruction = retryInstruction(response.headers, now);
     if (instruction !== undefined) {
       await discardBody(response);
-      throw new RetryRequestError(instruction);
+      if (instruction === MALFORMED_RETRY_SIGNAL) throw new RetryRequestError(instruction);
+      // A usable instruction keeps the 403 or 429 as its cause and says when the limit lifts, so a retry the
+      // controller refuses stops the run at a checkpoint (#165).
+      throw new RetryRequestError(instruction, statusError(request, response.status), { resetAt: now + instruction });
     }
   }
   if (request.provider === "github" && TRANSIENT_STATUSES.has(response.status)) {

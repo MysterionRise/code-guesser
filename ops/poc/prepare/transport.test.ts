@@ -1,5 +1,5 @@
 import { createRetryController, RetryRequestError } from "./retry";
-import { createBoundedTransport, TransportError } from "./transport";
+import { createBoundedTransport, rateLimitObservation, TransportError } from "./transport";
 
 const testModuleName: string = "vitest";
 const { describe, expect, it } = await import(testModuleName) as any;
@@ -232,6 +232,57 @@ describe("bounded preparation transport", () => {
     });
 
     await expect(transport.requestJson(githubRequest())).rejects.toMatchObject({ retryAfterMilliseconds: 5000 });
+  });
+
+  it("marks a usable rate-limit instruction with its reset and keeps the 403 or 429 as its cause", async () => {
+    const now = 1_700_000_000_000;
+    const signal = async (status: number, headers: Record<string, string>) => {
+      const transport = createBoundedTransport({ limits, now: () => now, fetch: async () => new Response(null, { status, headers }) });
+      return transport.requestJson(githubRequest()).catch((error: unknown) => error);
+    };
+    expect(await signal(429, { "retry-after": "2" })).toMatchObject({ retryAfterMilliseconds: 2000, rateLimit: { resetAt: now + 2000 },
+      cause: { code: "UNSUPPORTED_STATUS", status: 429, diagnostic: { statusClass: "4xx", pathTemplate: "/search/commits" } } });
+    expect(await signal(403, { "x-ratelimit-remaining": "0", "x-ratelimit-reset": String(now / 1000 + 3600) }))
+      .toMatchObject({ retryAfterMilliseconds: 3_600_000, rateLimit: { resetAt: now + 3_600_000 }, cause: { status: 403 } });
+    // A malformed instruction and a transient failure are no rate limit the run can resume after.
+    for (const caught of [await signal(429, { "retry-after": "soon" }), await signal(503, { "retry-after": "1" })]) {
+      expect(caught).toBeInstanceOf(RetryRequestError);
+      expect((caught as RetryRequestError).rateLimit).toBeUndefined();
+    }
+  });
+
+  it("tells the observer what every GitHub response says of its rate limit, and nothing else", async () => {
+    const reset = 1_700_003_600;
+    const limitHeaders = { "x-ratelimit-resource": "core", "x-ratelimit-remaining": "41", "x-ratelimit-reset": String(reset) };
+    const observed: unknown[] = [];
+    const answering = (response: () => Response) => createBoundedTransport({ limits: { ...limits, requestCount: 10 },
+      fetch: async () => response(), observeRateLimit: (observation) => { observed.push(observation); } });
+    await answering(() => new Response("{}", { status: 200, headers: { ...limitHeaders, "content-type": "application/json" } }))
+      .requestJson(githubRequest());
+    await answering(() => new Response(null, { status: 404, headers: { ...limitHeaders, "x-ratelimit-remaining": "0" } }))
+      .requestJson(githubRequest()).catch(() => undefined);
+    await answering(() => new Response("{}", { status: 200, headers: { ...limitHeaders, "content-type": "application/json" } }))
+      .requestJson({ provider: "huggingFace", method: "GET", url: "https://huggingface.co/api/datasets/bigcode/the-stack-v2" });
+    expect(observed).toEqual([
+      { resource: "core", remaining: 41, resetAt: reset * 1000 },
+      { resource: "core", remaining: 0, resetAt: reset * 1000 },
+    ]);
+  });
+
+  it("reads a rate limit only from a resource, a remaining count, and a reset that all parse", () => {
+    const read = (headers: Record<string, string>) => rateLimitObservation(new Headers(headers));
+    const valid = { "x-ratelimit-resource": "search", "x-ratelimit-remaining": "0", "x-ratelimit-reset": "1700000060" };
+    expect(read(valid)).toEqual({ resource: "search", remaining: 0, resetAt: 1_700_000_060_000 });
+    for (const changed of [
+      { "x-ratelimit-resource": "" }, { "x-ratelimit-resource": "Core" }, { "x-ratelimit-resource": "core/../x" },
+      { "x-ratelimit-remaining": "-1" }, { "x-ratelimit-remaining": "1.5" }, { "x-ratelimit-remaining": "007" }, { "x-ratelimit-remaining": "" },
+      { "x-ratelimit-reset": "0" }, { "x-ratelimit-reset": "soon" }, { "x-ratelimit-reset": "9007199254740991" },
+    ]) {
+      expect(read({ ...valid, ...changed }), JSON.stringify(changed)).toBeUndefined();
+    }
+    for (const missing of Object.keys(valid)) {
+      expect(read(Object.fromEntries(Object.entries(valid).filter(([key]) => key !== missing)))).toBeUndefined();
+    }
   });
 
   it("reports a malformed or elapsed retry instruction as a malformed signal, never as a network failure", async () => {

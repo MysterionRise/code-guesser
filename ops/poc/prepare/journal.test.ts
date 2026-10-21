@@ -1,12 +1,12 @@
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { canonicalBytes } from "./canonical";
 import { createCapacityMeter } from "./capacity";
 import { parsePreparationArguments } from "./index";
-import { openJournal, REDACTED_EMAIL, type JournalMode } from "./journal";
+import { clearJournalPath, openJournal, REDACTED_EMAIL, type JournalMode } from "./journal";
 import { loadProfile } from "./command-test-harness";
 import { MAINSTREAM_LANGUAGES, type CrawlProfile } from "./profile";
 import { createPreparationRuntime } from "./runtime";
@@ -54,12 +54,39 @@ const runRequests = async (profile: CrawlProfile, mode: JournalMode, path: strin
 };
 
 describe("run journal", () => {
-  it("parses the three command forms and rejects anything else", () => {
-    expect(parsePreparationArguments([])).toBe("fresh");
-    expect(parsePreparationArguments(["--resume"])).toBe("resume");
-    expect(parsePreparationArguments(["--offline"])).toBe("offline");
-    expect(parsePreparationArguments(["--resume", "--offline"])).toBeUndefined();
-    expect(parsePreparationArguments(["--fresh"])).toBeUndefined();
+  it("parses the journal flags, a profile, and a journal file, and rejects anything else", () => {
+    expect(parsePreparationArguments([])).toEqual({ journal: "fresh", setAside: false });
+    expect(parsePreparationArguments(["--fresh"])).toEqual({ journal: "fresh", setAside: true });
+    expect(parsePreparationArguments(["--resume"])).toEqual({ journal: "resume", setAside: false });
+    expect(parsePreparationArguments(["--offline"])).toEqual({ journal: "offline", setAside: false });
+    expect(parsePreparationArguments(["--profile=local-real-rounds.v5", "--resume", "--journal=run.v5.jsonl"]))
+      .toEqual({ journal: "resume", setAside: false, profile: "local-real-rounds.v5", journalFile: "run.v5.jsonl" });
+    for (const argv of [
+      ["--resume", "--offline"], ["--fresh", "--fresh"], ["fresh"], ["--constructor"], ["--profile"], ["--profile="],
+      ["--profile=local-real-rounds.v99"], ["--profile=../profiles/local-real-rounds.v6"], ["--profile=a", "--profile=b"],
+      ["--journal="], ["--journal=../run.jsonl"], ["--journal=tmp/run.jsonl"], ["--journal=.run.jsonl"], ["--journal=run jsonl"],
+      ["--journal=a", "--journal=b"],
+    ]) {
+      expect(parsePreparationArguments(argv), argv.join(" ")).toBeUndefined();
+    }
+  });
+
+  it("refuses to start a fresh journal over one, and sets one aside under a UTC stamp without ever replacing a file", () => {
+    const path = journalPath();
+    expect(clearJournalPath(path)).toBeUndefined();
+    writeFileSync(path, "recorded\n");
+    expect(() => clearJournalPath(path)).toThrow("JOURNAL_EXISTS");
+    expect(readFileSync(path, "utf8")).toBe("recorded\n");
+
+    const at = new Date("2026-10-20T15:04:05.678Z");
+    expect(clearJournalPath(path, at)).toBe(`${path}.20261020T150405Z`);
+    expect(existsSync(path)).toBe(false);
+    expect(readFileSync(`${path}.20261020T150405Z`, "utf8")).toBe("recorded\n");
+    // A second set-aside in the same second would replace the first; it refuses instead.
+    writeFileSync(path, "later\n");
+    expect(() => clearJournalPath(path, at)).toThrow("JOURNAL_EXISTS");
+    expect(readFileSync(path, "utf8")).toBe("later\n");
+    expect(readFileSync(`${path}.20261020T150405Z`, "utf8")).toBe("recorded\n");
   });
 
   it("replays a recorded run offline with the same values, hashes, and metering, and no network", async () => {
@@ -167,23 +194,24 @@ describe("run journal", () => {
     expect(capacity.snapshot().requestCount).toBe(2);
   });
 
-  it("records a rate limit the run could not retry, so an offline replay rejects the same request and a resumed run asks again", async () => {
+  it("never records a rate limit, so an offline replay stops at the same request and a resumed run asks again", async () => {
     const profile = await loadProfile();
     const path = journalPath();
     let calls = 0;
-    // GitHub asks for a retry after a second; the caller's retries are spent, so the request is given up.
+    // GitHub asks for a retry after a second; a run whose retries are spent stops at a checkpoint there.
     const limited = (async () => {
       calls += 1;
       return new Response("{}", { status: 429, headers: { "content-type": "application/json", "retry-after": "1" } });
     }) as typeof fetch;
     const journal = openJournal({ mode: "fresh", path });
     const runtime = createPreparationRuntime(profile, { PATH: "/bin" }, capacityFor(profile), limited, journal);
-    await expect(runtime.transport.requestJson(commitRequest(profile, "f") as any)).rejects.toMatchObject({ name: "RetryRequestError" });
+    await expect(runtime.transport.requestJson(commitRequest(profile, "f") as any))
+      .rejects.toMatchObject({ name: "RetryRequestError", rateLimit: { resetAt: expect.any(Number) }, cause: { status: 429 } });
     journal.markDiscoveryComplete();
-    expect(journal.finish()).toEqual({ mode: "fresh", replayed: 0, live: 1 });
+    expect(journal.finish()).toEqual({ mode: "fresh", replayed: 0, live: 0 });
 
     const offline = createPreparationRuntime(profile, { PATH: "/bin" }, capacityFor(profile), refusingFetch, openJournal({ mode: "offline", path }));
-    await expect(offline.transport.requestJson(commitRequest(profile, "f") as any)).rejects.toMatchObject({ code: "UNSUPPORTED_STATUS", status: 429 });
+    await expect(offline.transport.requestJson(commitRequest(profile, "f") as any)).rejects.toMatchObject({ code: "JOURNAL_MISS" });
     const resumed = openJournal({ mode: "resume", path });
     const again = createPreparationRuntime(profile, { PATH: "/bin" }, capacityFor(profile), limited, resumed);
     await expect(again.transport.requestJson(commitRequest(profile, "f") as any)).rejects.toMatchObject({ name: "RetryRequestError" });

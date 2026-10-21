@@ -25,7 +25,8 @@ export const createRunState = (): RunState => ({
 });
 
 export class PreparationError extends Error {
-  public constructor() { super("PREPARATION_FAILED"); this.name = "PreparationError"; }
+  /** `stop` names the run stop that ended a failed run, which sets the command's exit status. */
+  public constructor(public readonly stop?: string) { super("PREPARATION_FAILED"); this.name = "PreparationError"; }
 }
 
 export const REASON_CODE = /^[A-Z][A-Z0-9_]*$/u;
@@ -125,16 +126,30 @@ const spentBudget = (error: unknown): string | undefined => {
   return undefined;
 };
 
-/** Codes that say the offline replay is incomplete, which no candidate can fix. */
-const REPLAY_GAPS = new Set(["JOURNAL_MISS", "OFFLINE_NETWORK_REFUSED"]);
+/**
+ * Codes that stop the run, which no candidate can fix: the offline replay is incomplete (`JOURNAL_MISS`,
+ * `OFFLINE_NETWORK_REFUSED`), GitHub's rate limit is spent until a reset beyond the wait ceiling
+ * (`RATE_LIMIT_CHECKPOINT`, #165), or the operator interrupted the run (`RUN_INTERRUPTED`).
+ */
+export const RUN_STOPS: ReadonlySet<string> = new Set(["JOURNAL_MISS", "OFFLINE_NETWORK_REFUSED", "RATE_LIMIT_CHECKPOINT", "RUN_INTERRUPTED"]);
 
-const replayGap = (error: unknown): Error | undefined => {
+/** The run stop in a failure chain, if any: the error that carries its code. */
+export const runStop = (error: unknown): Error | undefined => {
   let current: unknown = error;
   for (let depth = 0; depth < FAILURE_CAUSE_DEPTH && current instanceof Error; depth += 1) {
-    if (REPLAY_GAPS.has(String((current as { code?: unknown }).code))) return current;
+    if (RUN_STOPS.has(String((current as { code?: unknown }).code))) return current;
     current = (current as { cause?: unknown }).cause;
   }
   return undefined;
+};
+
+const MINUTE_MILLISECONDS = 60_000;
+/** The UTC minute a run stopped at a rate-limit checkpoint may resume: the limit's reset, rounded up to the minute. */
+export const resumeMinute = (stop: Error | undefined): string | undefined => {
+  const resetAt = (stop as { resetAt?: unknown } | undefined)?.resetAt;
+  if (typeof resetAt !== "number" || !Number.isSafeInteger(resetAt)) return undefined;
+  const minute = new Date(Math.ceil(resetAt / MINUTE_MILLISECONDS) * MINUTE_MILLISECONDS);
+  return Number.isNaN(minute.getTime()) ? undefined : `${minute.toISOString().slice(0, 16)}Z`;
 };
 
 const PROGRAMMING_ERRORS = [TypeError, RangeError, ReferenceError] as const;
@@ -147,13 +162,14 @@ const unexplained = (failure: unknown): boolean =>
   failure instanceof PreparationError || PROGRAMMING_ERRORS.some((type) => failure instanceof type) || codeOf(failure) === undefined;
 
 /**
- * Records one rejected candidate. A spent run-wide budget ends this deck and every later one; a response
- * the offline journal lacks ends the run, so a replay can never publish fewer decks than the run it replays;
- * a programming error or a broken invariant ends the run too, since no other candidate can avoid it.
+ * Records one rejected candidate. A spent run-wide budget ends this deck and every later one. A run stop ends the
+ * run, so a replay can never publish fewer decks than the run it replays, and a spent rate limit or an interruption
+ * never shrinks a deck. A programming error or a broken invariant ends the run too, since no other candidate can
+ * avoid it.
  */
 export const rejectCandidate = (state: RunState, stage: DiagnosticStage, error: unknown): void => {
-  const gap = replayGap(error);
-  if (gap !== undefined) throw gap;
+  const stop = runStop(error);
+  if (stop !== undefined) throw stop;
   const budget = spentBudget(error);
   if (budget !== undefined) throw new BudgetExhaustedError(`BUDGET_EXHAUSTED_${budget}`, error);
   const failure = reportedFailure(error);

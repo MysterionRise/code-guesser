@@ -11,6 +11,7 @@ import { admitGitHubCandidates, describeGitHubRepository, screenGitHubRepository
 import { bindGitHubLineage } from "../github-lineage";
 import { crawlGitHubCommitSearch } from "../github-search";
 import { createPreparationRuntime, type PreparationDependencies } from "../index";
+import { openJournal, type JournalMode, type RunJournal } from "../journal";
 import { generateLanguageRounds, validateLanguageCandidate } from "../language-rounds";
 import { generateProjectRounds } from "../project-rounds";
 import { RetryRequestError } from "../retry";
@@ -27,6 +28,12 @@ export type CapturedFailure =
   | "malformed" | "capacity" | "freshness" | "credential"
   | "redirect" | "retry" | "cleanup" | "insufficient";
 
+/**
+ * GitHub's core rate limit for a captured run (#165): core requests past `requests` are refused with a 403 and an
+ * hour to the reset, and every API answer reports `reported` less the core requests spent so far.
+ */
+export type CapturedCoreLimit = Readonly<{ requests: number; reported: number }>;
+
 export interface CapturedDependencyState {
   readonly profile: CrawlProfile;
   readonly captures: CapturedResponses;
@@ -35,6 +42,9 @@ export interface CapturedDependencyState {
   readonly observedAt: string;
   readonly executionId: string;
   readonly failure?: CapturedFailure;
+  /** The run journal's mode and file, when the run keeps one. */
+  readonly journal?: Readonly<{ mode: JournalMode; path: string }>;
+  readonly coreLimit?: CapturedCoreLimit;
   readonly events: string[];
   readonly logs: string[];
   readonly reports: Uint8Array[];
@@ -48,6 +58,7 @@ interface CapturedRuntime {
   readonly hashes: string[];
   transport: BoundedTransport;
   readonly retry: { execute<Value>(operation: () => Promise<Value>): Promise<Value> };
+  readonly journal?: RunJournal;
   beginReplay(): void;
 }
 
@@ -86,17 +97,39 @@ const responseValue = (state: CapturedDependencyState, url: string): unknown => 
   return copy(value);
 };
 
-const capturedFetch = (state: CapturedDependencyState): typeof fetch => async (input, init) => {
-  const url = input.toString();
-  state.requests.push(url);
-  if (state.failure === "redirect" && url === REVISION_URL) {
-    return new Response(null, { status: 302, headers: { location: "https://example.test/escape" } });
-  }
-  const value = responseValue(state, url);
-  const body = typeof value === "string" ? value : JSON.stringify(value);
-  const contentType = typeof value === "string" ? "text/plain; charset=utf-8" : "application/json";
-  if (init?.redirect !== "manual" || init.method !== "GET") throw new Error("CAPTURE_POLICY_REJECTED");
-  return new Response(body, { status: 200, headers: { "content-type": contentType } });
+/** A core GitHub request: an API request other than a search page, which draws on its own limit. */
+export const isCoreRequest = (url: string): boolean =>
+  new URL(url).hostname === "api.github.com" && new URL(url).pathname !== "/search/commits";
+const UNLIMITED: CapturedCoreLimit = Object.freeze({ requests: Number.MAX_SAFE_INTEGER, reported: 5000 });
+
+const capturedFetch = (state: CapturedDependencyState): typeof fetch => {
+  const limit = state.coreLimit ?? UNLIMITED;
+  const now = Math.floor(Date.now() / 1000);
+  let spent = 0;
+  // GitHub reports its rate limit on every API answer: the core limit resets hourly, the search limit each minute.
+  const limitHeaders = (url: string): Record<string, string> => {
+    if (new URL(url).hostname !== "api.github.com") return {};
+    return isCoreRequest(url)
+      ? { "x-ratelimit-resource": "core", "x-ratelimit-remaining": String(Math.max(0, limit.reported - spent)), "x-ratelimit-reset": String(now + 3600) }
+      : { "x-ratelimit-resource": "search", "x-ratelimit-remaining": "29", "x-ratelimit-reset": String(now + 60) };
+  };
+  return async (input, init) => {
+    const url = input.toString();
+    state.requests.push(url);
+    if (state.failure === "redirect" && url === REVISION_URL) {
+      return new Response(null, { status: 302, headers: { location: "https://example.test/escape" } });
+    }
+    if (isCoreRequest(url)) spent += 1;
+    if (isCoreRequest(url) && spent > limit.requests) {
+      return new Response(JSON.stringify({ message: "API rate limit exceeded" }), { status: 403,
+        headers: { "content-type": "application/json", ...limitHeaders(url), "x-ratelimit-remaining": "0" } });
+    }
+    const value = responseValue(state, url);
+    const body = typeof value === "string" ? value : JSON.stringify(value);
+    const contentType = typeof value === "string" ? "text/plain; charset=utf-8" : "application/json";
+    if (init?.redirect !== "manual" || init.method !== "GET") throw new Error("CAPTURE_POLICY_REJECTED");
+    return new Response(body, { status: 200, headers: { "content-type": contentType, ...limitHeaders(url) } });
+  };
 };
 
 const retryTransport = (transport: BoundedTransport): BoundedTransport => Object.freeze({
@@ -129,7 +162,7 @@ const bootstrapLane = (
   createCapacity: (options) => capturedCapacity(state, options),
   createRuntime: ({ capacity }) => {
     const runtime = createPreparationRuntime(state.profile, state.environment, capacity,
-      capturedFetch(state)) as CapturedRuntime;
+      capturedFetch(state), state.journal ? openJournal(state.journal) : undefined) as CapturedRuntime;
     if (state.failure === "retry") runtime.transport = retryTransport(runtime.transport);
     reference.current = runtime;
     return runtime;
@@ -308,6 +341,14 @@ const outputLane = (state: CapturedDependencyState): Pick<PreparationDependencie
   log: (message) => { state.events.push(`log:${message}`); state.logs.push(message); },
 });
 
+/** Writes a journaled run's journal and logs its counts, as the command does. */
+const journalLane = (state: CapturedDependencyState): Pick<PreparationDependencies, "finishRuntime"> => state.journal ? {
+  finishRuntime: (runtime) => {
+    const summary = (runtime as CapturedRuntime).journal?.finish();
+    return summary && `PREPARATION_JOURNAL mode=${summary.mode} replayed=${summary.replayed} live=${summary.live}`;
+  },
+} : {};
+
 export const createCapturedDependencies = (state: CapturedDependencyState): PreparationDependencies => {
   const reference: RuntimeReference = {};
   return Object.freeze({
@@ -317,5 +358,6 @@ export const createCapturedDependencies = (state: CapturedDependencyState): Prep
     ...stackLane(state, reference),
     ...finalizeLane(state, reference),
     ...outputLane(state),
+    ...journalLane(state),
   });
 };

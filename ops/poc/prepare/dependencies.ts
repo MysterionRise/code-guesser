@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { basename, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import type { ProfileVersion } from "../../../packages/artifact/src/index";
 import { readAdvisories, readAdvisoryFix } from "./github-advisories";
 import { bindFixCommit, readDatasetBlob, readDatasetBugs } from "./github-fixes";
 import { generateBeforeAfterRounds } from "./before-after-rounds";
@@ -18,8 +19,8 @@ import { bindGitHubFile, listGitHubDirectory, readGitHubFile } from "./github-fi
 import { bindGitHubLineage, type GitHubLineageCandidate } from "./github-lineage";
 import { crawlGitHubCommitSearch } from "./github-search";
 import { generateLanguageRounds, validateLanguageCandidate } from "./language-rounds";
-import { parseCrawlProfile } from "./profile";
-import { openJournal, type JournalMode } from "./journal";
+import { CrawlProfileError, parseCrawlProfile, PROFILE_VERSION } from "./profile";
+import { clearJournalPath, openJournal, type JournalMode } from "./journal";
 import { generateProjectRounds } from "./project-rounds";
 import { stageRunReport, type StagedRunReport } from "./report-store";
 import { createRunReport } from "./run-report";
@@ -30,12 +31,16 @@ import { revalidateStackCandidate, type SelectedStackBlob } from "./stack-revali
 import type { Environment, PreparationDependencies, StackSelection } from "./types";
 import { journaledWorker } from "./worker-journal";
 
-const PROFILE_URL = new URL("../profiles/local-real-rounds.v6.json", import.meta.url);
+/** A profile in `ops/poc/profiles`, by its version. */
+const profileUrl = (version: ProfileVersion): URL => new URL(`../profiles/${version}.json`, import.meta.url);
 const ARTIFACT_PATH = fileURLToPath(new URL("../../../apps/game/src/demo/generated/local-real-rounds.json", import.meta.url));
 const REPORT_PATH = fileURLToPath(new URL("../stack/tmp/local-experiment-run.json", import.meta.url));
 const PIN_PATH = fileURLToPath(new URL("../../../apps/game/src/demo/local-real-experiment.pin.server.ts", import.meta.url));
 const FAILURE_REPORT_PATH = fileURLToPath(new URL("../stack/tmp/local-experiment-last-failure.json", import.meta.url));
-export const JOURNAL_PATH = fileURLToPath(new URL("../stack/tmp/journal/run.jsonl", import.meta.url));
+const JOURNAL_DIRECTORY = new URL("../stack/tmp/journal/", import.meta.url);
+/** The journal a run reads and writes; `--journal=<name>` names another file in the same directory. */
+export const JOURNAL_FILE = "run.jsonl";
+export const journalPath = (file: string = JOURNAL_FILE): string => fileURLToPath(new URL(file, JOURNAL_DIRECTORY));
 
 const projectEnvironment = (source: Environment, keys: readonly string[]): Environment =>
   Object.freeze(Object.fromEntries(keys.filter((key) => source[key] !== undefined).map((key) => [key, source[key]])));
@@ -60,6 +65,20 @@ const stageReport = async (report: unknown): Promise<StagedRunReport> => {
 };
 
 const workerRunner = (runtime: Runtime) => runtime.journal ? { runWorker: journaledWorker(runtime.journal) } : {};
+
+/**
+ * Runs a worker stage unless the run was interrupted. A worker that fails while the signal fires, as one stopped
+ * by the same Ctrl-C does, reports the interruption instead of its own exit.
+ */
+const interruptible = async <Value>(runtime: Runtime, operation: () => Promise<Value>): Promise<Value> => {
+  runtime.stopIfInterrupted();
+  try {
+    return await operation();
+  } catch (error) {
+    runtime.stopIfInterrupted();
+    throw error;
+  }
+};
 
 /** The game module that pins the artifact hash; the game plays an artifact only when its hash matches. */
 export const pinSource = (hash: string): string => `import "server-only";
@@ -104,18 +123,36 @@ const lineageOf = (candidate: unknown): GitHubLineageCandidate => (candidate as 
 
 export interface DependencyOptions {
   readonly journal: JournalMode;
+  /** `--fresh`: a journal already at the path is set aside instead of refusing the run with `JOURNAL_EXISTS`. */
+  readonly setAside?: boolean;
+  /** `--profile=<version>`: the profile in `ops/poc/profiles` to run, the preparer's own by default. */
+  readonly profile?: ProfileVersion;
+  /** `--journal=<name>`: the journal file in the journal directory, `run.jsonl` by default. */
+  readonly journalFile?: string;
+  /** Fires on SIGINT or SIGTERM, and the run stops as `RUN_INTERRUPTED`. */
+  readonly signal?: AbortSignal;
 }
 
 export const defaultDependencies = (options: DependencyOptions = { journal: "fresh" }): PreparationDependencies => ({
   loadProfile: async () => {
-    const raw = await readFile(PROFILE_URL);
+    const version = options.profile ?? PROFILE_VERSION;
+    const raw = await readFile(profileUrl(version));
     const profile = parseCrawlProfile(JSON.parse(raw.toString("utf8")));
+    // A profile file holds the version it is named for.
+    if (profile.profileVersion !== version) throw new CrawlProfileError();
     return { profile, canonicalProfileBytes: canonicalBytes(profile) };
   },
   environment: () => options.journal === "offline" ? offlineEnvironment(process.env) : projectPreparationEnvironment(process.env),
   createCapacity: createCapacityMeter,
-  createRuntime: ({ profile, environment, capacity }) => createPreparationRuntime(profile, environment, capacity,
-    options.journal === "offline" ? refuseNetwork : fetch, openJournal({ mode: options.journal, path: JOURNAL_PATH })),
+  createRuntime: ({ profile, environment, capacity }) => {
+    const path = journalPath(options.journalFile);
+    if (options.journal === "fresh") {
+      const setAside = clearJournalPath(path, options.setAside ? new Date() : undefined);
+      if (setAside !== undefined) console.info(`PREPARATION_JOURNAL_SET_ASIDE ${basename(setAside)}`);
+    }
+    return createPreparationRuntime(profile, environment, capacity, options.journal === "offline" ? refuseNetwork : fetch,
+      openJournal({ mode: options.journal, path }), options.signal ? { signal: options.signal } : {});
+  },
   preflight: (context) => {
     const runtime = runtimeOf(context);
     const acknowledgedUsableRevision = context.environment.STACK_V2_ACKNOWLEDGED_USABLE_REVISION;
@@ -154,13 +191,13 @@ export const defaultDependencies = (options: DependencyOptions = { journal: "fre
       crawlSnapshotId: options.crawlSnapshotId, candidates: [options.candidate as GitHubLineageCandidate],
       transport: runtime.transport, retry: runtime.retry }))[0]!);
   },
-  collectStackMetadata: (options) => workerStage(() => collectStackMetadata({
+  collectStackMetadata: (options) => workerStage(() => interruptible(runtimeOf(options), () => collectStackMetadata({
     profile: options.profile, capacity: options.capacity, configuration: options.configuration,
     rowLimit: options.profile.capacity.stackRowsPerLanguage, environment: options.environment,
-    blobAccess: async () => undefined, ...workerRunner(runtimeOf(options)) })),
-  fetchStackBlob: (options) => workerStage(() => fetchSelectedBlob({
+    blobAccess: async () => undefined, ...workerRunner(runtimeOf(options)) }))),
+  fetchStackBlob: (options) => workerStage(() => interruptible(runtimeOf(options), () => fetchSelectedBlob({
     row: options.row as StackMetadataRow, limits: options.limits, environment: options.environment, capacity: options.capacity,
-    ...workerRunner(runtimeOf(options)) })),
+    ...workerRunner(runtimeOf(options)) }))),
   revalidateStackCandidate: (options) => {
     const runtime = runtimeOf(options);
     return stage(runtime, () => revalidateStackCandidate({ profile: options.profile, profileHash: options.profileHash,

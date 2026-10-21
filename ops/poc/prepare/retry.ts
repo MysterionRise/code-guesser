@@ -1,13 +1,30 @@
 export class RetryError extends Error {
-  public constructor(public readonly code: string, cause?: unknown) {
+  public constructor(
+    public readonly code: string,
+    cause?: unknown,
+    /** When GitHub's rate limit lifts, in epoch milliseconds, on a `RATE_LIMIT_CHECKPOINT`. */
+    public readonly resetAt?: number,
+  ) {
     super(code, cause === undefined ? undefined : { cause });
     this.name = "RetryError";
   }
 }
 
-/** A request asking to be tried again after a wait; `cause` names a transient failure when there is one. */
+/** GitHub's rate limit behind a retry request: when it lifts, in epoch milliseconds. */
+export interface RateLimitSignal {
+  readonly resetAt: number;
+}
+
+/**
+ * A request asking to be tried again after a wait; `cause` names a transient failure, or the 403 or 429 of a
+ * rate limit, when there is one. `rateLimit` marks a GitHub rate limit, whose refused retry stops the run.
+ */
 export class RetryRequestError extends Error {
-  public constructor(public readonly retryAfterMilliseconds: unknown, cause?: unknown) {
+  public constructor(
+    public readonly retryAfterMilliseconds: unknown,
+    cause?: unknown,
+    public readonly rateLimit?: RateLimitSignal,
+  ) {
     super("RETRY_REQUESTED", cause === undefined ? undefined : { cause });
     this.name = "RetryRequestError";
   }
@@ -62,16 +79,19 @@ export const createRetryController = (options: RetryOptions): RetryController =>
         if (!(error instanceof RetryRequestError)) throw new RetryError("RETRY_SIGNAL_MISSING", error);
         const wait = error.retryAfterMilliseconds;
         // A refused retry keeps the transient failure, if any, as its cause for diagnostics.
-        const { cause } = error;
+        const { cause, rateLimit } = error;
         if (!Number.isSafeInteger(wait) || (wait as number) <= 0) {
           throw new RetryError("RETRY_SIGNAL_MALFORMED", cause);
         }
-        if (logicalRetries >= 1) throw new RetryError("LOGICAL_RETRY_LIMIT", cause);
-        if (runRetries >= options.maxRunRetries) throw new RetryError("RUN_RETRY_LIMIT", cause);
-        if ((wait as number) > options.maxWaitMilliseconds) throw new RetryError("WAIT_LIMIT", cause);
-        if (totalWait + (wait as number) > options.maxTotalWaitMilliseconds) {
-          throw new RetryError("TOTAL_WAIT_LIMIT", cause);
-        }
+        // A refused rate-limit retry stops the run at a checkpoint (#165): until the limit lifts, every later
+        // request would be refused the same way, and counting each as a rejected candidate would shrink the decks.
+        const fail = (code: string): never => {
+          throw rateLimit === undefined ? new RetryError(code, cause) : new RetryError("RATE_LIMIT_CHECKPOINT", cause, rateLimit.resetAt);
+        };
+        if (logicalRetries >= 1) fail("LOGICAL_RETRY_LIMIT");
+        if (runRetries >= options.maxRunRetries) fail("RUN_RETRY_LIMIT");
+        if ((wait as number) > options.maxWaitMilliseconds) fail("WAIT_LIMIT");
+        if (totalWait + (wait as number) > options.maxTotalWaitMilliseconds) fail("TOTAL_WAIT_LIMIT");
         logicalRetries += 1;
         runRetries += 1;
         totalWait += wait as number;

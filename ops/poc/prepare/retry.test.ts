@@ -3,6 +3,8 @@ import { createRetryController, RetryError, RetryRequestError } from "./retry";
 const testModuleName: string = "vitest";
 const { describe, expect, it } = await import(testModuleName) as any;
 
+/** The 403 GitHub answered at its rate limit, as the transport keeps it. */
+const refusal = Object.freeze({ code: "UNSUPPORTED_STATUS", status: 403 });
 const controller = (sleep: (milliseconds: number) => Promise<void> = async () => {}) =>
   createRetryController({
     maxRunRetries: 3,
@@ -77,6 +79,33 @@ describe("bounded retry controller", () => {
     const fresh = controller();
     await expect(fresh.execute(async () => { throw new RetryRequestError(15_001); }))
       .rejects.toMatchObject({ code: "WAIT_LIMIT" });
+  });
+
+  it("stops at a rate-limit checkpoint whenever it refuses a rate-limit retry, keeping the 403 and the reset", async () => {
+    const limited = (wait: number) => new RetryRequestError(wait, refusal, { resetAt: 1_700_000_060_000 });
+    const checkpoint = { name: "RetryError", code: "RATE_LIMIT_CHECKPOINT", cause: refusal, resetAt: 1_700_000_060_000 };
+
+    // The wait ceiling, and the same request limited twice.
+    await expect(controller().execute(async () => { throw limited(15_001); })).rejects.toMatchObject(checkpoint);
+    let attempts = 0;
+    await expect(controller().execute(async () => { attempts += 1; throw limited(1); })).rejects.toMatchObject(checkpoint);
+    expect(attempts).toBe(2);
+
+    // The run's retries, then its total wait, spent by earlier requests that each succeeded on their retry.
+    const retriedOnce = (retry: ReturnType<typeof controller>, wait: number): Promise<void> => {
+      let tried = false;
+      return retry.execute(async () => { if (!tried) { tried = true; throw new RetryRequestError(wait); } });
+    };
+    const spentRetries = controller();
+    for (let request = 0; request < 3; request += 1) await retriedOnce(spentRetries, 1);
+    await expect(spentRetries.execute(async () => { throw limited(1); })).rejects.toMatchObject(checkpoint);
+    const spentWait = controller();
+    for (let request = 0; request < 2; request += 1) await retriedOnce(spentWait, 15_000);
+    await expect(spentWait.execute(async () => { throw limited(1); })).rejects.toMatchObject(checkpoint);
+
+    // A transient failure refused the same ways keeps its own code.
+    await expect(controller().execute(async () => { throw new RetryRequestError(15_001, refusal); }))
+      .rejects.toMatchObject({ code: "WAIT_LIMIT", cause: refusal });
   });
 
   it("rejects missing or malformed retry instructions without sleeping", async () => {
