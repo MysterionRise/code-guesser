@@ -165,6 +165,19 @@ reaches the browser only once it is bought. Without
 random secret, so a restart ends the games in progress: the page then asks
 the player to deal new rounds.
 
+The server remembers each game's latest step, so an older token can't answer
+a round again. With `CODEGUESSR_STATE_DIR` it writes that step through to
+`state.sqlite` in the directory (Node's own `node:sqlite`), so the rule holds
+across a restart, and a game the file doesn't know has ended. Without it, the
+steps live in memory, and after a restart a game continues from whichever of
+its tokens arrives first. Expired games are deleted after six hours.
+
+`GET /api/health` answers `ok`, or 503 with one bare code:
+`ARTIFACT_MISSING`, `ARTIFACT_HASH_MISMATCH`, or `ARTIFACT_SCHEMA` (the
+rounds did not load), `STATE_DIR_UNWRITABLE`, `STATE_STORE_UNAVAILABLE`, or
+`EVENTS_DIR_UNWRITABLE`. It reads nothing from the request and records
+nothing.
+
 ### Public mode
 
 `CODEGUESSR_PUBLIC=1` marks a server for anonymous public play (#100). It
@@ -177,7 +190,7 @@ server exits with status 78.
 | `CODEGUESSR_PUBLIC` | `1` turns public mode on; any value but `1`, `0`, or empty is refused |
 | `CODEGUESSR_SESSION_SECRET` | Required, at least 32 characters. A public server never makes one up |
 | `CODEGUESSR_PUBLIC_ORIGIN` | Required: the https origin players use, such as `https://codeguessr.example`, with no path |
-| `CODEGUESSR_STATE_DIR` | Required: an absolute directory for the server's own state |
+| `CODEGUESSR_STATE_DIR` | Required: an absolute directory for the server's own state, the session ledger's `state.sqlite` |
 | `EXPERIMENT_EVENTS_DIR` | Required: an absolute directory for the event log |
 | `CODEGUESSR_CLIENT_IP_HEADER` | Required: the header the reverse proxy sets to the client's address, such as `X-Forwarded-For`, for rate limits (#98) |
 | `OPENROUTER_API_KEY` | Required when `GENUI_ENABLED=1` |

@@ -151,6 +151,14 @@ gate: changing queries, retries, ceilings, deck rules, or running
   - In public mode `secret()` throws rather than make a secret up, and `labMode()` is off for real games.
     `app/error.tsx` and `app/global-error.tsx` say nothing internal. The `dev` and `start` scripts still bind
     127.0.0.1; only the container (#170) will bind 0.0.0.0.
+- **State store and health (#164, L7):** with `CODEGUESSR_STATE_DIR`, `recordStep` writes each game's step through to
+  `<dir>/state.sqlite` (`server/state-store.server.ts`, on `node:sqlite` via `server/sqlite.server.ts`, loaded with
+  `process.getBuiltinModule` so webpack never sees it; WAL, `busy_timeout`). `readGame` checks memory, then the store,
+  and ends a game the store doesn't know (`SESSION_ENDED`), so a restart can't replay a seen round. Migrations count
+  in `user_version`; add a table (duels, #173) as a new migration. Without the directory, the ledger is memory-only as
+  before. `deriveKey(context)` is HKDF-SHA256 of the session secret, for other features' signing keys.
+  `GET /api/health` (`app/api/health/route.ts`) answers `ok` or 503 with a bare code and records nothing. Events stay
+  JSONL.
 - The answer-lock guard (#102) is the only path from round data to a model:
   - `modelContext` on the experiment reads the sealed game, and
     `apps/game/src/genui/round-context.server.ts` builds the round's context.

@@ -71,13 +71,15 @@ test("browser and gameplay dependency surfaces exclude acquisition capabilities"
     ...filesUnder(join(root, "packages", "artifact", "src")),
   ];
   assertContainsNoFingerprint(participantSources, "participant dependency surface");
-  // Two server endpoints: generative UI's guarded route (#101), off unless enabled and reading round data only
-  // through the answer-lock guard; and the event log's beacon (#107), which reads no round data at all. One boot
-  // hook (#97), which only checks the environment and prints codes.
+  // Three server endpoints: generative UI's guarded route (#101), off unless enabled and reading round data only
+  // through the answer-lock guard; the event log's beacon (#107), which reads no round data at all; and the health
+  // check (#164), which reads neither the request nor round data and records nothing. One boot hook (#97), which
+  // only checks the environment and prints codes.
   const routes = participantSources.filter((path) => /(?:^|\/)(?:route|middleware|instrumentation)\.[cm]?[jt]sx?$/u.test(path));
   assert.deepEqual(routes.map((path) => relative(root, path)), [
     "apps/game/src/app/api/events/route.ts",
     "apps/game/src/app/api/genui/route.ts",
+    "apps/game/src/app/api/health/route.ts",
     "apps/game/src/instrumentation.ts",
   ]);
   const eventsRoute = read(routes[0]);
@@ -86,7 +88,11 @@ test("browser and gameplay dependency surfaces exclude acquisition capabilities"
   const genuiRoute = read(routes[1]);
   assert.match(genuiRoute, /process\.env\.GENUI_ENABLED !== "1"/u);
   assert.match(genuiRoute, /experiment\.modelContext\(/u);
-  const boot = read(routes[2]);
+  const health = read(routes[2]);
+  assert.deepEqual([...health.matchAll(/^export (?:async )?function (\w+)\(([^)]*)\)/gmu)].map(([, name, parameters]) => `${name}(${parameters})`), ["GET()"]);
+  assert.match(health, /if \(!loaded\.ok\) return `ARTIFACT_\$\{loaded\.reason\}`;/u);
+  assert.doesNotMatch(health, /\bloaded\.experiment\b|headers\(|cookies\(|console\.|append|write(?:File)?Sync|recordStep|recordLedgerStep/u);
+  const boot = read(routes[3]);
   assert.deepEqual([...boot.matchAll(/(?:\bfrom|\bimport\s*\()\s*"([^"]+)"/gu)].map(([, specifier]) => specifier), ["./server/environment.server"]);
   assert.doesNotMatch(boot, /^import\b/mu);
   assert.match(boot, /if \(process\.env\.NEXT_RUNTIME === "nodejs"\)/u);
