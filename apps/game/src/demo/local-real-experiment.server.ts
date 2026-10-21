@@ -32,7 +32,7 @@ import { CONTROL, type Arms } from "../experiment/arms";
 import type { EventSink } from "../experiment/event-store.server";
 import { elapsed, emitterFor, recordClientEvent, type ClientEventOutcome, type Emit } from "./local-real-experiment-events.server";
 import { mixedRounds, seededRandom, seriesRounds, shuffle, type DealSeries } from "./local-real-experiment-deal.server";
-import { roundHints, scaffoldOf, type RoundLayers } from "./local-real-experiment-layers.server";
+import { roundHints, scaffoldOf, type PinnedArtifact, type RoundLayers } from "./local-real-experiment-layers.server";
 import { dealFrom, deriveDecks, type DerivedRound, type LocalRealDeck } from "./local-real-experiment-rounds.server";
 import type { RenderLimits } from "../genui/render-catalog";
 import { roundContext, type RoundContext } from "../genui/round-context.server";
@@ -105,8 +105,11 @@ export interface ModelCallOutcome {
 export interface ExperimentOptions {
   /** Where game events go; none records nothing. */
   readonly events?: EventSink | null;
-  /** Question layers by round id (#127); a game shows them when its arms say so. */
-  readonly layers?: RoundLayers;
+  /**
+   * Question layers by round id (#127), read once the artifact matches its pin, from the experiment's one parse and
+   * hash of it (#166); a game shows them when its arms say so.
+   */
+  readonly layers?: (artifact: PinnedArtifact) => RoundLayers;
 }
 
 export type { ClientEventOutcome } from "./local-real-experiment-events.server";
@@ -269,11 +272,12 @@ export const createLocalRealExperiment = (
 ): LocalRealExperiment => {
   const expectedArtifactHash = pinnedHash(artifactInput, trustedArtifactHash);
   const emit = emitterFor(options.events);
-  const layers: RoundLayers = options.layers ?? new Map();
   // Anything an artifact that matches its pin then fails is the schema's.
   try {
     const artifact = record(artifactInput, ARTIFACT_KEYS);
-    const decks = deriveDecks(parseArtifact(artifact), artifact);
+    const parsed = parseArtifact(artifact);
+    const decks = deriveDecks(parsed, artifact);
+    const layers: RoundLayers = options.layers?.({ value: artifact, decks: parsed, hash: expectedArtifactHash }) ?? new Map();
     const privateReveals = deepFreeze(Object.fromEntries(decks.flatMap(({ rounds }) =>
       rounds.map(({ privateReveal }) => [privateReveal.roundId, privateReveal]))));
     if (Object.keys(privateReveals).length !== decks.reduce((total, { rounds }) => total + rounds.length, 0)) fail();

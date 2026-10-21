@@ -99,6 +99,19 @@ export const containsProtected = (haystack: string, needle: string): boolean => 
   return pattern.test(haystack);
 };
 
+const WORD_RUN = /[A-Za-z0-9_]+/gu;
+/**
+ * `containsProtected` for many needles against one haystack (#166), which grows with the deck. A needle matches only
+ * between non-word characters or the haystack's ends, and each word run inside it stands between non-word characters
+ * or the needle's ends, so every word run of a matching needle is a whole word of the haystack. A needle with a run
+ * the haystack lacks is settled by set lookups; the rest, and needles with no run, take the exact check, so every
+ * answer is `containsProtected`'s.
+ */
+export const protectedIndex = (haystack: string): ((needle: string) => boolean) => {
+  const words = new Set(haystack.match(WORD_RUN) ?? []);
+  return (needle) => (needle.match(WORD_RUN) ?? []).every((word) => words.has(word)) && containsProtected(haystack, needle);
+};
+
 const UTC_TIMESTAMP = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{6})?Z$/u;
 /** A UTC timestamp with whole or microsecond seconds whose calendar fields survive a round trip. */
 export const utcTimestamp = (value: unknown): string => {
