@@ -32,8 +32,20 @@ import {
 import { CONTROL, type Arms } from "../experiment/arms";
 import type { EventSink } from "../experiment/event-store.server";
 import { elapsed, emitterFor, recordClientEvent, type ClientEventOutcome, type Emit } from "./local-real-experiment-events.server";
-import { mixedRounds, seededRandom, seriesRounds, shuffle, type DealSeries } from "./local-real-experiment-deal.server";
+import {
+  dailyRandom,
+  dealDigest,
+  mixedRounds,
+  parseDeal,
+  seededRandom,
+  seriesRounds,
+  shuffle,
+  type DealDescriptor,
+  type DealSeries,
+} from "./local-real-experiment-deal.server";
+import { duelAuthority, type DuelAuthority } from "./local-real-experiment-duel.server";
 import { roundHints, scaffoldOf, type PinnedArtifact, type RoundLayers } from "./local-real-experiment-layers.server";
+import { countPlay, playsKey, playsOf } from "./local-real-experiment-plays.server";
 import { dealFrom, deriveDecks, type DerivedRound, type LocalRealDeck } from "./local-real-experiment-rounds.server";
 import type { RenderLimits } from "../genui/render-catalog";
 import { roundContext, type RoundContext } from "../genui/round-context.server";
@@ -54,7 +66,13 @@ export interface LocalRealMix {
   readonly deckCount: number;
 }
 
-export interface LocalRealExperiment {
+/** Today's five on a date (#74), the way a deal names it. */
+export interface DailyDeal {
+  readonly date: string;
+}
+
+/** The experiment, and the duels it deals (#173). */
+export interface LocalRealExperiment extends DuelAuthority {
   readonly kind: "LOCAL_UNREVIEWED_EXPERIMENT";
   readonly artifactHash: string;
   readonly decks: readonly LocalRealDeck[];
@@ -67,9 +85,10 @@ export interface LocalRealExperiment {
   readonly dealSession: (deckId: SessionDeckId, random?: () => number, series?: DealSeries) => PublicModeContract;
   /**
    * A dealt session and the signed token that holds its progress, its arms, and whether it records events. A
-   * `series` deals that game of a seeded deal (#40), the same on every load.
+   * `series` deals that game of a seeded deal (#40), and a date today's five on it (#74), the same on every load;
+   * either is sealed with the game, so it can become a challenge (#173). Without one, `random` deals.
    */
-  readonly dealGame: (deckId: SessionDeckId, random?: () => number, now?: number, seal?: DealSeal, series?: DealSeries) => DealtGame;
+  readonly dealGame: (deckId: SessionDeckId, random?: () => number, now?: number, seal?: DealSeal, deal?: DealSeries | DailyDeal) => DealtGame;
   /** The next hint of the round being played, which lowers what a right answer scores. */
   readonly revealHint: (request: HintRequest, now?: number) => HintResponse;
   /** Locks in one answer for the round being played and reveals it, scored from the server's own state. */
@@ -232,7 +251,7 @@ const revealFor = (
   const roundScore = correct ? publicRound.points[state.hints] ?? fail() : 0;
   const next: GameState = {
     ...state, step: state.step + 1, roundIndex: state.roundIndex + 1, hints: 0, hintsByRound: [...state.hintsByRound, state.hints],
-    correct: state.correct + (correct ? 1 : 0), score: state.score + roundScore, roundStartedAt: now,
+    correct: state.correct + (correct ? 1 : 0), outcomes: [...state.outcomes, correct], score: state.score + roundScore, roundStartedAt: now,
   };
   return {
     next,
@@ -257,6 +276,10 @@ const revealFor = (
     }),
   };
 };
+
+/** How a deal is sealed: a seeded deal's game, today's five on a date, or neither. */
+const descriptorOf = (requested: DealSeries | DailyDeal | undefined): DealDescriptor => parseDeal(requested === undefined ? { kind: "unseeded" }
+  : "date" in requested ? { kind: "daily", date: requested.date } : { kind: "series", seed: requested.seed, game: requested.game }) ?? fail();
 
 /** The pinned hash, when the artifact matches it; a pin that is not a hash, or an artifact that does not match it, is a hash mismatch. */
 const pinnedHash = (artifactInput: unknown, trustedArtifactHash: string): string => {
@@ -287,10 +310,16 @@ export const createLocalRealExperiment = (
     if (Object.keys(privateReveals).length !== decks.reduce((total, { rounds }) => total + rounds.length, 0)) fail();
     const rounds = new Map(decks.flatMap((derived) => derived.rounds.map((round) => [round.publicRound.roundId, round] as const)));
     const deckTitles = new Map(decks.flatMap(({ deck, rounds: deckRounds }) => deckRounds.map(({ publicRound }) => [publicRound.roundId, deck.title] as const)));
-    // A seeded deal's game takes its rounds from the seed's order of the pool, and its option order from the seed too.
-    const deal = (deckId: SessionDeckId, random: () => number, series?: DealSeries) => {
+    // Each layer's hash, which a game that shows layers puts in its digest (#173).
+    const layerHashes = new Map([...layers].map(([roundId, layer]) => [roundId, canonicalHash(layer)] as const));
+    // A seeded deal's game takes its rounds from the seed's order of the pool, and its option order from the seed too;
+    // today's five takes both from its date.
+    const deal = (deckId: SessionDeckId, random: () => number, descriptor: DealDescriptor) => {
+      const series = descriptor.kind === "series" ? { seed: descriptor.seed, game: descriptor.game } : undefined;
+      if (descriptor.kind === "daily" && deckId !== DAILY_DECK) fail();
       if (deckId === MIXED_DECK || deckId === DAILY_DECK) {
-        const draw = series ? seededRandom({ ...series, deck: deckId }) : random;
+        const draw = series ? seededRandom({ ...series, deck: deckId })
+          : descriptor.kind === "daily" ? dailyRandom(expectedArtifactHash, descriptor.date) : random;
         return { mode: decks.length < ROUNDS_PER_SESSION ? fail() : dealFrom(deckId, mixedRounds(decks, draw), artifact, draw), wrapped: false };
       }
       const derived = decks.find(({ deck }) => deck.id === deckId) ?? fail();
@@ -298,38 +327,48 @@ export const createLocalRealExperiment = (
       const { rounds: order, wrapped } = seriesRounds(derived.rounds, series.seed, deckId, series.game);
       return { mode: dealFrom(deckId, order, artifact, seededRandom({ ...series, deck: deckId, options: true })), wrapped };
     };
-    const dealSession = (deckId: SessionDeckId, random: () => number = Math.random, series?: DealSeries) => deal(deckId, random, series).mode;
+    const dealSession = (deckId: SessionDeckId, random: () => number = Math.random, series?: DealSeries) =>
+      deal(deckId, random, descriptorOf(series)).mode;
     // Each round scores up to its own top points, so a mixed game's best is the sum of its rounds'.
-    const maximumOf = (state: GameState): number =>
-      state.roundIds.reduce((total, roundId) => total + (rounds.get(roundId) ?? fail()).publicRound.points[0], 0);
+    const maximumOf = (roundIds: readonly string[]): number =>
+      roundIds.reduce((total, roundId) => total + (rounds.get(roundId) ?? fail()).publicRound.points[0], 0);
+    const digestOf = (mode: PublicModeContract, arms: Arms): string =>
+      dealDigest(mode, arms.layer === "on" ? mode.rounds.map(({ roundId }) => layerHashes.get(roundId) ?? null) : null);
+    // Seals a dealt game. One that shows question layers carries each layered round's scaffold with the round (#128).
+    const start = (deckId: SessionDeckId, { mode: dealt, wrapped }: Readonly<{ mode: PublicModeContract; wrapped: boolean }>, now: number,
+      seal: DealSeal, descriptor: DealDescriptor): DealtGame => {
+      const mode = seal.arms.layer !== "on" || !dealt.rounds.some(({ roundId }) => layers.has(roundId)) ? dealt
+        : createPublicModeContract({ sessionContractVersionId: dealt.sessionContractVersionId, rounds: dealt.rounds.map((round) => {
+          const layer = layers.get(round.roundId);
+          return { ...round, content: { ...round.content, panes: [...round.content.panes] },
+            mode: { ...round.mode, candidates: [...round.mode.candidates], clues: [...round.mode.clues] },
+            points: [...round.points] as [number, number, number], ...(layer ? { scaffold: scaffoldOf(layer) } : {}) };
+        }) });
+      const state: GameState = {
+        version: 3, gameId: newGameId(), artifactHash: expectedArtifactHash, deck: deckId,
+        roundIds: mode.rounds.map(({ roundId }) => roundId), step: 0, roundIndex: 0, hints: 0, hintsByRound: [], correct: 0, outcomes: [],
+        score: 0, dealtAt: now, roundStartedAt: now, arms: seal.arms, record: seal.record, deal: descriptor, dealDigest: digestOf(mode, seal.arms),
+        priorPlays: playsOf(playsKey({ artifactHash: expectedArtifactHash, deck: deckId, deal: descriptor })),
+      };
+      const sessionToken = sealGame(state);
+      recordStep(state, now);
+      emit(state, "game_dealt", {}, now);
+      return Object.freeze({ mode, sessionToken, arms: state.arms, wrapped });
+    };
+    const mixed = decks.length < ROUNDS_PER_SESSION ? null
+      : Object.freeze({ title: "Mixed", description: "Five rounds, each from a different deck.", deckCount: decks.length });
+    const listed = Object.freeze(decks.map(({ deck }) => deck));
     return Object.freeze({
       kind: "LOCAL_UNREVIEWED_EXPERIMENT",
       artifactHash: expectedArtifactHash,
-      decks: Object.freeze(decks.map(({ deck }) => deck)),
-      mixed: decks.length < ROUNDS_PER_SESSION ? null
-        : Object.freeze({ title: "Mixed", description: "Five rounds, each from a different deck.", deckCount: decks.length }),
+      decks: listed,
+      mixed,
       privateReveals,
       dealSession,
       dealGame: (deckId: SessionDeckId, random: () => number = Math.random, now = Date.now(), seal: DealSeal = { arms: CONTROL, record: true },
-        series?: DealSeries) => {
-        const { mode: dealt, wrapped } = deal(deckId, random, series);
-        // A game that shows question layers carries each layered round's scaffold with the round (#128).
-        const mode = seal.arms.layer !== "on" || !dealt.rounds.some(({ roundId }) => layers.has(roundId)) ? dealt
-          : createPublicModeContract({ sessionContractVersionId: dealt.sessionContractVersionId, rounds: dealt.rounds.map((round) => {
-            const layer = layers.get(round.roundId);
-            return { ...round, content: { ...round.content, panes: [...round.content.panes] },
-              mode: { ...round.mode, candidates: [...round.mode.candidates], clues: [...round.mode.clues] },
-              points: [...round.points] as [number, number, number], ...(layer ? { scaffold: scaffoldOf(layer) } : {}) };
-          }) });
-        const state: GameState = {
-          version: 2, gameId: newGameId(), artifactHash: expectedArtifactHash, deck: deckId,
-          roundIds: mode.rounds.map(({ roundId }) => roundId), step: 0, roundIndex: 0, hints: 0, hintsByRound: [], correct: 0, score: 0,
-          dealtAt: now, roundStartedAt: now, arms: seal.arms, record: seal.record,
-        };
-        const sessionToken = sealGame(state);
-        recordStep(state, now);
-        emit(state, "game_dealt", {}, now);
-        return Object.freeze({ mode, sessionToken, arms: state.arms, wrapped });
+        requested?: DealSeries | DailyDeal) => {
+        const descriptor = descriptorOf(requested);
+        return start(deckId, deal(deckId, random, descriptor), now, seal, descriptor);
       },
       revealHint: (value: HintRequest, now = Date.now()): HintResponse => {
         const request = strings(value, ["sessionToken", "roundId"]);
@@ -354,9 +393,10 @@ export const createLocalRealExperiment = (
         const outcome = transact(request.sessionToken!, expectedArtifactHash, now, (state) => {
           before = state;
           const revealed = revealFor(currentRound(rounds, state, request.roundId!), state, request.candidateId!, expectedArtifactHash, now,
-            maximumOf(state));
-          after = revealed.next;
-          return revealed;
+            maximumOf(state.roundIds));
+          // A game counts as a play of its deal or challenge at its first reveal, never at a deal nobody played (#173).
+          after = state.roundIndex === 0 ? { ...revealed.next, priorPlays: countPlay(state, now) } : revealed.next;
+          return { next: after, result: revealed.result };
         });
         if (!outcome.ok) return outcome;
         emit(after!, "round_revealed", { round: after!.roundIndex, correct: outcome.result.correct, hints: before!.hints,
@@ -383,6 +423,8 @@ export const createLocalRealExperiment = (
         return contextFor(round, deckTitles.get(request.roundId!)!, state, index, emit, layers);
       },
       recordClientEvent: (value: unknown, now = Date.now()): ClientEventOutcome => recordClientEvent(value, expectedArtifactHash, now, emit),
+      ...duelAuthority({ artifactHash: expectedArtifactHash, decks: listed, mixed, rounds, start, digestOf, maximumOf,
+        deal: (deckId, descriptor) => deal(deckId, Math.random, descriptor) }),
     });
   } catch {
     return fail("SCHEMA");

@@ -42,7 +42,7 @@ vi.mock("next/headers", () => ({ headers: async () => requestHeaders }));
 
 const { SHARED_KEY, clientKey, clientNetwork } = await import("../src/server/client-key.server");
 const { BUCKET_CAPACITY, GENUI_CAPS, SURFACES, capped, limited, rateLimitScale, retryAfter, tooMany } = await import("../src/server/rate-limit.server");
-const { authorizeLocalExperimentReveal, revealLocalExperimentHint } = await import("../src/app/actions");
+const { authorizeLocalExperimentReveal, createDuelChallenge, issueDuelResult, revealLocalExperimentHint } = await import("../src/app/actions");
 const { POST: beacon } = await import("../src/app/api/events/route");
 const { POST: genui } = await import("../src/app/api/genui/route");
 const { RATE_LIMITED_MESSAGE } = await import("../src/components/arcade/index");
@@ -255,16 +255,17 @@ describe("where the limits are wired (#98)", () => {
   it("tells a player past the deal limit to wait, and deals nothing", async () => {
     limitsOn();
     from("203.0.113.10");
-    // A deck's address redirects to a fresh seed's game, and that spends a deal too.
+    // A deck's address redirects to a fresh seed's game and spends nothing; each game dealt spends one deal.
     await expect(render({ deck: "fix" })).rejects.toThrow("NEXT_REDIRECT");
     const dealtBefore = stored.filter(({ type }) => type === "game_dealt").length;
-    for (let game = 1; game < SURFACES.deal.burst; game += 1) expect(await render({ deck: "fix", deal: "0badcafe", game: String(game) })).toContain("Round");
-    expect(stored.filter(({ type }) => type === "game_dealt").length).toBe(dealtBefore + SURFACES.deal.burst - 1);
+    for (let game = 0; game < SURFACES.deal.burst; game += 1) expect(await render({ deck: "fix", deal: "0badcafe", game: String(game) })).toContain("Round");
+    expect(stored.filter(({ type }) => type === "game_dealt").length).toBe(dealtBefore + SURFACES.deal.burst);
     const refused = await render({ deck: "fix", deal: "0badcafe", game: "10" });
     expect(refused).toContain("Too many new games — wait a minute");
     expect(refused).toContain('href="/?deck=fix&amp;deal=0badcafe&amp;game=10"');
-    expect(await render({ deck: "fix" })).toContain("Too many new games");
-    expect(stored.filter(({ type }) => type === "game_dealt").length).toBe(dealtBefore + SURFACES.deal.burst - 1);
+    // Past the limit a deck's address still redirects; the game it leads to is the one refused.
+    await expect(render({ deck: "fix" })).rejects.toThrow("NEXT_REDIRECT");
+    expect(stored.filter(({ type }) => type === "game_dealt").length).toBe(dealtBefore + SURFACES.deal.burst);
     // Another client, and the deck chooser, are untouched.
     from("203.0.113.11");
     expect(await render({ deck: "fix", deal: "0badcafe", game: "0" })).not.toContain("Too many new games");
@@ -287,6 +288,22 @@ describe("where the limits are wired (#98)", () => {
     const shell = readFileSync(new URL("../src/components/arcade/arcade-shell.tsx", import.meta.url), "utf8");
     expect(shell.match(/response\.reason === "RATE_LIMITED" \? RATE_LIMITED_MESSAGE/gu)).toHaveLength(2);
     expect(RATE_LIMITED_MESSAGE).toMatch(/^That was too many requests at once\./u);
+  });
+
+  it("refuses duel links past their limits: making one spends a duel create, opening one a duel open (#173)", async () => {
+    limitsOn();
+    from("203.0.113.25");
+    for (let request = 0; request < SURFACES.duel_create.burst; request += 1) {
+      expect((await (request % 2 === 0 ? createDuelChallenge("forged.token") : issueDuelResult({ sessionToken: "forged.token", challengeToken: "x" }))).ok)
+        .toBe(false);
+    }
+    expect(await createDuelChallenge("forged.token")).toEqual({ ok: false, reason: "RATE_LIMITED" });
+    expect(await issueDuelResult({ sessionToken: "forged.token", challengeToken: "x" })).toEqual({ ok: false, reason: "RATE_LIMITED" });
+    for (let request = 0; request < SURFACES.duel_open.burst; request += 1) expect(await render({ duel: "forged" })).toContain("isn’t valid");
+    expect(await render({ duel: "forged" })).toContain("Too many duel links at once");
+    expect(await render({ "duel-result": "forged" })).toContain("Too many duel links at once");
+    const game = readFileSync(new URL("../src/components/duel/duel-game.tsx", import.meta.url), "utf8");
+    expect(game.match(/response\.reason === "RATE_LIMITED" \? RATE_LIMITED_MESSAGE/gu)).toHaveLength(2);
   });
 
   it("refuses beacons past the limit before reading them", async () => {

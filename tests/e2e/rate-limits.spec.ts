@@ -81,18 +81,18 @@ test("an explainer past its game's limit falls back to the static reveal, and th
 
 test("a player past the deal limit is told to wait, with no game dealt, while other players still play", async ({ page, request }) => {
   const client = { "X-Forwarded-For": clientAddress() };
-  // A deck's address spends a deal on its redirect to a fresh seed; spend the burst that way, then a little more.
+  // Each game dealt spends a deal (the redirect to a fresh seed spends nothing). The drain deals under `Sec-GPC: 1`, so
+  // its games record no events in the shared store; spend the burst that way, then a little more.
+  const drain = async (game: number) =>
+    (await (await request.get(`/?deck=fix&deal=0badcafe&game=${game}`, { headers: { ...client, "Sec-GPC": "1" } })).text())
+      .includes("Too many new games");
   let dealt = 0;
-  for (; dealt <= 4 * DEAL_BURST * E2E_RATE_LIMITS; dealt += 1) {
-    const response = await request.get("/?deck=fix", { headers: client, maxRedirects: 0 });
-    if (response.status() === 200) break;
-    expect(response.status()).toBe(307);
-  }
+  for (; dealt <= 4 * DEAL_BURST * E2E_RATE_LIMITS; dealt += 1) if (await drain(dealt)) break;
   expect(dealt).toBeGreaterThanOrEqual(DEAL_BURST * E2E_RATE_LIMITS);
   await page.setExtraHTTPHeaders(client);
   // The bucket refills while the browser loads, so it is drained again just before each try.
   await expect(async () => {
-    await Promise.all(Array.from({ length: 20 }, () => request.get("/?deck=fix", { headers: client, maxRedirects: 0 })));
+    await Promise.all(Array.from({ length: 20 }, (_, index) => drain(900 + index)));
     await page.goto("/?deck=fix&deal=0badcafe&game=0");
     await expect(page.getByRole("heading", { name: "Too many new games — wait a minute" })).toBeVisible({ timeout: 1_000 });
   }).toPass({ timeout: 60_000 });

@@ -4,18 +4,16 @@ import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
-import { authorizeLocalExperimentReveal, revealLocalExperimentHint } from "./actions";
+import { authorizeLocalExperimentReveal, createDuelChallenge, revealLocalExperimentHint } from "./actions";
 import { ArtifactUnavailable } from "../demo/artifact-unavailable";
 import { DemoArcade } from "../demo/demo-arcade";
 import { DAILY_DESCRIPTION, DAILY_TITLE, gameSources, type GameSource } from "../demo/game-sources.server";
-import {
-  LOCAL_REAL_EXPERIMENT_NOTICE_BODY,
-  LOCAL_REAL_EXPERIMENT_NOTICE_LEAD,
-  activeLocalRealExperiment,
-} from "../demo/local-real-experiment-loader.server";
-import { DEAL_SEED, MAXIMUM_GAME, dailyRandom, localDate, type DealSeries } from "../demo/local-real-experiment-deal.server";
+import { activeLocalRealExperiment } from "../demo/local-real-experiment-loader.server";
+import { DEAL_SEED, MAXIMUM_GAME, localDate, type DealSeries } from "../demo/local-real-experiment-deal.server";
 import type { LocalRealDeck, LocalRealMix } from "../demo/local-real-experiment.server";
 import { DAILY_DECK, MIXED_DECK, type SessionDeckId } from "../demo/local-real-experiment-domain.server";
+import { PageFrame } from "../demo/page-frame";
+import { DuelPage, duelMetadata, duelRequest } from "../duel/duel-page";
 import { CONTROL, FACTORS, assignArms, labMode, labOverrides, parseDisabled, type Arms, type Level } from "../experiment/arms";
 import { DESIGN_LABELS, READY_DESIGNS, type Design } from "../genui/designs";
 import { clientKey } from "../server/client-key.server";
@@ -49,12 +47,17 @@ const requestedSource = (requested: string | string[] | undefined): GameSource |
 
 /**
  * A deck's title, description, and link preview (#171), from what its deck publishes and never from a round; the
- * chooser keeps the layout's. The preview is an image of the deck's title (`app/og/[deck]/route.tsx`).
+ * chooser keeps the layout's. The preview is an image of the deck's title (`app/og/[deck]/route.tsx`). A duel's page
+ * is never indexed (#173).
  */
 export async function generateMetadata({ searchParams }: PageProps): Promise<Metadata> {
-  const source = requestedSource((await searchParams).deck);
+  const query = await searchParams;
   const origin = publicOrigin(await headers());
   const base: Metadata = origin === null ? {} : { metadataBase: new URL(origin) };
+  const loaded = activeLocalRealExperiment();
+  const duel = duelRequest(query);
+  if (loaded.ok && duel !== null) return { ...base, ...duelMetadata(duel, loaded.experiment) };
+  const source = requestedSource(query.deck);
   if (source === undefined) return base;
   const title = `${source.title} · CodeGuessr`;
   return {
@@ -202,9 +205,11 @@ function DealtSession({ deck, series, arms, record, overrides, origin }: {
 }) {
   const loaded = activeLocalRealExperiment();
   if (!loaded.ok) return null;
-  // Today's five deals from the local date, so a reload or a new game that day deals the same five (#74).
-  const random = deck.id === DAILY_DECK ? dailyRandom(loaded.experiment.artifactHash, localDate(new Date())) : Math.random;
-  const { mode, sessionToken, wrapped } = loaded.experiment.dealGame(deck.id, random, Date.now(), { arms, record }, series);
+  // Today's five deals from the local date, so a reload or a new game that day deals the same five (#74). The game
+  // seals its date, as a seeded deal's game seals its seed, so it can become a challenge (#173).
+  const now = Date.now();
+  const deal = deck.id === DAILY_DECK ? { date: localDate(new Date(now)) } : series;
+  const { mode, sessionToken, wrapped } = loaded.experiment.dealGame(deck.id, Math.random, now, { arms, record }, deal);
   // The next game of a seeded deal shares no round with this one until the pool is spent; today's five moves to a mix.
   const next = series ? gameHref(deck.id, { ...series, game: Math.min(series.game + 1, MAXIMUM_GAME) }) : `/?deck=${MIXED_DECK}`;
   // A mixed game names each round's deck; a deck's own game needs no reminder.
@@ -213,12 +218,14 @@ function DealtSession({ deck, series, arms, record, overrides, origin }: {
   // A shared link deals a friend this very game (#171), so it carries the deal and never a tester's lab picks. Today's
   // five links to its plain address until that carries the date (#172).
   const share = origin === null ? {} : { shareHref: `${origin}${gameHref(deck.id, series)}` };
+  // A finished game can also challenge a friend (#173), with a link of its own.
+  const challenge = origin === null ? {} : { duel: { role: "challenger", origin, createChallenge: createDuelChallenge } as const };
   return (
     <>
       {wrapped && <p className="deal-note">You’ve now seen every round in this deck, so this game starts it over.</p>}
       <DemoArcade key={sessionToken} mode={mode} sessionToken={sessionToken} deckTitle={deck.title} {...(roundDecks ? { roundDecks } : {})}
         authorizeRevealAction={authorizeLocalExperimentReveal} revealHintAction={revealLocalExperimentHint}
-        chooseAnotherDeckHref="/" newGameHref={`${next}${labQuery(overrides)}`} {...share}
+        chooseAnotherDeckHref="/" newGameHref={`${next}${labQuery(overrides)}`} {...share} {...challenge}
         {...(arms.design === "off" ? {} : { genuiDesign: arms.design })} />
     </>
   );
@@ -235,26 +242,30 @@ export default async function Page({ searchParams }: PageProps) {
   const arms = assignArms({ genuiEnabled, disabled: parseDisabled(process.env.EXPERIMENT_DISABLED), overrides });
   const requestHeaders = await headers();
   const record = requestHeaders.get("sec-gpc") !== "1";
+  // A duel's link (#173) shows its own page: a challenge's intro, the friend's game of it, or a result.
+  const duel = duelRequest(query);
+  if (loaded.ok && duel !== null) {
+    // Playing a challenge deals a game, so it spends a deal; opening an intro or a result spends a duel open (#98).
+    const rateLimited = limited(duel.kind === "play" ? "deal" : "duel_open", clientKey(requestHeaders));
+    return <DuelPage request={duel} experiment={loaded.experiment} record={record} origin={publicOrigin(requestHeaders)} labTheme={overrides.theme}
+      rateLimited={rateLimited} />;
+  }
   const series = seriesOf(query);
   const source = requestedSource(requested);
   // Today's five names its date, so its share line carries it.
   const deck = source?.id === DAILY_DECK ? { ...source, title: `${source.title}, ${localDate(new Date())}` } : source;
-  // A deck's address deals a game or redirects to one, and either spends the player's deal allowance (#98); past it the
-  // page says so, before any deal, redirect, or event.
-  const dealLimited = deck !== undefined && limited("deal", clientKey(requestHeaders));
+  // A deck's game spends the player's deal allowance (#98); the redirect to a fresh deal's first game spends nothing, so
+  // a game from the chooser costs one deal, as "Deal new rounds" does. Past it the page says so, before any deal or event.
+  const dealLimited = deck !== undefined && (deck.id === DAILY_DECK || series !== undefined) && limited("deal", clientKey(requestHeaders));
   // A deck's game is a game of a seeded deal (#40): an address without one starts a fresh deal at its first game, so a
   // reload shows the same game and "Deal new rounds" the next. Today's five is seeded by its date instead.
-  if (deck && !dealLimited && deck.id !== DAILY_DECK && series === undefined) {
+  if (deck && deck.id !== DAILY_DECK && series === undefined) {
     redirect(`${gameHref(deck.id, { seed: randomBytes(4).toString("hex"), game: 0 })}${labQuery(overrides)}`);
   }
   // A game shows the theme it drew (#125); the chooser, outside any game, keeps the original unless a tester picks one.
   const theme = deck && !dealLimited ? arms.theme : overrides.theme ?? CONTROL.theme;
   return (
-    <div className="demo-page" data-theme={theme}>
-      <p className="demo-notice">
-        <strong>{LOCAL_REAL_EXPERIMENT_NOTICE_LEAD}</strong> {LOCAL_REAL_EXPERIMENT_NOTICE_BODY}
-      </p>
-      <noscript><p className="demo-notice">CodeGuessr needs JavaScript to accept answers and reveal progressive evidence.</p></noscript>
+    <PageFrame theme={theme}>
       {!loaded.ok
         ? <ArtifactUnavailable reason={loaded.reason} />
         : deck
@@ -273,6 +284,6 @@ export default async function Page({ searchParams }: PageProps) {
             </>
           )
           : <DeckChooser decks={loaded.experiment.decks} mixed={loaded.experiment.mixed} query={labQuery(overrides)} />}
-    </div>
+    </PageFrame>
   );
 }

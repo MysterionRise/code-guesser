@@ -4,6 +4,7 @@ import dynamic from "next/dynamic";
 
 import type { HintRequest, HintResponse, RevealRequest, RevealResponse } from "../components/arcade";
 import type { PublicModeContract } from "../components/arcade/mode-contract";
+import type { GameDuel } from "../components/duel/duel-contract";
 import type { Design } from "../genui/designs";
 
 const ArcadeShell = dynamic(
@@ -22,6 +23,7 @@ interface DemoArcadeProps {
   readonly deckTitle?: string;
   readonly roundDecks?: Readonly<Record<string, string>>;
   readonly genuiDesign?: Design;
+  readonly duel?: GameDuel;
 }
 
 export function DemoArcade(props: DemoArcadeProps) {

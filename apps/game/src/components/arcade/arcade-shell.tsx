@@ -5,6 +5,10 @@ import { sendEvent } from "../../experiment/beacon";
 import { viewportBucket, type ClientEvent, type GenuiEvent } from "../../experiment/events";
 import type { Design } from "../../genui/designs";
 import type { HostChatProps } from "../../genui/host-chat";
+import type { GameDuel } from "../duel/duel-contract";
+import { OpponentStrip } from "../duel/duel-game";
+import { useFragmentNames } from "../duel/duel-names";
+import { DEFAULT_NAME } from "../duel/duel-text";
 import { AnswerOptions } from "./answer-options";
 import {
   createArcadeSession,
@@ -44,10 +48,14 @@ interface ArcadeShellProps {
   roundDecks?: Readonly<Record<string, string>>;
   /** When set, a revealed round offers this generative design (#101, #114); the server decides with `GENUI_ENABLED`. */
   genuiDesign?: Design;
+  /** When set, a finished game can challenge a friend, or this game answers a friend's challenge (#173). */
+  duel?: GameDuel;
 }
 
-export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealHintAction, chooseAnotherDeckHref, newGameHref, shareHref, deckTitle, roundDecks, genuiDesign }: ArcadeShellProps) {
+export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealHintAction, chooseAnotherDeckHref, newGameHref, shareHref, deckTitle, roundDecks, genuiDesign, duel }: ArcadeShellProps) {
   const [session, setSession] = React.useState(() => createArcadeSession(mode));
+  // A challenge link names its challenger in its fragment, which only the browser reads (#173).
+  const opponentName = useFragmentNames().from;
   const token = React.useRef(sessionToken);
   const currentToken = React.useCallback(() => token.current, []);
   const hintPending = React.useRef(false);
@@ -198,6 +206,9 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
       <ArcadeHeader score={session.score}>
         <RoundTrack rounds={mode.rounds} roundIndex={session.roundIndex} outcomes={session.outcomes} />
       </ArcadeHeader>
+      {duel?.role === "challenged" && (
+        <OpponentStrip name={opponentName ?? DEFAULT_NAME} rounds={duel.challenge.challenger.rounds} answered={session.completedRounds} />
+      )}
 
       <section className="game-card" aria-labelledby="round-title" data-round-id={round.roundId}>
         <p className="eyebrow">Round {session.roundIndex + 1} of {mode.rounds.length}
@@ -241,7 +252,7 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
             <RoundReveal round={round} reveal={session.reveal} hintsUsed={session.visibleHintCount}
               pickLabel={labelOf(session.lockedCandidateId)} complete={session.status === "complete"}
               correctRounds={session.correctRounds} history={session.history} deckTitle={deckTitle} shareHref={shareHref} newGameHref={newGameHref}
-              chooseAnotherDeckHref={chooseAnotherDeckHref} genuiDesign={genuiDesign} sessionToken={currentToken}
+              chooseAnotherDeckHref={chooseAnotherDeckHref} genuiDesign={genuiDesign} duel={duel} opponentName={opponentName} sessionToken={currentToken}
               onNext={next} headingRef={revealHeading} track={track} trackGenui={trackGenui} />
           )}
         </div>
