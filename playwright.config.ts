@@ -64,7 +64,7 @@ export default defineConfig({
     },
     {
       name: "arcade",
-      testMatch: /(?:arcade-shell|accessibility-local|genui|events|themes|layers|share)\.spec\.ts/,
+      testMatch: /(?:arcade-shell|accessibility-local|genui|events|themes|layers|share|duel)\.spec\.ts/,
       use: { baseURL },
     },
   ],

@@ -14,7 +14,11 @@ export interface StateStore {
   ledgerStep(gameId: string): number | undefined;
   /** Records a game's latest step until it expires; a recorded step never moves back. */
   recordLedgerStep(gameId: string, step: number, expiresAt: number, now: number): void;
-  /** Deletes every row past its expiry, and returns how many. */
+  /** How many games of a deal or challenge revealed a round (#173), or undefined when the store holds none. */
+  plays(key: string): number | undefined;
+  /** Records a deal's or challenge's play count; a recorded count never moves back. */
+  recordPlays(key: string, count: number, now: number): void;
+  /** Deletes every row past its expiry and the oldest play counts past `PLAYS_CAPACITY`, and returns how many. */
   prune(now: number): number;
   close(): void;
 }
@@ -22,14 +26,18 @@ export interface StateStore {
 export const STATE_FILE = "state.sqlite";
 /** Expired rows are deleted when the store opens, then at most this often as steps are recorded. */
 export const PRUNE_INTERVAL_MS = 10 * 60 * 1000;
+/** Deals and challenges whose plays are counted (#173); past this, the counts touched longest ago go first. */
+export const PLAYS_CAPACITY = 50_000;
 
 /**
  * The schema, one migration at a time: each runs once, in order, and is never edited once shipped, and
- * `user_version` counts those applied. A later feature, such as the duel plays (#173), adds its tables as a new one.
+ * `user_version` counts those applied. A later feature adds its tables as a new one, as the duel plays did (#173).
  */
 export const MIGRATIONS: readonly string[] = Object.freeze([
   `CREATE TABLE ledger (game_id TEXT PRIMARY KEY, step INTEGER NOT NULL, expires_at INTEGER NOT NULL) STRICT;
    CREATE INDEX ledger_expiry ON ledger (expires_at);`,
+  `CREATE TABLE plays (key TEXT PRIMARY KEY, count INTEGER NOT NULL, touched_at INTEGER NOT NULL) STRICT;
+   CREATE INDEX plays_age ON plays (touched_at);`,
 ]);
 
 /** Applies the migrations this file has not had yet, in one transaction; a file from a newer build is refused. */
@@ -61,16 +69,25 @@ export const openStateStore = (directory: string, now = Date.now()): StateStore 
   const upsert = database.prepare(`INSERT INTO ledger (game_id, step, expires_at) VALUES (?, ?, ?)
     ON CONFLICT (game_id) DO UPDATE SET step = excluded.step, expires_at = excluded.expires_at WHERE excluded.step > ledger.step`);
   const expired = database.prepare("DELETE FROM ledger WHERE expires_at < ?");
+  const playCount = database.prepare("SELECT count FROM plays WHERE key = ?");
+  const upsertPlays = database.prepare(`INSERT INTO plays (key, count, touched_at) VALUES (?, ?, ?)
+    ON CONFLICT (key) DO UPDATE SET count = excluded.count, touched_at = excluded.touched_at WHERE excluded.count > plays.count`);
+  const oldestPlays = database.prepare("DELETE FROM plays WHERE key IN (SELECT key FROM plays ORDER BY touched_at DESC, key LIMIT -1 OFFSET ?)");
   let prunedAt = now;
   const prune = (at: number): number => {
     prunedAt = at;
-    return Number(expired.run(at).changes);
+    return Number(expired.run(at).changes) + Number(oldestPlays.run(PLAYS_CAPACITY).changes);
   };
   prune(now);
   return Object.freeze({
     ledgerStep: (gameId: string) => (select.get(gameId) as { step: number } | undefined)?.step,
     recordLedgerStep: (gameId: string, step: number, expiresAt: number, at: number) => {
       upsert.run(gameId, step, expiresAt);
+      if (at - prunedAt >= PRUNE_INTERVAL_MS) prune(at);
+    },
+    plays: (key: string) => (playCount.get(key) as { count: number } | undefined)?.count,
+    recordPlays: (key: string, count: number, at: number) => {
+      upsertPlays.run(key, count, at);
       if (at - prunedAt >= PRUNE_INTERVAL_MS) prune(at);
     },
     prune,

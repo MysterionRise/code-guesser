@@ -199,6 +199,49 @@ A shared link and a link preview name the address the request came to.
 Behind a proxy or on a public host, set `CODEGUESSR_PUBLIC_ORIGIN` (such as
 `https://codeguessr.example`) so they name that instead.
 
+### Duels
+
+"Challenge a friend", under any finished game of a deck, the mix, or today's
+five, makes a challenge link such as `/?duel=<token>#from=Ana`. It opens on
+an intro: who challenges, the deck, and the total to beat (`4/5 right ·
+3,800 of 5,000`). The intro deals nothing, so a link preview never starts a
+game. "Play the same five" deals the friend the challenger's very game: the
+same rounds, option order, theme, and question layer. The server deals it
+again and checks it against the challenge first.
+
+During the game, a strip shows each of the challenger's rounds only once the
+friend has locked that round, and the reveal says how the challenger did on
+it. This is presentation, not secrecy: the page holds the challenger's
+right-or-wrong, hints, and points for every round from the start, and never
+an answer. A finished game ends on a comparison and a result link, such as
+`/?duel-result=<token>#from=Ana&vs=Ben`, which shows both games read-only.
+"Rematch" deals the deck afresh.
+
+- **What a link carries:** a token encrypted (AES-256-GCM) under a key derived
+  from the session secret. A challenge holds the deal, the challenger's arms,
+  how each round went, and the best score. A result holds both games' rounds.
+  Neither holds a round, an option, an answer, or a name.
+- **Names:** a name is optional, and lives only in the part after `#`, which a
+  browser never sends, so no name reaches the server or its logs. It is
+  cleaned before it shows: letters, digits, spaces, `-`, `'`, and `_`, up to
+  24, or else "A friend".
+- **First try and plays:** the intro and the comparison say whether the
+  challenger's game was their first of that deal on this server ("First try")
+  or followed an earlier one. Today's five is everyone's game, so it says
+  neither. A result says which play of the link it was ("Ben's 2nd play of
+  this link").
+- **Lifetimes:** a challenge deals for 7 days, and a result shows for 30. A
+  result outlives the round set it was played on. A challenge for an earlier
+  round set says so, and offers its deck afresh.
+- **The secret:** duel links need a fixed `CODEGUESSR_SESSION_SECRET`. With
+  the random secret a server makes without one, every link dies when it
+  restarts.
+- **Events:** duel games record none until events v2 (X3 of #173).
+
+To try it on one machine, finish a game, choose "Challenge a friend", copy the
+link, and open it in a second tab. The tabs share nothing: the friend's tab
+shows only what its own link carries.
+
 ### Public mode
 
 `CODEGUESSR_PUBLIC=1` marks a server for anonymous public play (#100). It

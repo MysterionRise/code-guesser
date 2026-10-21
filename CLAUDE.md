@@ -166,6 +166,13 @@ gate: changing queries, retries, ceilings, deck rules, or running
   text never ships with the page. `CODEGUESSR_SESSION_SECRET` (32+ chars)
   keeps games alive across restarts; without it each local process makes a random
   secret.
+  - The token holds game state v3 (#173): beside progress it seals how the game was dealt (`deal`: `series`
+    `{seed, game}`, `daily {date}`, `duel {challenge}`, or `unseeded`), `dealDigest` (`dealDigest` in the deal module:
+    round and option ids in dealt order, and each layer's hash when the game shows layers), per-round `outcomes`, and
+    `priorPlays`. Per-round points are recomputed, never stored. Its MAC context is `codeguessr-game-session.v3`, so
+    v2 tokens end as `SESSION_ENDED`. `sealGame`'s JSON key list names every nested key (arms, `DEAL_KEYS`): a key it
+    leaves out is dropped silently. `page.tsx` deals today's five with `{ date: localDate(now) }`, so it seals its
+    date.
 - **Public mode (#97, L4):** `CODEGUESSR_PUBLIC=1` marks a public server, and `checkEnvironment`
   (`apps/game/src/server/environment.server.ts`) holds it to anonymous play:
   - it requires the session secret, an https `CODEGUESSR_PUBLIC_ORIGIN` with no path, absolute `CODEGUESSR_STATE_DIR`
@@ -181,10 +188,45 @@ gate: changing queries, retries, ceilings, deck rules, or running
   `<dir>/state.sqlite` (`server/state-store.server.ts`, on `node:sqlite` via `server/sqlite.server.ts`, loaded with
   `process.getBuiltinModule` so webpack never sees it; WAL, `busy_timeout`). `readGame` checks memory, then the store,
   and ends a game the store doesn't know (`SESSION_ENDED`), so a restart can't replay a seen round. Migrations count
-  in `user_version`; add a table (duels, #173) as a new migration. Without the directory, the ledger is memory-only as
-  before. `deriveKey(context)` is HKDF-SHA256 of the session secret, for other features' signing keys.
-  `GET /api/health` (`app/api/health/route.ts`) answers `ok` or 503 with a bare code and records nothing. Events stay
-  JSONL.
+  in `user_version`; a feature adds its tables as a new migration (the second is the duel `plays`, #173). Without the
+  directory, the ledger is memory-only as before. `deriveKey(context)` is HKDF-SHA256 of the session secret, for other
+  features' keys. `GET /api/health` (`app/api/health/route.ts`) answers `ok` or 503 with a bare code and records
+  nothing. Events stay JSONL.
+- **Duels (#173: X1 the server, X2 the UI; events v2 is X3):** a finished game of a seeded deal or of today's five
+  becomes a challenge link, and a friend's finished game of it a result link.
+  - Tokens (`demo/local-real-experiment-duel-token.server.ts`): AES-256-GCM under `deriveKey(context)`, a random
+    12-byte IV, the context as AAD, `base64url(iv‖ciphertext‖tag)`, at most 1,024 characters. Contexts
+    `codeguessr-duel.v1` (challenge, 7 days from issue) and `codeguessr-duel-result.v1` (result, 30 days), so neither
+    passes for the other. Encryption keeps the seed from the friend. A challenge holds the deal, digest, the
+    challenger's arms, `[correct, hints, points]` per round, the maximum, `firstPlay`, and its id (an HMAC of the game
+    id under `codeguessr-duel-id.v1`, unlinkable to its events); never a round, option, label, game id, or name. Both
+    parse strictly (exact keys, closed enums, points a round can score).
+  - The authority (`demo/local-real-experiment-duel.server.ts`, spread into the experiment): `createChallenge`,
+    `openChallenge`, `dealChallenge`, `issueResult`, `openResult`. A friend's game is re-dealt and checked against the
+    digest, the maximum, and every round's points (`DEAL_DRIFT`, logged as `DUEL_REFUSED DEAL_DRIFT`), plays the
+    challenger's theme and layer (the design only while generative UI is on and it isn't switched off,
+    `challengedArms`), seals `deal: {kind: "duel"}` with no seed, and records no events until X3. Refusals: `INVALID`,
+    `EXPIRED`, `ROUND_SET` (another artifact, told only once the link authenticates), `DEAL_DRIFT`, `NOT_ELIGIBLE`,
+    `SESSION_ENDED`; a `ROUND_SET` or `DEAL_DRIFT` refusal names its deck while this artifact offers it. A result
+    opens on any round set (`earlierRoundSet`, and a generic title once its deck is gone). `duelVerdict`
+    (`components/duel/duel-contract.ts`, the browser-safe types): score, then fewer hints, then more rounds right, else
+    a draw; recomputed on every read. Actions: `createDuelChallenge`, `issueDuelResult`.
+  - Plays ledger (`demo/local-real-experiment-plays.server.ts`, no identity): games that revealed a round, per seeded
+    deal (`canonicalHash({artifact, deck, seed, game})`) and per challenge id, counted at a game's first reveal; written
+    through to the store's `plays` table, 50,000 keys, oldest first. A game seals `priorPlays` at its deal and catches
+    up at its first reveal, so a challenge says `firstPlay` `yes`/`no` (`shared` for today's five) and a result which
+    play of the link it was.
+  - Pages (`duel/duel-page.tsx`, from `page.tsx` before any deck): `?duel=<t>` is an intro that deals nothing, in the
+    challenger's theme, `noindex`; `&play=1` deals the friend's game (no lab picks or lab bar; "Deal new rounds" and
+    "Rematch" are a fresh deal of the deck, a mix for today's five); `?duel-result=<t>` is read-only, outside any game.
+  - In the game (`components/duel/`): `OpponentStrip` shows each of the challenger's rounds once the friend has locked
+    it (presentation, not secrecy: the page holds them from the deal), and the reveal's live region says it. The friend's
+    game ends on `DuelCompletion` (`issueDuelResult`, the comparison table, "Send your result", "Rematch"); any other
+    finished series or daily game offers `ChallengeFriend`. Share lines (`duel-text.ts`): a challenge's has no grid, a
+    result's has both.
+  - Names live only in the fragment (`#from=Ana`, `&vs=Ben`), which never reaches the server: `sanitizeName` (NFKC,
+    no control or format characters, letters, marks, digits, space, `-`, `'`, `_`, 24 code points, else "A friend"),
+    read in the browser by `useFragmentNames`. `tests/e2e/duel.spec.ts` plays it with two browser contexts.
 - The answer-lock guard (#102) is the only path from round data to a model:
   - `modelContext` on the experiment reads the sealed game, and
     `apps/game/src/genui/round-context.server.ts` builds the round's context.
@@ -325,7 +367,8 @@ gate: changing queries, retries, ceilings, deck rules, or running
       `game_completed`, and `genui_call` itself; the browser sends
       `game_viewed`, `deal_again`, `result_shared` (`via: share | clipboard`, #171), `genui_interaction`, and
       `genui_fallback` to the beacon route `app/api/events/route.ts`
-      (1 KB, a live signed token, 60 per game); the retired `result_copied` still parses in stored lines;
+      (2 KB since game state v3's longer token, a live signed token, 60 per game); the retired `result_copied` still
+      parses in stored lines;
     - opt-in: nothing is recorded without `EXPERIMENT_EVENTS_DIR` (one JSONL
       file per UTC day, rolled up into `totals.jsonl` after 90 days), and a
       deal under `Sec-GPC: 1` seals `record: false`;

@@ -7,7 +7,7 @@ vi.mock("server-only", () => ({}));
 
 import { artifact, hashValue } from "./support/local-real-artifact";
 
-const { MIGRATIONS, PRUNE_INTERVAL_MS, STATE_FILE, openStateStore, stateStore } = await import("../src/server/state-store.server");
+const { MIGRATIONS, PLAYS_CAPACITY, PRUNE_INTERVAL_MS, STATE_FILE, openStateStore, stateStore } = await import("../src/server/state-store.server");
 const { openSqlite } = await import("../src/server/sqlite.server");
 const { GAME_TTL_MS, deriveKey } = await import("../src/demo/local-real-experiment-session.server");
 const { createLocalRealExperiment } = await import("../src/demo/local-real-experiment.server");
@@ -50,8 +50,39 @@ describe("the state store (#164)", () => {
     const database = openSqlite(join(nested, STATE_FILE));
     expect(database.prepare("PRAGMA user_version").get()).toEqual({ user_version: MIGRATIONS.length });
     expect(database.prepare("PRAGMA journal_mode").get()).toEqual({ journal_mode: "wal" });
-    expect(database.prepare("SELECT name FROM sqlite_schema WHERE type = 'table'").all()).toEqual([{ name: "ledger" }]);
+    expect(database.prepare("SELECT name FROM sqlite_schema WHERE type = 'table' ORDER BY name").all()).toEqual([{ name: "ledger" }, { name: "plays" }]);
     database.close();
+  });
+
+  it("takes a store from before the duel plays (#173) to the plays table, keeping its ledger", () => {
+    const database = openSqlite(join(directory, STATE_FILE));
+    database.exec(MIGRATIONS[0]!);
+    database.exec("PRAGMA user_version = 1");
+    database.prepare("INSERT INTO ledger (game_id, step, expires_at) VALUES (?, ?, ?)").run("a", 3, NOW + GAME_TTL_MS);
+    database.close();
+    const store = openStateStore(directory, NOW);
+    expect(store.ledgerStep("a")).toBe(3);
+    expect(store.plays("deal")).toBeUndefined();
+    store.close();
+  });
+
+  it("keeps a deal's play count, never moving it back, and the most recent counts past its capacity", () => {
+    const store = openStateStore(directory, NOW);
+    store.recordPlays("deal", 0, NOW);
+    store.recordPlays("deal", 2, NOW);
+    store.recordPlays("deal", 1, NOW);
+    expect(store.plays("deal")).toBe(2);
+    store.close();
+    const database = openSqlite(join(directory, STATE_FILE));
+    const insert = database.prepare("INSERT INTO plays (key, count, touched_at) VALUES (?, 1, ?)");
+    database.exec("BEGIN");
+    for (let index = 0; index < PLAYS_CAPACITY; index += 1) insert.run(`newer-${index}`, NOW + 1 + index);
+    database.exec("COMMIT");
+    database.close();
+    const reopened = openStateStore(directory, NOW);
+    expect(reopened.plays("deal")).toBeUndefined();
+    expect(reopened.plays("newer-0")).toBe(1);
+    reopened.close();
   });
 
   it("refuses a file a newer build has migrated", () => {
