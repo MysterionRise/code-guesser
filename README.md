@@ -138,7 +138,8 @@ v1.1, once the launch gates in #100 close.
 
 ## Play locally
 
-Prerequisites: Node.js `20.18.0` and pnpm `9.15.9`.
+Prerequisites: Node.js `24.22.0` and pnpm `9.15.9`. `.nvmrc` and `.node-version`
+pin the Node version, so `nvm use` or `fnm use` picks it.
 
 ```bash
 pnpm install --frozen-lockfile
