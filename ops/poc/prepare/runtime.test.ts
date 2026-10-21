@@ -122,6 +122,34 @@ describe("rate-limit checkpoints in the runtime (#165)", () => {
   });
 });
 
+describe("spaced search pages (#167)", () => {
+  it("sends live search pages the given spacing apart, and every other request at once", async () => {
+    const profile = await loadProfile();
+    const sent: { path: string; at: number }[] = [];
+    const live = limitedFetch([{ remaining: 4000, reset: FAR_RESET }]);
+    const timed = (async (url: string | URL, init?: RequestInit) => {
+      sent.push({ path: new URL(String(url)).pathname, at: performance.now() });
+      return live.fetchLike(url, init);
+    }) as typeof fetch;
+    const spacing = 60;
+    const runtime = createPreparationRuntime(profile, { PATH: "/bin" }, capacityFor(profile), timed, undefined, { searchSpacingMilliseconds: spacing });
+    const page = (number: number) => {
+      const request = searchRequest(profile);
+      const url = new URL(request.url);
+      url.searchParams.set("page", String(number));
+      return { ...request, url: url.href };
+    };
+    await runtime.transport.requestJson(page(1));
+    await runtime.transport.requestJson(commitRequest(profile, "a"));
+    await runtime.transport.requestJson(page(2));
+    const [first, commit, second] = sent;
+    expect(sent.map(({ path }) => path)).toEqual(["/search/commits", `/repos/example/project/commits/${"a".repeat(40)}`, "/search/commits"]);
+    expect(commit!.at - first!.at).toBeLessThan(spacing);
+    // Timers may fire a millisecond early.
+    expect(second!.at - first!.at).toBeGreaterThanOrEqual(spacing - 2);
+  });
+});
+
 describe("interrupted runs", () => {
   it("stops at the next request, live or replayed, without sending it", async () => {
     const profile = await loadProfile();

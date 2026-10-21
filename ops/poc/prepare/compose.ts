@@ -7,10 +7,10 @@ import {
 import {
   ARTIFACT_SCHEMA_VERSIONS,
   CROSS_DECK_KEYS_BY_KIND,
-  DEDUPLICATION_KEYS_BY_KIND,
   DECK_IDS,
   DECK_KINDS,
   ROUNDS_PER_SESSION,
+  deduplicationKeys,
   mentionsRepository,
   namesAlgorithm,
   parseExperimentArtifact,
@@ -94,7 +94,7 @@ const requireBindings = (decks: readonly (readonly ExperimentFixture[])[], profi
     }
   };
   // Within a deck, the kind's own identities; across decks, each identity among the rounds whose kind lists it.
-  for (const fixtures of decks) distinct(fixtures, fixtures.length === 0 ? [] : DEDUPLICATION_KEYS_BY_KIND[fixtures[0]!.kind]);
+  for (const fixtures of decks) distinct(fixtures, fixtures.length === 0 ? [] : deduplicationKeys(fixtures[0]!.kind, profile.profileVersion));
   for (const key of new Set(all.flatMap(({ kind }) => CROSS_DECK_KEYS_BY_KIND[kind]))) {
     distinct(all.filter(({ kind }) => CROSS_DECK_KEYS_BY_KIND[kind].includes(key)), [key]);
   }

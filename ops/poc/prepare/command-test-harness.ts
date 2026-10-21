@@ -22,11 +22,17 @@ export const accepted = <Value>(value: Value, digit = "a") => ({
  * The run's profile without its curated section, and with a before-or-after pool of five; the Stack decks hold
  * two rounds per language. Curated decks are tested with the profiles `loadCuratedProfile` builds.
  */
-/** The v5 profile without its curated section; `profileVersion` reads it as a later version. */
-export const loadProfile = async (profileVersion: ProfileVersion = "local-real-rounds.v5"): Promise<CrawlProfile> => {
+/**
+ * The v5 profile without its curated section; `profileVersion` reads it as a later version, and `selection` changes
+ * its selection section further, such as a v7 profile's project rounds per language (#167).
+ */
+export const loadProfile = async (
+  profileVersion: ProfileVersion = "local-real-rounds.v5",
+  selection: Readonly<Record<string, number>> = {},
+): Promise<CrawlProfile> => {
   const raw = { ...JSON.parse(await readFile(profilePath, "utf8")), profileVersion };
   delete raw.curated;
-  raw.selection = { ...raw.selection, beforeAfterPool: 5 };
+  raw.selection = { ...raw.selection, beforeAfterPool: 5, ...selection };
   return parseCrawlProfile(raw);
 };
 export const classificationsFor = (

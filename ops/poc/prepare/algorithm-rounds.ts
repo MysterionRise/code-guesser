@@ -88,7 +88,8 @@ const fixtureFor = (candidate: AlgorithmCandidate, family: AlgorithmFamily, entr
 
 /**
  * One algorithm round per candidate. Each round offers its family's four algorithms, and each family's rounds
- * answer each of its algorithms exactly once, so no option set and no option's frequency points to an answer.
+ * answer each of its algorithms equally often (once, or from v7 on `roundsPerAlgorithm` times, each in another
+ * language), so no option set and no option's frequency points to an answer.
  */
 export const generateAlgorithmRounds = (options: Readonly<{ profile: CrawlProfile; candidates: readonly unknown[] }>): GeneratedRounds => {
   const { profile } = options;
@@ -100,11 +101,15 @@ export const generateAlgorithmRounds = (options: Readonly<{ profile: CrawlProfil
     const entry = family.algorithms.find(({ id }) => id === candidate.algorithmId) ?? fail();
     return fixtureFor(candidate, family, entry, profile);
   });
+  const answers = deck.roundsPerAlgorithm ?? 1;
   for (const familyId of new Set(candidates.map(({ familyId }) => familyId))) {
     const answered = candidates.filter((candidate) => candidate.familyId === familyId).map(({ algorithmId }) => algorithmId).sort();
     const family = deck.families.find(({ id }) => id === familyId)!;
-    if (answered.join("|") !== family.algorithms.map(({ id }) => id).sort().join("|")) fail("ALGORITHM_FAMILY_UNBALANCED");
+    if (answered.join("|") !== family.algorithms.flatMap(({ id }) => Array<string>(answers).fill(id)).sort().join("|")) {
+      fail("ALGORITHM_FAMILY_UNBALANCED");
+    }
   }
+  if (new Set(candidates.map(({ algorithmId, language }) => `${algorithmId}:${language}`)).size !== candidates.length) fail("ALGORITHM_FAMILY_UNBALANCED");
   for (const key of ["path", "blob", "rawContentHash", "excerptHash"] as const) {
     if (new Set(candidates.map((candidate) => candidate[key])).size !== candidates.length) fail();
   }

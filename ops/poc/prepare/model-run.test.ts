@@ -170,6 +170,19 @@ describe("operational run records", () => {
     expect(() => parseRunRecord(sized(DECK_IDS.length * MAXIMUM_POOL_SIZE + 1))).toThrow(ExperimentRecordError);
   });
 
+  it("accepts a v7 run's spend up to the ceilings raised for it, and no further (#167)", () => {
+    const spent = (requests: number, blobAttempts: number) => {
+      const candidate = runRecord() as Record<string, any>;
+      candidate.profileVersion = "local-real-rounds.v7";
+      candidate.counts.requests = requests;
+      candidate.counts.blobAttempts = blobAttempts;
+      return candidate;
+    };
+    expect((parseRunRecord(spent(10_000, 600)) as any).counts).toMatchObject({ requests: 10_000, blobAttempts: 600 });
+    expect(() => parseRunRecord(spent(10_001, 600))).toThrow(ExperimentRecordError);
+    expect(() => parseRunRecord(spent(10_000, 601))).toThrow(ExperimentRecordError);
+  });
+
   it("bounds operational outcomes by the recorded source capacities and screening relationships", () => {
     const sourceCapacity = 300 + STACK_LANGUAGES.length * 10_000;
     const mutations: Array<(candidate: ReturnType<typeof runRecord>) => void> = [

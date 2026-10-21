@@ -24,7 +24,7 @@ import { clearJournalPath, openJournal, type JournalMode } from "./journal";
 import { generateProjectRounds } from "./project-rounds";
 import { stageRunReport, type StagedRunReport } from "./report-store";
 import { createRunReport } from "./run-report";
-import { createPreparationRuntime, runtimeOf, stage, workerStage, type Runtime } from "./runtime";
+import { createPreparationRuntime, runtimeOf, SEARCH_PAGE_SPACING, stage, workerStage, type Runtime } from "./runtime";
 import { preflightStackAccess } from "./stack-access";
 import { collectStackMetadata, type StackMetadataRow } from "./stack-metadata";
 import { revalidateStackCandidate, type SelectedStackBlob } from "./stack-revalidation";
@@ -151,7 +151,7 @@ export const defaultDependencies = (options: DependencyOptions = { journal: "fre
       if (setAside !== undefined) console.info(`PREPARATION_JOURNAL_SET_ASIDE ${basename(setAside)}`);
     }
     return createPreparationRuntime(profile, environment, capacity, options.journal === "offline" ? refuseNetwork : fetch,
-      openJournal({ mode: options.journal, path }), options.signal ? { signal: options.signal } : {});
+      openJournal({ mode: options.journal, path }), { searchSpacingMilliseconds: SEARCH_PAGE_SPACING, ...(options.signal ? { signal: options.signal } : {}) });
   },
   preflight: (context) => {
     const runtime = runtimeOf(context);

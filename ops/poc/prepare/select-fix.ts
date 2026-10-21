@@ -1,6 +1,6 @@
 import { screenBlob } from "@codeguessr/content/local-poc-support";
 
-import { AUTHORSHIP_CLAIM, CROSS_DECK_KEYS_BY_KIND, DEDUPLICATION_KEYS_BY_KIND, profileAtLeast, sameFile } from "../../../packages/artifact/src/index";
+import { AUTHORSHIP_CLAIM, CROSS_DECK_KEYS_BY_KIND, deduplicationKeys, profileAtLeast, sameFile } from "../../../packages/artifact/src/index";
 import { DECK_SHORT, noteRejection, rejectCandidate, type DeckAttempts, type DeckOutcome, type RunState } from "./diagnostics";
 import { looksGenerated } from "./excerpt-window";
 import { bugsInPyRevisions, defects4jRevisions, oneLineFix, type BugRevisions } from "./fix-patch";
@@ -57,7 +57,7 @@ export const selectFix = async (
 ): Promise<DeckOutcome<FixSelection>> => attempt<FixSelection>(async () => {
   const { profile } = context;
   const deck = profile.curated!.fix!;
-  const keys = { deck: DEDUPLICATION_KEYS_BY_KIND.FIX, cross: CROSS_DECK_KEYS_BY_KIND.FIX };
+  const keys = { deck: deduplicationKeys("FIX", profile.profileVersion), cross: CROSS_DECK_KEYS_BY_KIND.FIX };
   const queues: DatasetBug[][] = [];
   for (const dataset of deck.datasets) {
     try {

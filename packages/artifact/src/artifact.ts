@@ -8,7 +8,6 @@ import {
   CROSS_DECK_KEYS_BY_KIND,
   DECK_IDS,
   DECK_KINDS,
-  DEDUPLICATION_KEYS_BY_KIND,
   DETAIL_KINDS,
   LANGUAGE_PAIRS,
   LANGUAGE_SLUGS,
@@ -19,6 +18,7 @@ import {
   PROTECTED_SOURCE_KEYS,
   ROUNDS_PER_SESSION,
   STACK_LANGUAGES,
+  deduplicationKeys,
   isLanguageSelection,
   profileAtLeast,
   type CandidateRecord,
@@ -510,6 +510,14 @@ const DECK_RULES: Readonly<Partial<Record<DeckId, (fixtures: readonly ParsedFixt
   "name-function": nameFunctionDeckRule,
   framework: familyDeckRule,
   exercise: familyDeckRule,
+  // From v7 on (#167) an algorithm may be the answer more than once: within its family each is the answer equally
+  // often, as in the other family decks, and never twice in one language. Before v7 each is the answer once.
+  algorithm: (fixtures: readonly ParsedFixture[]) => {
+    if (!profileAtLeast(fixtures[0]!.source.profileVersion, "local-real-rounds.v7")) return;
+    familyDeckRule(fixtures);
+    if (pairs(fixtures).some(([left, right]) => left.source.algorithmId === right.source.algorithmId
+      && left.source.language === right.source.language)) fail();
+  },
   // Pane order carries no signal: the later version is pane A in half the pool, give or take one.
   "before-after": (fixtures: readonly ParsedFixture[]) => {
     const aLater = fixtures.filter(({ correctCandidateId }) => correctCandidateId === BEFORE_AFTER_CANDIDATE_IDS[0]).length;
@@ -642,7 +650,7 @@ const parseDeck = (value: unknown, snapshot: Snapshot): ParsedDeck => {
   const values = Array.isArray(deck.fixtures) ? deck.fixtures : fail();
   if (values.length < ROUNDS_PER_SESSION || values.length > MAXIMUM_POOL_SIZE) fail();
   const fixtures = values.map((fixture: unknown) => parseFixture(fixture, DECK_KINDS[id], snapshot));
-  requireDistinct(fixtures, DEDUPLICATION_KEYS_BY_KIND[DECK_KINDS[id]]);
+  requireDistinct(fixtures, deduplicationKeys(DECK_KINDS[id], snapshot.profileVersion));
   DECK_RULES[id]?.(fixtures);
   return deepFreeze({ id, title, description, roundsPerSession: ROUNDS_PER_SESSION, fixtures: Object.freeze(fixtures) });
 };

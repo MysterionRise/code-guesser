@@ -11,8 +11,9 @@ import stream_metadata
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PROFILE_PATH = os.path.join(HERE, "..", "profiles", "local-real-rounds.v5.json")
-# The v1.0 data run's profile (#129): every check that holds for v5 holds for it too.
-PROFILE_PATHS = (PROFILE_PATH, os.path.join(HERE, "..", "profiles", "local-real-rounds.v6.json"))
+# The v1.0 data run's profile (#129) and v7's (#167): every check that holds for v5 holds for them too.
+PROFILE_PATHS = (PROFILE_PATH, os.path.join(HERE, "..", "profiles", "local-real-rounds.v6.json"),
+                 os.path.join(HERE, "..", "profiles", "local-real-rounds.v7.json"))
 
 
 def load(path):

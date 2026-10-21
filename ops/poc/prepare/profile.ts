@@ -1,7 +1,8 @@
 import { CAPACITY_CEILINGS, STACK_RELEASE, STACK_REVISION, type CeilingKey } from "../limits";
 import {
-  ADVISORY_ECOSYSTEMS, AUTHORSHIP_CLAIM, CWE_ID, MAINSTREAM_LANGUAGES, PROFILE_VERSION, PROFILE_VERSIONS, ROUNDS_PER_LANGUAGE, STACK_LANGUAGES, isLanguageSelection,
-  spellsFramework, copyNamesExercise, type AdvisoryEcosystem, type DeckId, type ProfileVersion, type StackLanguage,
+  ADVISORY_ECOSYSTEMS, AUTHORSHIP_CLAIM, CWE_ID, MAINSTREAM_LANGUAGES, MAXIMUM_POOL_SIZE, PROFILE_VERSION, PROFILE_VERSIONS, ROUNDS_PER_LANGUAGE,
+  STACK_LANGUAGES, isLanguageSelection, profileAtLeast, spellsFramework, copyNamesExercise, type AdvisoryEcosystem, type DeckId, type ProfileVersion,
+  type StackLanguage,
 } from "../../../packages/artifact/src/index";
 import { isKnownFramework } from "./framework-markers";
 
@@ -64,8 +65,13 @@ export interface CrawlProfile {
     subjectMaxLength: number; changeWindowLines: number; changeContextLines: number; maxChangedLines: number;
   }>;
   readonly selection: Readonly<{
-    /** Rounds in the before-or-after pool; the Stack decks hold two rounds per language. */
+    /** Rounds in the before-or-after pool; the Stack decks hold two rounds per language unless set below. */
     beforeAfterPool: number;
+    /**
+     * From v7 on (#167), the project deck's rounds per language, in groups of two answers and two decoys (2 or 4);
+     * present only when set, and two when not.
+     */
+    projectRoundsPerLanguage?: number;
     /** A project round's repositories, answer and distractors, all have at least this many star events. */
     minimumStarEvents: number;
     /** What the metadata worker returns per language: the most-starred repositories, a few files of each, */
@@ -116,7 +122,7 @@ export interface AlgorithmEntry {
   readonly complexity: string;
   readonly files: Readonly<Record<string, AlgorithmFile>>;
 }
-/** Four algorithms offered together; each family's rounds answer each of them once. */
+/** Four algorithms offered together; each family's rounds answer each of them once, or from v7 on equally often. */
 export interface AlgorithmFamily {
   readonly id: string;
   /** What the reveal says the family shares, so the wrong options were tempting. */
@@ -268,6 +274,9 @@ export interface CuratedProfile {
   readonly repositories: readonly CuratedRepository[];
   readonly algorithm?: Readonly<{
     rounds: number;
+    /** From v7 on (#167), how often each algorithm of a published family is the answer, each time from another
+     * language (1 or 2); present only when set, and once when not. */
+    roundsPerAlgorithm?: number;
     templates: Readonly<{ title: string; description: string; prompt: string; evidence: string; explanation: string }>;
     families: readonly AlgorithmFamily[];
   }>;
@@ -284,22 +293,39 @@ export interface CuratedProfile {
 export const ALGORITHM_FAMILY_SIZE = 4;
 /** Options per output round; the answer's rank among them cycles through all four across the pool. */
 export const OUTPUT_OPTIONS = 4;
-/** The most files an output deck may read. */
-export const OUTPUT_FILE_READS_MAXIMUM = 240;
 /** Options per fix round; the answer's rank among them cycles through all four across the pool. */
 export const FIX_OPTIONS = 4;
-/** The most dataset patches a fix deck may read. */
-export const FIX_PATCH_READS_MAXIMUM = 240;
 /** The datasets a fix deck can read, each with the direction its patches run in. */
 export const FIX_DATASETS = Object.freeze(["defects4j", "bugsinpy"] as const);
+
+/** What a profile version lets its curated decks ask for. */
+export interface CuratedCaps {
+  /** The most rounds an algorithm, output, fix, or vulnerable-line deck may hold; the other curated decks hold up to a pool. */
+  readonly rounds: number;
+  /** The most files an output, missing-line, or name-function deck may read, and the most patches a fix deck may. */
+  readonly reads: number;
+}
+const CAPS_TO_V6: CuratedCaps = Object.freeze({ rounds: 40, reads: 240 });
+/** Through v6 the caps of the v1.0 run; from v7 on (#167) every curated deck may fill a whole pool and read twice as far. */
+export const CURATED_CAPS: Readonly<Record<ProfileVersion, CuratedCaps>> = Object.freeze({
+  "local-real-rounds.v5": CAPS_TO_V6,
+  "local-real-rounds.v6": CAPS_TO_V6,
+  "local-real-rounds.v7": Object.freeze({ rounds: MAXIMUM_POOL_SIZE, reads: 480 }),
+});
 
 /** The configured languages the project deck reads: all but those marked for the language deck alone. */
 export const projectLanguages = (profile: CrawlProfile): readonly StackLanguage[] =>
   profile.stack.configurations.filter(({ projectDeck }) => projectDeck !== false).map(({ language }) => language);
 
+/** The answers in a group of project rounds: two, beside two decoys, so the group's rounds offer the same four repositories. */
+export const PROJECT_GROUP_ANSWERS = 2;
+/** The project deck's rounds per language: two, one group, unless a v7 profile sets more (#167). */
+export const projectRoundsPerLanguage = (profile: CrawlProfile): number =>
+  profile.selection.projectRoundsPerLanguage ?? ROUNDS_PER_LANGUAGE;
+
 /** Rounds in each deck's pool; a session deals five of them. A deck the profile does not configure holds none. */
 export const poolSizes = (profile: CrawlProfile): Readonly<Record<DeckId, number>> => Object.freeze({
-  project: ROUNDS_PER_LANGUAGE * projectLanguages(profile).length,
+  project: projectRoundsPerLanguage(profile) * projectLanguages(profile).length,
   language: ROUNDS_PER_LANGUAGE * profile.stack.configurations.length,
   "before-after": profile.selection.beforeAfterPool,
   algorithm: profile.curated?.algorithm?.rounds ?? 0,
@@ -491,9 +517,23 @@ const parseScreening = (value: unknown): CrawlProfile["screening"] => {
 /** The metadata worker's own bounds on what one language may return. */
 export const SAMPLE_MAXIMA = Object.freeze({ popularRepositories: 100, filesPerRepository: 10, ordinaryRows: 1000 });
 
-const parseSelection = (value: unknown): CrawlProfile["selection"] => {
-  const selection = exactRecord(value, ["beforeAfterPool", "minimumStarEvents", "popularRepositories", "filesPerRepository", "ordinaryRows"]);
+/**
+ * Whether a section sets a key that only `minimum` and later profiles may carry. The key appears only when set, so an
+ * earlier profile parses (and hashes) as before, and an earlier profile that sets it is refused.
+ */
+const laterKey = (value: unknown, key: string, version: ProfileVersion, minimum: ProfileVersion): boolean => {
+  const set = isRecord(value) && Object.hasOwn(value, key);
+  if (set && !profileAtLeast(version, minimum)) fail();
+  return set;
+};
+
+const parseSelection = (value: unknown, version: ProfileVersion): CrawlProfile["selection"] => {
+  // From v7 on (#167) the project deck may hold more rounds per language, in whole groups.
+  const grouped = laterKey(value, "projectRoundsPerLanguage", version, "local-real-rounds.v7");
+  const selection = exactRecord(value, ["beforeAfterPool", "minimumStarEvents", "popularRepositories", "filesPerRepository", "ordinaryRows",
+    ...(grouped ? ["projectRoundsPerLanguage"] : [])]);
   const parsed = Object.fromEntries(Object.entries(selection).map(([key, entry]) => [key, integer(entry)])) as CrawlProfile["selection"];
+  if (grouped && ![PROJECT_GROUP_ANSWERS, 2 * PROJECT_GROUP_ANSWERS].includes(parsed.projectRoundsPerLanguage!)) fail();
   // A pool holds at least one five-round session and at most forty rounds.
   if (parsed.beforeAfterPool < 5 || parsed.beforeAfterPool > 40) fail();
   if (parsed.popularRepositories > SAMPLE_MAXIMA.popularRepositories || parsed.filesPerRepository > SAMPLE_MAXIMA.filesPerRepository
@@ -561,17 +601,23 @@ const parseAlgorithmEntry = (value: unknown, repositories: ReadonlySet<string>):
 const namesAny = (copy: string, algorithms: readonly AlgorithmEntry[]): boolean =>
   algorithms.some(({ label, names }) => [label, ...names].map(foldName).some((name) => foldName(copy).includes(name)));
 
-const parseAlgorithmDeck = (value: unknown, repositories: readonly CuratedRepository[]): NonNullable<CuratedProfile["algorithm"]> => {
-  const algorithm = exactRecord(value, ["rounds", "templates", "families"]);
+const parseAlgorithmDeck = (value: unknown, repositories: readonly CuratedRepository[], version: ProfileVersion): NonNullable<CuratedProfile["algorithm"]> => {
+  // From v7 on (#167) each algorithm may be the answer twice, from two languages' files.
+  const repeated = laterKey(value, "roundsPerAlgorithm", version, "local-real-rounds.v7");
+  const algorithm = exactRecord(value, ["rounds", "templates", "families", ...(repeated ? ["roundsPerAlgorithm"] : [])]);
   const rounds = integer(algorithm.rounds);
-  if (rounds % ALGORITHM_FAMILY_SIZE !== 0 || rounds < 8 || rounds > 40) fail();
+  const roundsPerAlgorithm = repeated ? integer(algorithm.roundsPerAlgorithm) : 1;
+  if (roundsPerAlgorithm > 2 || rounds % (ALGORITHM_FAMILY_SIZE * roundsPerAlgorithm) !== 0 || rounds < 8 || rounds > CURATED_CAPS[version].rounds) fail();
   const templates = exactRecord(algorithm.templates, ["title", "description", "prompt", "evidence", "explanation"]);
   const known = new Set(repositories.map(({ repository }) => repository));
-  const families = (Array.isArray(algorithm.families) && algorithm.families.length * ALGORITHM_FAMILY_SIZE >= rounds
+  const languageOf = (repository: string) => repositories.find((pin) => pin.repository === repository)!.language;
+  const families = (Array.isArray(algorithm.families) && algorithm.families.length * ALGORITHM_FAMILY_SIZE * roundsPerAlgorithm >= rounds
     ? algorithm.families : fail()).map((entry: unknown) => {
     const family = exactRecord(entry, ["id", "note", "algorithms"]);
     const algorithms = (Array.isArray(family.algorithms) && family.algorithms.length === ALGORITHM_FAMILY_SIZE
       ? family.algorithms : fail()).map((item: unknown) => parseAlgorithmEntry(item, known));
+    // Each answer comes from another language, so every algorithm lists files in that many languages.
+    if (algorithms.some(({ files }) => new Set(Object.keys(files).map(languageOf)).size < roundsPerAlgorithm)) fail();
     const note = text(family.note);
     if (algorithms.some(({ idea, complexity }) => namesAny(idea, algorithms) || namesAny(complexity, algorithms))) fail();
     if (namesAny(note, algorithms)) fail();
@@ -584,6 +630,7 @@ const parseAlgorithmDeck = (value: unknown, repositories: readonly CuratedReposi
     || new Set(all.map(({ label }) => label)).size !== all.length) fail();
   return Object.freeze({
     rounds,
+    ...(repeated ? { roundsPerAlgorithm } : {}),
     templates: Object.freeze({
       title: text(templates.title), description: text(templates.description), prompt: placeholderText(templates.prompt, []),
       evidence: placeholderText(templates.evidence, ["path", "repository", "name"]),
@@ -593,17 +640,17 @@ const parseAlgorithmDeck = (value: unknown, repositories: readonly CuratedReposi
   });
 };
 
-const parseOutputDeck = (value: unknown, repositories: readonly CuratedRepository[]): OutputDeck => {
+const parseOutputDeck = (value: unknown, repositories: readonly CuratedRepository[], caps: CuratedCaps): OutputDeck => {
   const deck = exactRecord(value, ["rounds", "repository", "directories", "fileReads", "templates"]);
   const rounds = integer(deck.rounds);
-  if (rounds % OUTPUT_OPTIONS !== 0 || rounds < 8 || rounds > 40) fail();
+  if (rounds % OUTPUT_OPTIONS !== 0 || rounds < 8 || rounds > caps.rounds) fail();
   const repository = text(deck.repository);
   // Doctests are Python's; the repository must be one of the curated pins.
   if (repositories.find((known) => known.repository === repository)?.language !== "Python") fail();
   const directories = uniqueTexts(deck.directories);
   if (directories.some((directory) => !/^[A-Za-z0-9_]+$/u.test(directory))) fail();
   const fileReads = integer(deck.fileReads);
-  if (fileReads < rounds || fileReads > OUTPUT_FILE_READS_MAXIMUM) fail();
+  if (fileReads < rounds || fileReads > caps.reads) fail();
   const templates = exactRecord(deck.templates, ["title", "description", "prompt", "evidence", "explanation"]);
   return Object.freeze({
     rounds, repository, directories, fileReads,
@@ -615,7 +662,7 @@ const parseOutputDeck = (value: unknown, repositories: readonly CuratedRepositor
   });
 };
 
-const parseMissingLineDeck = (value: unknown, repositories: readonly CuratedRepository[]): MissingLineDeck => {
+const parseMissingLineDeck = (value: unknown, repositories: readonly CuratedRepository[], caps: CuratedCaps): MissingLineDeck => {
   const deck = exactRecord(value, ["rounds", "repository", "directories", "fileReads", "windowLines", "templates"]);
   const rounds = integer(deck.rounds);
   if (rounds % 4 !== 0 || rounds < 8 || rounds > 60) fail();
@@ -624,7 +671,7 @@ const parseMissingLineDeck = (value: unknown, repositories: readonly CuratedRepo
   const directories = uniqueTexts(deck.directories);
   if (directories.some((directory) => !/^[A-Za-z0-9_]+$/u.test(directory))) fail();
   const fileReads = integer(deck.fileReads);
-  if (fileReads < rounds || fileReads > OUTPUT_FILE_READS_MAXIMUM) fail();
+  if (fileReads < rounds || fileReads > caps.reads) fail();
   const windowLines = integer(deck.windowLines);
   if (windowLines < 6 || windowLines > 20) fail();
   const templates = exactRecord(deck.templates, ["title", "description", "prompt", "evidence", "explanation"]);
@@ -638,7 +685,7 @@ const parseMissingLineDeck = (value: unknown, repositories: readonly CuratedRepo
   });
 };
 
-const parseNameFunctionDeck = (value: unknown, repositories: readonly CuratedRepository[]): NameFunctionDeck => {
+const parseNameFunctionDeck = (value: unknown, repositories: readonly CuratedRepository[], caps: CuratedCaps): NameFunctionDeck => {
   const deck = exactRecord(value, ["rounds", "sources", "fileReads", "functionLines", "templates"]);
   const rounds = integer(deck.rounds);
   if (rounds % 4 !== 0 || rounds < 8 || rounds > 60) fail();
@@ -653,7 +700,7 @@ const parseNameFunctionDeck = (value: unknown, repositories: readonly CuratedRep
   });
   if (new Set(sources.map(({ repository }) => repository)).size !== sources.length) fail();
   const fileReads = integer(deck.fileReads);
-  if (fileReads < rounds || fileReads > OUTPUT_FILE_READS_MAXIMUM) fail();
+  if (fileReads < rounds || fileReads > caps.reads) fail();
   const functionLines = integer(deck.functionLines);
   if (functionLines < 6 || functionLines > 30) fail();
   const templates = exactRecord(deck.templates, ["title", "description", "prompt", "evidence", "explanation"]);
@@ -777,10 +824,10 @@ const parseExerciseDeck = (value: unknown, repositories: readonly CuratedReposit
 };
 
 const PROJECT_NAME = /^[A-Za-z0-9_.-]+$/u;
-const parseFixDeck = (value: unknown): FixDeck => {
+const parseFixDeck = (value: unknown, caps: CuratedCaps): FixDeck => {
   const deck = exactRecord(value, ["rounds", "datasets", "patchReads", "perRepository", "templates"]);
   const rounds = integer(deck.rounds);
-  if (rounds % FIX_OPTIONS !== 0 || rounds < 8 || rounds > 40) fail();
+  if (rounds % FIX_OPTIONS !== 0 || rounds < 8 || rounds > caps.rounds) fail();
   const datasets = (Array.isArray(deck.datasets) && deck.datasets.length > 0 ? deck.datasets : fail()).map((entry: unknown) => {
     const dataset = exactRecord(entry, ["id", "repository", "commit", "projects"]);
     if (!(FIX_DATASETS as readonly unknown[]).includes(dataset.id)) fail();
@@ -800,7 +847,7 @@ const parseFixDeck = (value: unknown): FixDeck => {
   if (new Set(datasets.map(({ id }) => id)).size !== datasets.length) fail();
   const patchReads = integer(deck.patchReads);
   const perRepository = integer(deck.perRepository);
-  if (patchReads < rounds || patchReads > FIX_PATCH_READS_MAXIMUM || perRepository > rounds / 2) fail();
+  if (patchReads < rounds || patchReads > caps.reads || perRepository > rounds / 2) fail();
   const templates = exactRecord(deck.templates, ["title", "description", "prompt", "evidence", "explanation"]);
   return Object.freeze({
     rounds, datasets: Object.freeze(datasets), patchReads, perRepository,
@@ -820,10 +867,10 @@ const day = (value: string): number => {
   return new Date(time).toISOString().slice(0, 10) === value ? time : fail();
 };
 
-const parseVulnerableLineDeck = (value: unknown): VulnerableLineDeck => {
+const parseVulnerableLineDeck = (value: unknown, caps: CuratedCaps): VulnerableLineDeck => {
   const deck = exactRecord(value, ["rounds", "ecosystems", "published", "commitReads", "cwes", "templates"]);
   const rounds = integer(deck.rounds);
-  if (rounds % FIX_OPTIONS !== 0 || rounds < 8 || rounds > 40) fail();
+  if (rounds % FIX_OPTIONS !== 0 || rounds < 8 || rounds > caps.rounds) fail();
   const ecosystems = uniqueTexts(deck.ecosystems);
   if (ecosystems.some((ecosystem) => !(ADVISORY_ECOSYSTEMS as readonly string[]).includes(ecosystem))) fail();
   const published = uniqueTexts(deck.published);
@@ -855,21 +902,22 @@ const parseVulnerableLineDeck = (value: unknown): VulnerableLineDeck => {
   });
 };
 
-/** The curated pins, and each deck built from them that the profile configures. */
-const parseCurated = (value: unknown): CuratedProfile => {
+/** The curated pins, and each deck built from them that the profile configures, within its version's caps. */
+const parseCurated = (value: unknown, version: ProfileVersion): CuratedProfile => {
   const decks = (["algorithm", "output", "fix", "missing-line", "name-function", "framework", "exercise", "vulnerable-line"] as const).filter((key) => isRecord(value) && Object.hasOwn(value, key));
   const curated = exactRecord(value, ["repositories", ...decks]);
   const repositories = parseCuratedRepositories(curated.repositories);
+  const caps = CURATED_CAPS[version];
   return Object.freeze({
     repositories,
-    ...(decks.includes("algorithm") ? { algorithm: parseAlgorithmDeck(curated.algorithm, repositories) } : {}),
-    ...(decks.includes("output") ? { output: parseOutputDeck(curated.output, repositories) } : {}),
-    ...(decks.includes("fix") ? { fix: parseFixDeck(curated.fix) } : {}),
-    ...(decks.includes("missing-line") ? { "missing-line": parseMissingLineDeck(curated["missing-line"], repositories) } : {}),
-    ...(decks.includes("name-function") ? { "name-function": parseNameFunctionDeck(curated["name-function"], repositories) } : {}),
+    ...(decks.includes("algorithm") ? { algorithm: parseAlgorithmDeck(curated.algorithm, repositories, version) } : {}),
+    ...(decks.includes("output") ? { output: parseOutputDeck(curated.output, repositories, caps) } : {}),
+    ...(decks.includes("fix") ? { fix: parseFixDeck(curated.fix, caps) } : {}),
+    ...(decks.includes("missing-line") ? { "missing-line": parseMissingLineDeck(curated["missing-line"], repositories, caps) } : {}),
+    ...(decks.includes("name-function") ? { "name-function": parseNameFunctionDeck(curated["name-function"], repositories, caps) } : {}),
     ...(decks.includes("framework") ? { framework: parseFrameworkDeck(curated.framework, repositories) } : {}),
     ...(decks.includes("exercise") ? { exercise: parseExerciseDeck(curated.exercise, repositories) } : {}),
-    ...(decks.includes("vulnerable-line") ? { "vulnerable-line": parseVulnerableLineDeck(curated["vulnerable-line"]) } : {}),
+    ...(decks.includes("vulnerable-line") ? { "vulnerable-line": parseVulnerableLineDeck(curated["vulnerable-line"], caps) } : {}),
   });
 };
 
@@ -897,7 +945,7 @@ export const parseCrawlProfile = (value: unknown): CrawlProfile => {
     ] as const),
     capacity: parseCapacity(root.capacity),
     screening: parseScreening(root.screening),
-    selection: parseSelection(root.selection),
-    ...(curated ? { curated: parseCurated(root.curated) } : {}),
+    selection: parseSelection(root.selection, profileVersion),
+    ...(curated ? { curated: parseCurated(root.curated, profileVersion) } : {}),
   });
 };

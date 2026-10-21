@@ -26,17 +26,22 @@ import type { ComposeOptions } from "../compose";
 import type { GitHubAdmissionCandidate } from "../github-admission";
 import { generateLanguageRounds } from "../language-rounds";
 import { LANGUAGE_SLUGS } from "../../../../packages/artifact/src/index";
-import { MAINSTREAM_LANGUAGES, STACK_EXTENSIONS, STACK_LANGUAGES, parseCrawlProfile, type CrawlProfile, type StackLanguage } from "../profile";
+import {
+  MAINSTREAM_LANGUAGES, STACK_EXTENSIONS, STACK_LANGUAGES, parseCrawlProfile, projectRoundsPerLanguage, type CrawlProfile, type StackLanguage,
+} from "../profile";
 import { generateProjectRounds, type ProjectRoundInput, type RepositoryOption } from "../project-rounds";
 import type { RevalidatedStackCandidate } from "../stack-revalidation";
 
 export const sha1 = (seed: string): string => createHash("sha1").update(seed).digest("hex");
 export const sha256 = (value: string): string => createHash("sha256").update(value).digest("hex");
 
-/** The run's profile without its curated section: the three decks built from The Stack v2 and GitHub search. */
-export const loadDeckProfile = (profileVersion: ProfileVersion = "local-real-rounds.v5"): CrawlProfile => {
+/**
+ * The run's profile without its curated section: the three decks built from The Stack v2 and GitHub search. `selection`
+ * changes its selection section, such as a v7 profile's project rounds per language (#167).
+ */
+export const loadDeckProfile = (profileVersion: ProfileVersion = "local-real-rounds.v5", selection: Readonly<Record<string, number>> = {}): CrawlProfile => {
   const { curated: _curated, ...raw } = JSON.parse(readFileSync(new URL("../../profiles/local-real-rounds.v5.json", import.meta.url), "utf8"));
-  return parseCrawlProfile({ ...raw, profileVersion });
+  return parseCrawlProfile({ ...raw, profileVersion, selection: { ...raw.selection, ...selection } });
 };
 
 export const RESPONSE_HASHES = Object.freeze([sha256("response-a"), sha256("response-b"), sha256("response-c")]);
@@ -262,7 +267,7 @@ export const stackCandidate = (
   const commit = sha1(`stack-commit-${repository}-${language}-${variant}`);
   const blob = sha1(`stack-blob-${repository}-${language}-${variant}`);
   const fixture = LANGUAGE_FIXTURES[language]![variant % 2]!;
-  const path = fixture.path;
+  const path = (overrides.path as string | undefined) ?? fixture.path;
   const excerpt = `${fixture.excerpt}\n${VARIANT_LINE[language]!(variant)}`;
   const value = {
     discoverySource: "STACK_V2", repository, repositoryUrl: root, authorName: `Stack Author ${language} ${variant}`,
@@ -298,18 +303,21 @@ const PROJECT_OPTIONS: Readonly<Partial<Record<StackLanguage, readonly string[]>
   "C++": ["umber/cascade", "umber/delta", "slate-dev/prairie", "slate-dev/fjord"],
 });
 
+/**
+ * Each language's project rounds, in groups of two (#167): the first group offers its four popular repositories, and
+ * each later group four more, named after them, with its files in a directory of their own.
+ */
 export const projectRoundInputs = (profile: CrawlProfile, snapshotId: string): readonly ProjectRoundInput[] =>
-  MAINSTREAM_LANGUAGES.flatMap((language) => {
-    const options: RepositoryOption[] = PROJECT_OPTIONS[language]!.map((repository) => ({ repository, description: `A popular ${repository.split("/")[1]} toolkit.` }));
+  MAINSTREAM_LANGUAGES.flatMap((language) => Array.from({ length: projectRoundsPerLanguage(profile) / 2 }, (_, group) => {
+    const options: RepositoryOption[] = PROJECT_OPTIONS[language]!.map((name) => group === 0 ? name : `${name}ix${group}`)
+      .map((repository) => ({ repository, description: `A popular ${repository.split("/")[1]} toolkit.` }));
     return [0, 1].map((variant) => {
       const own = options[variant]!;
-      return {
-        candidate: stackCandidate(profile, snapshotId, language, variant + 10, { repository: own.repository }),
-        description: own.description,
-        distractors: options.filter((option) => option.repository !== own.repository),
-      };
+      const candidate = stackCandidate(profile, snapshotId, language, variant + 10 + 2 * group, { repository: own.repository,
+        ...(group === 0 ? {} : { path: `group${group}/${LANGUAGE_FIXTURES[language]![variant]!.path}` }) });
+      return { candidate, description: own.description, distractors: options.filter((option) => option.repository !== own.repository) };
     });
-  });
+  }).flat());
 
 export interface DeckCandidates {
   readonly project: readonly ProjectRoundInput[];
@@ -845,23 +853,53 @@ export const curatedFiles = (): ReadonlyMap<string, string> => new Map(CURATED_S
     return [`algos/python:${file.path}`, curatedPythonSource(file.path.split("/")[1]!.replace(/\.py$/u, ""))] as const;
   })));
 
-/** Bound algorithm candidates for the small profile, as selection and the final snapshot would leave them. */
+/** A curated file's Go source: the named function, camel-cased, over a body numbered so no two files read alike. */
+export const curatedGoSource = (stem: string): string => {
+  const name = stem.replace(/_([a-z])/gu, (_, letter: string) => letter.toUpperCase());
+  const start = Object.keys(ALGORITHM_BODIES).indexOf(stem) + 2;
+  return `package algorithms\n\n// ${name} is a reference implementation.\nfunc ${name}(items []int) int {\n\ttotal := ${start}\n`
+    + `\tfor index, item := range items {\n\t\tif item > total {\n\t\t\ttotal = item + index\n\t\t}\n\t}\n\treturn total\n}\n`;
+};
+
+/** The small profile's Go files, which a v7 deck reads for each algorithm's second answer (#167). */
+export const curatedGoFiles = (): ReadonlyMap<string, string> => new Map(CURATED_SECTION.algorithm.families
+  .flatMap(({ algorithms }) => algorithms.map((entry) => {
+    const file = entry.files["algos/go"];
+    return [`algos/go:${file.path}`, curatedGoSource(file.path.split("/")[1]!.replace(/\.go$/u, ""))] as const;
+  })));
+
+/**
+ * The small profile read as v7 (#167): a sixteen-round algorithm deck that answers each algorithm twice, once in
+ * Python and once in Go.
+ */
+export const loadRepeatedAlgorithmProfile = (selection: Readonly<Record<string, number>> = {}): CrawlProfile => {
+  const raw = JSON.parse(readFileSync(new URL("../../profiles/local-real-rounds.v5.json", import.meta.url), "utf8"));
+  return parseCrawlProfile({ ...raw, profileVersion: "local-real-rounds.v7", selection: { ...raw.selection, ...selection },
+    curated: { repositories: CURATED_REPOSITORIES, algorithm: { ...structuredClone(CURATED_SECTION.algorithm), rounds: 16, roundsPerAlgorithm: 2 } } });
+};
+
+/**
+ * Bound algorithm candidates for the small profile, as selection and the final snapshot would leave them: each
+ * algorithm's Python file, and its Go file too when the deck answers each algorithm twice.
+ */
 export const algorithmCandidates = (profile: CrawlProfile, snapshotId: string): readonly AlgorithmCandidate[] =>
-  CURATED_SECTION.algorithm.families.flatMap((family) => family.algorithms.map((entry) => {
-    const stem = entry.files["algos/python"].path.split("/")[1]!.replace(/\.py$/u, "");
-    const window = algorithmWindow(curatedPythonSource(stem), "Python",
-      { names: [entry.label, ...entry.names], symbols: [], stems: family.algorithms.flatMap(({ label }) => labelStems(label)) },
-      { maxLines: profile.screening.excerptLines, maxBytes: profile.screening.excerptBytes, minBytes: profile.screening.minimumExcerptBytes })!;
-    const bytes = Buffer.from(curatedPythonSource(stem));
-    return Object.freeze({
-      familyId: family.id, algorithmId: entry.id, language: "Python" as const, repository: "algos/python",
-      commit: CURATED_REPOSITORIES[0].commit, path: entry.files["algos/python"].path, blob: sha1(`curated-blob-${stem}`),
-      rawContentHash: sha256(bytes.toString()), licenseName: "MIT License", licenseSpdx: "MIT",
-      licenseFileUrl: `https://github.com/algos/python/blob/${CURATED_REPOSITORIES[0].commit}/LICENSE`,
-      authorName: "Curated Author", authorLogin: "curated-author", authorCommit: sha1(`author-${stem}`),
-      excerpt: window.excerpt, excerptHash: sha256(window.excerpt), functionName: window.functionName, crawlSnapshotId: snapshotId,
-    });
-  }));
+  CURATED_SECTION.algorithm.families.flatMap((family) => family.algorithms.flatMap((entry) =>
+    CURATED_REPOSITORIES.slice(0, profile.curated!.algorithm!.roundsPerAlgorithm ?? 1).map((pin) => {
+      const path = entry.files[pin.repository].path;
+      const stem = path.split("/")[1]!.replace(/\.(?:py|go)$/u, "");
+      const source = pin.language === "Python" ? curatedPythonSource(stem) : curatedGoSource(stem);
+      const window = algorithmWindow(source, pin.language,
+        { names: [entry.label, ...entry.names], symbols: [], stems: family.algorithms.flatMap(({ label }) => labelStems(label)) },
+        { maxLines: profile.screening.excerptLines, maxBytes: profile.screening.excerptBytes, minBytes: profile.screening.minimumExcerptBytes })!;
+      const root = `https://github.com/${pin.repository}`;
+      return Object.freeze({
+        familyId: family.id, algorithmId: entry.id, language: pin.language, repository: pin.repository,
+        commit: pin.commit, path, blob: sha1(pin.language === "Python" ? `curated-blob-${stem}` : `curated-blob-${pin.repository}-${stem}`),
+        rawContentHash: sha256(source), licenseName: "MIT License", licenseSpdx: "MIT", licenseFileUrl: `${root}/blob/${pin.commit}/LICENSE`,
+        authorName: "Curated Author", authorLogin: "curated-author", authorCommit: sha1(`author-${stem}`),
+        excerpt: window.excerpt, excerptHash: sha256(window.excerpt), functionName: window.functionName, crawlSnapshotId: snapshotId,
+      });
+    })));
 
 /** An eight-round fix deck over two small Java projects (as Defects4J) and two Python projects (as BugsInPy). */
 export const FIX_SECTION = Object.freeze({

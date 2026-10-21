@@ -1,6 +1,6 @@
 import { screenBlob } from "@codeguessr/content/local-poc-support";
 
-import { AUTHORSHIP_CLAIM, CROSS_DECK_KEYS_BY_KIND, DEDUPLICATION_KEYS_BY_KIND, namesAdvisory } from "../../../packages/artifact/src/index";
+import { AUTHORSHIP_CLAIM, CROSS_DECK_KEYS_BY_KIND, deduplicationKeys, namesAdvisory } from "../../../packages/artifact/src/index";
 import { DECK_SHORT, noteRejection, rejectCandidate, type DeckAttempts, type DeckOutcome, type RunState } from "./diagnostics";
 import { looksGenerated } from "./excerpt-window";
 import { fixWindows, type FixWindow } from "./fix-window";
@@ -56,7 +56,7 @@ export const selectVulnerableLine = async (
   const { profile } = context;
   const deck = profile.curated!["vulnerable-line"]!;
   const hints = new Map(deck.cwes.map(({ id, hint }) => [id, hint]));
-  const keys = { deck: DEDUPLICATION_KEYS_BY_KIND.VULNERABLE_LINE, cross: CROSS_DECK_KEYS_BY_KIND.VULNERABLE_LINE };
+  const keys = { deck: deduplicationKeys("VULNERABLE_LINE", profile.profileVersion), cross: CROSS_DECK_KEYS_BY_KIND.VULNERABLE_LINE };
   const queues: AdvisoryPointer[][] = [];
   for (const ecosystem of deck.ecosystems) {
     const listed: AdvisoryPointer[] = [];

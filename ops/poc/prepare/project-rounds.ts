@@ -2,7 +2,7 @@ import { canonicalHash } from "./canonical";
 import { exactStackBindings } from "./language-rounds";
 import { deepFreeze } from "./model-validation";
 import { namesRepository, profileAtLeast, projectCandidateId, sharedOptionWords, type ExperimentFixture } from "./model";
-import { poolSizes, type CrawlProfile } from "./profile";
+import { PROJECT_GROUP_ANSWERS, poolSizes, type CrawlProfile } from "./profile";
 import { approximately, attributionFor, fill, orderedPool, roundIdFor, shuffled, sourceRecord, type GeneratedRounds } from "./round-helpers";
 import type { RevalidatedStackCandidate } from "./stack-revalidation";
 
@@ -115,5 +115,9 @@ export const generateProjectRounds = (options: ProjectRoundsOptions): GeneratedR
     const values = fixtures.map(({ source }) => String(source[key]));
     if (new Set(values).size !== values.length) fail();
   }
+  // Each repository is offered by the two rounds of its group alone, so counting options finds no answer.
+  const offered = new Map<string, number>();
+  for (const { label } of fixtures.flatMap(({ candidates }) => candidates)) offered.set(label, (offered.get(label) ?? 0) + 1);
+  if ([...offered.values()].some((count) => count !== PROJECT_GROUP_ANSWERS)) fail();
   return orderedPool(fixtures);
 };

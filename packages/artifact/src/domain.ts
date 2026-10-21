@@ -16,21 +16,22 @@ export const MODE_KINDS: Readonly<Record<FixtureKind, DeckId>> = Object.freeze({
   VULNERABLE_LINE: "vulnerable-line",
 });
 /**
- * The crawl profiles an artifact may come from, oldest first, each with its artifact schema. v5 made the committed
- * artifact; v6 is the v1.0 data run (#129), and its rules apply to its own artifacts only, so v5 still rebuilds the
- * committed artifact byte for byte.
+ * The crawl profiles an artifact may come from, oldest first, each with its artifact schema. v6 is the v1.0 data run
+ * (#129), which made the committed artifact; v7 grows the pools from the same sources (#167). A version's rules apply
+ * to its own artifacts and later ones only, so an earlier profile still rebuilds its artifact byte for byte.
  */
-export const PROFILE_VERSIONS = Object.freeze(["local-real-rounds.v5", "local-real-rounds.v6"] as const);
+export const PROFILE_VERSIONS = Object.freeze(["local-real-rounds.v5", "local-real-rounds.v6", "local-real-rounds.v7"] as const);
 export type ProfileVersion = typeof PROFILE_VERSIONS[number];
 export const ARTIFACT_SCHEMA_VERSIONS = Object.freeze({
   "local-real-rounds.v5": "local-experiment-artifact.v4",
   "local-real-rounds.v6": "local-experiment-artifact.v5",
+  "local-real-rounds.v7": "local-experiment-artifact.v6",
 } as const);
 export type ArtifactSchemaVersion = typeof ARTIFACT_SCHEMA_VERSIONS[ProfileVersion];
 /** Whether a profile or snapshot version is `minimum` or later: a rule added for a run holds for that run's profile on. */
 export const profileAtLeast = (version: ProfileVersion, minimum: ProfileVersion): boolean =>
   PROFILE_VERSIONS.indexOf(version) >= PROFILE_VERSIONS.indexOf(minimum);
-/** The profile the preparer runs, and its artifact's schema; the v1.0 data run moves both to v6. */
+/** The profile the preparer runs, and its artifact's schema; the v7 data run (#167) moves both on. */
 export const PROFILE_VERSION: ProfileVersion = "local-real-rounds.v6";
 export const ARTIFACT_SCHEMA_VERSION: ArtifactSchemaVersion = ARTIFACT_SCHEMA_VERSIONS[PROFILE_VERSION];
 export const CONTENT_CLASS = "LOCAL_UNREVIEWED_EXPERIMENT";
@@ -67,7 +68,10 @@ export const isLanguageSelection = (languages: readonly unknown[]): boolean => {
   return languages.length > 0 && indexes.every((index, at) => index >= 0 && (at === 0 || index > indexes[at - 1]!))
     && LANGUAGE_PAIRS.every((pair) => pair.every((member) => languages.includes(member)) || pair.every((member) => !languages.includes(member)));
 };
-/** Project and language decks hold this many rounds per language; the language deck's option design needs exactly two. */
+/**
+ * Project and language decks hold this many rounds per language; the language deck's option design needs exactly two,
+ * and from v7 on a profile may give the project deck more, in groups of two (#167).
+ */
 export const ROUNDS_PER_LANGUAGE = 2;
 /** Options per round: four for every kind but before-or-after, which has two. */
 export const CANDIDATE_COUNTS: Readonly<Record<FixtureKind, number>> = Object.freeze({
@@ -172,8 +176,9 @@ export const CROSS_DECK_KEYS = ["commit", "blob", "rawContentHash", "excerptHash
  */
 /** A curated file's identities: many rounds may share its repository and pinned commit, never its file. */
 const FILE_KEYS = ["path", "blob", "rawContentHash", "excerptHash"] as const;
-export const DEDUPLICATION_KEYS_BY_KIND: Readonly<Record<FixtureKind, readonly string[]>> = Object.freeze({
+const DEDUPLICATION_KEYS_BY_KIND: Readonly<Record<FixtureKind, readonly string[]>> = Object.freeze({
   PROJECT: DECK_DEDUPLICATION_KEYS, LANGUAGE: DECK_DEDUPLICATION_KEYS, BEFORE_AFTER: DECK_DEDUPLICATION_KEYS,
+  // Before v7, each algorithm is the answer once.
   ALGORITHM: [...FILE_KEYS, "algorithmId"],
   OUTPUT: [...FILE_KEYS],
   // A file may hold several recorded bugs; each round is its own bug and its own commit.
@@ -185,6 +190,12 @@ export const DEDUPLICATION_KEYS_BY_KIND: Readonly<Record<FixtureKind, readonly s
   EXERCISE: [...FILE_KEYS],
   VULNERABLE_LINE: ["repository", "commit", "fixCommit", "advisory", "blob", "rawContentHash", "excerptHash"],
 });
+/**
+ * The identities that may not repeat within a deck of a kind, in a profile version's artifacts. From v7 on (#167) an
+ * algorithm may be the answer more than once, each time from another language's file, so only its files are distinct.
+ */
+export const deduplicationKeys = (kind: FixtureKind, version: ProfileVersion): readonly string[] =>
+  kind === "ALGORITHM" && profileAtLeast(version, "local-real-rounds.v7") ? FILE_KEYS : DEDUPLICATION_KEYS_BY_KIND[kind];
 export const CROSS_DECK_KEYS_BY_KIND: Readonly<Record<FixtureKind, readonly string[]>> = Object.freeze({
   PROJECT: CROSS_DECK_KEYS, LANGUAGE: CROSS_DECK_KEYS, BEFORE_AFTER: CROSS_DECK_KEYS,
   ALGORITHM: ["blob", "rawContentHash", "excerptHash"],

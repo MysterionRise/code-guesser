@@ -1,8 +1,48 @@
 import { describe, expect, it } from "vitest";
 
+import { composeExperimentArtifact } from "../../../ops/poc/prepare/compose";
+import { composeInput, loadCuratedProfile, loadRepeatedAlgorithmProfile } from "../../../ops/poc/prepare/testdata/deck-builders";
 import {
-  FIX_ORDERS, fixExtremeLimits, fixExtremeScores, fixRanks, fixSlack, labelStems, lineComplexity, pairLongerScore, rareWords, showsLabelStem,
+  DECK_KINDS, ExperimentRecordError, FIX_ORDERS, deduplicationKeys, fixExtremeLimits, fixExtremeScores, fixRanks, fixSlack, labelStems,
+  lineComplexity, pairLongerScore, parseArtifactDecks, rareWords, showsLabelStem,
 } from "../src/index";
+
+describe("algorithm decks that answer an algorithm more than once (#167)", () => {
+  const composed = (profile = loadRepeatedAlgorithmProfile()): any => structuredClone(composeExperimentArtifact(composeInput(profile)).artifact);
+  const algorithmDeck = (value: any) => value.decks.find(({ id }: any) => id === "algorithm");
+
+  it("lets only a v7 deck repeat an algorithm id; every other kind keeps its keys", () => {
+    for (const version of ["local-real-rounds.v5", "local-real-rounds.v6"] as const) {
+      expect(deduplicationKeys("ALGORITHM", version)).toEqual(["path", "blob", "rawContentHash", "excerptHash", "algorithmId"]);
+    }
+    expect(deduplicationKeys("ALGORITHM", "local-real-rounds.v7")).toEqual(["path", "blob", "rawContentHash", "excerptHash"]);
+    for (const kind of Object.values(DECK_KINDS).filter((kind) => kind !== "ALGORITHM")) {
+      expect(deduplicationKeys(kind, "local-real-rounds.v7")).toEqual(deduplicationKeys(kind, "local-real-rounds.v6"));
+    }
+  });
+
+  it("parses a v7 deck whose families answer each algorithm twice, once in each language", () => {
+    const deck = parseArtifactDecks(composed()).find(({ id }) => id === "algorithm")!;
+    expect(deck.fixtures).toHaveLength(16);
+    const answers = new Map<string, string[]>();
+    for (const { source } of deck.fixtures) answers.set(String(source.algorithmId), [...answers.get(String(source.algorithmId)) ?? [], String(source.language)]);
+    expect([...answers.values()].every((languages) => [...languages].sort().join("|") === "Go|Python")).toBe(true);
+  });
+
+  it("refuses a v7 deck whose family answers unevenly, or answers an algorithm twice in one language", () => {
+    const uneven = composed();
+    algorithmDeck(uneven).fixtures.splice(0, 1);
+    expect(() => parseArtifactDecks(uneven)).toThrow(ExperimentRecordError);
+    const sameLanguage = composed();
+    const go = algorithmDeck(sameLanguage).fixtures.find(({ source }: any) => source.language === "Go");
+    go.source.language = "Python";
+    expect(() => parseArtifactDecks(sameLanguage)).toThrow(ExperimentRecordError);
+    // Before v7 the deck's own keys hold each algorithm to one answer, and its balance is the generator's.
+    const v5 = composed(loadCuratedProfile());
+    algorithmDeck(v5).fixtures.splice(0, 1);
+    expect(() => parseArtifactDecks(v5)).not.toThrow();
+  });
+});
 
 describe("algorithm label stems", () => {
   it("finds a label's stem inside any identifier, the answer's and a decoy's alike", () => {
