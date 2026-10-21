@@ -164,8 +164,19 @@ gate: changing queries, retries, ceilings, deck rules, or running
   server actions take one step each. A ledger refuses an older token, so a
   round takes one answer, and score and hint counts are the server's. Hint
   text never ships with the page. `CODEGUESSR_SESSION_SECRET` (32+ chars)
-  keeps games alive across restarts; without it each process makes a random
+  keeps games alive across restarts; without it each local process makes a random
   secret.
+- **Public mode (#97, L4):** `CODEGUESSR_PUBLIC=1` marks a public server, and `checkEnvironment`
+  (`apps/game/src/server/environment.server.ts`) holds it to anonymous play:
+  - it requires the session secret, an https `CODEGUESSR_PUBLIC_ORIGIN` with no path, absolute `CODEGUESSR_STATE_DIR`
+    and `EXPERIMENT_EVENTS_DIR`, a `CODEGUESSR_CLIENT_IP_HEADER` name, and the OpenRouter key under `GENUI_ENABLED=1`;
+  - it refuses lab mode and an `OPENROUTER_BASE_URL` other than OpenRouter's unless `EXPERIMENT_SOURCE` is `agent` or
+    `synthetic`, and an `EXPERIMENT_DISABLED` pair it doesn't know;
+  - `src/instrumentation.ts` runs it at boot: each failure prints `GAME_ENVIRONMENT_REJECTED <CODE>`, never a value,
+    and the server exits 78. `pnpm test:deploy` (`tests/deploy/`) boots the production build to check that.
+  - In public mode `secret()` throws rather than make a secret up, and `labMode()` is off for real games.
+    `app/error.tsx` and `app/global-error.tsx` say nothing internal. The `dev` and `start` scripts still bind
+    127.0.0.1; only the container (#170) will bind 0.0.0.0.
 - The answer-lock guard (#102) is the only path from round data to a model:
   - `modelContext` on the experiment reads the sealed game, and
     `apps/game/src/genui/round-context.server.ts` builds the round's context.
@@ -867,6 +878,7 @@ pnpm test:performance
 pnpm test:e2e
 pnpm exec node --test tests/containment/acquisition-boundary.test.mjs
 pnpm --filter @codeguessr/game build
+pnpm test:deploy
 pnpm audit --audit-level=high
 ```
 
@@ -877,6 +889,6 @@ pnpm audit --audit-level=high
    passes server-side validation and the leakage test, and its pinned hash
    matches.
 3. The root route plays every deck offline.
-4. Browser, build, accessibility, performance, containment, unit, and type
+4. Browser, build, boot, accessibility, performance, containment, unit, and type
    checks pass freshly.
 5. The README and its media reflect what actually plays.

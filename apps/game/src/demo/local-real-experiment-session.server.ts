@@ -3,6 +3,7 @@ import "server-only";
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
 import { FACTORS, parseArms, type Arms } from "../experiment/arms";
+import { MIN_SECRET_LENGTH, publicMode } from "../server/environment.server";
 import { ROUNDS_PER_SESSION, SESSION_DECK_IDS, type SessionDeckId } from "./local-real-experiment-domain.server";
 
 /**
@@ -55,8 +56,6 @@ export class SessionRefusal extends Error {
 export const GAME_TTL_MS = 6 * 60 * 60 * 1000;
 /** Live games the ledger remembers; past this, the oldest are forgotten first. */
 export const LEDGER_CAPACITY = 50_000;
-/** A configured secret must be at least this long. */
-export const MIN_SECRET_LENGTH = 32;
 const MAC_CONTEXT = "codeguessr-game-session.v2";
 const STATE_KEYS = ["arms", "artifactHash", "correct", "dealtAt", "deck", "gameId", "hints", "hintsByRound", "record", "roundIds", "roundIndex", "roundStartedAt", "score", "step", "version"];
 
@@ -75,13 +74,15 @@ const shared = (): SessionGlobals => {
 
 /**
  * `CODEGUESSR_SESSION_SECRET` when set, so games survive a restart; otherwise a random secret for this process.
- * A configured secret that is too short is refused rather than weakened.
+ * A configured secret that is too short is refused rather than weakened, and a public server (#97) never makes one
+ * up: its games must outlive a deploy, so it refuses to sign without one.
  */
 const secret = (): Buffer => {
   const globals = shared();
   if (globals.secret) return globals.secret;
   const configured = process.env.CODEGUESSR_SESSION_SECRET;
   if (configured !== undefined && configured.length < MIN_SECRET_LENGTH) throw new Error("CODEGUESSR_SESSION_SECRET_TOO_SHORT");
+  if (configured === undefined && publicMode()) throw new Error("CODEGUESSR_SESSION_SECRET_MISSING");
   globals.secret = configured === undefined ? randomBytes(32) : Buffer.from(configured, "utf8");
   return globals.secret;
 };

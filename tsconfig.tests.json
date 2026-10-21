@@ -11,6 +11,8 @@
   "include": [
     "apps/game/test/**/*.ts",
     "apps/game/test/**/*.tsx",
+    // The global error page, which a test renders, imports the global style sheet.
+    "apps/game/src/styles.d.ts",
     "packages/*/test/**/*.ts",
     "tests/e2e/**/*.ts",
     "playwright.config.ts"

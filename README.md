@@ -185,6 +185,30 @@ A shared link and a link preview name the address the request came to.
 Behind a proxy or on a public host, set `CODEGUESSR_PUBLIC_ORIGIN` (such as
 `https://codeguessr.example`) so they name that instead.
 
+### Public mode
+
+`CODEGUESSR_PUBLIC=1` marks a server for anonymous public play (#100). It
+refuses to start until it is configured for it: each missing or malformed
+setting prints `GAME_ENVIRONMENT_REJECTED <CODE>`, never a value, and the
+server exits with status 78.
+
+| Variable | In public mode |
+| --- | --- |
+| `CODEGUESSR_PUBLIC` | `1` turns public mode on; any value but `1`, `0`, or empty is refused |
+| `CODEGUESSR_SESSION_SECRET` | Required, at least 32 characters. A public server never makes one up |
+| `CODEGUESSR_PUBLIC_ORIGIN` | Required: the https origin players use, such as `https://codeguessr.example`, with no path; shared links and link previews name it |
+| `CODEGUESSR_STATE_DIR` | Required: an absolute directory for the server's own state |
+| `EXPERIMENT_EVENTS_DIR` | Required: an absolute directory for the event log |
+| `CODEGUESSR_CLIENT_IP_HEADER` | Required: the header the reverse proxy sets to the client's address, such as `X-Forwarded-For`, for rate limits (#98) |
+| `OPENROUTER_API_KEY` | Required when `GENUI_ENABLED=1` |
+| `OPENROUTER_BASE_URL` | Unset or `https://openrouter.ai/api/v1`, unless `EXPERIMENT_SOURCE` is `agent` or `synthetic` |
+| `EXPERIMENT_LAB` | Refused, unless `EXPERIMENT_SOURCE` is `agent` or `synthetic`; lab mode stays off for real games |
+| `EXPERIMENT_DISABLED` | Only known `factor:level` pairs |
+
+A page that fails shows a plain error page with a link back to the decks; it
+says nothing about the error. The `dev` and `start` scripts still listen on
+127.0.0.1 only.
+
 ### Generative UI (experimental)
 
 Off by default. With `GENUI_ENABLED=1` and an OpenRouter key, a revealed round
@@ -515,12 +539,15 @@ pnpm test:performance
 pnpm test:e2e
 pnpm exec node --test tests/containment/acquisition-boundary.test.mjs
 pnpm --filter @codeguessr/game build
+pnpm test:deploy
 uv run --project ops/poc/stack --locked python -m unittest discover -s ops/poc/stack
 pnpm audit --audit-level=high
 ```
 
 `pnpm audit` asks the npm registry for advisories, so it is the one check
-that needs the network; CI runs it after installing.
+that needs the network; CI runs it after installing. `pnpm test:deploy`
+starts the production build in public mode; it reuses a build newer than the
+game's sources and builds one otherwise.
 
 If Playwright reports that Chromium is missing on a fresh machine, run
 `pnpm exec playwright install chromium`. `pnpm test:e2e` starts its own dev
@@ -558,7 +585,7 @@ Each path has a status:
 | `ops/experiment` | `experiment:report`: the experiment's report from the event log, with its statistics and pre-registered plan | live |
 | `ops/content` | The `acquire:content` operator command and its policy files. The containment test (`tests/containment/acquisition-boundary.test.mjs`) requires the script to exist | Contract-era |
 | `ops/tsconfig.json` | Type-checks everything under `ops/`; `pnpm typecheck` runs it | PoC support |
-| `tests` | Accessibility, browser, performance, and containment suites. They run in CI against the live game; the privacy and provenance checks date from the Contract era | PoC support |
+| `tests` | Accessibility, browser, performance, containment, and boot (`tests/deploy`) suites. They run in CI against the live game; the privacy and provenance checks date from the Contract era | PoC support |
 | `.github/workflows/ci.yml` | CI: a dependency audit that fails on high or critical advisories, then every suite above, with no provider secrets and no live preparation | PoC support |
 | `.github/dependabot.yml` | Monthly version updates for npm and GitHub Actions, minor and patch grouped, npm majors left to hand upgrades, at most five open pull requests per ecosystem; the Stack worker's `uv.lock` gets security updates only, since the worker journal is keyed to it | PoC support |
 | `vitest.config.mts` | Finds `*.test.ts` and `*.test.tsx` under `apps/`, `packages/`, and `ops/`, and compiles JSX with React's automatic runtime, since the tsconfig preserves JSX for Next.js. A test may take 30 s, as the preparer's synchronous composition tests take up to 12 s on CI | PoC support |

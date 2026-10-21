@@ -1,6 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { CONTROL, FACTORS, assignArms, effectiveWeights, labMode, labOverrides, parseArms, parseDisabled, type Arms } from "../src/experiment/arms";
+import { SOURCES } from "../src/experiment/events";
+
+vi.mock("server-only", () => ({}));
+
+const { eventSource } = await import("../src/experiment/event-store.server");
 
 /** A small deterministic generator, so draws are repeatable. */
 const seeded = (seed: number) => () => {
@@ -51,6 +56,13 @@ describe("experiment arms (#106)", () => {
     expect(labMode({ NODE_ENV: "development" })).toBe(true);
     expect(labMode({ NODE_ENV: "production" })).toBe(false);
     expect(labMode({ EXPERIMENT_LAB: "yes", NODE_ENV: "production" })).toBe(false);
+    // A public server (#97) keeps the draw, except on a smoke run whose events never mix with real games.
+    for (const source of [...SOURCES, undefined, "admin"]) {
+      const smoke = eventSource({ EXPERIMENT_SOURCE: source }) !== "real";
+      expect(labMode({ CODEGUESSR_PUBLIC: "1", EXPERIMENT_LAB: "1", EXPERIMENT_SOURCE: source, NODE_ENV: "production" })).toBe(smoke);
+      expect(labMode({ CODEGUESSR_PUBLIC: "1", EXPERIMENT_SOURCE: source, NODE_ENV: "development" })).toBe(smoke);
+    }
+    expect(labMode({ CODEGUESSR_PUBLIC: "0", EXPERIMENT_LAB: "1", NODE_ENV: "production" })).toBe(true);
     const overrides = labOverrides({ design: "composer", theme: ["paper"], layer: "sideways", deck: "fix" });
     expect(overrides).toEqual({ design: "composer" });
     expect(assignArms({ genuiEnabled: true, disabled: new Set(), overrides, random: seeded(1) }).design).toBe("composer");
