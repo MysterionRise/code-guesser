@@ -170,6 +170,18 @@ describe("experiment report", () => {
     expect(renderReport(built)).toContain("2 stored lines failed the event schema");
   });
 
+  it("reads shared results, and the copied results stored before them, without counting either as a game (#171)", () => {
+    const store = syntheticStore(1);
+    const line = (type: string, fields: Record<string, unknown> = {}) => JSON.stringify({ v: 1, type, game: "1".padStart(32, "0"), day: "2026-11-02",
+      source: "real", deck: "algorithm", design: "off", theme: "terminal", layer: "off", ...fields });
+    const shared = [line("result_shared", { via: "share" }), line("result_shared", { via: "clipboard" }), line("result_copied"), line("result_shared", { via: "email" })];
+    writeFileSync(join(store.directory, "events-2026-11-02.jsonl"), `${shared.join("\n")}\n`, { flag: "a" });
+    const built = report(store);
+    expect(built.refused).toBe(1);
+    expect(built.games).toBe(store.games);
+    expect(built.completed).toBe(report(syntheticStore(1)).completed);
+  });
+
   it("renders the plan, each factor, and the interactions as descriptive tables", () => {
     const markdown = renderReport(report(syntheticStore(3)));
     for (const heading of ["## Pre-registered plan", "## Design", "## Theme", "## Layer", "### design × theme", "### theme × layer"]) {

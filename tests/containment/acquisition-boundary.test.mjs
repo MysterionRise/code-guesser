@@ -71,28 +71,45 @@ test("browser and gameplay dependency surfaces exclude acquisition capabilities"
     ...filesUnder(join(root, "packages", "artifact", "src")),
   ];
   assertContainsNoFingerprint(participantSources, "participant dependency surface");
-  // Two server endpoints: generative UI's guarded route (#101), off unless enabled and reading round data only
-  // through the answer-lock guard; and the event log's beacon (#107), which reads no round data at all. One boot
-  // hook (#97), which only checks the environment and prints codes.
+  // Three server endpoints: generative UI's guarded route (#101), off unless enabled and reading round data only
+  // through the answer-lock guard; the event log's beacon (#107), which reads no round data at all; and each deck's
+  // link preview (#171), an image of its title drawn at build time. One boot hook (#97), which only checks the
+  // environment and prints codes.
   const routes = participantSources.filter((path) => /(?:^|\/)(?:route|middleware|instrumentation)\.[cm]?[jt]sx?$/u.test(path));
-  assert.deepEqual(routes.map((path) => relative(root, path)), [
+  assert.deepEqual(routes.map((path) => relative(root, path)).sort(), [
     "apps/game/src/app/api/events/route.ts",
     "apps/game/src/app/api/genui/route.ts",
+    "apps/game/src/app/og/[deck]/route.tsx",
     "apps/game/src/instrumentation.ts",
   ]);
-  const eventsRoute = read(routes[0]);
+  const eventsRoute = read(join(game, "src", "app", "api", "events", "route.ts"));
   assert.match(eventsRoute, /const MAX_BODY_LENGTH = 1024;/u);
   assert.deepEqual([...eventsRoute.matchAll(/experiment\.(\w+)\(/gu)].map(([, method]) => method), ["recordClientEvent"]);
-  const genuiRoute = read(routes[1]);
+  const genuiRoute = read(join(game, "src", "app", "api", "genui", "route.ts"));
   assert.match(genuiRoute, /process\.env\.GENUI_ENABLED !== "1"/u);
   assert.match(genuiRoute, /experiment\.modelContext\(/u);
-  const boot = read(routes[2]);
+  const boot = read(join(game, "src", "instrumentation.ts"));
   assert.deepEqual([...boot.matchAll(/(?:\bfrom|\bimport\s*\()\s*"([^"]+)"/gu)].map(([, specifier]) => specifier), ["./server/environment.server"]);
   assert.doesNotMatch(boot, /^import\b/mu);
   assert.match(boot, /if \(process\.env\.NEXT_RUNTIME === "nodejs"\)/u);
   assert.deepEqual([...boot.matchAll(/console\.\w+\(([^;]*)\);/gu)].map(([, argument]) => argument), ["`GAME_ENVIRONMENT_REJECTED ${code}`"]);
   assert.match(boot, /process\.exit\(78\);/u);
   assert.doesNotMatch(boot, /experiment|activeLocalRealExperiment|readFileSync|process\.env\.(?!NEXT_RUNTIME\b)\w/u);
+  // The preview reads deck titles alone, through the one list of what a game is dealt from, and that list reads only
+  // each deck's id, title, and description: no round, option, or deal reaches either. Comments are left out.
+  const code = (path) => read(path).replace(/\/\*[\s\S]*?\*\/|^\s*\/\/.*$/gmu, "");
+  const roundData = /\b(?:fixtures?|rounds?|candidates?|privateReveals|panes?|prompt|clues?|hints?|deal\w*|answer|revealHint|modelContext|recordClientEvent)\b/iu;
+  const ogRoute = code(join(game, "src", "app", "og", "[deck]", "route.tsx"));
+  assert.match(ogRoute, /^export const dynamic = "force-static";$/mu);
+  assert.match(ogRoute, /^export const dynamicParams = false;$/mu);
+  assert.deepEqual([...ogRoute.matchAll(/\bloaded\.(\w+)/gu)].map(([, key]) => key), ["ok", "experiment"]);
+  assert.match(ogRoute, /gameSources\(loaded\.experiment\)\.map\(\(\{ id, title \}\) => \[id, title\]\)/u);
+  assert.doesNotMatch(ogRoute, roundData);
+  assert.doesNotMatch(ogRoute, /\bdescription\b|\bfetch\b|process\.env|headers\(/u);
+  const sources = code(join(game, "src", "demo", "game-sources.server.ts"));
+  assert.match(sources, /= \(\{ decks, mixed \}: Pick<LocalRealExperiment, "decks" \| "mixed">\)/u);
+  assert.match(sources, /decks\.map\(\(\{ id, title, description \}\) => \(\{ id, title, description \}\)\)/u);
+  assert.doesNotMatch(sources, roundData);
   assert.equal(participantSources.some((path) => /\bfetch\s*\(/u.test(read(path))), false);
 
   const contentPackage = JSON.parse(read(join(root, "packages", "content", "package.json")));

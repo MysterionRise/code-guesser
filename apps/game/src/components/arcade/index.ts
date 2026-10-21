@@ -13,6 +13,7 @@ export {
 } from "./arcade-session";
 export {
   SESSION_ENDED_MESSAGE,
+  SHARE_MARKS,
   formatCompletionResult,
   projectSpoilerFreeShare,
   roundPointsNote,

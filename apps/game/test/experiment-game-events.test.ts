@@ -91,18 +91,19 @@ describe("the event beacon (#107)", () => {
     // Played in the last minutes, since the route checks the token against the real clock.
     const { token } = playGame(true, Date.now() - 400_000);
     captured.length = 0;
-    expect((await beacon({ sessionToken: token, event: { type: "result_copied" } })).status).toBe(204);
+    expect((await beacon({ sessionToken: token, event: { type: "result_shared", via: "share" } })).status).toBe(204);
     expect((await beacon({ sessionToken: token, event: { type: "deal_again", to: "chooser" } })).status).toBe(204);
     expect((await beacon({ sessionToken: token, event: { type: "genui_interaction", round: 5, action: "explain" } })).status).toBe(204);
     expect(captured.map(({ event }) => [event.type, event.fields])).toEqual([
-      ["result_copied", {}], ["deal_again", { to: "chooser" }], ["genui_interaction", { round: 5, action: "explain" }],
+      ["result_shared", { via: "share" }], ["deal_again", { to: "chooser" }], ["genui_interaction", { round: 5, action: "explain" }],
     ]);
     captured.length = 0;
-    // Server events can't be sent from a browser, and no field outside the schema gets through.
+    // Server events can't be sent from a browser, nor retired ones, and no field outside the schema gets through.
     expect((await beacon({ sessionToken: token, event: { type: "round_revealed", round: 1, correct: true, hints: 0, ms: 1 } })).status).toBe(400);
-    expect((await beacon({ sessionToken: token, event: { type: "result_copied", text: "my answer was A" } })).status).toBe(400);
-    expect((await beacon({ sessionToken: token, event: { type: "result_copied" }, ip: "127.0.0.1" })).status).toBe(400);
-    expect((await beacon({ sessionToken: "forged.token", event: { type: "result_copied" } })).status).toBe(410);
+    expect((await beacon({ sessionToken: token, event: { type: "result_copied" } })).status).toBe(400);
+    expect((await beacon({ sessionToken: token, event: { type: "result_shared", via: "share", text: "my answer was A" } })).status).toBe(400);
+    expect((await beacon({ sessionToken: token, event: { type: "result_shared", via: "clipboard" }, ip: "127.0.0.1" })).status).toBe(400);
+    expect((await beacon({ sessionToken: "forged.token", event: { type: "result_shared", via: "clipboard" } })).status).toBe(410);
     expect((await beacon("{not json")).status).toBe(400);
     expect((await beacon("x".repeat(2_000))).status).toBe(413);
     expect(captured).toEqual([]);

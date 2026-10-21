@@ -16,6 +16,7 @@ export type EventSource = (typeof SOURCES)[number];
 const VIEWPORTS = ["phone", "tablet", "desktop"] as const;
 const PHASES = ["before-lock", "after-lock"] as const;
 const DEAL_TARGETS = ["same-deck", "chooser"] as const;
+const SHARE_ROUTES = ["share", "clipboard"] as const;
 const GENUI_ACTIONS = ["explain", "chat", "quiz", "offer_hint", "step"] as const;
 const GENUI_FALLBACKS = ["unavailable", "refused", "failed", "rejected"] as const;
 const DAY_MS = 86_400_000;
@@ -37,6 +38,7 @@ const PAYLOADS = {
   game_completed: { score: count(1_000_000), correct: count(5), hints: count(10), ms },
   deal_again: { to: oneOf(DEAL_TARGETS) },
   result_copied: {},
+  result_shared: { via: oneOf(SHARE_ROUTES) },
   genui_call: { round, phase: oneOf(PHASES), ok: flag, status: count(599), calls: count(20), tokensIn: count(1_000_000), tokensOut: count(100_000), ms },
   genui_interaction: { round, action: oneOf(GENUI_ACTIONS) },
   genui_fallback: { round, reason: oneOf(GENUI_FALLBACKS) },
@@ -46,11 +48,17 @@ export type EventType = keyof typeof PAYLOADS;
 export const EVENT_TYPES = Object.freeze(Object.keys(PAYLOADS) as EventType[]);
 
 /** The events only a browser sees; it sends them to the beacon route, which adds the game's own fields. */
-export const CLIENT_EVENT_TYPES = Object.freeze(["game_viewed", "deal_again", "result_copied", "genui_interaction", "genui_fallback"] as const);
+export const CLIENT_EVENT_TYPES = Object.freeze(["game_viewed", "deal_again", "result_shared", "genui_interaction", "genui_fallback"] as const);
 export type ClientEventType = (typeof CLIENT_EVENT_TYPES)[number];
+/**
+ * Events nothing sends any more, still read so the lines already stored keep parsing: `result_copied` became
+ * `result_shared` (#171), which also says whether the share sheet or the clipboard took it.
+ */
+export const RETIRED_EVENT_TYPES = Object.freeze(["result_copied"] as const);
 
 export type Viewport = (typeof VIEWPORTS)[number];
 export type DealTarget = (typeof DEAL_TARGETS)[number];
+export type ShareRoute = (typeof SHARE_ROUTES)[number];
 export type GenuiAction = (typeof GENUI_ACTIONS)[number];
 export type GenuiFallback = (typeof GENUI_FALLBACKS)[number];
 /** What a generative panel reports; the shell adds the round it belongs to. */
@@ -60,7 +68,7 @@ export type GenuiEvent = Readonly<{ type: "genui_interaction"; action: GenuiActi
 export type ClientEvent =
   | Readonly<{ type: "game_viewed"; viewport: Viewport }>
   | Readonly<{ type: "deal_again"; to: DealTarget }>
-  | Readonly<{ type: "result_copied" }>
+  | Readonly<{ type: "result_shared"; via: ShareRoute }>
   | (GenuiEvent & Readonly<{ round: number }>);
 
 /** What every event carries: the schema, the game, the day (UTC, no time), the source, the deck, and the arms. */

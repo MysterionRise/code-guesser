@@ -88,6 +88,21 @@ it under "Why". The round dots mark each answered round ✓ or ✗, and a
 finished game lists every round, your pick, the answer, the points, and its
 source.
 
+"Share result" passes on a spoiler-free line: the deck, the tally, one square
+per round (🟩 right with no hint, 🟨 right with hints, ⬛ missed), and the
+game's own address, so a friend is dealt the same five. A browser with a share
+sheet opens it (Web Share); any other copies the line to the clipboard:
+
+```text
+CodeGuessr · Which language? · 4/5 · 3,800/5,000
+🟩🟨⬛🟩🟩
+http://127.0.0.1:3000/?deck=language&deal=0a1b2c3d&game=0
+```
+
+The link carries the deck, the deal's seed, and the game number, never a
+lab pick. A deck's address also gives link previews its title, description,
+and an image of its title (`/og/<deck>`), never anything from a round.
+
 From the keyboard, `1` to `4` pick an option, `Enter` locks it in, `H` buys a
 hint, and `N` moves to the next round. On a phone, "Wrap lines" wraps long
 code under each line's own indentation.
@@ -100,7 +115,8 @@ Two cards come first in the chooser:
 
 - **Today's five** (`/?deck=daily`) deals a mixed game seeded by the artifact
   and the local date. Every load that day deals the same five rounds in the
-  same order, and its share line carries the date.
+  same order, and its share line carries the date. Its link is
+  `/?deck=daily` for now; #172 adds the date to it.
 - **Mixed** (`/?deck=mixed`) deals one round from each of five decks drawn at
   random. Each round's header names its deck, and the game scores up to the
   sum of its rounds' top points.
@@ -165,6 +181,10 @@ reaches the browser only once it is bought. Without
 random secret, so a restart ends the games in progress: the page then asks
 the player to deal new rounds.
 
+A shared link and a link preview name the address the request came to.
+Behind a proxy or on a public host, set `CODEGUESSR_PUBLIC_ORIGIN` (such as
+`https://codeguessr.example`) so they name that instead.
+
 ### Public mode
 
 `CODEGUESSR_PUBLIC=1` marks a server for anonymous public play (#100). It
@@ -176,7 +196,7 @@ server exits with status 78.
 | --- | --- |
 | `CODEGUESSR_PUBLIC` | `1` turns public mode on; any value but `1`, `0`, or empty is refused |
 | `CODEGUESSR_SESSION_SECRET` | Required, at least 32 characters. A public server never makes one up |
-| `CODEGUESSR_PUBLIC_ORIGIN` | Required: the https origin players use, such as `https://codeguessr.example`, with no path |
+| `CODEGUESSR_PUBLIC_ORIGIN` | Required: the https origin players use, such as `https://codeguessr.example`, with no path; shared links and link previews name it |
 | `CODEGUESSR_STATE_DIR` | Required: an absolute directory for the server's own state |
 | `EXPERIMENT_EVENTS_DIR` | Required: an absolute directory for the event log |
 | `CODEGUESSR_CLIENT_IP_HEADER` | Required: the header the reverse proxy sets to the client's address, such as `X-Forwarded-For`, for rate limits (#98) |
@@ -245,8 +265,9 @@ again.
 | `EXPERIMENT_SOURCE` | Tags events `agent` (playtests) or `synthetic` (tests), so they never mix with real games |
 
 The event log records what happened in a game and under which arms: the deal,
-hints, answers, the finished game, the way on, and generative-panel use and
-model calls, with durations and token counts. It never records an IP address,
+hints, answers, the finished game, the way on, a shared result (by share
+sheet or clipboard), and generative-panel use and model calls, with durations
+and token counts. It never records an IP address,
 user agent, cookie, persistent id, chat text, round content, or the option
 chosen. A browser that sends `Sec-GPC: 1` gets a game that records nothing.
 Raw events are kept for 90 days and then rolled up into daily totals.
@@ -566,7 +587,7 @@ Each path has a status:
 | `ops/tsconfig.json` | Type-checks everything under `ops/`; `pnpm typecheck` runs it | PoC support |
 | `tests` | Accessibility, browser, performance, containment, and boot (`tests/deploy`) suites. They run in CI against the live game; the privacy and provenance checks date from the Contract era | PoC support |
 | `.github/workflows/ci.yml` | CI: a dependency audit that fails on high or critical advisories, then every suite above, with no provider secrets and no live preparation | PoC support |
-| `.github/dependabot.yml` | Monthly version updates for npm, uv, and GitHub Actions, minor and patch grouped, at most five open pull requests per ecosystem | PoC support |
+| `.github/dependabot.yml` | Monthly version updates for npm and GitHub Actions, minor and patch grouped, npm majors left to hand upgrades, at most five open pull requests per ecosystem; the Stack worker's `uv.lock` gets security updates only, since the worker journal is keyed to it | PoC support |
 | `vitest.config.mts` | Finds `*.test.ts` and `*.test.tsx` under `apps/`, `packages/`, and `ops/`, and compiles JSX with React's automatic runtime, since the tsconfig preserves JSX for Next.js. A test may take 30 s, as the preparer's synchronous composition tests take up to 12 s on CI | PoC support |
 | `playwright.config.ts` | The browser suites; starts a dev server on 127.0.0.1 (`E2E_PORT`, default 3000) | PoC support |
 | `tsconfig.base.json` | Compiler options every package and `ops/` extend | PoC support |

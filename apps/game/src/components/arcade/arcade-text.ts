@@ -1,29 +1,49 @@
-import type { EntertainmentResultProjection } from "./arcade-session";
+import type { EntertainmentResultProjection, RoundRecord } from "./arcade-session";
 import { ArcadeShellRuleError, type RoundModeKind } from "./mode-contract";
 
 /** The words the game shows around a round: points, progress, hint costs, the share line, and pane notes. */
 
 export const points = (value: number): string => value.toLocaleString("en-US");
 
-/** The share line names the deck and the tally, never a round's content or answer. */
-export function projectSpoilerFreeShare(result: EntertainmentResultProjection, correctRounds: number, deckTitle?: string) {
+/** The share grid's marks (#171): right with no hint, right with hints, and missed. */
+export const SHARE_MARKS = Object.freeze({ clean: "🟩", hinted: "🟨", missed: "⬛" });
+
+/** What the share line may know of a round: whether it was right, and whether it took hints. */
+export type SharedRound = Pick<RoundRecord, "correct" | "hints">;
+
+const shareMark = ({ correct, hints }: SharedRound): string => !correct ? SHARE_MARKS.missed : hints === 0 ? SHARE_MARKS.clean : SHARE_MARKS.hinted;
+
+const SHARE_URL = /^https?:\/\/\S+$/u;
+
+/**
+ * The share line (#171): the deck, the tally, one mark per round in play order, and the game's own address, so a
+ * friend can play the same five. It reads only each round's outcome and hint count, never a round's content or answer.
+ */
+export function projectSpoilerFreeShare(result: EntertainmentResultProjection, rounds: readonly SharedRound[], deckTitle?: string, url?: string) {
   if (result.completedRounds !== 5) throw new ArcadeShellRuleError("sharing requires a complete run");
-  if (!Number.isInteger(correctRounds) || correctRounds < 0 || correctRounds > result.completedRounds) {
-    throw new ArcadeShellRuleError("correct rounds must be within the completed rounds");
-  }
-  const parts = ["CodeGuessr", ...(deckTitle ? [deckTitle] : []),
-    `${correctRounds}/${result.completedRounds} correct`, `${points(result.score)}/${points(result.attainableMaximum)}`];
+  if (rounds.length !== result.completedRounds) throw new ArcadeShellRuleError("sharing needs every round's outcome");
+  if (url !== undefined && !SHARE_URL.test(url)) throw new ArcadeShellRuleError("a shared link must be an absolute web address");
+  const correct = rounds.filter((round) => round.correct).length;
+  const tally = ["CodeGuessr", ...(deckTitle ? [deckTitle] : []),
+    `${correct}/${result.completedRounds}`, `${points(result.score)}/${points(result.attainableMaximum)}`].join(" · ");
+  const message = `${tally}\n${rounds.map(shareMark).join("")}`;
   return Object.freeze({
-    text: parts.join(" · "),
+    /** The whole line, link included, as the clipboard takes it. */
+    text: url === undefined ? message : `${message}\n${url}`,
+    /** The line without its link, for a share sheet that takes the link on its own. */
+    message,
+    url: url ?? null,
     score: result.score,
     rounds: result.completedRounds,
-    correct: correctRounds,
+    correct,
   });
 }
 
-export function formatCompletionResult(result: EntertainmentResultProjection, correctRounds: number, deckTitle?: string): string {
-  const share = projectSpoilerFreeShare(result, correctRounds, deckTitle);
-  return `Run complete — ${points(result.score)} points, ${correctRounds} of ${result.completedRounds} correct. Share: ${share.text}.`;
+export function formatCompletionResult(result: EntertainmentResultProjection, correctRounds: number): string {
+  if (!Number.isInteger(correctRounds) || correctRounds < 0 || correctRounds > result.completedRounds) {
+    throw new ArcadeShellRuleError("correct rounds must be within the completed rounds");
+  }
+  return `Run complete — ${points(result.score)} points, ${correctRounds} of ${result.completedRounds} correct.`;
 }
 
 /** What one round earned and the hints it took, as its reveal states it: "+800 points (1 hint)" or "0 points (no hints)". */
