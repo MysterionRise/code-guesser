@@ -18,12 +18,14 @@ updates:
       npm-minor-and-patch:
         update-types: [minor, patch]
 
-  # The locked Stack worker (pyproject.toml and uv.lock).
+  # The locked Stack worker (pyproject.toml and uv.lock). The worker journal is keyed to uv.lock's hash, so a lock
+  # change orphans every recorded worker output and breaks `--offline` rebuilds: no routine version updates (a limit
+  # of 0 keeps security updates). Move the lock by hand, between data runs.
   - package-ecosystem: uv
     directory: /ops/poc/stack
     schedule:
       interval: monthly
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 0
     groups:
       uv-minor-and-patch:
         update-types: [minor, patch]
