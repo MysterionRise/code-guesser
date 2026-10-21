@@ -177,6 +177,19 @@ gate: changing queries, retries, ceilings, deck rules, or running
   - In public mode `secret()` throws rather than make a secret up, and `labMode()` is off for real games.
     `app/error.tsx` and `app/global-error.tsx` say nothing internal. The `dev` and `start` scripts still bind
     127.0.0.1; only the container (#170) will bind 0.0.0.0.
+- **Security headers and the nonce CSP (#97, L5):** `src/middleware.ts` makes a nonce per request and sets the page's
+  policy on the request (Next.js tags its scripts from it) and the response: `script-src 'self' 'nonce-…'
+  'strict-dynamic'`, `style-src 'self' 'unsafe-inline'` (panes and the visualizer frame size themselves with `style=`),
+  `frame-ancestors 'none'`, and the rest of #97's list. Public mode adds `upgrade-insecure-requests` and HSTS
+  (`max-age=300`), and development `'unsafe-eval'`. The middleware sets them per request, because `next.config.mjs`
+  `headers()` is fixed at build. That file sends `Referrer-Policy`, `nosniff`, `X-Frame-Options` (SAMEORIGIN on
+  `/genui/frame`), COOP, and a `Permissions-Policy` that leaves Web Share and the clipboard alone. Server actions take
+  16 KB.
+  - The root layout awaits `connection()`, so every page, the 404 included, renders per request with a nonce.
+  - `z.config({ jitless: true })` in `genui/composer-spec.ts` stops zod's eval probe. The panel and the host import
+    that module before the AI SDK, which builds its schemas as it loads; imported later, the probe still fired.
+  - `tests/e2e/security-headers.spec.ts` checks every header and nonce, and that no deck and no design breaks the
+    policy. `pnpm test:deploy` checks the same on the production build, where eval is refused.
 - **State store and health (#164, L7):** with `CODEGUESSR_STATE_DIR`, `recordStep` writes each game's step through to
   `<dir>/state.sqlite` (`server/state-store.server.ts`, on `node:sqlite` via `server/sqlite.server.ts`, loaded with
   `process.getBuiltinModule` so webpack never sees it; WAL, `busy_timeout`). `readGame` checks memory, then the store,
@@ -238,7 +251,10 @@ gate: changing queries, retries, ceilings, deck rules, or running
     lets the model write one small HTML page that shows the round's code at
     work. It runs in an iframe with `sandbox="allow-scripts"` (opaque origin)
     and a CSP of `default-src 'none'` put ahead of the model's markup: no
-    network, storage, or game access.
+    network, storage, or game access. Since #97 the frame loads the constant
+    shell `app/genui/frame/route.ts` (that CSP as a header, `sandbox
+    allow-scripts`, `frame-ancestors 'self'`) and is posted the page once; a
+    `srcdoc` frame would inherit the game's nonce policy and block its scripts.
     - `parseVisualizer` refuses external URLs, links, meta, base, frames,
       forms, network and storage APIs, parent, top, or location access, and
       pages over 40 KB. It matches access patterns, not words.
