@@ -1,9 +1,10 @@
 import "server-only";
 
-import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHmac, hkdfSync, randomBytes, timingSafeEqual } from "node:crypto";
 
 import { FACTORS, parseArms, type Arms } from "../experiment/arms";
 import { MIN_SECRET_LENGTH, publicMode } from "../server/environment.server";
+import { stateStore } from "../server/state-store.server";
 import { ROUNDS_PER_SESSION, SESSION_DECK_IDS, type SessionDeckId } from "./local-real-experiment-domain.server";
 
 /**
@@ -91,6 +92,15 @@ const ledger = () => shared().ledger ??= new Map();
 
 const mac = (payload: string): Buffer => createHmac("sha256", secret()).update(`${MAC_CONTEXT}.${payload}`).digest();
 
+/**
+ * A key for one purpose, derived from the session secret by HKDF-SHA256 with `context` as its info, so another
+ * feature, such as duel links (#173), signs under its own key and its tokens never pass for a game's.
+ */
+export const deriveKey = (context: string): Buffer => {
+  if (context.length === 0) throw new Error("KEY_CONTEXT_REJECTED");
+  return Buffer.from(hkdfSync("sha256", secret(), Buffer.alloc(0), context, 32));
+};
+
 export const newGameId = (): string => randomBytes(16).toString("hex");
 
 const isCount = (value: unknown, maximum: number): value is number =>
@@ -149,8 +159,13 @@ export const openGame = (token: unknown, artifactHash: string, now: number): Gam
   return state;
 };
 
-/** Records a game's latest step, forgetting expired games and then the oldest ones past the ledger's capacity. */
+/**
+ * Records a game's latest step, forgetting expired games and then the oldest ones past the ledger's capacity. With a
+ * state store (`CODEGUESSR_STATE_DIR`, #164) the step is written through to it first, synchronously, so it outlives
+ * a restart and the memory ledger's capacity.
+ */
 export const recordStep = (state: GameState, now: number, capacity = LEDGER_CAPACITY): void => {
+  stateStore()?.recordLedgerStep(state.gameId, state.step, state.dealtAt + GAME_TTL_MS, now);
   const entries = ledger();
   entries.delete(state.gameId);
   entries.set(state.gameId, { step: state.step, expiresAt: state.dealtAt + GAME_TTL_MS });
@@ -163,9 +178,13 @@ export const recordStep = (state: GameState, now: number, capacity = LEDGER_CAPA
 /** The game a token holds, when it is the game's latest step; reading it changes nothing. */
 export const readGame = (token: unknown, artifactHash: string, now: number): GameState => {
   const state = openGame(token, artifactHash, now);
-  const known = ledger().get(state.gameId);
-  // A game the ledger has forgotten (a restart, or capacity) continues from its token.
-  if (known !== undefined && known.step !== state.step) throw new SessionRefusal("STALE_STEP");
+  const store = stateStore();
+  const known = ledger().get(state.gameId)?.step ?? store?.ledgerStep(state.gameId);
+  // Without a store, a game the ledger has forgotten (a restart, or capacity) continues from its token. A store holds
+  // every live game's latest step, so a game it doesn't know has ended, and an older token can't replay a round whose
+  // reveal was seen before a restart.
+  if (known === undefined && store !== null) throw new SessionRefusal("SESSION_ENDED");
+  if (known !== undefined && known !== state.step) throw new SessionRefusal("STALE_STEP");
   return state;
 };
 
@@ -187,5 +206,5 @@ export const advanceGame = <Result>(
   return { result, token: sealed };
 };
 
-/** Test support: forgets every recorded step. */
+/** Test support: forgets every step held in memory, as a restart does; a state store keeps its own. */
 export const forgetAllGames = (): void => { ledger().clear(); };

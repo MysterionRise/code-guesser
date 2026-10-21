@@ -1,25 +1,30 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
 import { createServer } from "node:net";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
-import { before, test } from "node:test";
+import { after, before, test } from "node:test";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const game = join(root, "apps", "game");
 const built = join(game, ".next");
 const next = join(game, "node_modules", "next", "dist", "bin", "next");
 const SENTINEL = "boot-sentinel-5d1e8b";
-/** A public server configured for anonymous play (#97). */
+const data = mkdtempSync(join(tmpdir(), "codeguessr-boot-"));
+/** A public server configured for anonymous play (#97), with its state and events in a scratch directory. */
 const PUBLIC = Object.freeze({
   CODEGUESSR_PUBLIC: "1",
   CODEGUESSR_SESSION_SECRET: `${SENTINEL}-${"s".repeat(32)}`,
   CODEGUESSR_PUBLIC_ORIGIN: "https://codeguessr.example",
-  CODEGUESSR_STATE_DIR: "/nonexistent/codeguessr/state",
-  EXPERIMENT_EVENTS_DIR: "/nonexistent/codeguessr/events",
+  CODEGUESSR_STATE_DIR: join(data, "state"),
+  EXPERIMENT_EVENTS_DIR: join(data, "events"),
   CODEGUESSR_CLIENT_IP_HEADER: "X-Forwarded-For",
 });
+
+after(() => rmSync(data, { recursive: true, force: true }));
 
 function newestUnder(path) {
   const stat = statSync(path);
@@ -73,7 +78,8 @@ async function start(env, ready) {
   }
 }
 
-// The production build is reused when it is newer than the game's sources, and built otherwise.
+// The production build is reused when it is newer than the game's sources, and built otherwise; a loaded machine
+// takes over three minutes to build.
 before(() => {
   const fresh = existsSync(join(built, "BUILD_ID")) && existsSync(join(built, "server", "instrumentation.js"))
     && statSync(join(built, "BUILD_ID")).mtimeMs > Math.max(newestUnder(join(game, "src")), newestUnder(join(game, "next.config.mjs")));
@@ -82,7 +88,7 @@ before(() => {
     cwd: root,
     encoding: "utf8",
     env: { ...process.env, NEXT_TELEMETRY_DISABLED: "1" },
-    timeout: 180_000,
+    timeout: 400_000,
   });
   assert.equal(result.status, 0, `game build failed\n${result.stdout}\n${result.stderr}`);
 });
@@ -103,10 +109,21 @@ test("a public server without its session secret refuses to start, naming the co
   assert.doesNotMatch(`${stdout}${stderr}`, new RegExp(SENTINEL, "u"));
 });
 
-test("a configured public server starts and serves the chooser, printing no value", async () => {
-  const { code, signal, stdout, stderr } = await start(PUBLIC, async (_, response) => {
+test("a configured public server starts, answers its health check, and keeps each dealt game in its state store", async () => {
+  const { code, signal, stdout, stderr } = await start(PUBLIC, async (port, response) => {
     assert.equal(response.status, 200);
     assert.match(await response.text(), /Pick a deck/u);
+    const health = await fetch(`http://127.0.0.1:${port}/api/health`);
+    assert.deepEqual([health.status, await health.text()], [200, "ok"]);
+    // A deck's address redirects to a seeded deal, whose page deals a game; node:sqlite loads at run time, unbundled.
+    const dealt = await fetch(`http://127.0.0.1:${port}/?deck=project`);
+    assert.equal(dealt.status, 200);
+    const database = new DatabaseSync(join(PUBLIC.CODEGUESSR_STATE_DIR, "state.sqlite"), { readOnly: true });
+    try {
+      assert.deepEqual({ ...database.prepare("SELECT count(*) AS games, max(step) AS step FROM ledger").get() }, { games: 1, step: 0 });
+    } finally {
+      database.close();
+    }
   });
   assert.ok(code === 0 || signal === "SIGTERM", `the server stopped badly (${code}, ${signal})\n${stdout}\n${stderr}`);
   assert.doesNotMatch(`${stdout}${stderr}`, /GAME_ENVIRONMENT_REJECTED/u);
