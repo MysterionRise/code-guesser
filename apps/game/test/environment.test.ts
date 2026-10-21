@@ -37,6 +37,9 @@ const FAILURES = [
   ["EXPERIMENT_EVENTS_DIR_RELATIVE", { EXPERIMENT_EVENTS_DIR: "./events" }],
   ["CODEGUESSR_CLIENT_IP_HEADER_MISSING", { CODEGUESSR_CLIENT_IP_HEADER: undefined }],
   ["CODEGUESSR_CLIENT_IP_HEADER_INVALID", { CODEGUESSR_CLIENT_IP_HEADER: "X-Forwarded-For: 10.0.0.1" }],
+  ["CODEGUESSR_RATE_LIMITS_INVALID", { CODEGUESSR_RATE_LIMITS: "off" }],
+  ["CODEGUESSR_RATE_LIMITS_INVALID", { CODEGUESSR_RATE_LIMITS: "0" }],
+  ["CODEGUESSR_RATE_LIMITS_INVALID", { CODEGUESSR_RATE_LIMITS: "1e3" }],
   ["OPENROUTER_API_KEY_MISSING", { GENUI_ENABLED: "1" }],
   ["OPENROUTER_BASE_URL_REJECTED", { OPENROUTER_BASE_URL: "http://127.0.0.1:3201/api/v1" }],
   ["OPENROUTER_BASE_URL_REJECTED", { OPENROUTER_BASE_URL: "" }],
@@ -69,6 +72,7 @@ describe("the boot check (#97)", () => {
     expect(checkEnvironment(PUBLIC)).toEqual([]);
     expect(checkEnvironment({ ...PUBLIC, GENUI_ENABLED: "1", OPENROUTER_API_KEY: "key", OPENROUTER_BASE_URL: OPENROUTER_BASE_URL,
       EXPERIMENT_DISABLED: " design:host, theme:arcade ,", CODEGUESSR_CLIENT_IP_HEADER: "CF-Connecting-IP" })).toEqual([]);
+    for (const limits of ["", "on", "2", "0.5"]) expect(checkEnvironment({ ...PUBLIC, CODEGUESSR_RATE_LIMITS: limits }), limits).toEqual([]);
   });
 
   it.each(FAILURES)("names %s for one wrong setting", (code, change) => {
@@ -98,6 +102,7 @@ describe("the boot check (#97)", () => {
   it("never returns a value, only codes", () => {
     const planted = Object.fromEntries([
       "CODEGUESSR_PUBLIC_ORIGIN", "CODEGUESSR_STATE_DIR", "EXPERIMENT_EVENTS_DIR", "CODEGUESSR_CLIENT_IP_HEADER", "OPENROUTER_BASE_URL", "EXPERIMENT_DISABLED",
+      "CODEGUESSR_RATE_LIMITS",
     ].map((name) => [name, `${SENTINEL}:${name}`]));
     const codes = checkEnvironment({ ...planted, CODEGUESSR_PUBLIC: "1", CODEGUESSR_SESSION_SECRET: SENTINEL, GENUI_ENABLED: "1" });
     expect(codes.length).toBeGreaterThan(5);
@@ -109,7 +114,8 @@ describe("the boot check (#97)", () => {
 describe("boot (#97)", () => {
   /** Every variable the check reads, unset first, so the shell running the tests can't change the outcome. */
   const CHECKED = ["CODEGUESSR_PUBLIC", "CODEGUESSR_SESSION_SECRET", "CODEGUESSR_PUBLIC_ORIGIN", "CODEGUESSR_STATE_DIR", "EXPERIMENT_EVENTS_DIR",
-    "CODEGUESSR_CLIENT_IP_HEADER", "GENUI_ENABLED", "OPENROUTER_API_KEY", "OPENROUTER_BASE_URL", "EXPERIMENT_SOURCE", "EXPERIMENT_LAB", "EXPERIMENT_DISABLED"];
+    "CODEGUESSR_CLIENT_IP_HEADER", "CODEGUESSR_RATE_LIMITS", "GENUI_ENABLED", "OPENROUTER_API_KEY", "OPENROUTER_BASE_URL", "EXPERIMENT_SOURCE", "EXPERIMENT_LAB",
+    "EXPERIMENT_DISABLED"];
   const boot = async (env: Record<string, string | undefined>) => {
     for (const name of CHECKED) vi.stubEnv(name, undefined);
     for (const [name, value] of Object.entries({ NEXT_RUNTIME: "nodejs", ...env })) vi.stubEnv(name, value);

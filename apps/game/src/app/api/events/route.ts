@@ -1,9 +1,11 @@
 import { activeLocalRealExperiment } from "../../../demo/local-real-experiment-loader.server";
+import { clientKey } from "../../../server/client-key.server";
+import { limited, tooMany } from "../../../server/rate-limit.server";
 
 /**
  * The event log's beacon (#107): the few events only a browser sees, for a live game this server dealt. It stores
  * nothing about the request itself, and a game that records no events (`Sec-GPC: 1` at the deal) is answered the
- * same way as one that does.
+ * same way as one that does. A client past its beacon limit (#98) is refused before its body is read.
  */
 export const dynamic = "force-dynamic";
 
@@ -13,6 +15,7 @@ const MAX_BODY_LENGTH = 1024;
 const STATUS = { RECORDED: 204, REJECTED: 400, SESSION_ENDED: 410, LIMIT: 429 } as const;
 
 export async function POST(request: Request): Promise<Response> {
+  if (limited("beacon", clientKey(request.headers))) return tooMany("beacon");
   const declared = Number(request.headers.get("content-length") ?? "0");
   if (declared > MAX_BODY_LENGTH) return new Response(null, { status: 413 });
   const text = await request.text();

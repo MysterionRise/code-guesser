@@ -15,7 +15,7 @@ import {
   type RevealRequest,
   type RevealResponse,
 } from "./arcade-session";
-import { SESSION_ENDED_MESSAGE, points } from "./arcade-text";
+import { RATE_LIMITED_MESSAGE, SESSION_ENDED_MESSAGE, points } from "./arcade-text";
 import { CodePanes } from "./code-panes";
 import { HintBar } from "./hint-bar";
 import { LINE_KINDS, optionLine, type PublicModeContract } from "./mode-contract";
@@ -147,7 +147,7 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
       const response = await authorizeRevealAction({ sessionToken: token.current, roundId: round.roundId, candidateId: choice });
       if (!response.ok) {
         if (response.reason === "SESSION_ENDED") setEnded(true);
-        else setError("Couldn’t check that answer. Try again.");
+        else setError(response.reason === "RATE_LIMITED" ? RATE_LIMITED_MESSAGE : "Couldn’t check that answer. Try again.");
         return;
       }
       const result = projectDisplayReveal(response.reveal);
@@ -171,7 +171,7 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
       const response = await revealHintAction({ sessionToken: token.current, roundId: round.roundId });
       if (!response.ok) {
         if (response.reason === "SESSION_ENDED") setEnded(true);
-        else setHintError("Couldn’t get that hint. Try again.");
+        else setHintError(response.reason === "RATE_LIMITED" ? RATE_LIMITED_MESSAGE : "Couldn’t get that hint. Try again.");
         return;
       }
       setSession((current) => transitionArcadeSession(mode, current, { type: "reveal-hint", label: response.hint, detail: response.detail ?? null }));

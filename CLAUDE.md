@@ -185,6 +185,19 @@ gate: changing queries, retries, ceilings, deck rules, or running
   before. `deriveKey(context)` is HKDF-SHA256 of the session secret, for other features' signing keys.
   `GET /api/health` (`app/api/health/route.ts`) answers `ok` or 503 with a bare code and records nothing. Events stay
   JSONL.
+- **Rate limits (#98, L6):** token buckets per client and surface (`SURFACES` in `server/rate-limit.server.ts`, on
+  `globalThis` like the ledger, full buckets swept): deal 20/min burst 10 (a deck's redirect counts too), hint and
+  reveal 60, beacon 120, genui 10 burst 4, a global `genui-all` 120, and `og`, `duel_create`, `duel_open` declared
+  ahead. A game also gets 12 explainer calls and 8 host turns a round (`GENUI_CAPS`, `capped`).
+  - They apply in public mode or with `CODEGUESSR_RATE_LIMITS` (`on`, or a multiplier; the e2e server runs at 10).
+  - `server/client-key.server.ts` is the one module that reads the client address: the last entry of
+    `CODEGUESSR_CLIENT_IP_HEADER` (the one the proxy appended), an IPv6 address cut to its /64, then a truncated
+    HMAC-SHA256 under a per-process salt. No header, or no readable address, is one shared key.
+    `test/rate-limits.test.ts` holds every other module to that and checks that no log line or stored event holds an
+    address.
+  - A limited page shows "Too many new games — wait a minute"; actions refuse with `RATE_LIMITED`; routes answer 429
+    with `Retry-After` (`tooMany`), and genui's per-game caps 429 `GAME_CAP`. The panel and the host report a 429 as
+    the `genui_fallback` reason `limited` (schema still v1) and keep the static reveal.
 - The answer-lock guard (#102) is the only path from round data to a model:
   - `modelContext` on the experiment reads the sealed game, and
     `apps/game/src/genui/round-context.server.ts` builds the round's context.

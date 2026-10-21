@@ -18,7 +18,9 @@ import type { LocalRealDeck, LocalRealMix } from "../demo/local-real-experiment.
 import { DAILY_DECK, MIXED_DECK, type SessionDeckId } from "../demo/local-real-experiment-domain.server";
 import { CONTROL, FACTORS, assignArms, labMode, labOverrides, parseDisabled, type Arms, type Level } from "../experiment/arms";
 import { DESIGN_LABELS, READY_DESIGNS, type Design } from "../genui/designs";
+import { clientKey } from "../server/client-key.server";
 import { publicOrigin } from "../server/public-origin.server";
+import { limited } from "../server/rate-limit.server";
 
 const DECK_COUNT_WORDS = ["No decks", "One deck", "Two decks", "Three decks", "Four decks", "Five decks", "Six decks", "Seven decks",
   "Eight decks", "Nine decks", "Ten decks", "Eleven decks", "Twelve decks"] as const;
@@ -170,6 +172,16 @@ function LabBar({ deck, series, arms, overrides, genuiEnabled }: {
   );
 }
 
+/** What a player past the deal limit (#98) sees in place of a game: nothing is dealt or recorded, and they may try again. */
+function DealLimited({ href }: { readonly href: string }) {
+  return (
+    <main className="empty-state" aria-labelledby="deal-limited-title">
+      <h1 id="deal-limited-title">Too many new games — wait a minute</h1>
+      <p>Each player can start only so many games a minute. <a href={href}>Try again</a> once it has passed.</p>
+    </main>
+  );
+}
+
 /**
  * A fresh five-round game from the deck's pool, dealt on every visit. The server holds its progress, the arms it
  * drew (#106), and whether it records events (#107); a browser that sends `Sec-GPC: 1` gets a game that records none.
@@ -227,13 +239,16 @@ export default async function Page({ searchParams }: PageProps) {
   const source = requestedSource(requested);
   // Today's five names its date, so its share line carries it.
   const deck = source?.id === DAILY_DECK ? { ...source, title: `${source.title}, ${localDate(new Date())}` } : source;
+  // A deck's address deals a game or redirects to one, and either spends the player's deal allowance (#98); past it the
+  // page says so, before any deal, redirect, or event.
+  const dealLimited = deck !== undefined && limited("deal", clientKey(requestHeaders));
   // A deck's game is a game of a seeded deal (#40): an address without one starts a fresh deal at its first game, so a
   // reload shows the same game and "Deal new rounds" the next. Today's five is seeded by its date instead.
-  if (deck && deck.id !== DAILY_DECK && series === undefined) {
+  if (deck && !dealLimited && deck.id !== DAILY_DECK && series === undefined) {
     redirect(`${gameHref(deck.id, { seed: randomBytes(4).toString("hex"), game: 0 })}${labQuery(overrides)}`);
   }
   // A game shows the theme it drew (#125); the chooser, outside any game, keeps the original unless a tester picks one.
-  const theme = deck ? arms.theme : overrides.theme ?? CONTROL.theme;
+  const theme = deck && !dealLimited ? arms.theme : overrides.theme ?? CONTROL.theme;
   return (
     <div className="demo-page" data-theme={theme}>
       <p className="demo-notice">
@@ -246,9 +261,15 @@ export default async function Page({ searchParams }: PageProps) {
           ? (
             <>
               <nav className="deck-nav" aria-label="Decks"><a href="/">All decks</a></nav>
-              {lab && <LabBar deck={deck} series={series} arms={arms} overrides={overrides} genuiEnabled={genuiEnabled} />}
-              <DealtSession deck={deck} series={deck.id === DAILY_DECK ? undefined : series} arms={arms} record={record} overrides={overrides}
-                origin={publicOrigin(requestHeaders)} />
+              {dealLimited
+                ? <DealLimited href={`${gameHref(deck.id, deck.id === DAILY_DECK ? undefined : series)}${labQuery(overrides)}`} />
+                : (
+                  <>
+                    {lab && <LabBar deck={deck} series={series} arms={arms} overrides={overrides} genuiEnabled={genuiEnabled} />}
+                    <DealtSession deck={deck} series={deck.id === DAILY_DECK ? undefined : series} arms={arms} record={record}
+                      overrides={overrides} origin={publicOrigin(requestHeaders)} />
+                  </>
+                )}
             </>
           )
           : <DeckChooser decks={loaded.experiment.decks} mixed={loaded.experiment.mixed} query={labQuery(overrides)} />}

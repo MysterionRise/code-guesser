@@ -18,7 +18,8 @@ const PHASES = ["before-lock", "after-lock"] as const;
 const DEAL_TARGETS = ["same-deck", "chooser"] as const;
 const SHARE_ROUTES = ["share", "clipboard"] as const;
 const GENUI_ACTIONS = ["explain", "chat", "quiz", "offer_hint", "step"] as const;
-const GENUI_FALLBACKS = ["unavailable", "refused", "failed", "rejected"] as const;
+/** Why a generative panel fell back; `limited` is a rate limit or a game's cap (#98), added within schema v1. */
+const GENUI_FALLBACKS = ["unavailable", "refused", "failed", "rejected", "limited"] as const;
 const DAY_MS = 86_400_000;
 
 type Check = (value: unknown) => boolean;

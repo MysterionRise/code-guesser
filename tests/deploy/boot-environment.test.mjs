@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -128,4 +128,33 @@ test("a configured public server starts, answers its health check, and keeps eac
   assert.ok(code === 0 || signal === "SIGTERM", `the server stopped badly (${code}, ${signal})\n${stdout}\n${stderr}`);
   assert.doesNotMatch(`${stdout}${stderr}`, /GAME_ENVIRONMENT_REJECTED/u);
   assert.doesNotMatch(`${stdout}${stderr}`, new RegExp(SENTINEL, "u"));
+});
+
+test("a public server limits deals by the address its proxy appended, an IPv6 client by its /64, and keeps no address", async () => {
+  const { code, signal, stdout, stderr } = await start(PUBLIC, async (port) => {
+    const deal = async (forwarded, game) =>
+      (await fetch(`http://127.0.0.1:${port}/?deck=project&deal=0badcafe&game=${game}`, { headers: { "x-forwarded-for": forwarded } })).text();
+    /** Deals from one client until the server refuses: how many it dealt, and how many ten at once and one every three seconds allow. */
+    const dealUntilRefused = async (forwarded) => {
+      const started = Date.now();
+      for (let game = 0; game < 40; game += 1) {
+        if (/Too many new games — wait a minute/u.test(await deal(forwarded(game), game))) {
+          return { dealt: game, allowed: 10 + Math.floor((Date.now() - started) / 3_000) };
+        }
+      }
+      return { dealt: 40, allowed: 0 };
+    };
+    // Every entry before the last is whatever the client sent, so forging them never wins a fresh allowance.
+    const forged = await dealUntilRefused((game) => `198.51.100.${game + 1}, 203.0.113.40`);
+    assert.ok(forged.dealt >= 10 && forged.dealt <= forged.allowed, JSON.stringify(forged));
+    assert.doesNotMatch(await deal("203.0.113.40, 198.51.100.41", 0), /Too many new games/u);
+    const network = await dealUntilRefused((game) => `2001:db8:5:6:${game.toString(16)}::1`);
+    assert.ok(network.dealt >= 10 && network.dealt <= network.allowed, JSON.stringify(network));
+  });
+  assert.ok(code === 0 || signal === "SIGTERM", `the server stopped badly (${code}, ${signal})\n${stdout}\n${stderr}`);
+  // Nothing the server printed or wrote, its event log and state store included, holds an address.
+  const written = (path) => statSync(path).isDirectory() ? readdirSync(path).flatMap((name) => written(join(path, name))) : [readFileSync(path, "latin1")];
+  const kept = [stdout, stderr, ...written(data)].join("\n");
+  assert.match(kept, /"type":"game_dealt"/u);
+  assert.doesNotMatch(kept, /203\.0\.113|198\.51\.100|2001:0?db8/iu);
 });

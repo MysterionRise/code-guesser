@@ -18,7 +18,7 @@ vi.mock("../src/demo/local-real-experiment-loader.server", async (importOriginal
 const { POST } = await import("../src/app/api/genui/route");
 const { DEFAULT_MODEL, MAX_TURN_LENGTH, MAX_TURNS, mentionsCode, playerTurns } = await import("../src/genui/model.server");
 const { inputSchemaFor, RENDER_CATALOG } = await import("../src/genui/render-catalog");
-const { explainRequest, fellBack, renderViews } = await import("../src/genui/genui-panel");
+const { explainRequest, fellBack, renderViews, wasLimited } = await import("../src/genui/genui-panel");
 const { HOST_HISTORY, HOST_TURN_LENGTH, withPick } = await import("../src/genui/host-chat");
 // @ts-expect-error The fake is plain JavaScript shared with the browser tests.
 const { startFakeOpenRouter } = await import("../../../tests/e2e/fake-openrouter.mjs");
@@ -113,6 +113,15 @@ describe("generative UI building blocks (#101)", () => {
     expect(fellBack("ready", true, 0, undefined)).toBe(true);
     expect(fellBack("ready", true, 2, undefined)).toBe(false);
     expect(fellBack("error", true, 0, new Error("GENUI_FAILED"))).toBe(true);
+  });
+
+  it("tells a rate limit's 429 apart from every other failure, for the event log (#98)", async () => {
+    const { APICallError } = await import("ai");
+    const failure = (statusCode: number) => new APICallError({ message: "{}", url: "/api/genui", requestBodyValues: undefined, statusCode });
+    expect(wasLimited(failure(429))).toBe(true);
+    for (const statusCode of [403, 410, 422, 503]) expect(wasLimited(failure(statusCode)), String(statusCode)).toBe(false);
+    expect(wasLimited(new Error("429"))).toBe(false);
+    expect(wasLimited(undefined)).toBe(false);
   });
 
   it("shows a code view's highlighted lines with two either side, not the whole pane again", async () => {
