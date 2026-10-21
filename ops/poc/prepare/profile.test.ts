@@ -13,10 +13,79 @@ const rejects = (value: unknown): void => {
   expect(() => parseCrawlProfile(value)).toThrow(CrawlProfileError);
 };
 
-describe("local crawl profile v6 (#129)", () => {
-  const v6 = async (): Promise<Record<string, any>> =>
-    JSON.parse(await readFile(new URL("../profiles/local-real-rounds.v6.json", import.meta.url), "utf8")) as Record<string, any>;
+const v6 = async (): Promise<Record<string, any>> =>
+  JSON.parse(await readFile(new URL("../profiles/local-real-rounds.v6.json", import.meta.url), "utf8")) as Record<string, any>;
+const v7 = async (): Promise<Record<string, any>> =>
+  JSON.parse(await readFile(new URL("../profiles/local-real-rounds.v7.json", import.meta.url), "utf8")) as Record<string, any>;
 
+describe("local crawl profile v7 (#167)", () => {
+  it("grows the pools from v6's sources within the raised ceilings", async () => {
+    const profile = parseCrawlProfile(await v7());
+    expect(profile.profileVersion).toBe("local-real-rounds.v7");
+    // The dry run's measured yields (docs/review/evidence/2026-10-21-v7-dry-run.md): v6's searches hold 31 usable
+    // commits, the fix deck's bug lists run out at 36 rounds, and the missing-line deck balances at 40.
+    expect(poolSizes(profile)).toEqual({ project: 48, language: 52, "before-after": 30, algorithm: 48, output: 40, fix: 36, "missing-line": 40,
+      "name-function": 48, framework: 32, exercise: 48, "vulnerable-line": 0 });
+    expect(profile.selection.projectRoundsPerLanguage).toBe(4);
+    expect(profile.curated!.algorithm!.roundsPerAlgorithm).toBe(2);
+    expect(profile.capacity).toEqual(CAPACITY_CEILINGS);
+  });
+
+  it("reads only v6's sources: the same languages, licences, pins, datasets, families, and templates", async () => {
+    const [six, seven] = [await v6(), await v7()];
+    for (const key of ["stack", "licenses", "templates", "deduplication", "screening"]) expect(seven[key]).toEqual(six[key]);
+    for (const key of ["repositories", "framework", "exercise"]) expect(seven.curated[key]).toEqual(six.curated[key]);
+    expect(seven.curated.algorithm.families).toEqual(six.curated.algorithm.families);
+    expect(seven.curated.fix.datasets).toEqual(six.curated.fix.datasets);
+    expect(seven.curated["name-function"].sources).toEqual(six.curated["name-function"].sources);
+    for (const key of ["output", "missing-line"]) expect(seven.curated[key].directories).toEqual(six.curated[key].directories);
+    // v6's commit searches, less the django window that found nothing; the run replays them from the v6 journal.
+    expect(seven.github.queries).toEqual(six.github.queries.filter(({ id }: any) => id !== "refactor-django"));
+  });
+
+  it("accepts the v7 keys only in a v7 profile, and only in whole groups", async () => {
+    const [six, seven] = [await v6(), await v7()];
+    rejects({ ...six, selection: { ...six.selection, projectRoundsPerLanguage: 2 } });
+    rejects({ ...six, curated: { ...six.curated, algorithm: { ...six.curated.algorithm, roundsPerAlgorithm: 1 } } });
+    // Without the keys, a v7 profile holds two project rounds a language and answers each algorithm once.
+    const { projectRoundsPerLanguage: _rounds, ...selection } = seven.selection;
+    const { roundsPerAlgorithm: _answers, ...algorithm } = seven.curated.algorithm;
+    const plain = parseCrawlProfile({ ...seven, selection, curated: { ...seven.curated, algorithm: { ...algorithm, rounds: 24 } } });
+    expect(poolSizes(plain).project).toBe(24);
+    expect(plain.curated!.algorithm).not.toHaveProperty("roundsPerAlgorithm");
+    for (const rounds of [0, 1, 3, 6]) rejects({ ...seven, selection: { ...seven.selection, projectRoundsPerLanguage: rounds } });
+    for (const change of [{ roundsPerAlgorithm: 3 }, { roundsPerAlgorithm: 0 }, { rounds: 44 }, { rounds: 72 }]) {
+      rejects({ ...seven, curated: { ...seven.curated, algorithm: { ...seven.curated.algorithm, ...change } } });
+    }
+    // Each answer comes from another language, so an algorithm with files in one language cannot be answered twice.
+    const oneLanguage = structuredClone(seven);
+    const { "TheAlgorithms/Python": python } = oneLanguage.curated.algorithm.families[0].algorithms[0].files;
+    oneLanguage.curated.algorithm.families[0].algorithms[0].files = { "TheAlgorithms/Python": python };
+    rejects(oneLanguage);
+    const { roundsPerAlgorithm: _twice, ...once } = oneLanguage.curated.algorithm;
+    expect(() => parseCrawlProfile({ ...oneLanguage, curated: { ...oneLanguage.curated, algorithm: { ...once, rounds: 24 } } })).not.toThrow();
+  });
+
+  it("caps curated decks per version: v6 at 40 rounds and 240 reads, v7 at a whole pool and 480 reads", async () => {
+    const [six, seven] = [await v6(), await v7()];
+    const withDeck = (profile: Record<string, any>, deck: string, change: Record<string, number>) =>
+      ({ ...profile, curated: { ...profile.curated, [deck]: { ...profile.curated[deck], ...change } } });
+    for (const [deck, reads] of [["output", "fileReads"], ["fix", "patchReads"], ["missing-line", "fileReads"], ["name-function", "fileReads"]] as const) {
+      rejects(withDeck(six, deck, { [reads]: 241 }));
+      expect(() => parseCrawlProfile(withDeck(seven, deck, { [reads]: 480 }))).not.toThrow();
+      rejects(withDeck(seven, deck, { [reads]: 481 }));
+    }
+    for (const deck of ["output", "fix"]) {
+      rejects(withDeck(six, deck, { rounds: 44 }));
+      expect(() => parseCrawlProfile(withDeck(seven, deck, { rounds: 60 }))).not.toThrow();
+      rejects(withDeck(seven, deck, { rounds: 64 }));
+    }
+    rejects(withDeck(six, "algorithm", { rounds: 44 }));
+    expect(() => parseCrawlProfile(withDeck(seven, "algorithm", { rounds: 56 }))).not.toThrow();
+  });
+});
+
+describe("local crawl profile v6 (#129)", () => {
   it("configures every v1.0 deck built so far, the rarer languages for the language deck alone, and the wider allowlist", async () => {
     const profile = parseCrawlProfile(await v6());
     expect(profile.profileVersion).toBe("local-real-rounds.v6");
@@ -25,7 +94,8 @@ describe("local crawl profile v6 (#129)", () => {
     expect(profile.stack.configurations.slice(12).every(({ projectDeck }) => projectDeck === false)).toBe(true);
     expect(poolSizes(profile)).toEqual({ project: 24, language: 52, "before-after": 20, algorithm: 24, output: 24, fix: 24, "missing-line": 24,
       "name-function": 24, framework: 32, exercise: 48, "vulnerable-line": 0 });
-    expect(profile.capacity).toEqual(CAPACITY_CEILINGS);
+    // The v1.0 run's spend, within the ceilings v7 raised (#167).
+    expect(profile.capacity).toEqual({ ...CAPACITY_CEILINGS, requestCount: 5000, blobAttempts: 400 });
   });
 
   it("keeps v5's sections as they were, so only the additions differ", async () => {
@@ -36,7 +106,7 @@ describe("local crawl profile v6 (#129)", () => {
   });
 
   it("refuses a profile version it does not know", async () => {
-    rejects({ ...(await v6()), profileVersion: "local-real-rounds.v7" });
+    rejects({ ...(await v6()), profileVersion: "local-real-rounds.v8" });
   });
 });
 

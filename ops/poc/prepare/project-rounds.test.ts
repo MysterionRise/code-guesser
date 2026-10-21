@@ -30,6 +30,31 @@ describe("project rounds", () => {
     }
   });
 
+  it("from profile v7 on, holds more rounds a language in groups of two, each group offering four repositories of its own (#167)", () => {
+    const v7 = loadDeckProfile("local-real-rounds.v7", { projectRoundsPerLanguage: 4 });
+    const inputs = projectRoundInputs(v7, snapshotIdFor(v7));
+    const { fixtures } = generateProjectRounds({ profile: v7, rounds: inputs });
+    expect(fixtures).toHaveLength(48);
+    const optionsOf = (fixture: (typeof fixtures)[number]) => fixture.candidates.map(({ label }) => label).sort().join("|");
+    for (const language of MAINSTREAM_LANGUAGES) {
+      const sets = fixtures.filter(({ source }) => source.configuration === language).map(optionsOf);
+      expect(sets).toHaveLength(4);
+      // Two groups, each set offered by two rounds, and no repository in both.
+      expect(new Set(sets).size).toBe(2);
+      const [first, second] = [...new Set(sets)].map((set) => set.split("|"));
+      expect(first!.some((repository) => second!.includes(repository))).toBe(false);
+    }
+    const counts = new Map<string, number>();
+    for (const { label } of fixtures.flatMap(({ candidates }) => candidates)) counts.set(label, (counts.get(label) ?? 0) + 1);
+    expect(new Set(counts.values())).toEqual(new Set([2]));
+    const composed = composeExperimentArtifact(composeInput(v7));
+    expect(composed.artifact.decks[0]!.fixtures).toHaveLength(48);
+    // A round whose repository another group offers too would let counting find it.
+    const shared = inputs.map((input, index) => index === 2
+      ? { ...input, distractors: [inputs[0]!.distractors[1]!, ...input.distractors.slice(1)] } : input);
+    expect(() => generateProjectRounds({ profile: v7, rounds: shared })).toThrow(ProjectRoundsError);
+  });
+
   it("shows each option's description and hints at the file name and popularity", () => {
     const { fixtures } = generateProjectRounds({ profile, rounds: rounds() });
     const fixture = fixtures[0]!;

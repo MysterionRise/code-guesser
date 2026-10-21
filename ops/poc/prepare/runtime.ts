@@ -31,7 +31,16 @@ export interface RuntimeOptions {
   readonly signal?: AbortSignal;
   /** The clock a rate limit's reset is read against, in epoch milliseconds. */
   readonly now?: () => number;
+  /** The least time between two live search pages, `SEARCH_PAGE_SPACING` in a real run; none when unset. */
+  readonly searchSpacingMilliseconds?: number;
 }
+
+/**
+ * Live search pages are sent at least this far apart. GitHub's secondary rate limit refused commit search after
+ * about ten pages sent back to back, with no retry instruction (#167's dry run), and discovery cannot resume part
+ * way: a resumed run searches every query again.
+ */
+export const SEARCH_PAGE_SPACING = 10_000;
 
 export class ReplayMissError extends Error {
   public readonly code = "FINALIZE_REPLAY_MISS";
@@ -119,6 +128,14 @@ export const createPreparationRuntime = (
       throw new RetryError("RATE_LIMIT_CHECKPOINT", undefined, core.resetAt);
     }
   };
+  let lastSearch = Number.NEGATIVE_INFINITY;
+  /** Spaces a live search page from the one before (#167); replayed pages and other requests go at once. */
+  const spaceSearch = async (input: RequestInput): Promise<void> => {
+    if (options.searchSpacingMilliseconds === undefined || input.provider !== "github" || new URL(input.url).pathname !== SEARCH_PATH) return;
+    const wait = lastSearch + options.searchSpacingMilliseconds - now();
+    if (wait > 0) await new Promise((done) => setTimeout(done, wait));
+    lastSearch = now();
+  };
   const base = createBoundedTransport({ fetch: fetchLike, credentials, now, observeRateLimit, limits: {
     timeoutMilliseconds: profile.capacity.waitMilliseconds, concurrentRequests: profile.capacity.concurrentRequests,
     requestCount: profile.capacity.requestCount, responseBytes: profile.capacity.responseBytes, pages: profile.capacity.githubPages,
@@ -142,7 +159,10 @@ export const createPreparationRuntime = (
     const policy = replayPolicy(input);
     // A journal replay is metered like a live response, so a replayed run spends what a live one would.
     const recorded = journal?.take(key, policy);
-    if (!recorded) holdBack(input);
+    if (!recorded) {
+      holdBack(input);
+      await spaceSearch(input);
+    }
     const lease = capacity.beginRequest();
     try {
       if (recorded?.encoding === "failure") {

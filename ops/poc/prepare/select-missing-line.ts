@@ -1,6 +1,6 @@
 import { screenBlob } from "@codeguessr/content/local-poc-support";
 
-import { CROSS_DECK_KEYS_BY_KIND, DEDUPLICATION_KEYS_BY_KIND } from "../../../packages/artifact/src/index";
+import { CROSS_DECK_KEYS_BY_KIND, deduplicationKeys } from "../../../packages/artifact/src/index";
 import { DECK_SHORT, noteRejection, rejectCandidate, type DeckAttempts, type DeckOutcome, type RunState } from "./diagnostics";
 import { looksGenerated } from "./excerpt-window";
 import { withoutCommentary } from "./function-windows";
@@ -53,7 +53,7 @@ export const selectMissingLine = async (
   const pin = profile.curated!.repositories.find(({ repository }) => repository === deck.repository)!;
   const language = pin.language;
   const target = { repository: pin.repository, commit: pin.commit };
-  const keys = { deck: DEDUPLICATION_KEYS_BY_KIND.MISSING_LINE, cross: CROSS_DECK_KEYS_BY_KIND.MISSING_LINE };
+  const keys = { deck: deduplicationKeys("MISSING_LINE", profile.profileVersion), cross: CROSS_DECK_KEYS_BY_KIND.MISSING_LINE };
   const sourceFile = SOURCE_FILE[language] ?? fail("MISSING_LINE_LANGUAGE");
   const paths: string[] = [];
   for (const directory of deck.directories) {

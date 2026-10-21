@@ -1,7 +1,7 @@
 import { generateAlgorithmRounds } from "./algorithm-rounds";
 import { composeExperimentArtifact } from "./compose";
 import { algorithmCandidateId, ExperimentRecordError, labelStems, parseExperimentArtifact } from "./model";
-import { algorithmCandidates, composeInput, loadCuratedProfile, sha256, snapshotIdFor } from "./testdata/deck-builders";
+import { algorithmCandidates, composeInput, loadCuratedProfile, loadRepeatedAlgorithmProfile, sha256, snapshotIdFor } from "./testdata/deck-builders";
 import { parseArtifactDecks, rawHash } from "../../../packages/artifact/src/index";
 import {
   TOLERANCE, accuracy, alphabeticalSolver, chance, frequencySolver, raritySolver, sameOptionsSolver,
@@ -42,6 +42,36 @@ describe("algorithm rounds", () => {
       ? { ...candidate, excerpt: `${candidate.excerpt}\n# unlike insertion sort`, excerptHash: sha256(`${candidate.excerpt}\n# unlike insertion sort`) } : candidate);
     expect(() => generateAlgorithmRounds({ profile, candidates: named })).toThrow("ALGORITHM_NAME_SHOWN");
     expect(() => generateAlgorithmRounds({ profile, candidates: candidates.slice(0, 7) })).toThrow();
+  });
+
+  it("from profile v7 on, answers each algorithm of a family equally often, each time in another language (#167)", () => {
+    const repeated = loadRepeatedAlgorithmProfile();
+    const candidates = algorithmCandidates(repeated, snapshotIdFor(repeated));
+    const { fixtures } = generateAlgorithmRounds({ profile: repeated, candidates });
+    expect(fixtures).toHaveLength(16);
+    for (const family of families) {
+      const ids = family.algorithms.map(({ id }) => algorithmCandidateId(id)).sort();
+      const rounds = fixtures.filter((fixture) => fixture.candidates.some(({ id }) => ids.includes(id)));
+      expect(rounds.map(({ correctCandidateId }) => correctCandidateId).sort()).toEqual(ids.flatMap((id) => [id, id]));
+    }
+    expect(new Set(fixtures.map(({ source }) => `${source.algorithmId}:${source.language}`)).size).toBe(16);
+    // A third answer for one algorithm in place of another's second, or two answers in one language, is unbalanced.
+    const index = candidates.findIndex(({ algorithmId, language }) => algorithmId === "insertion-sort" && language === "Go");
+    const third = candidates.map((candidate, at) => at === index ? { ...candidate, algorithmId: "bubble-sort" } : candidate);
+    expect(() => generateAlgorithmRounds({ profile: repeated, candidates: third })).toThrow("ALGORITHM_FAMILY_UNBALANCED");
+    const oneLanguage = candidates.map((candidate, at) => at === index ? { ...candidate, language: "Python" as const } : candidate);
+    expect(() => generateAlgorithmRounds({ profile: repeated, candidates: oneLanguage })).toThrow("ALGORITHM_FAMILY_UNBALANCED");
+  });
+
+  it("composes a v7 deck the shared parser accepts, in schema v6", () => {
+    const composed = composeExperimentArtifact(composeInput(loadRepeatedAlgorithmProfile()));
+    expect(composed.artifact.schemaVersion).toBe("local-experiment-artifact.v6");
+    const deck = parseArtifactDecks(composed.artifact).find(({ id }) => id === "algorithm")!;
+    expect(deck.fixtures).toHaveLength(16);
+    const limit = chance(deck.fixtures[0]!) + TOLERANCE;
+    for (const solver of [sameOptionsSolver(deck.fixtures), frequencySolver(deck.fixtures), raritySolver(deck.fixtures), alphabeticalSolver]) {
+      expect(accuracy(deck.fixtures, solver)).toBeLessThanOrEqual(limit);
+    }
   });
 
   it("composes a fourth deck the shared parser accepts, with the pins and algorithms in the snapshot", () => {

@@ -14,9 +14,13 @@ describe("shared limits file", () => {
     const profile = await loadProfile();
     expect(profile.stack.revision).toBe(STACK_REVISION);
     for (const [key, value] of Object.entries(profile.capacity)) expect(value).toBeLessThanOrEqual(CAPACITY_CEILINGS[key as keyof typeof CAPACITY_CEILINGS]);
-    // The v1.0 run's profile spends the raised ceilings in full (#129).
-    const v6 = parseCrawlProfile(JSON.parse(readFileSync(new URL("../profiles/local-real-rounds.v6.json", import.meta.url), "utf8")));
-    expect(v6.capacity).toEqual(CAPACITY_CEILINGS);
+    // The v7 run's profile spends the ceilings raised for it in full (#167); the v1.0 run's stays within them (#129).
+    const load = (version: string) =>
+      parseCrawlProfile(JSON.parse(readFileSync(new URL(`../profiles/local-real-rounds.${version}.json`, import.meta.url), "utf8")));
+    expect(load("v7").capacity).toEqual(CAPACITY_CEILINGS);
+    expect(CAPACITY_CEILINGS.requestCount).toBe(10_000);
+    expect(CAPACITY_CEILINGS.blobAttempts).toBe(600);
+    expect(load("v6").capacity).toEqual({ ...CAPACITY_CEILINGS, requestCount: 5000, blobAttempts: 400 });
   });
 
   it("rejects a missing, extra, non-positive, or malformed entry", () => {

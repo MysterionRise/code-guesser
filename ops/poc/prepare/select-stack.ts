@@ -4,7 +4,7 @@ import {
 } from "./diagnostics";
 import { ROUNDS_PER_LANGUAGE, profileAtLeast, sharedOptionWords } from "../../../packages/artifact/src/index";
 import { dataOnly, generatedPath } from "./excerpt-window";
-import { projectLanguages, type CrawlProfile, type StackLanguage } from "./profile";
+import { PROJECT_GROUP_ANSWERS, projectLanguages, projectRoundsPerLanguage, type CrawlProfile, type StackLanguage } from "./profile";
 import { namedByTemplates, optionDetail, projectRoundAllowed, type RepositoryOption } from "./project-rounds";
 import {
   addHashes, collidesWithSelected, provisionalSnapshot, revealsProtected, unreportable, view, type RepositoryScreen,
@@ -44,7 +44,7 @@ const stackOrder = (left: unknown, right: unknown): number => {
 const starEvents = (row: unknown): number => Number((row as { starEventsCount?: unknown }).starEventsCount ?? 0);
 const languageOf = (row: unknown): unknown => view(row).detectedLanguage;
 
-/** A project round in waiting: its revalidated file, and the four repositories every round of its language offers. */
+/** A project round in waiting: its revalidated file, and the four repositories both rounds of its group offer. */
 export interface ProjectSelection extends StackSelection {
   readonly description: string | null;
   readonly distractors: readonly RepositoryOption[];
@@ -71,10 +71,11 @@ const popularRepositories = (rows: readonly unknown[], minimumStarEvents: number
 const OPTIONS_PER_ROUND = 4;
 
 /**
- * Selects the two Stack decks, two rounds per language each. Project rounds come from the most popular
- * repositories of each language, one file each; every round of a language offers the same four repositories
- * (its answers plus decoys), so no option shows up more often than another. Language rounds come from
- * repositories below the popularity bar, in stable order.
+ * Selects the two Stack decks, two rounds per language each unless a v7 profile gives the project deck more. Project
+ * rounds come from the most popular repositories of each language, one file each, in groups of two: both rounds of a
+ * group offer the same four repositories (its answers plus decoys), and no repository is offered in two groups, so
+ * no option shows up more often than another. Language rounds come from repositories below the popularity bar, in
+ * stable order.
  */
 export const selectStack = async (
   context: Context,
@@ -163,11 +164,78 @@ export const selectStack = async (
   const echoes = (pane: string, option: RepositoryOption): boolean =>
     sharedOptionWords(pane, option.repository, optionDetail(option.description)).length > 0;
 
+  // A repository is an option in one group's rounds only: one that recurred across languages (next.js has JavaScript,
+  // TypeScript, and Rust files) or across a language's groups would appear more often than the rest and point to a decoy.
+  const offered = new Set<string>();
+  const paneOf = (selection: StackSelection) => String(view(selection.candidate).excerpt);
+  const pathOf = (selection: StackSelection) => String(view(selection.candidate).path);
+
+  /**
+   * One group of a language's project rounds: two answers from the repositories still open, then two decoys, so the
+   * group's two rounds offer the same four repositories. A repository whose files were tried as an answer is not tried
+   * again in a later group; `deck` holds the rounds already chosen.
+   */
+  const projectGroup = async (
+    language: StackLanguage,
+    open: ReturnType<typeof popularRepositories>,
+    tried: Set<string>,
+    deck: readonly StackSelection[],
+  ): Promise<readonly ProjectSelection[] | undefined> => {
+    const answers: StackSelection[] = [];
+    const answered = new Set<string>();
+    const answerOptions: RepositoryOption[] = [];
+    for (const { repository, rows: files } of open) {
+      if (answers.length >= PROJECT_GROUP_ANSWERS) break;
+      if (tried.has(repository)) continue;
+      tried.add(repository);
+      const own = strict ? await described(repository) : undefined;
+      if (strict && own === undefined) continue;
+      const option: RepositoryOption = { repository, description: own?.description ?? null };
+      for (const row of files.slice(0, profile.selection.filesPerRepository)) {
+        const selection = await tryRow(row, language, [...deck, ...answers], (candidate) => {
+          if (!projectRoundAllowed(String(view(candidate).excerpt), String(view(candidate).path), [repository])) throw new Error("PROJECT_NAME_IN_EXCERPT");
+          // The group's other answer is an option of this round, and this repository one of that round's: neither
+          // round's code or file name may name the other's repository, as the generator requires of every option.
+          if (strict && (!projectRoundAllowed(String(view(candidate).excerpt), String(view(candidate).path), answerOptions.map((other) => other.repository))
+            || answers.some((other) => !projectRoundAllowed(paneOf(other), pathOf(other), [repository])))) throw new Error("PROJECT_NAME_IN_EXCERPT");
+          if (strict && ([option, ...answerOptions].some((other) => echoes(String(view(candidate).excerpt), other))
+            || answers.some((other) => echoes(paneOf(other), option)))) throw new Error("PROJECT_WORDS_IN_EXCERPT");
+        });
+        if (selection) { answers.push(selection); answered.add(repository); answerOptions.push(option); break; }
+      }
+    }
+    if (answers.length < PROJECT_GROUP_ANSWERS) return undefined;
+    // Decoys fill the group's four options; none may be named by any of its rounds' code or file names.
+    const options: RepositoryOption[] = [];
+    for (const answer of answers) {
+      const description = strict ? answerOptions[answers.indexOf(answer)] : await describe(String(view(answer.candidate).repository));
+      if (description === undefined) return undefined;
+      options.push({ repository: String(view(answer.candidate).repository), description: description.description });
+    }
+    for (const { repository } of open) {
+      if (options.length >= OPTIONS_PER_ROUND) break;
+      if (answered.has(repository) || !answers.every(({ candidate }) =>
+        projectRoundAllowed(String(view(candidate).excerpt), String(view(candidate).path), [repository]))) continue;
+      const description = strict ? await described(repository) : await describe(repository);
+      if (description === undefined || description.fork || description.archived) continue;
+      const option = { repository, description: description.description };
+      if (strict && answers.some((answer) => echoes(paneOf(answer), option))) {
+        noteRejection(state, "SCREENING", new Error("PROJECT_WORDS_IN_EXCERPT"));
+        continue;
+      }
+      options.push(option);
+    }
+    if (options.length < OPTIONS_PER_ROUND) return undefined;
+    for (const option of options) offered.add(option.repository);
+    return answers.map((answer) => {
+      const own = String(view(answer.candidate).repository);
+      return Object.freeze({ ...answer, description: options.find((option) => option.repository === own)!.description,
+        distractors: Object.freeze(options.filter((option) => option.repository !== own)) });
+    });
+  };
+
   const project = await attempt<ProjectSelection>(async () => {
     const rounds: ProjectSelection[] = [];
-    // A repository is an option in one language's rounds only: one that recurred across languages (next.js has
-    // JavaScript, TypeScript, and Rust files) would appear more often than the rest and point to a decoy.
-    const offered = new Set<string>();
     for (const language of projectLanguages(profile)) {
       // A repository the deck's own wording names (`github/…` in "GitHub star events") can be no option.
       const ranked = popularRepositories(rows.filter((row) => languageOf(row) === language), profile.selection.minimumStarEvents)
@@ -177,56 +245,12 @@ export const selectStack = async (
           noteRejection(state, "SCREENING", new Error("PROJECT_NAMED_BY_TEMPLATE"));
           return false;
         });
-      const answers: StackSelection[] = [];
-      const answered = new Set<string>();
-      const answerOptions: RepositoryOption[] = [];
-      const paneOf = (selection: StackSelection) => String(view(selection.candidate).excerpt);
-      const pathOf = (selection: StackSelection) => String(view(selection.candidate).path);
-      for (const { repository, rows: files } of ranked) {
-        if (answers.length >= ROUNDS_PER_LANGUAGE) break;
-        const own = strict ? await described(repository) : undefined;
-        if (strict && own === undefined) continue;
-        const option: RepositoryOption = { repository, description: own?.description ?? null };
-        for (const row of files.slice(0, profile.selection.filesPerRepository)) {
-          const selection = await tryRow(row, language, answers, (candidate) => {
-            if (!projectRoundAllowed(String(view(candidate).excerpt), String(view(candidate).path), [repository])) throw new Error("PROJECT_NAME_IN_EXCERPT");
-            // The language's other answer is an option of this round, and this repository one of that round's: neither
-            // round's code or file name may name the other's repository, as the generator requires of every option.
-            if (strict && (!projectRoundAllowed(String(view(candidate).excerpt), String(view(candidate).path), answerOptions.map((other) => other.repository))
-              || answers.some((other) => !projectRoundAllowed(paneOf(other), pathOf(other), [repository])))) throw new Error("PROJECT_NAME_IN_EXCERPT");
-            if (strict && ([option, ...answerOptions].some((other) => echoes(String(view(candidate).excerpt), other))
-              || answers.some((other) => echoes(paneOf(other), option)))) throw new Error("PROJECT_WORDS_IN_EXCERPT");
-          });
-          if (selection) { answers.push(selection); answered.add(repository); answerOptions.push(option); break; }
-        }
-      }
-      if (answers.length < ROUNDS_PER_LANGUAGE) return { skipped: DECK_SHORT };
-      // Decoys fill the language's four options; none may be named by any of its rounds' code or file names.
-      const options: RepositoryOption[] = [];
-      for (const answer of answers) {
-        const description = strict ? answerOptions[answers.indexOf(answer)] : await describe(String(view(answer.candidate).repository));
-        if (description === undefined) return { skipped: DECK_SHORT };
-        options.push({ repository: String(view(answer.candidate).repository), description: description.description });
-      }
-      for (const { repository } of ranked) {
-        if (options.length >= OPTIONS_PER_ROUND) break;
-        if (answered.has(repository) || !answers.every(({ candidate }) =>
-          projectRoundAllowed(String(view(candidate).excerpt), String(view(candidate).path), [repository]))) continue;
-        const description = strict ? await described(repository) : await describe(repository);
-        if (description === undefined || description.fork || description.archived) continue;
-        const option = { repository, description: description.description };
-        if (strict && answers.some((answer) => echoes(paneOf(answer), option))) {
-          noteRejection(state, "SCREENING", new Error("PROJECT_WORDS_IN_EXCERPT"));
-          continue;
-        }
-        options.push(option);
-      }
-      if (options.length < OPTIONS_PER_ROUND) return { skipped: DECK_SHORT };
-      for (const option of options) offered.add(option.repository);
-      for (const answer of answers) {
-        const own = String(view(answer.candidate).repository);
-        rounds.push(Object.freeze({ ...answer, description: options.find((option) => option.repository === own)!.description,
-          distractors: Object.freeze(options.filter((option) => option.repository !== own)) }));
+      const tried = new Set<string>();
+      // A language's rounds come in groups, each from repositories no earlier group offered (#167).
+      for (let group = 0; group < projectRoundsPerLanguage(profile) / PROJECT_GROUP_ANSWERS; group += 1) {
+        const selected = await projectGroup(language, ranked.filter(({ repository }) => !offered.has(repository)), tried, rounds);
+        if (selected === undefined) return { skipped: DECK_SHORT };
+        rounds.push(...selected);
       }
     }
     return { candidates: Object.freeze(rounds) };

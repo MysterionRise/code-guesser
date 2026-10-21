@@ -11,8 +11,8 @@ const testModuleName: string = "vitest";
 const { describe, expect, it } = await import(testModuleName) as any;
 
 const profilePath = new URL("../profiles/local-real-rounds.v5.json", import.meta.url);
-/** The v1.0 run's profile spends every ceiling in full, so a budget one above its own is one above the worker's maximum. */
-const ceilingProfilePath = new URL("../profiles/local-real-rounds.v6.json", import.meta.url);
+/** The v7 run's profile spends every ceiling in full (#167), so a budget one above its own is one above the worker's maximum. */
+const ceilingProfilePath = new URL("../profiles/local-real-rounds.v7.json", import.meta.url);
 const hasUv = spawnSync("uv", ["--version"], { stdio: "ignore" }).status === 0;
 const SEAM_TIMEOUT_MILLISECONDS = 120_000;
 

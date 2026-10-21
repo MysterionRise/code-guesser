@@ -1,6 +1,6 @@
 import { screenBlob } from "@codeguessr/content/local-poc-support";
 
-import { CROSS_DECK_KEYS_BY_KIND, DEDUPLICATION_KEYS_BY_KIND, profileAtLeast, sameIdea } from "../../../packages/artifact/src/index";
+import { CROSS_DECK_KEYS_BY_KIND, deduplicationKeys, profileAtLeast, sameIdea } from "../../../packages/artifact/src/index";
 import { DECK_SHORT, noteRejection, rejectCandidate, type DeckAttempts, type DeckOutcome, type RunState } from "./diagnostics";
 import { doctestFunctions, roundExamples, type DoctestExample, type DoctestFunction } from "./doctest-parse";
 import { looksGenerated } from "./excerpt-window";
@@ -75,7 +75,7 @@ export const selectOutput = async (
   const deck = profile.curated!.output!;
   const pin = profile.curated!.repositories.find(({ repository }) => repository === deck.repository)!;
   const target = { repository: pin.repository, commit: pin.commit };
-  const keys = { deck: DEDUPLICATION_KEYS_BY_KIND.OUTPUT, cross: CROSS_DECK_KEYS_BY_KIND.OUTPUT };
+  const keys = { deck: deduplicationKeys("OUTPUT", profile.profileVersion), cross: CROSS_DECK_KEYS_BY_KIND.OUTPUT };
   const paths: string[] = [];
   for (const directory of deck.directories) {
     try {

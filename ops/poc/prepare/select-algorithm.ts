@@ -1,7 +1,7 @@
 import { screenBlob } from "@codeguessr/content/local-poc-support";
 
 import {
-  CROSS_DECK_KEYS_BY_KIND, DEDUPLICATION_KEYS_BY_KIND, labelStems, namesAlgorithm, showsLabelStem,
+  CROSS_DECK_KEYS_BY_KIND, deduplicationKeys, labelStems, namesAlgorithm, showsLabelStem,
 } from "../../../packages/artifact/src/index";
 import type { AlgorithmCandidate } from "./algorithm-rounds";
 import { DECK_SHORT, noteRejection, rejectCandidate, type DeckAttempts, type DeckOutcome, type RunState } from "./diagnostics";
@@ -18,9 +18,10 @@ export type AlgorithmSelection = Omit<AlgorithmCandidate, "crawlSnapshotId">;
 const fail = (code: string): never => { throw new Error(code); };
 
 /**
- * Selects the algorithm deck, one whole family at a time: each of a family's four algorithms needs one file that
- * yields a masked window naming none of the four, read in the language whose turn it is first, then in the others.
- * A family that cannot fill is dropped whole, so every published family answers each of its algorithms once.
+ * Selects the algorithm deck, one whole family at a time: each of a family's four algorithms needs a file that
+ * yields a masked window naming none of the four, read in the language whose turn it is first, then in the others;
+ * from v7 on (#167) it needs `roundsPerAlgorithm` of them, each in another language. A family that cannot fill is
+ * dropped whole, so every published family answers each of its algorithms equally often.
  */
 export const selectAlgorithm = async (
   context: Context,
@@ -35,7 +36,7 @@ export const selectAlgorithm = async (
   const deck = curated.algorithm!;
   const repositories = curated.repositories;
   const limits = { maxLines: profile.screening.excerptLines, maxBytes: profile.screening.excerptBytes, minBytes: profile.screening.minimumExcerptBytes };
-  const keys = { deck: DEDUPLICATION_KEYS_BY_KIND.ALGORITHM, cross: CROSS_DECK_KEYS_BY_KIND.ALGORITHM };
+  const keys = { deck: deduplicationKeys("ALGORITHM", profile.profileVersion), cross: CROSS_DECK_KEYS_BY_KIND.ALGORITHM };
   const seen = new Set<string>();
   const rounds: AlgorithmSelection[] = [];
 
@@ -82,24 +83,28 @@ export const selectAlgorithm = async (
     }
   };
 
+  const answers = deck.roundsPerAlgorithm ?? 1;
+  const languageOf = (repository: string) => repositories.find((known) => known.repository === repository)!.language;
   let turn = 0;
   for (const family of deck.families) {
     if (rounds.length >= deck.rounds) break;
     const picked: AlgorithmSelection[] = [];
     for (const entry of family.algorithms) {
-      // Languages take turns being tried first, so the deck spreads across them.
+      // Languages take turns being tried first, so the deck spreads across them; each answer is in another language.
       const order = repositories.map((_, index) => repositories[(turn + index) % repositories.length]!.repository)
         .filter((repository) => entry.files[repository] !== undefined);
-      let selection: AlgorithmSelection | undefined;
+      const selections: AlgorithmSelection[] = [];
       for (const repository of order) {
-        selection = await tryFile(family, entry, repository, picked);
-        if (selection) break;
+        if (selections.length >= answers) break;
+        if (selections.some(({ language }) => language === languageOf(repository))) continue;
+        const selection = await tryFile(family, entry, repository, [...picked, ...selections]);
+        if (selection) selections.push(selection);
       }
-      if (!selection) break;
-      picked.push(selection);
+      if (selections.length < answers) break;
+      picked.push(...selections);
       turn += 1;
     }
-    if (picked.length === family.algorithms.length) rounds.push(...picked);
+    if (picked.length === family.algorithms.length * answers) rounds.push(...picked);
     else noteRejection(state, "SELECTION", new Error("ALGORITHM_FAMILY_SHORT"));
   }
   if (rounds.length < deck.rounds) return { skipped: DECK_SHORT };
