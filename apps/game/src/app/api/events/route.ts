@@ -7,8 +7,11 @@ import { activeLocalRealExperiment } from "../../../demo/local-real-experiment-l
  */
 export const dynamic = "force-dynamic";
 
-/** A beacon larger than this is refused unread. */
-const MAX_BODY_LENGTH = 1024;
+/**
+ * A beacon larger than this is refused unread. A finished game's token runs to about 1,100 characters since game state
+ * v3 (#173), so a beacon takes 2 KB.
+ */
+const MAX_BODY_LENGTH = 2048;
 
 const STATUS = { RECORDED: 204, REJECTED: 400, SESSION_ENDED: 410, LIMIT: 429 } as const;
 
