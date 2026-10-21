@@ -1,5 +1,7 @@
 # Version updates (#26, #27): once a month, minor and patch updates grouped into one pull request per
-# ecosystem, majors one pull request each. Dependabot caps open pull requests per ecosystem, not overall.
+# ecosystem. npm majors are taken by hand, since they move the toolchain: `@types/node` follows the pinned Node
+# runtime, and Next 16 renames `middleware.ts`. Other majors come one pull request each. Dependabot caps open pull
+# requests per ecosystem, not overall.
 # Security updates are a repository setting (#27) and keep their own limit.
 version: 2
 updates:
@@ -9,6 +11,9 @@ updates:
     schedule:
       interval: monthly
     open-pull-requests-limit: 5
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     groups:
       npm-minor-and-patch:
         update-types: [minor, patch]
