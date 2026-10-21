@@ -9,21 +9,21 @@
     "typecheck": "next typegen && tsc --noEmit"
   },
   "dependencies": {
-    "@ai-sdk/openai-compatible": "3.0.68",
-    "@ai-sdk/react": "4.0.143",
+    "@ai-sdk/openai-compatible": "3.0.71",
+    "@ai-sdk/react": "4.0.147",
     "@json-render/core": "0.21.1",
     "@json-render/react": "0.21.1",
-    "ai": "7.0.140",
+    "ai": "7.0.143",
     "next": "15.5.27",
-    "react": "19.3.0",
-    "react-dom": "19.3.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
     "server-only": "0.0.1",
     "zod": "4.6.7"
   },
   "devDependencies": {
     "@types/node": "24.19.2",
-    "@types/react": "19.0.3",
-    "@types/react-dom": "19.0.2",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
     "typescript": "6.0.3"
   }
 }
