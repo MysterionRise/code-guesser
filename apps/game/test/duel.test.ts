@@ -193,21 +193,27 @@ describe("game state v3 (#173)", () => {
  * this test.
  */
 const GOLDEN_DIGESTS: Readonly<Record<string, string>> = {
-  mixed: "7867d7a6bcbb33e088cb33fa1026913b",
-  project: "5303a7a85659234eeed99c2830633d8c",
+  mixed: "691ff8d43fdd94d3f9e8ce65ad8f1874",
+  project: "f96202305c8388e965836060add0cba2",
   language: "2e83e51cfe0b147f4256b0503bad70d5",
-  "before-after": "7da4d500aff9914052dc029cfa4abeb6",
-  algorithm: "24df8fd25256e6ef6895d826a74a5150",
-  output: "a858105d9c179e142233d006ce4437c2",
-  fix: "9f5e019dbe2535b997611199480f2427",
-  "missing-line": "0990f0975b024a3f3be9eeaed6daf2f2",
-  "name-function": "675e5e9d5b5b94994561d312d7d6fcbf",
+  "before-after": "ff575f4124e21dc7928a08c39d6a135a",
+  algorithm: "31bbd9f9a1db543f78be399aa763a7f5",
+  output: "a3f4aae882e765704290946197c89484",
+  fix: "7c3854be96c86863c10109030770284e",
+  "missing-line": "1f00ab33f78709d5f72f0ba16d328f6c",
+  "name-function": "91f11c953d6468ec896d016d3848ff00",
   framework: "b9f653b90564baf4f8ad16a2bbbe497b",
   exercise: "9d49c71b817fca9400ce7e56d4141bd8",
-  daily: "1f3c2fc460ff6ffcdfa8a9729f23556c",
-  "algorithm+layers": "b768358d88825d96ba8dacff46227fea",
+  daily: "d485bd0d812e559684146542988a1c1c",
+  "algorithm+layers": "76de85808d91db04f8879156d7bab227",
   "language+layers": "857757c2205732515a58a2d2d1c346ac",
 };
+
+/** Every string a parsed link holds, at any depth. */
+const stringsIn = (value: unknown): string[] =>
+  typeof value === "string" ? [value]
+    : Array.isArray(value) ? value.flatMap(stringsIn)
+      : value !== null && typeof value === "object" ? Object.values(value).flatMap(stringsIn) : [];
 
 describe("the deal digest (#173)", () => {
   it("matches the golden digest of every deck's game against the committed artifact", () => {
@@ -528,14 +534,17 @@ describe("what a link holds (#173)", () => {
       if (!issued.ok) throw new Error(issued.reason);
       const challengeText = plaintextOf(challengeToken, CHALLENGE_CONTEXT);
       for (const text of [challengeText, plaintextOf(issued.resultToken, RESULT_CONTEXT)]) {
+        // Labels and names are checked against the link's values, not its text: a label may spell one of its keys
+        // (v7 has an option named `max`), and the keys are pinned below.
+        const values = stringsIn(JSON.parse(text));
         for (const round of dealt.mode.rounds) {
           const fixture = fixtures.get(round.roundId)!;
           expect(text).not.toContain(round.roundId);
           for (const { candidateId, label } of round.mode.candidates) {
             expect(text).not.toContain(candidateId);
-            expect(text).not.toContain(JSON.stringify(label));
+            expect(values).not.toContain(label);
           }
-          expect(text).not.toContain(JSON.stringify(fixture.source.authorName));
+          expect(values).not.toContain(fixture.source.authorName);
           expect(text).not.toContain(fixture.source.repository);
         }
         expect(text).not.toContain(payloadOf(token).gameId);
