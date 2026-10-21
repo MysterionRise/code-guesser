@@ -297,9 +297,9 @@ gate: changing queries, retries, ceilings, deck rules, or running
       option can be stored;
     - the server records `game_dealt`, `hint_revealed`, `round_revealed`,
       `game_completed`, and `genui_call` itself; the browser sends
-      `game_viewed`, `deal_again`, `result_copied`, `genui_interaction`, and
+      `game_viewed`, `deal_again`, `result_shared` (`via: share | clipboard`, #171), `genui_interaction`, and
       `genui_fallback` to the beacon route `app/api/events/route.ts`
-      (1 KB, a live signed token, 60 per game);
+      (1 KB, a live signed token, 60 per game); the retired `result_copied` still parses in stored lines;
     - opt-in: nothing is recorded without `EXPERIMENT_EVENTS_DIR` (one JSONL
       file per UTC day, rolled up into `totals.jsonl` after 90 days), and a
       deal under `Sec-GPC: 1` seals `record: false`;

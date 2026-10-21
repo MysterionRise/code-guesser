@@ -1,11 +1,13 @@
 import { randomBytes } from "node:crypto";
 
+import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { authorizeLocalExperimentReveal, revealLocalExperimentHint } from "./actions";
 import { ArtifactUnavailable } from "../demo/artifact-unavailable";
 import { DemoArcade } from "../demo/demo-arcade";
+import { DAILY_DESCRIPTION, DAILY_TITLE, gameSources, type GameSource } from "../demo/game-sources.server";
 import {
   LOCAL_REAL_EXPERIMENT_NOTICE_BODY,
   LOCAL_REAL_EXPERIMENT_NOTICE_LEAD,
@@ -16,6 +18,7 @@ import type { LocalRealDeck, LocalRealMix } from "../demo/local-real-experiment.
 import { DAILY_DECK, MIXED_DECK, type SessionDeckId } from "../demo/local-real-experiment-domain.server";
 import { CONTROL, FACTORS, assignArms, labMode, labOverrides, parseDisabled, type Arms, type Level } from "../experiment/arms";
 import { DESIGN_LABELS, READY_DESIGNS, type Design } from "../genui/designs";
+import { publicOrigin } from "../server/public-origin.server";
 
 const DECK_COUNT_WORDS = ["No decks", "One deck", "Two decks", "Three decks", "Four decks", "Five decks", "Six decks", "Seven decks",
   "Eight decks", "Nine decks", "Ten decks", "Eleven decks", "Twelve decks"] as const;
@@ -36,10 +39,32 @@ interface PageProps {
   readonly searchParams: Promise<Readonly<Record<string, string | string[] | undefined>>>;
 }
 
-/** What a game is dealt from: a deck, or the mix of five (#56). */
-interface GameSource {
-  readonly id: SessionDeckId;
-  readonly title: string;
+/** The deck, mix, or today's five a page's address names, when this artifact offers it. */
+const requestedSource = (requested: string | string[] | undefined): GameSource | undefined => {
+  const loaded = activeLocalRealExperiment();
+  return !loaded.ok || typeof requested !== "string" ? undefined : gameSources(loaded.experiment).find(({ id }) => id === requested);
+};
+
+/**
+ * A deck's title, description, and link preview (#171), from what its deck publishes and never from a round; the
+ * chooser keeps the layout's. The preview is an image of the deck's title (`app/og/[deck]/route.tsx`).
+ */
+export async function generateMetadata({ searchParams }: PageProps): Promise<Metadata> {
+  const source = requestedSource((await searchParams).deck);
+  const origin = publicOrigin(await headers());
+  const base: Metadata = origin === null ? {} : { metadataBase: new URL(origin) };
+  if (source === undefined) return base;
+  const title = `${source.title} · CodeGuessr`;
+  return {
+    ...base,
+    title,
+    description: source.description,
+    openGraph: {
+      type: "website", siteName: "CodeGuessr", title, description: source.description,
+      images: [{ url: `/og/${source.id}`, width: 1200, height: 630, alt: title }],
+    },
+    twitter: { card: "summary_large_image" },
+  };
 }
 
 /**
@@ -62,8 +87,8 @@ function DeckChooser({ decks, mixed, query }: { readonly decks: readonly LocalRe
           <ul className="deck-list">
             <li>
               <a className="deck-card" href={`/?deck=${DAILY_DECK}${query}`}>
-                <span className="deck-title">Today’s five</span>{" "}
-                <span className="deck-description">The same mixed five all day, new tomorrow.</span>{" "}
+                <span className="deck-title">{DAILY_TITLE}</span>{" "}
+                <span className="deck-description">{DAILY_DESCRIPTION}</span>{" "}
                 <span className="deck-size">{localDate(new Date())}</span>
               </a>
             </li>
@@ -159,8 +184,9 @@ const seriesOf = (query: Readonly<Record<string, string | string[] | undefined>>
   return typeof query.deal === "string" && DEAL_SEED.test(query.deal) && game <= MAXIMUM_GAME ? { seed: query.deal, game } : undefined;
 };
 
-function DealtSession({ deck, series, arms, record, overrides }: {
+function DealtSession({ deck, series, arms, record, overrides, origin }: {
   readonly deck: GameSource; readonly series: DealSeries | undefined; readonly arms: Arms; readonly record: boolean; readonly overrides: Partial<Arms>;
+  readonly origin: string | null;
 }) {
   const loaded = activeLocalRealExperiment();
   if (!loaded.ok) return null;
@@ -172,12 +198,15 @@ function DealtSession({ deck, series, arms, record, overrides }: {
   // A mixed game names each round's deck; a deck's own game needs no reminder.
   const roundDecks = deck.id === MIXED_DECK || deck.id === DAILY_DECK
     ? Object.fromEntries(loaded.experiment.decks.map(({ id, title }) => [id, title])) : undefined;
+  // A shared link deals a friend this very game (#171), so it carries the deal and never a tester's lab picks. Today's
+  // five links to its plain address until that carries the date (#172).
+  const share = origin === null ? {} : { shareHref: `${origin}${gameHref(deck.id, series)}` };
   return (
     <>
       {wrapped && <p className="deal-note">You’ve now seen every round in this deck, so this game starts it over.</p>}
       <DemoArcade key={sessionToken} mode={mode} sessionToken={sessionToken} deckTitle={deck.title} {...(roundDecks ? { roundDecks } : {})}
         authorizeRevealAction={authorizeLocalExperimentReveal} revealHintAction={revealLocalExperimentHint}
-        chooseAnotherDeckHref="/" newGameHref={`${next}${labQuery(overrides)}`}
+        chooseAnotherDeckHref="/" newGameHref={`${next}${labQuery(overrides)}`} {...share}
         {...(arms.design === "off" ? {} : { genuiDesign: arms.design })} />
     </>
   );
@@ -192,12 +221,12 @@ export default async function Page({ searchParams }: PageProps) {
   const lab = labMode();
   const overrides = lab ? labOverrides(query) : {};
   const arms = assignArms({ genuiEnabled, disabled: parseDisabled(process.env.EXPERIMENT_DISABLED), overrides });
-  const record = (await headers()).get("sec-gpc") !== "1";
+  const requestHeaders = await headers();
+  const record = requestHeaders.get("sec-gpc") !== "1";
   const series = seriesOf(query);
-  const deck: GameSource | undefined = !loaded.ok || typeof requested !== "string" ? undefined
-    : requested === MIXED_DECK ? (loaded.experiment.mixed ? { id: MIXED_DECK, title: loaded.experiment.mixed.title } : undefined)
-      : requested === DAILY_DECK ? (loaded.experiment.mixed ? { id: DAILY_DECK, title: `Today’s five, ${localDate(new Date())}` } : undefined)
-      : loaded.experiment.decks.find(({ id }) => id === requested);
+  const source = requestedSource(requested);
+  // Today's five names its date, so its share line carries it.
+  const deck = source?.id === DAILY_DECK ? { ...source, title: `${source.title}, ${localDate(new Date())}` } : source;
   // A deck's game is a game of a seeded deal (#40): an address without one starts a fresh deal at its first game, so a
   // reload shows the same game and "Deal new rounds" the next. Today's five is seeded by its date instead.
   if (deck && deck.id !== DAILY_DECK && series === undefined) {
@@ -218,7 +247,8 @@ export default async function Page({ searchParams }: PageProps) {
             <>
               <nav className="deck-nav" aria-label="Decks"><a href="/">All decks</a></nav>
               {lab && <LabBar deck={deck} series={series} arms={arms} overrides={overrides} genuiEnabled={genuiEnabled} />}
-              <DealtSession deck={deck} series={deck.id === DAILY_DECK ? undefined : series} arms={arms} record={record} overrides={overrides} />
+              <DealtSession deck={deck} series={deck.id === DAILY_DECK ? undefined : series} arms={arms} record={record} overrides={overrides}
+                origin={publicOrigin(requestHeaders)} />
             </>
           )
           : <DeckChooser decks={loaded.experiment.decks} mixed={loaded.experiment.mixed} query={labQuery(overrides)} />}

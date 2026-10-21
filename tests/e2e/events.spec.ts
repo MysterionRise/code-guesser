@@ -33,6 +33,8 @@ test.beforeEach(async ({ request }) => {
 
 test("a played game leaves its events under its sealed arms, with nothing that identifies the player", async ({ page, context }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  // Without Web Share the result goes to the clipboard (#171), whichever browser runs the test.
+  await page.addInitScript(() => { delete (Navigator.prototype as { share?: unknown }).share; });
   const from = storedEvents().length;
   await page.goto("/?deck=fix&design=off");
   await expect(page.getByText("Round 1 of 5")).toBeVisible();
@@ -43,7 +45,7 @@ test("a played game leaves its events under its sealed arms, with nothing that i
     if (round < 5) await page.getByRole("button", { name: "Next round" }).click();
   }
   await page.getByRole("button", { name: "Copy result" }).click();
-  await expect(page.getByRole("button", { name: "Copied" })).toBeVisible();
+  await expect(page.locator(".share-status")).toHaveText("Result copied");
   await page.getByRole("link", { name: "Choose another deck" }).click();
   await expect(page.getByRole("heading", { name: "Pick a deck" })).toBeVisible();
 
@@ -53,8 +55,9 @@ test("a played game leaves its events under its sealed arms, with nothing that i
   const mine = events.filter((event) => event.game === game);
   expect(mine.map(({ type }) => type).sort()).toEqual([
     "deal_again", "game_completed", "game_dealt", "game_viewed", "hint_revealed",
-    "result_copied", "round_revealed", "round_revealed", "round_revealed", "round_revealed", "round_revealed",
+    "result_shared", "round_revealed", "round_revealed", "round_revealed", "round_revealed", "round_revealed",
   ]);
+  expect(mine.find(({ type }) => type === "result_shared")).toMatchObject({ via: "clipboard" });
   for (const event of mine) {
     expect(event).toMatchObject({ v: 1, source: "synthetic", deck: "fix", design: "off", theme: "terminal", layer: "off", day: today() });
   }

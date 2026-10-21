@@ -18,6 +18,7 @@ interface DemoArcadeProps {
   readonly revealHintAction: (request: HintRequest) => Promise<HintResponse>;
   readonly chooseAnotherDeckHref?: string;
   readonly newGameHref?: string;
+  readonly shareHref?: string;
   readonly deckTitle?: string;
   readonly roundDecks?: Readonly<Record<string, string>>;
   readonly genuiDesign?: Design;

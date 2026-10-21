@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 
 const { CONTROL } = await import("../src/experiment/arms");
-const { EVENT_TYPES, dayOf, isDay, parseEvent, viewportBucket } = await import("../src/experiment/events");
+const { CLIENT_EVENT_TYPES, EVENT_TYPES, RETIRED_EVENT_TYPES, dayOf, isDay, parseEvent, viewportBucket } = await import("../src/experiment/events");
 const { RAW_RETENTION_DAYS, SERVER_EVENT_TYPES, eventSinkFromEnv, eventSource, fileEventStore, storeSink } = await import("../src/experiment/event-store.server");
 
 const DECKS = ["project", "language", "fix"];
@@ -22,6 +22,7 @@ const VALID: Readonly<Record<string, Record<string, unknown>>> = {
   game_completed: { score: 4_300, correct: 4, hints: 2, ms: 300_000 },
   deal_again: { to: "same-deck" },
   result_copied: {},
+  result_shared: { via: "share" },
   genui_call: { round: 3, phase: "after-lock", ok: true, status: 0, calls: 2, tokensIn: 7_000, tokensOut: 900, ms: 6_000 },
   genui_interaction: { round: 3, action: "explain" },
   genui_fallback: { round: 3, reason: "failed" },
@@ -65,6 +66,16 @@ describe("the event schema (#107)", () => {
 
   it("splits events between the server and the browser", () => {
     expect([...SERVER_EVENT_TYPES].sort()).toEqual(["game_completed", "game_dealt", "genui_call", "hint_revealed", "round_revealed"]);
+    expect([...CLIENT_EVENT_TYPES].sort()).toEqual(["deal_again", "game_viewed", "genui_fallback", "genui_interaction", "result_shared"]);
+  });
+
+  it("says how a result was shared, as a closed choice, and still reads the copies stored before it (#171)", () => {
+    expect(RETIRED_EVENT_TYPES).toEqual(["result_copied"]);
+    expect(parseEvent({ ...base("result_shared"), via: "clipboard" }, DECKS)).not.toBeNull();
+    for (const via of ["sms", "", 1, null]) expect(parseEvent({ ...base("result_shared"), via }, DECKS), String(via)).toBeNull();
+    expect(parseEvent(base("result_shared"), DECKS)).toBeNull();
+    expect(parseEvent({ ...base("result_shared"), via: "share", url: "http://127.0.0.1:3000/?deck=fix" }, DECKS)).toBeNull();
+    expect(parseEvent(base("result_copied"), DECKS)).not.toBeNull();
   });
 });
 
