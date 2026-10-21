@@ -2,7 +2,7 @@
 
 ## Mission
 
-A local-only "guess from the code" game. One preparation run crawls real
+A "guess from the code" game. One preparation run crawls real
 open-source code before play and freezes ten decks (296 rounds since the v1.0
 data run), each a pool of rounds from which every game deals five:
 
@@ -20,7 +20,8 @@ data run), each a pool of rounds from which every game deals five:
 - "Which framework?": 32 TodoMVC files; "Which exercise?": 48 Exercism
   reference solutions.
 
-The goal is a demo on one machine, not public play.
+The goal is anonymous public play on one instance of the owner's own server (v1.1, #100). Until #100's launch gates
+close, the game is served on localhost only.
 
 ## Read first
 
@@ -42,25 +43,33 @@ gate: changing queries, retries, ceilings, deck rules, or running
 
 ## Guardrails
 
-- Localhost only; no deployment and no public players.
+- Anonymous public play, once #100's launch gates close; until then, localhost only.
+  - No accounts and no personal data. Nothing stores or logs an IP address, user agent, cookie, or persistent id. Rate
+    limits (#98) may read the client address in memory, in one module, and never keep it.
+  - One instance, on the owner's own server (#170). Rate limits and counters live in the process and the session ledger
+    on its volume (#164), so a second instance needs shared stores first.
+  - Lab mode (`EXPERIMENT_LAB`) is never on in production, except for a smoke run tagged with a non-real
+    `EXPERIMENT_SOURCE`.
+  - After launch day, every player-visible change (UI, artifact, or arms) gets a dated entry in the experiment change log
+    (#169), so the report can split its periods.
 - Public open-source code only, with licence and recorded-author data.
 - Bounded, selective reads only. Never download a whole dataset, a whole
   language shard, or a repository archive. The Stack v2 stays pinned to
   revision `e565caa3a78c2423bd374333a472b049eb090e47` unless deliberately moved.
 - Credentials come only from standard stores (`~/.cache/huggingface/token`,
   `gh auth token`, and for generative UI `~/.config/openrouter/key`, mode
-  0600) through the environment. Never log or commit tokens,
-  provider bodies, contact data, private email, or source excerpts from failed
-  diagnostics.
-- Gameplay never touches the network; it plays the frozen local artifact. The
-  one exception is opt-in generative UI (`GENUI_ENABLED=1`, #101). Its server
-  route `apps/game/src/app/api/genui/route.ts` calls OpenRouter only through
-  the answer-lock guard, for a live game's round, and the browser never talks
-  to a model. Spend limits live on the OpenRouter key, not in the app.
+  0600) through the environment; on the server, only from its secret store, never through `NEXT_PUBLIC_*`. Never log
+  or commit tokens, provider bodies, contact data, private email, or source excerpts from failed diagnostics.
+- The control arm plays the frozen local artifact and makes no outbound request. The one exception is opt-in generative
+  UI (`GENUI_ENABLED=1`, #101). Its server route `apps/game/src/app/api/genui/route.ts` calls OpenRouter only through
+  the answer-lock guard, for a live game's round. The browser talks only to the game's own origin, never to a model.
+  Spend limits live on the OpenRouter key, not in the app; the app's rate limits and per-game caps fall back to the
+  static reveal.
 - Preparation may also call OpenRouter: `pnpm prepare:questions` (#127) writes
   question layers with a model that knows the answer. Its answers are journaled
   in `ops/poc/questions/tmp/journal.jsonl` (gitignored) and its output is
   frozen and pinned, so play still never calls a model before the lock.
+- The preparation guardrails above (bounded reads, the licence allowlist, credentials) are unchanged by public play.
 - Malformed provider data fails closed. Transient errors may be retried within
   the request budget.
 - Preserve unrelated worktree changes.
