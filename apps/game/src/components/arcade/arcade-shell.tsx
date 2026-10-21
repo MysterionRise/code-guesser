@@ -36,6 +36,8 @@ interface ArcadeShellProps {
   chooseAnotherDeckHref?: string;
   /** When set, completion links to a freshly dealt game from the same deck. */
   newGameHref?: string;
+  /** When set, the share line links to this game: its absolute address, with no lab picks (#171). */
+  shareHref?: string;
   /** When set, the share line names the deck. */
   deckTitle?: string;
   /** When set, as in a mixed game (#56), each round's eyebrow names its own deck, by round kind. */
@@ -44,7 +46,7 @@ interface ArcadeShellProps {
   genuiDesign?: Design;
 }
 
-export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealHintAction, chooseAnotherDeckHref, newGameHref, deckTitle, roundDecks, genuiDesign }: ArcadeShellProps) {
+export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealHintAction, chooseAnotherDeckHref, newGameHref, shareHref, deckTitle, roundDecks, genuiDesign }: ArcadeShellProps) {
   const [session, setSession] = React.useState(() => createArcadeSession(mode));
   const token = React.useRef(sessionToken);
   const currentToken = React.useCallback(() => token.current, []);
@@ -79,7 +81,7 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
   const settled = React.useRef(false);
 
   // The event log (#107) hears from the browser only what the server can't see: the viewport, the way on from a
-  // finished game, a copied result, and what the player does with a generative panel.
+  // finished game, a shared result, and what the player does with a generative panel.
   const track = React.useCallback((event: ClientEvent) => sendEvent(token.current, event), []);
   // Once per game, though React's strict mode runs effects twice in development.
   const viewed = React.useRef(false);
@@ -238,7 +240,7 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
           {session.reveal && (
             <RoundReveal round={round} reveal={session.reveal} hintsUsed={session.visibleHintCount}
               pickLabel={labelOf(session.lockedCandidateId)} complete={session.status === "complete"}
-              correctRounds={session.correctRounds} history={session.history} deckTitle={deckTitle} newGameHref={newGameHref}
+              correctRounds={session.correctRounds} history={session.history} deckTitle={deckTitle} shareHref={shareHref} newGameHref={newGameHref}
               chooseAnotherDeckHref={chooseAnotherDeckHref} genuiDesign={genuiDesign} sessionToken={currentToken}
               onNext={next} headingRef={revealHeading} track={track} trackGenui={trackGenui} />
           )}

@@ -46,33 +46,54 @@ function GameSummary({ history, result }: { readonly history: readonly RoundReco
   );
 }
 
-/** Where a finished game can go next, and its spoiler-free share line. */
-function CompletionActions({ result, correctRounds, deckTitle, newGameHref, chooseAnotherDeckHref, track }: {
+/**
+ * Where a finished game can go next, and its spoiler-free share line (#171): through the browser's share sheet where
+ * it has one, otherwise onto the clipboard. A status line says which, for screen readers too.
+ */
+function CompletionActions({ result, correctRounds, history, deckTitle, shareHref, newGameHref, chooseAnotherDeckHref, track }: {
   readonly result: EntertainmentResultProjection;
   readonly correctRounds: number;
+  readonly history: readonly RoundRecord[];
   readonly deckTitle: string | undefined;
+  readonly shareHref: string | undefined;
   readonly newGameHref: string | undefined;
   readonly chooseAnotherDeckHref: string | undefined;
   readonly track: (event: ClientEvent) => void;
 }) {
-  const [copied, setCopied] = React.useState(false);
-  const copyResult = async () => {
+  // The shell renders only in the browser, so this never differs from a server render.
+  const sheet = typeof navigator !== "undefined" && typeof navigator.share === "function";
+  const [status, setStatus] = React.useState("");
+  const shareResult = async () => {
+    const share = projectSpoilerFreeShare(result, history, deckTitle, shareHref);
+    const data: ShareData = share.url === null ? { text: share.message } : { text: share.message, url: share.url };
+    if (sheet && navigator.canShare?.(data) !== false) {
+      try {
+        await navigator.share(data);
+        setStatus("Result shared");
+        track({ type: "result_shared", via: "share" });
+        return;
+      } catch (error) {
+        // Closing the sheet is the player's call; any other failure falls back to the clipboard.
+        if (error instanceof DOMException && error.name === "AbortError") return;
+      }
+    }
     try {
-      await navigator.clipboard.writeText(projectSpoilerFreeShare(result, correctRounds, deckTitle).text);
-      setCopied(true);
-      track({ type: "result_copied" });
+      await navigator.clipboard.writeText(share.text);
+      setStatus("Result copied");
+      track({ type: "result_shared", via: "clipboard" });
     } catch {
-      setCopied(false);
+      setStatus("Couldn’t copy the result. Try again.");
     }
   };
   return (
     <>
-      <p>{formatCompletionResult(result, correctRounds, deckTitle)}</p>
+      <p>{formatCompletionResult(result, correctRounds)}</p>
       <div className="completion-actions">
         {newGameHref && <a className="primary-action" href={newGameHref} onClick={() => track({ type: "deal_again", to: "same-deck" })}>Deal new rounds</a>}
-        <button className="secondary-action" type="button" onClick={copyResult}>{copied ? "Copied" : "Copy result"}</button>
+        <button className="secondary-action" type="button" onClick={shareResult}>{sheet ? "Share result" : "Copy result"}</button>
         {chooseAnotherDeckHref && <a className="deck-link" href={chooseAnotherDeckHref} onClick={() => track({ type: "deal_again", to: "chooser" })}>Choose another deck</a>}
       </div>
+      <p className="share-status" role="status">{status}</p>
     </>
   );
 }
@@ -82,7 +103,7 @@ function CompletionActions({ result, correctRounds, deckTitle, newGameHref, choo
  * the way on right after; then why, which folds away once a generative explainer has rendered (#121); then the
  * explainer, the round's source, and the next round. The parent renders it only after the server authorized the reveal.
  */
-export function RoundReveal({ round, reveal, hintsUsed, pickLabel, complete, correctRounds, history, deckTitle, newGameHref, chooseAnotherDeckHref, genuiDesign, sessionToken, onNext, headingRef, track, trackGenui }: {
+export function RoundReveal({ round, reveal, hintsUsed, pickLabel, complete, correctRounds, history, deckTitle, shareHref, newGameHref, chooseAnotherDeckHref, genuiDesign, sessionToken, onNext, headingRef, track, trackGenui }: {
   readonly round: Readonly<PublicRound>;
   readonly reveal: AuthorizedReveal;
   readonly hintsUsed: number;
@@ -93,6 +114,8 @@ export function RoundReveal({ round, reveal, hintsUsed, pickLabel, complete, cor
   /** Every answered round so far, for the summary once the game is complete. */
   readonly history: readonly RoundRecord[];
   readonly deckTitle: string | undefined;
+  /** The finished game's own address, which its share line links to. */
+  readonly shareHref: string | undefined;
   readonly newGameHref: string | undefined;
   readonly chooseAnotherDeckHref: string | undefined;
   readonly genuiDesign: Design | undefined;
@@ -113,7 +136,7 @@ export function RoundReveal({ round, reveal, hintsUsed, pickLabel, complete, cor
       {complete && (
         <>
           <GameSummary history={history} result={reveal.result} />
-          <CompletionActions result={reveal.result} correctRounds={correctRounds} deckTitle={deckTitle}
+          <CompletionActions result={reveal.result} correctRounds={correctRounds} history={history} deckTitle={deckTitle} shareHref={shareHref}
             newGameHref={newGameHref} chooseAnotherDeckHref={chooseAnotherDeckHref} track={track} />
         </>
       )}
