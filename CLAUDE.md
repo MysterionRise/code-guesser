@@ -484,16 +484,24 @@ gate: changing queries, retries, ceilings, deck rules, or running
 
 1. Finish v1.0 (#130): the `v1.0.0` tag and GitHub release, with the owner's go-ahead. Owner decisions still open:
    #120 (model per design) and #160 (the algorithm layer's fairness).
-2. The next release: hardening and hosting (#97–#100), then the deferred decks, "Spot the vulnerable line" (#59) and
-   "Which era?" (#60), and the other four question-layer designs (#128).
-3. Phase 3c, in `docs/review/2026-10-13-next-sources-plan.md`: other forges
+2. The next release, v1.1 (milestone v1.1, checklist #174), planned in `docs/review/2026-10-20-next-phase-plan.md`.
+   The owner decided on 2026-10-20:
+   - public play on one instance of the owner's own server (hardening #97–#100, #164, #170);
+   - async duel challenge links (#173);
+   - bigger pools from the current sources in profile v7 (#165–#167);
+   - Node 24 (#21);
+   - shipping on after launch, with every player-visible change dated (#169).
+3. After v1.1: the deferred decks, "Spot the vulnerable line" (#59) and "Which era?" (#60), and the other four
+   question-layer designs (#128). Live duel rooms and practice mode (#64) come later too.
+4. Phase 3c, in `docs/review/2026-10-13-next-sources-plan.md`: other forges
    (GitLab, Software Heritage). It has open decisions (licence allowlist,
    accounts) to settle with the user first.
-4. The research note's backlog: guess the commit message (the user said "not
+5. The research note's backlog: guess the commit message (the user said "not
    now"), vulnerable or fixed.
 
-Ask before widening the licence allowlist, raising the request ceiling past 5,000 (`ops/poc/limits.json`), or adding a
-source not named in the research note or #129.
+Ask before widening the licence allowlist, raising the request ceiling past 10,000 (`ops/poc/limits.json`; the owner
+approved up to 10,000 for the v7 run on 2026-10-20, and the file says 5,000 until #167), or adding a source not named
+in the research note or #129.
 
 Iterate on deck rules with
 `STACK_V2_ACKNOWLEDGED_USABLE_REVISION=e565caa3a78c2423bd374333a472b049eb090e47 pnpm prepare:poc --offline`
