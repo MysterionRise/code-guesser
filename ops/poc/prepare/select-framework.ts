@@ -1,6 +1,6 @@
 import { screenBlob } from "@codeguessr/content/local-poc-support";
 
-import { CROSS_DECK_KEYS_BY_KIND, DEDUPLICATION_KEYS_BY_KIND } from "../../../packages/artifact/src/index";
+import { CROSS_DECK_KEYS_BY_KIND, deduplicationKeys } from "../../../packages/artifact/src/index";
 import { DECK_SHORT, noteRejection, rejectCandidate, type DeckAttempts, type DeckOutcome, type RunState } from "./diagnostics";
 import { looksGenerated } from "./excerpt-window";
 import type { FrameworkCandidate } from "./framework-rounds";
@@ -44,7 +44,7 @@ export const selectFramework = async (
   // Every framework's names are masked in every round, so no window names one, whichever family it is offered with.
   const terms = { names: every.flatMap(({ label, names }) => [label, ...names]), symbols: every.flatMap(({ symbols }) => symbols) };
   const limits = { maxLines: deck.windowLines, maxBytes: profile.screening.excerptBytes, minBytes: profile.screening.minimumExcerptBytes };
-  const keys = { deck: DEDUPLICATION_KEYS_BY_KIND.FRAMEWORK, cross: CROSS_DECK_KEYS_BY_KIND.FRAMEWORK };
+  const keys = { deck: deduplicationKeys("FRAMEWORK", profile.profileVersion), cross: CROSS_DECK_KEYS_BY_KIND.FRAMEWORK };
   const seen = new Set<string>();
   const rounds: FrameworkSelection[] = [];
   /** Each directory's listing, read once. */

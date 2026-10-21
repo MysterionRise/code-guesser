@@ -90,7 +90,7 @@ gate: changing queries, retries, ceilings, deck rules, or running
   `apps/game/src/demo/local-real-experiment.server.ts` does it server-side.
 - **Profile v6 (#129):** `ops/poc/profiles/local-real-rounds.v6.json` is the v1.0 data run's profile. It configures
   every v1.0 deck built so far (missing-line, name-function, framework, exercise), the seven rarer pairs for the
-  language deck alone, the wider allowlist (BSD-2-Clause, ISC, Python-2.0), and the raised ceilings in
+  language deck alone, the wider allowlist (BSD-2-Clause, ISC, Python-2.0), and the ceilings of the time in
   `ops/poc/limits.json` (5,000 requests, 448 MiB of Stack metadata, 400 blob attempts, 200 blobs, 32 MiB), and a
   before-after pool of 20.
   - `PROFILE_VERSIONS` and `ARTIFACT_SCHEMA_VERSIONS` (`packages/artifact/src/domain.ts`) pair each profile with
@@ -124,6 +124,32 @@ gate: changing queries, retries, ceilings, deck rules, or running
       patch changes only comments, or whose files differ only in comments, docstrings, or string text
       (`changesOnlyProse` in `code-skeleton.ts`), is refused. The v6 pool is 20 rounds.
     - Dry run of these rules on the v5 data: `docs/review/evidence/2026-10-19-v6-leak-rules-dry-run.md`.
+- **Profile v7 (#167, beside v6):** `ops/poc/profiles/local-real-rounds.v7.json` grows the pools from v6's sources
+  only; `PROFILE_VERSIONS` pairs it with `local-experiment-artifact.v6`, and `PROFILE_VERSION` stays v6 until the
+  v7 data run (D4), so the v6 `--offline` rebuild still gives `1abc21f8…`. `pnpm prepare:poc --resume
+  --profile=local-real-rounds.v7 --journal=<copy of run.jsonl>` runs it.
+  - Caps per version (`CURATED_CAPS` in `profile.ts`): through v6 the algorithm, output, fix, and vulnerable-line
+    decks hold at most 40 rounds and a deck reads at most 240 files or patches; from v7 every curated deck may fill a
+    pool (`MAXIMUM_POOL_SIZE`, 60) and read 480. `ops/poc/limits.json` allows 10,000 requests and 600 blob attempts;
+    the v6 profile keeps its own 5,000 and 400.
+  - Two keys only a v7 profile may set, each present only when set (in a v6 profile, `CRAWL_PROFILE_REJECTED`):
+    `selection.projectRoundsPerLanguage` (2 or 4) and `curated.algorithm.roundsPerAlgorithm` (1 or 2).
+  - The project deck takes a language's rounds in groups of two answers and two decoys (`PROJECT_GROUP_ANSWERS`,
+    `select-stack.ts`): both rounds of a group offer the same four repositories, no repository is offered in two
+    groups or languages, and a repository tried as an answer is not read again; the generator requires every option
+    in exactly two rounds. The language deck keeps two rounds a language.
+  - The algorithm deck answers each family member `roundsPerAlgorithm` times, each from another language, the
+    languages taking turns as before; a family short of that for any member is dropped whole. From v7
+    `deduplicationKeys(kind, version)` drops `algorithmId`, and the parser holds the deck to `familyDeckRule` and
+    to one answer per algorithm and language.
+  - The dry run (`docs/review/evidence/2026-10-21-v7-dry-run.md`) set the targets from measured yields: 422 rounds.
+    - project 48, language 52, before-after 30, algorithm 48, output 40, fix 36, missing-line 40, name-function 48,
+      framework 32, exercise 48;
+    - before-after keeps v6's seven searches (django's empty window dropped), since GitHub's secondary limit refused
+      every new date window;
+    - fix's bug lists run out at 36; missing-line balances at 40, not 48.
+  - Its journal, with discovery complete, is `ops/poc/stack/tmp/journal/dry-v7-2026-10-21.jsonl` (ignored); D4
+    resumes on a copy of it.
 - **Mixed and daily play (#56, #74):** `/?deck=mixed` deals one round from each of five decks drawn at random
   (`MIXED_DECK`, offered when the artifact holds five decks or more); `/?deck=daily` deals the same mix seeded by
   the artifact's hash and the local date (`dailyRandom` in `local-real-experiment-deal.server.ts`). Both are
@@ -529,7 +555,7 @@ gate: changing queries, retries, ceilings, deck rules, or running
    now"), vulnerable or fixed.
 
 Ask before widening the licence allowlist, raising the request ceiling past 10,000 (`ops/poc/limits.json`; the owner
-approved up to 10,000 for the v7 run on 2026-10-20, and the file says 5,000 until #167), or adding a source not named
+approved up to 10,000 for the v7 run on 2026-10-20, and the file says 10,000 since #167's profile PR), or adding a source not named
 in the research note or #129.
 
 Iterate on deck rules with
@@ -546,6 +572,11 @@ GITHUB_TOKEN="$(gh auth token)" \
 STACK_V2_ACKNOWLEDGED_USABLE_REVISION=e565caa3a78c2423bd374333a472b049eb090e47 \
 pnpm prepare:poc --fresh
 ```
+
+Live search pages go at least ten seconds apart (`SEARCH_PAGE_SPACING` in `runtime.ts`): GitHub's secondary rate
+limit refused commit search after about ten back-to-back pages with a bare 403, which fails discovery, and a resumed
+run searches every query again (#167's dry run). Once tripped, the limit refused even spaced pages for hours, so add
+search windows on a day with no other searching.
 
 GitHub allows about 5,000 requests an hour. A run that spends them stops at
 `RATE_LIMIT_CHECKPOINT` (exit 75), journals what it has, and logs

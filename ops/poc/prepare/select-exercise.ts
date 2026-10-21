@@ -1,6 +1,6 @@
 import { screenBlob } from "@codeguessr/content/local-poc-support";
 
-import { CROSS_DECK_KEYS_BY_KIND, DEDUPLICATION_KEYS_BY_KIND, labelStems } from "../../../packages/artifact/src/index";
+import { CROSS_DECK_KEYS_BY_KIND, deduplicationKeys, labelStems } from "../../../packages/artifact/src/index";
 import { DECK_SHORT, noteRejection, rejectCandidate, type DeckAttempts, type DeckOutcome, type RunState } from "./diagnostics";
 import { looksGenerated } from "./excerpt-window";
 import { namesExercise, type ExerciseCandidate } from "./exercise-rounds";
@@ -33,7 +33,7 @@ export const selectExercise = async (
   const curated = profile.curated!;
   const deck = curated.exercise!;
   const limits = { maxLines: profile.screening.excerptLines, maxBytes: profile.screening.excerptBytes, minBytes: profile.screening.minimumExcerptBytes };
-  const keys = { deck: DEDUPLICATION_KEYS_BY_KIND.EXERCISE, cross: CROSS_DECK_KEYS_BY_KIND.EXERCISE };
+  const keys = { deck: deduplicationKeys("EXERCISE", profile.profileVersion), cross: CROSS_DECK_KEYS_BY_KIND.EXERCISE };
   const seen = new Set<string>();
   const rounds: ExerciseSelection[] = [];
 

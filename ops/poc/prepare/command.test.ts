@@ -11,7 +11,8 @@ import { GitHubSearchError } from "./github-search";
 import { JournalError, openJournal } from "./journal";
 import { HARNESS_CANDIDATES, accepted, classificationsFor, harnessRow, hash, loadProfile, makeHarness } from "./command-test-harness";
 import {
-  CURATED_REPOSITORIES, CURATED_SECTION, FIX_SECTION, OUTPUT_SECTION, advisoryHarnessData, curatedFiles, exerciseFiles, fixHarnessData, frameworkFiles, loadCuratedProfile, missingLineFiles, doctestedModule, nameFunctionFiles, outputFiles, sha256, swapOutputFile,
+  CURATED_REPOSITORIES, CURATED_SECTION, FIX_SECTION, OUTPUT_SECTION, advisoryHarnessData, curatedFiles, curatedGoFiles, exerciseFiles, fixHarnessData, frameworkFiles,
+  loadCuratedProfile, loadRepeatedAlgorithmProfile, missingLineFiles, doctestedModule, nameFunctionFiles, outputFiles, sha256, swapOutputFile,
 } from "./testdata/deck-builders";
 import { LANGUAGE_SLUGS } from "../../../packages/artifact/src/index";
 import { MAINSTREAM_LANGUAGES, parseCrawlProfile } from "./profile";
@@ -326,6 +327,60 @@ const logLines = (calls: readonly string[]): string[] =>
     await prepareLocalExperiment(harness.dependencies);
     expect(offered.get("python-org/python-pop-2")).toEqual(new Set(["Python"]));
     expect([...offered.values()].every((languages) => languages.size === 1)).toBe(true);
+  });
+
+  it("from profile v7 on, selects a language's project rounds in groups, no repository offered in two groups (#167)", async () => {
+    // Ten popular repositories a language. python-pop-1's one file names its own project, and the repository is a
+    // fork, so it is neither an answer nor a decoy of the first group, and the second group does not read it again.
+    const groupRows = (language: string) => Array.from({ length: 10 }, (_, rank) => harnessRow(language, `${slugOf(language)}-pop-${rank}`,
+      { starEventsCount: 9000 - rank * 500, ...(language === "Python" && rank === 1 ? { excerpt: "import python_pop_1\npython-pop-1.run()" } : {}) }));
+    const rows = Object.fromEntries(MAINSTREAM_LANGUAGES.map((language) => [language, [...groupRows(language), ...ordinaryRows(language)]]));
+    const rounds: { language: string; options: string[] }[] = [];
+    const harness = await makeHarness({
+      collectStackMetadata: metadataFrom(rows),
+      describeRepository: async ({ repository }) =>
+        accepted({ description: `About ${repository.split("/")[1]}`, fork: repository === "python-org/python-pop-1", archived: false }, "2"),
+      generateProject: ({ profile, rounds: selected }) => {
+        for (const round of selected) {
+          rounds.push({ language: String((round.candidate as any).detectedLanguage),
+            options: [String((round.candidate as any).repository), ...round.distractors.map((option) => option.repository)].sort() });
+        }
+        return { fixtures: Array(4 * MAINSTREAM_LANGUAGES.length).fill({ kind: "PROJECT" }) } as any;
+      },
+    }, { profile: await loadProfile("local-real-rounds.v7", { projectRoundsPerLanguage: 4 }) });
+    await prepareLocalExperiment(harness.dependencies);
+    expect(rounds).toHaveLength(4 * MAINSTREAM_LANGUAGES.length);
+    const python = rounds.filter(({ language }) => language === "Python").map(({ options }) => options.join(","));
+    expect(python).toEqual([
+      ...Array(2).fill([0, 2, 3, 4].map((rank) => `python-org/python-pop-${rank}`).join(",")),
+      ...Array(2).fill([5, 6, 7, 8].map((rank) => `python-org/python-pop-${rank}`).join(",")),
+    ]);
+    expect(harness.calls.filter((call) => call.startsWith("fetch:python-pop-1:"))).toHaveLength(1);
+    // Every repository is offered by exactly the two rounds of its group.
+    const offered = new Map<string, number>();
+    for (const repository of rounds.flatMap(({ options }) => options)) offered.set(repository, (offered.get(repository) ?? 0) + 1);
+    expect(new Set(offered.values())).toEqual(new Set([2]));
+    expect(logLines(harness.calls)).toContain("log:PREPARATION_DECKS project,language,before-after");
+  });
+
+  it("from profile v7 on, answers each algorithm twice, the second time in another language (#167)", async () => {
+    const harness = await makeHarness({}, { profile: loadRepeatedAlgorithmProfile({ beforeAfterPool: 5 }),
+      curatedFiles: new Map([...curatedFiles(), ...curatedGoFiles()]) });
+    await prepareLocalExperiment(harness.dependencies);
+    const curated = harness.calls.filter((call) => call.startsWith("curated:"));
+    // Each algorithm reads its file in the language whose turn it is first, then the other one.
+    expect(curated.slice(0, 4)).toEqual([
+      "curated:algos/python:algorithms/bubble_sort.py", "curated:algos/go:algorithms/bubble_sort.go",
+      "curated:algos/go:algorithms/insertion_sort.go", "curated:algos/python:algorithms/insertion_sort.py",
+    ]);
+    expect(curated).toHaveLength(16);
+    expect(harness.calls).toContain("algorithm:16");
+    expect(logLines(harness.calls)).toContain("log:PREPARATION_DECKS project,language,before-after,algorithm");
+    // With the Go files absent, no family can answer each algorithm twice.
+    const short = await makeHarness({}, { profile: loadRepeatedAlgorithmProfile({ beforeAfterPool: 5 }), curatedFiles: curatedFiles() });
+    await prepareLocalExperiment(short.dependencies);
+    expect(logLines(short.calls)).toContain("log:PREPARATION_DECK_SKIPPED algorithm DECK_SHORT");
+    expect((short.reports[0] as any).diagnostics).toContainEqual({ stage: "SELECTION", reasonCode: "ALGORITHM_FAMILY_SHORT", count: 2 });
   });
 
   it("selects a configured algorithm deck after the Stack decks, one whole family at a time, languages taking turns", async () => {

@@ -1,6 +1,6 @@
 import { screenBlob } from "@codeguessr/content/local-poc-support";
 
-import { CROSS_DECK_KEYS_BY_KIND, DEDUPLICATION_KEYS_BY_KIND } from "../../../packages/artifact/src/index";
+import { CROSS_DECK_KEYS_BY_KIND, deduplicationKeys } from "../../../packages/artifact/src/index";
 import { DECK_SHORT, noteRejection, rejectCandidate, type DeckAttempts, type DeckOutcome, type RunState } from "./diagnostics";
 import { looksGenerated } from "./excerpt-window";
 import { withoutCommentary } from "./function-windows";
@@ -50,7 +50,7 @@ export const selectNameFunction = async (
 ): Promise<DeckOutcome<NameFunctionSelection>> => attempt<NameFunctionSelection>(async () => {
   const { profile } = context;
   const deck = profile.curated!["name-function"]!;
-  const keys = { deck: DEDUPLICATION_KEYS_BY_KIND.NAME_FUNCTION, cross: CROSS_DECK_KEYS_BY_KIND.NAME_FUNCTION };
+  const keys = { deck: deduplicationKeys("NAME_FUNCTION", profile.profileVersion), cross: CROSS_DECK_KEYS_BY_KIND.NAME_FUNCTION };
   const files: Readonly<{ repository: string; commit: string; language: StackLanguage; path: string; key: string }>[] = [];
   for (const { repository, directories } of deck.sources) {
     const pin = profile.curated!.repositories.find((known) => known.repository === repository)!;
