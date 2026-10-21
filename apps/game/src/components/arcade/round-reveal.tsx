@@ -3,9 +3,13 @@ import * as React from "react";
 import type { ClientEvent, GenuiEvent } from "../../experiment/events";
 import type { Design } from "../../genui/designs";
 import type { GenuiPanelProps } from "../../genui/genui-panel";
+import type { ChallengerDuel, GameDuel } from "../duel/duel-contract";
+import { ChallengeFriend, DuelCompletion } from "../duel/duel-game";
+import { DEFAULT_NAME, opponentRoundLine } from "../duel/duel-text";
 import type { AuthorizedReveal, EntertainmentResultProjection, RoundRecord } from "./arcade-session";
 import { formatCompletionResult, points, projectSpoilerFreeShare, roundPointsNote } from "./arcade-text";
 import type { PublicRound } from "./mode-contract";
+import { hasShareSheet, shareOrCopy } from "./share-sheet";
 
 const SOURCE_LINK = /(https:\/\/\S+)/u;
 
@@ -48,9 +52,10 @@ function GameSummary({ history, result }: { readonly history: readonly RoundReco
 
 /**
  * Where a finished game can go next, and its spoiler-free share line (#171): through the browser's share sheet where
- * it has one, otherwise onto the clipboard. A status line says which, for screen readers too.
+ * it has one, otherwise onto the clipboard. A status line says which, for screen readers too. A game of a seeded deal
+ * or of today's five can also challenge a friend (#173).
  */
-function CompletionActions({ result, correctRounds, history, deckTitle, shareHref, newGameHref, chooseAnotherDeckHref, track }: {
+function CompletionActions({ result, correctRounds, history, deckTitle, shareHref, newGameHref, chooseAnotherDeckHref, challenge, sessionToken, track }: {
   readonly result: EntertainmentResultProjection;
   readonly correctRounds: number;
   readonly history: readonly RoundRecord[];
@@ -58,30 +63,19 @@ function CompletionActions({ result, correctRounds, history, deckTitle, shareHre
   readonly shareHref: string | undefined;
   readonly newGameHref: string | undefined;
   readonly chooseAnotherDeckHref: string | undefined;
+  readonly challenge: ChallengerDuel | undefined;
+  readonly sessionToken: () => string;
   readonly track: (event: ClientEvent) => void;
 }) {
-  // The shell renders only in the browser, so this never differs from a server render.
-  const sheet = typeof navigator !== "undefined" && typeof navigator.share === "function";
+  const sheet = hasShareSheet();
   const [status, setStatus] = React.useState("");
   const shareResult = async () => {
     const share = projectSpoilerFreeShare(result, history, deckTitle, shareHref);
-    const data: ShareData = share.url === null ? { text: share.message } : { text: share.message, url: share.url };
-    if (sheet && navigator.canShare?.(data) !== false) {
-      try {
-        await navigator.share(data);
-        setStatus("Result shared");
-        track({ type: "result_shared", via: "share" });
-        return;
-      } catch (error) {
-        // Closing the sheet is the player's call; any other failure falls back to the clipboard.
-        if (error instanceof DOMException && error.name === "AbortError") return;
-      }
-    }
-    try {
-      await navigator.clipboard.writeText(share.text);
-      setStatus("Result copied");
-      track({ type: "result_shared", via: "clipboard" });
-    } catch {
+    const outcome = await shareOrCopy(share.url === null ? { text: share.message } : { text: share.message, url: share.url }, share.text);
+    if (outcome === "shared" || outcome === "copied") {
+      setStatus(outcome === "shared" ? "Result shared" : "Result copied");
+      track({ type: "result_shared", via: outcome === "shared" ? "share" : "clipboard" });
+    } else if (outcome === "failed") {
       setStatus("Couldn’t copy the result. Try again.");
     }
   };
@@ -94,6 +88,7 @@ function CompletionActions({ result, correctRounds, history, deckTitle, shareHre
         {chooseAnotherDeckHref && <a className="deck-link" href={chooseAnotherDeckHref} onClick={() => track({ type: "deal_again", to: "chooser" })}>Choose another deck</a>}
       </div>
       <p className="share-status" role="status">{status}</p>
+      {challenge && <ChallengeFriend duel={challenge} sessionToken={sessionToken} />}
     </>
   );
 }
@@ -102,8 +97,10 @@ function CompletionActions({ result, correctRounds, history, deckTitle, shareHre
  * A revealed round (#126): the verdict, what it earned, and the answer first; on the last round the game's summary and
  * the way on right after; then why, which folds away once a generative explainer has rendered (#121); then the
  * explainer, the round's source, and the next round. The parent renders it only after the server authorized the reveal.
+ * In a friend's game of a challenge (#173), it also says how the challenger did on this round, and the game ends on
+ * the duel's comparison instead of the usual way on.
  */
-export function RoundReveal({ round, reveal, hintsUsed, pickLabel, complete, correctRounds, history, deckTitle, shareHref, newGameHref, chooseAnotherDeckHref, genuiDesign, sessionToken, onNext, headingRef, track, trackGenui }: {
+export function RoundReveal({ round, reveal, hintsUsed, pickLabel, complete, correctRounds, history, deckTitle, shareHref, newGameHref, chooseAnotherDeckHref, genuiDesign, duel, opponentName, sessionToken, onNext, headingRef, track, trackGenui }: {
   readonly round: Readonly<PublicRound>;
   readonly reveal: AuthorizedReveal;
   readonly hintsUsed: number;
@@ -119,6 +116,9 @@ export function RoundReveal({ round, reveal, hintsUsed, pickLabel, complete, cor
   readonly newGameHref: string | undefined;
   readonly chooseAnotherDeckHref: string | undefined;
   readonly genuiDesign: Design | undefined;
+  readonly duel: GameDuel | undefined;
+  /** The challenger's name, from the challenge link, in a friend's game; null when the link names no one. */
+  readonly opponentName: string | null;
   readonly sessionToken: () => string;
   readonly onNext: () => void;
   readonly headingRef: React.Ref<HTMLHeadingElement>;
@@ -132,12 +132,19 @@ export function RoundReveal({ round, reveal, hintsUsed, pickLabel, complete, cor
     <>
       <h2 ref={headingRef} tabIndex={-1} className={reveal.correct ? "verdict-right" : "verdict-missed"}>{reveal.correct ? "Nice read." : "Not this time."}</h2>
       <p className="round-points">{roundPointsNote(reveal.score, hintsUsed)}</p>
+      {duel?.role === "challenged" && (
+        <p className="duel-line">{opponentRoundLine(opponentName ?? DEFAULT_NAME, duel.challenge.challenger.rounds[history.length - 1]!)}</p>
+      )}
       <p className="answer-line">The answer: <strong>{answer}</strong></p>
       {complete && (
         <>
           <GameSummary history={history} result={reveal.result} />
-          <CompletionActions result={reveal.result} correctRounds={correctRounds} history={history} deckTitle={deckTitle} shareHref={shareHref}
-            newGameHref={newGameHref} chooseAnotherDeckHref={chooseAnotherDeckHref} track={track} />
+          {duel?.role === "challenged"
+            ? <DuelCompletion duel={duel} name={opponentName} sessionToken={sessionToken} chooseAnotherDeckHref={chooseAnotherDeckHref} />
+            : (
+              <CompletionActions result={reveal.result} correctRounds={correctRounds} history={history} deckTitle={deckTitle} shareHref={shareHref}
+                newGameHref={newGameHref} chooseAnotherDeckHref={chooseAnotherDeckHref} challenge={duel} sessionToken={sessionToken} track={track} />
+            )}
         </>
       )}
       <details className="reveal-why" open={whyOpen} onToggle={(event) => setWhyOpen(event.currentTarget.open)}>

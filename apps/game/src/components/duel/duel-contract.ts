@@ -1,3 +1,5 @@
+import type { Level } from "../../experiment/arms";
+
 /**
  * Duels (#173): what a challenge link and its result show, as the server sends them to the browser. A challenge holds
  * how each round went and nothing that tells a round's answer: no round, option, or player is named.
@@ -29,6 +31,8 @@ export interface ChallengeView {
   /** The game's best possible score. */
   readonly max: number;
   readonly challenger: DuelSide & Readonly<{ firstPlay: FirstPlay }>;
+  /** The challenger's theme, which the friend plays in too. */
+  readonly theme: Level<"theme">;
   /** When the link stops dealing, in ms. */
   readonly expiresAt: number;
 }
@@ -52,6 +56,11 @@ export interface DuelComparison {
   /** The friend's game, and which play of the link it was, from 1. */
   readonly challenged: DuelSide & Readonly<{ play: number }>;
   readonly verdict: DuelVerdict;
+  /**
+   * Whether the result was played on an earlier round set. A result holds no round, so it still shows; its deck may be
+   * gone, and then its title is a generic one.
+   */
+  readonly earlierRoundSet: boolean;
 }
 
 /**
@@ -60,7 +69,11 @@ export interface DuelComparison {
  * (`DEAL_DRIFT`), a game that can't challenge or answer this challenge (`NOT_ELIGIBLE`), or a game that has ended.
  */
 export type DuelRefusalReason = "INVALID" | "EXPIRED" | "ROUND_SET" | "DEAL_DRIFT" | "NOT_ELIGIBLE" | "SESSION_ENDED";
-export type DuelRefusal = Readonly<{ ok: false; reason: DuelRefusalReason }>;
+/**
+ * A refusal. One for a link that authenticated but can't deal (`ROUND_SET`, `DEAL_DRIFT`) names its deck when this
+ * server still offers it, so the page can deal that deck afresh.
+ */
+export type DuelRefusal = Readonly<{ ok: false; reason: DuelRefusalReason; deck?: string }>;
 
 /**
  * A challenge for a finished game: its link's token, and what the link shows. `firstIssue` is false when the game
@@ -76,6 +89,32 @@ export interface IssueResultRequest {
   sessionToken: string;
   challengeToken: string;
 }
+
+/** A finished game of a seeded deal or of today's five, which can challenge a friend. */
+export interface ChallengerDuel {
+  readonly role: "challenger";
+  /** The origin a challenge link names. */
+  readonly origin: string;
+  readonly createChallenge: (sessionToken: string) => Promise<CreateChallengeResponse>;
+}
+
+/**
+ * A friend's game of a challenge: the challenger's rounds, shown one by one as the friend answers each, and the way to
+ * a result link and a rematch.
+ */
+export interface ChallengedDuel {
+  readonly role: "challenged";
+  /** The origin a result link names; with none, the game offers no result link. */
+  readonly origin: string | null;
+  readonly challengeToken: string;
+  readonly challenge: ChallengeView;
+  /** A fresh deal of the challenge's deck, never the challenger's next game. */
+  readonly rematchHref: string;
+  readonly issueResult: (request: IssueResultRequest) => Promise<IssueResultResponse>;
+}
+
+/** What a game offers for a duel (#173). */
+export type GameDuel = ChallengerDuel | ChallengedDuel;
 
 /** A side's totals over its rounds. */
 export const duelSide = (rounds: readonly DuelRound[]): DuelSide => Object.freeze({

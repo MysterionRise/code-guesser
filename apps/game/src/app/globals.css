@@ -462,3 +462,29 @@ noscript { display: block; padding: 12px; margin-bottom: 16px; background: var(-
 @media (max-width: 600px) { .game-card { padding: 16px 12px; } .code-window { padding: 14px 10px; } .code-window.numbered { padding-left: 4px; } }
 /* Missing-line and name-the-function options are code (#57, #73). */
 .candidate-label.code-label { font-family: var(--font-mono); font-size: .9rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* Duels (#173): a link's own pages, the challenger's rounds beside the friend's game, the comparison, and the name fields. */
+.duel-page { width: min(980px, calc(100% - 32px)); margin: auto; padding: 36px 0 64px; }
+.duel-page h1 { margin: 12px 0 14px; overflow-wrap: anywhere; }
+.duel-deck { margin: 0 0 6px; color: var(--accent); font-size: 1.3rem; font-weight: 900; }
+.duel-total { margin: 0 0 10px; font-size: 1.1rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+.duel-badge { display: inline-block; margin: 0 0 12px; padding: 3px 12px; border: 1px solid var(--border-soft); border-radius: var(--radius-pill); color: var(--text-soft); font-size: .88rem; font-weight: 700; }
+.duel-intro, .duel-note { color: var(--muted); }
+.duel-intro { margin: 4px 0 0; }
+.duel-note { margin: 4px 0 8px; }
+.duel-line { margin: 0 0 8px; font-weight: 700; }
+.duel-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; margin: -12px 0 20px; }
+.duel-strip-name { min-width: 0; color: var(--muted); font-weight: 800; overflow-wrap: anywhere; }
+.duel-strip .round-track { flex: 1 1 280px; margin: 0; max-width: 440px; }
+/* The comparison reuses the game summary's table; its cells wrap, so two players' columns fit a phone. */
+.duel-comparison caption { margin-bottom: 6px; text-align: left; color: var(--muted); font-size: .88rem; }
+.game-summary.duel-comparison td:last-child { white-space: normal; }
+.duel-comparison tfoot td { text-align: left; }
+.duel-comparison .duel-missed { color: var(--miss); }
+.duel-comparison bdi { overflow-wrap: anywhere; }
+.duel-challenge { margin-top: 14px; }
+.duel-share { display: grid; gap: 8px; max-width: 420px; margin: 18px 0 0; }
+.duel-share h3 { margin: 0; }
+.duel-share label { font-weight: 700; }
+.duel-share input { min-width: 0; padding: 10px 12px; border: 1px solid var(--border-soft); border-radius: var(--radius-small); background: var(--code-bg); color: var(--text); }
+.reveal .duel-share button, .reveal .duel-challenge button { margin: 0; justify-self: start; }
+.reveal .duel-retry { margin: 8px 0 0; }
