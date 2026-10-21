@@ -805,6 +805,7 @@ pnpm test:performance
 pnpm test:e2e
 pnpm exec node --test tests/containment/acquisition-boundary.test.mjs
 pnpm --filter @codeguessr/game build
+pnpm audit --audit-level=high
 ```
 
 ## Done means

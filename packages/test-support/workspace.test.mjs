@@ -31,6 +31,7 @@ test("defines one CI workflow that pins the toolchain and runs every verificatio
     "node-version: 24.22.0",
     "version: 9.15.9",
     "pnpm install --frozen-lockfile",
+    "pnpm audit --audit-level=high",
     "pnpm typecheck",
     "pnpm test\n",
     "pnpm test:a11y",

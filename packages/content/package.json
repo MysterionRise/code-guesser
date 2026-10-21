@@ -21,6 +21,7 @@
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
-    "typescript": "5.7.2"
+    "@types/node": "24.19.2",
+    "typescript": "6.0.3"
   }
 }

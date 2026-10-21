@@ -349,7 +349,7 @@ describe("operator-only acquisition command", () => {
     const workspace = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
     const content = JSON.parse(await readFile(join(root, "packages/content/package.json"), "utf8"));
     expect(workspace.scripts["acquire:content"]).toContain("tsx");
-    expect(workspace.devDependencies.tsx).toBe("4.23.1");
+    expect(workspace.devDependencies.tsx).toBe("4.23.15");
     expect(content.devDependencies?.tsx).toBe(undefined);
     expect(content.exports["."]).toBe("./src/index.ts");
     expect(content.exports["./operator/acquisition"].node).toBe("./src/acquisition/index.ts");

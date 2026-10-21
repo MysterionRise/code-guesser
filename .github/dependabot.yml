@@ -1,0 +1,34 @@
+# Version updates (#26, #27): once a month, minor and patch updates grouped into one pull request per
+# ecosystem, majors one pull request each. Dependabot caps open pull requests per ecosystem, not overall.
+# Security updates are a repository setting (#27) and keep their own limit.
+version: 2
+updates:
+  # The pnpm workspace: root, apps/*, and packages/*, with pnpm-lock.yaml.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 5
+    groups:
+      npm-minor-and-patch:
+        update-types: [minor, patch]
+
+  # The locked Stack worker (pyproject.toml and uv.lock).
+  - package-ecosystem: uv
+    directory: /ops/poc/stack
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 5
+    groups:
+      uv-minor-and-patch:
+        update-types: [minor, patch]
+
+  # The actions .github/workflows uses.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 5
+    groups:
+      actions-minor-and-patch:
+        update-types: [minor, patch]
