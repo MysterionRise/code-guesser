@@ -65,7 +65,7 @@ export const loadLocalRealExperiment = (options: LoadOptions = {}): LoadedLocalR
   }
   try {
     const experiment = createLocalRealExperiment(value, trustedArtifactHash,
-      { events: options.events ?? null, layers: loadQuestionLayers(value, options.layers) });
+      { events: options.events ?? null, layers: (artifact) => loadQuestionLayers(artifact, options.layers) });
     return Object.freeze({ ok: true, experiment });
   } catch (error) {
     const reason = error instanceof LocalRealExperimentError && error.reason === "HASH_MISMATCH" ? "HASH_MISMATCH" : "SCHEMA";

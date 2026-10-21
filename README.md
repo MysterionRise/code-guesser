@@ -132,12 +132,14 @@ Four known leaks wait for new source data and run as expected failures:
 - the newer before-after pane being the bigger one (#75);
 - algorithm families that a remembering player can finish (#81).
 
-The real-data PoC is localhost-only, automatically prepared, unreviewed, and
-not meant for public players.
+The rounds are prepared automatically and not reviewed by hand. The game is
+served on localhost today; anonymous public play on one instance comes with
+v1.1, once the launch gates in #100 close.
 
 ## Play locally
 
-Prerequisites: Node.js `20.18.0` and pnpm `9.15.9`.
+Prerequisites: Node.js `24.22.0` and pnpm `9.15.9`. `.nvmrc` and `.node-version`
+pin the Node version, so `nvm use` or `fnm use` picks it.
 
 ```bash
 pnpm install --frozen-lockfile
@@ -462,16 +464,21 @@ Ctrl-C ends the process at once.
 
 ## Guardrails
 
-- Localhost only; no deployment and no public players.
+- Anonymous public play once #100's launch gates close, on one instance of the
+  owner's own server; until then, localhost only. No accounts, and nothing
+  stores or logs an IP address, user agent, cookie, or persistent id.
+- After launch day, every player-visible change gets a dated entry in the
+  experiment change log (#169).
 - Public open-source code only, with licence and recorded-author data.
 - Bounded, selective reads only. Never download a whole dataset, a whole
   language shard, or a repository archive.
 - Credentials come only from standard stores and are never logged or
   committed.
 - Fetched code is only read, never run: doctests are parsed as text.
-- Gameplay never touches the network, unless generative UI is switched on.
-  Then the server calls OpenRouter only through the answer-lock guard, and the
-  model sees no code before the answer is locked.
+- The control arm makes no outbound request. With generative UI switched on,
+  the server calls OpenRouter only through the answer-lock guard, and the model
+  sees no code before the answer is locked. The browser talks only to the
+  game's own origin.
 - Question layers are written before play, with the answers journaled, and
   frozen beside the artifact.
 - Malformed provider data fails closed. Transient errors may be retried within
@@ -488,7 +495,11 @@ pnpm test:e2e
 pnpm exec node --test tests/containment/acquisition-boundary.test.mjs
 pnpm --filter @codeguessr/game build
 uv run --project ops/poc/stack --locked python -m unittest discover -s ops/poc/stack
+pnpm audit --audit-level=high
 ```
+
+`pnpm audit` asks the npm registry for advisories, so it is the one check
+that needs the network; CI runs it after installing.
 
 If Playwright reports that Chromium is missing on a fresh machine, run
 `pnpm exec playwright install chromium`. `pnpm test:e2e` starts its own dev
@@ -527,8 +538,9 @@ Each path has a status:
 | `ops/content` | The `acquire:content` operator command and its policy files. The containment test (`tests/containment/acquisition-boundary.test.mjs`) requires the script to exist | Contract-era |
 | `ops/tsconfig.json` | Type-checks everything under `ops/`; `pnpm typecheck` runs it | PoC support |
 | `tests` | Accessibility, browser, performance, and containment suites. They run in CI against the live game; the privacy and provenance checks date from the Contract era | PoC support |
-| `.github/workflows/ci.yml` | CI: every suite above, with no provider secrets and no live preparation | PoC support |
-| `vitest.config.mts` | Finds `*.test.ts` and `*.test.tsx` under `apps/`, `packages/`, and `ops/` | PoC support |
+| `.github/workflows/ci.yml` | CI: a dependency audit that fails on high or critical advisories, then every suite above, with no provider secrets and no live preparation | PoC support |
+| `.github/dependabot.yml` | Monthly version updates for npm, uv, and GitHub Actions, minor and patch grouped, at most five open pull requests per ecosystem | PoC support |
+| `vitest.config.mts` | Finds `*.test.ts` and `*.test.tsx` under `apps/`, `packages/`, and `ops/`, and compiles JSX with React's automatic runtime, since the tsconfig preserves JSX for Next.js. A test may take 30 s, as the preparer's synchronous composition tests take up to 12 s on CI | PoC support |
 | `playwright.config.ts` | The browser suites; starts a dev server on 127.0.0.1 (`E2E_PORT`, default 3000) | PoC support |
 | `tsconfig.base.json` | Compiler options every package and `ops/` extend | PoC support |
 | `compose.test.yaml` | A Postgres 16 test service. No script, test, or workflow uses it | Contract-era |

@@ -3,8 +3,14 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
+// Counts the game's parses and hashes, which reach the shared parser through its index.
+vi.mock("../../../packages/artifact/src/index", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../../../packages/artifact/src/index")>();
+  return { ...original, canonicalHash: vi.fn(original.canonicalHash), parseArtifactDecks: vi.fn(original.parseArtifactDecks) };
+});
 
 const { loadLocalRealExperiment } = await import("../src/demo/local-real-experiment-loader.server");
+const { canonicalHash, parseArtifactDecks } = await import("../../../packages/artifact/src/index");
 const { projectHintDetail } = await import("../src/components/arcade/arcade-session");
 
 const ARTIFACT_PATH = fileURLToPath(new URL("../src/demo/generated/local-real-rounds.json", import.meta.url));
@@ -72,6 +78,16 @@ describe("question layers in the game (#128)", () => {
     }
     expect(logged.mock.calls.map(([line]) => line)).toEqual(["QUESTION_LAYERS_UNAVAILABLE QUESTION_LAYERS_PIN"]);
     logged.mockRestore();
+  });
+
+  it("loads the artifact with one parse and one hash, and checks the layers against them (#166)", () => {
+    vi.mocked(parseArtifactDecks).mockClear();
+    vi.mocked(canonicalHash).mockClear();
+    const experiment = experimentWith();
+    expect(parseArtifactDecks).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(canonicalHash).mock.calls.filter(([value]) => typeof value === "object" && value !== null && "crawlSnapshot" in value))
+      .toHaveLength(1);
+    expect(layeredGame(experiment, "algorithm", "on").mode.rounds[0]!.scaffold?.design).toBe("trace-it");
   });
 
   it("refuses a hint detail that isn't one of the two shapes", () => {

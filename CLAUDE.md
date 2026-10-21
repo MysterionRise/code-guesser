@@ -2,7 +2,7 @@
 
 ## Mission
 
-A local-only "guess from the code" game. One preparation run crawls real
+A "guess from the code" game. One preparation run crawls real
 open-source code before play and freezes ten decks (296 rounds since the v1.0
 data run), each a pool of rounds from which every game deals five:
 
@@ -20,7 +20,8 @@ data run), each a pool of rounds from which every game deals five:
 - "Which framework?": 32 TodoMVC files; "Which exercise?": 48 Exercism
   reference solutions.
 
-The goal is a demo on one machine, not public play.
+The goal is anonymous public play on one instance of the owner's own server (v1.1, #100). Until #100's launch gates
+close, the game is served on localhost only.
 
 ## Read first
 
@@ -42,25 +43,33 @@ gate: changing queries, retries, ceilings, deck rules, or running
 
 ## Guardrails
 
-- Localhost only; no deployment and no public players.
+- Anonymous public play, once #100's launch gates close; until then, localhost only.
+  - No accounts and no personal data. Nothing stores or logs an IP address, user agent, cookie, or persistent id. Rate
+    limits (#98) may read the client address in memory, in one module, and never keep it.
+  - One instance, on the owner's own server (#170). Rate limits and counters live in the process and the session ledger
+    on its volume (#164), so a second instance needs shared stores first.
+  - Lab mode (`EXPERIMENT_LAB`) is never on in production, except for a smoke run tagged with a non-real
+    `EXPERIMENT_SOURCE`.
+  - After launch day, every player-visible change (UI, artifact, or arms) gets a dated entry in the experiment change log
+    (#169), so the report can split its periods.
 - Public open-source code only, with licence and recorded-author data.
 - Bounded, selective reads only. Never download a whole dataset, a whole
   language shard, or a repository archive. The Stack v2 stays pinned to
   revision `e565caa3a78c2423bd374333a472b049eb090e47` unless deliberately moved.
 - Credentials come only from standard stores (`~/.cache/huggingface/token`,
   `gh auth token`, and for generative UI `~/.config/openrouter/key`, mode
-  0600) through the environment. Never log or commit tokens,
-  provider bodies, contact data, private email, or source excerpts from failed
-  diagnostics.
-- Gameplay never touches the network; it plays the frozen local artifact. The
-  one exception is opt-in generative UI (`GENUI_ENABLED=1`, #101). Its server
-  route `apps/game/src/app/api/genui/route.ts` calls OpenRouter only through
-  the answer-lock guard, for a live game's round, and the browser never talks
-  to a model. Spend limits live on the OpenRouter key, not in the app.
+  0600) through the environment; on the server, only from its secret store, never through `NEXT_PUBLIC_*`. Never log
+  or commit tokens, provider bodies, contact data, private email, or source excerpts from failed diagnostics.
+- The control arm plays the frozen local artifact and makes no outbound request. The one exception is opt-in generative
+  UI (`GENUI_ENABLED=1`, #101). Its server route `apps/game/src/app/api/genui/route.ts` calls OpenRouter only through
+  the answer-lock guard, for a live game's round. The browser talks only to the game's own origin, never to a model.
+  Spend limits live on the OpenRouter key, not in the app; the app's rate limits and per-game caps fall back to the
+  static reveal.
 - Preparation may also call OpenRouter: `pnpm prepare:questions` (#127) writes
   question layers with a model that knows the answer. Its answers are journaled
   in `ops/poc/questions/tmp/journal.jsonl` (gitignored) and its output is
   frozen and pinned, so play still never calls a model before the lock.
+- The preparation guardrails above (bounded reads, the licence allowlist, credentials) are unchanged by public play.
 - Malformed provider data fails closed. Transient errors may be retried within
   the request budget.
 - Preserve unrelated worktree changes.
@@ -276,8 +285,8 @@ gate: changing queries, retries, ceilings, deck rules, or running
       file per UTC day, rolled up into `totals.jsonl` after 90 days), and a
       deal under `Sec-GPC: 1` seals `record: false`;
     - `EXPERIMENT_SOURCE=agent|synthetic` tags playtests and tests.
-    - SQLite waits for Node 24 (#21): Node 20 has no `node:sqlite`, so the
-      store is JSONL behind the `EventStore` interface.
+    - The store is JSONL behind the `EventStore` interface. Node 24 (#21)
+      has `node:sqlite`, but nothing uses it yet.
   - **Report** (#108, `ops/experiment/`): `pnpm experiment:report` reads one source's raw days with the events
     parser and prints Markdown (`--json=` writes JSON).
     - Each factor's levels are compared on the deal-again rate of completed games: seeded Beta draws
@@ -485,16 +494,24 @@ gate: changing queries, retries, ceilings, deck rules, or running
 
 1. Finish v1.0 (#130): the `v1.0.0` tag and GitHub release, with the owner's go-ahead. Owner decisions still open:
    #120 (model per design) and #160 (the algorithm layer's fairness).
-2. The next release: hardening and hosting (#97–#100), then the deferred decks, "Spot the vulnerable line" (#59) and
-   "Which era?" (#60), and the other four question-layer designs (#128).
-3. Phase 3c, in `docs/review/2026-10-13-next-sources-plan.md`: other forges
+2. The next release, v1.1 (milestone v1.1, checklist #174), planned in `docs/review/2026-10-20-next-phase-plan.md`.
+   The owner decided on 2026-10-20:
+   - public play on one instance of the owner's own server (hardening #97–#100, #164, #170);
+   - async duel challenge links (#173);
+   - bigger pools from the current sources in profile v7 (#165–#167);
+   - Node 24 (#21);
+   - shipping on after launch, with every player-visible change dated (#169).
+3. After v1.1: the deferred decks, "Spot the vulnerable line" (#59) and "Which era?" (#60), and the other four
+   question-layer designs (#128). Live duel rooms and practice mode (#64) come later too.
+4. Phase 3c, in `docs/review/2026-10-13-next-sources-plan.md`: other forges
    (GitLab, Software Heritage). It has open decisions (licence allowlist,
    accounts) to settle with the user first.
-4. The research note's backlog: guess the commit message (the user said "not
+5. The research note's backlog: guess the commit message (the user said "not
    now"), vulnerable or fixed.
 
-Ask before widening the licence allowlist, raising the request ceiling past 5,000 (`ops/poc/limits.json`), or adding a
-source not named in the research note or #129.
+Ask before widening the licence allowlist, raising the request ceiling past 10,000 (`ops/poc/limits.json`; the owner
+approved up to 10,000 for the v7 run on 2026-10-20, and the file says 5,000 until #167), or adding a source not named
+in the research note or #129.
 
 Iterate on deck rules with
 `STACK_V2_ACKNOWLEDGED_USABLE_REVISION=e565caa3a78c2423bd374333a472b049eb090e47 pnpm prepare:poc --offline`
@@ -806,6 +823,8 @@ add up.
 
 ## Commands
 
+Run them under Node 24.22.0, which `.nvmrc` pins (`nvm use`).
+
 ```bash
 pnpm exec vitest run ops/poc/prepare
 pnpm exec tsc --noEmit -p ops/tsconfig.json
@@ -817,6 +836,7 @@ pnpm test:performance
 pnpm test:e2e
 pnpm exec node --test tests/containment/acquisition-boundary.test.mjs
 pnpm --filter @codeguessr/game build
+pnpm audit --audit-level=high
 ```
 
 ## Done means

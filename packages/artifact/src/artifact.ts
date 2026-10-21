@@ -50,10 +50,10 @@ import { namesAdvisory, parseAdvisorySnapshot, vulnerableLineHint, type Advisory
 import {
   canonicalHash,
   codeText,
-  containsProtected,
   deepFreeze,
   gitId,
   positiveInteger,
+  protectedIndex,
   rawHash,
   record,
   serializeCanonical,
@@ -647,14 +647,17 @@ const parseDeck = (value: unknown, snapshot: Snapshot): ParsedDeck => {
   return deepFreeze({ id, title, description, roundsPerSession: ROUNDS_PER_SESSION, fixtures: Object.freeze(fixtures) });
 };
 
-/** Repository names may appear before the answer only as project-round candidate labels. */
+/**
+ * Repository names may appear before the answer only as project-round candidate labels. The public text is indexed
+ * once, so a protected value takes a scan of it only when all its words are there (#166).
+ */
 const requirePublicContainment = (fixtures: readonly ParsedFixture[]): void => {
-  const publicText = serializeCanonical(fixtures.map((fixture) => ({
+  const shows = protectedIndex(serializeCanonical(fixtures.map((fixture) => ({
     panes: fixture.panes,
     prompt: fixture.prompt,
     candidates: fixture.kind === "PROJECT" ? fixture.candidates.map(({ id, detail }) => ({ id, detail })) : fixture.candidates,
     clues: fixture.clues,
-  })));
+  }))));
   for (const fixture of fixtures) {
     const protectedValues = [
       fixture.evidence,
@@ -664,7 +667,7 @@ const requirePublicContainment = (fixtures: readonly ParsedFixture[]): void => {
         // A whole-file excerpt makes the raw-content hash equal the public excerpt hash.
         .filter((value) => value !== fixture.source.excerptHash && value !== fixture.source.parentExcerptHash),
     ];
-    if (protectedValues.some((value) => typeof value === "string" && containsProtected(publicText, value))) fail();
+    if (protectedValues.some((value) => typeof value === "string" && shows(value))) fail();
   }
 };
 

@@ -8,27 +8,15 @@ import type {
   RevealRequest,
   RevealResponse,
 } from "../components/arcade/arcade-session";
-import {
-  LINE_KINDS,
-  createPublicModeContract,
-  type PublicModeContract,
-  type PublicRoundInput,
-} from "../components/arcade/mode-contract";
+import { createPublicModeContract, type PublicModeContract } from "../components/arcade/mode-contract";
 import { ARTIFACT_KEYS, parseArtifact } from "./local-real-experiment-artifact.server";
 import {
   LocalRealExperimentError,
-  MODE_KINDS,
   ROUNDS_PER_SESSION,
-  RULE_SEMANTICS,
   fail,
-  roundPoints,
   DAILY_DECK,
   MIXED_DECK,
-  type DeckId,
   type SessionDeckId,
-  type JsonRecord,
-  type ParsedDeck,
-  type ParsedFixture,
   type PrivateReveal,
 } from "./local-real-experiment-domain.server";
 import {
@@ -44,7 +32,8 @@ import { CONTROL, type Arms } from "../experiment/arms";
 import type { EventSink } from "../experiment/event-store.server";
 import { elapsed, emitterFor, recordClientEvent, type ClientEventOutcome, type Emit } from "./local-real-experiment-events.server";
 import { mixedRounds, seededRandom, seriesRounds, shuffle, type DealSeries } from "./local-real-experiment-deal.server";
-import { roundHints, scaffoldOf, type RoundLayers } from "./local-real-experiment-layers.server";
+import { roundHints, scaffoldOf, type PinnedArtifact, type RoundLayers } from "./local-real-experiment-layers.server";
+import { dealFrom, deriveDecks, type DerivedRound, type LocalRealDeck } from "./local-real-experiment-rounds.server";
 import type { RenderLimits } from "../genui/render-catalog";
 import { roundContext, type RoundContext } from "../genui/round-context.server";
 import {
@@ -55,14 +44,7 @@ import {
 } from "./local-real-experiment-validation.server";
 
 export { LocalRealExperimentError };
-
-/** One playable deck as the chooser shows it; sessions are dealt from its pool on request. */
-export interface LocalRealDeck {
-  readonly id: DeckId;
-  readonly title: string;
-  readonly description: string;
-  readonly poolSize: number;
-}
+export type { LocalRealDeck } from "./local-real-experiment-rounds.server";
 
 /** The mixed game (#56), offered when the artifact holds at least a game's worth of decks. */
 export interface LocalRealMix {
@@ -123,8 +105,11 @@ export interface ModelCallOutcome {
 export interface ExperimentOptions {
   /** Where game events go; none records nothing. */
   readonly events?: EventSink | null;
-  /** Question layers by round id (#127); a game shows them when its arms say so. */
-  readonly layers?: RoundLayers;
+  /**
+   * Question layers by round id (#127), read once the artifact matches its pin, from the experiment's one parse and
+   * hash of it (#166); a game shows them when its arms say so.
+   */
+  readonly layers?: (artifact: PinnedArtifact) => RoundLayers;
 }
 
 export type { ClientEventOutcome } from "./local-real-experiment-events.server";
@@ -159,103 +144,6 @@ export interface DealtGame {
   /** Whether this game of a seeded deal reached the end of its deck's pool, so its rounds start over (#40). */
   readonly wrapped: boolean;
 }
-
-interface DerivedRound {
-  readonly publicRound: PublicRoundInput;
-  /** Hint text stays on the server until a player buys it; the public round carries only each hint's place. */
-  readonly hints: readonly string[];
-  readonly privateReveal: PrivateReveal;
-}
-
-interface DerivedDeck {
-  readonly deck: LocalRealDeck;
-  readonly rounds: readonly DerivedRound[];
-}
-
-const SCORING = canonicalHash({ scheme: "local-experiment-chance-equal-points.v1" });
-
-const pointsFor = (fixture: ParsedFixture): [number, number, number] => {
-  const count = fixture.candidates.length;
-  return [roundPoints(count, 0), roundPoints(count, 1), roundPoints(count, 2)];
-};
-
-const deriveRound = (fixture: ParsedFixture, artifact: JsonRecord): DerivedRound => {
-  const candidates = fixture.candidates.map(({ id, label, detail }) => ({ candidateId: id, label, detail }));
-  const hints = Object.freeze([...fixture.clues]);
-  const clues = hints.map((_, index) => ({ order: index + 1 as 1 | 2 }));
-  const panes = fixture.panes.map(({ label, text }) => ({ label, text }));
-  const versions = {
-    // Order-free, so a session's shuffled options keep the round's version.
-    candidateSet: canonicalHash([...candidates].sort((left, right) => left.candidateId < right.candidateId ? -1 : 1)),
-    clueSet: canonicalHash(hints.map((label, index) => ({ order: index + 1, label }))),
-    scoring: SCORING,
-    rules: canonicalHash({ kind: fixture.kind, prompt: fixture.prompt, semantics: RULE_SEMANTICS[fixture.kind] }),
-  };
-  const content = canonicalHash(panes);
-  const publicRound: PublicRoundInput = {
-    roundId: fixture.roundId,
-    roundVersionId: fixture.roundVersion,
-    content: { versionId: content, panes },
-    mode: {
-      kind: MODE_KINDS[fixture.kind],
-      contractVersionId: canonicalHash({ candidates: versions.candidateSet, prompt: fixture.prompt }),
-      calibrationVersionId: canonicalHash({ profileHash: artifact.profileHash, profileVersion: fixture.source.profileVersion, kind: fixture.kind }),
-      prompt: fixture.prompt,
-      candidates,
-      clues,
-    },
-    points: pointsFor(fixture),
-    versions,
-  };
-  const privateReveal: PrivateReveal = deepFreeze({
-    roundId: fixture.roundId,
-    roundVersionId: fixture.roundVersion,
-    correctCandidateId: fixture.correctCandidateId,
-    evidence: fixture.evidence,
-    explanation: fixture.explanation,
-    attribution: fixture.attribution,
-    helpfulSignals: Object.freeze([...fixture.helpfulSignals]),
-    misleadingSignals: Object.freeze([...fixture.misleadingSignals]),
-    versions: Object.freeze({
-      content,
-      candidateSet: versions.candidateSet,
-      scoring: versions.scoring,
-      rules: versions.rules,
-      evidence: canonicalHash({ evidence: fixture.evidence }),
-      reveal: canonicalHash({ explanation: fixture.explanation, attribution: fixture.attribution, correctCandidateId: fixture.correctCandidateId }),
-    }),
-  });
-  return Object.freeze({ publicRound, hints, privateReveal });
-};
-
-const deriveDecks = (parsedDecks: readonly ParsedDeck[], artifact: JsonRecord): readonly DerivedDeck[] =>
-  Object.freeze(parsedDecks.map((deck) => Object.freeze({
-    deck: Object.freeze({ id: deck.id, title: deck.title, description: deck.description, poolSize: deck.fixtures.length }),
-    rounds: Object.freeze(deck.fixtures.map((fixture) => deriveRound(fixture, artifact))),
-  })));
-
-const dealFrom = (deck: SessionDeckId, pool: readonly DerivedRound[], artifact: JsonRecord, random: () => number): PublicModeContract => {
-  const rounds = pool.slice(0, ROUNDS_PER_SESSION).map(({ publicRound }) => ({
-    ...publicRound,
-    mode: {
-      ...publicRound.mode,
-      // Two options keep their natural A-then-B order and a fix or vulnerable-line round's lines their line order,
-      // which the deck already balances; other four-option rounds are reshuffled every session.
-      candidates: publicRound.mode.candidates.length > 2 && !LINE_KINDS.has(publicRound.mode.kind)
-        ? shuffle(publicRound.mode.candidates, random) : [...publicRound.mode.candidates],
-    },
-  }));
-  return createPublicModeContract({
-    sessionContractVersionId: canonicalHash({
-      schemaVersion: artifact.schemaVersion,
-      profileHash: artifact.profileHash,
-      crawlSnapshotId: (artifact.crawlSnapshot as JsonRecord).id,
-      deck,
-      rounds: rounds.map(({ roundId }) => roundId),
-    }),
-    rounds,
-  });
-};
 
 const REJECTED: GameRefusal = Object.freeze({ ok: false, reason: "REJECTED" });
 const SESSION_ENDED: GameRefusal = Object.freeze({ ok: false, reason: "SESSION_ENDED" });
@@ -384,11 +272,12 @@ export const createLocalRealExperiment = (
 ): LocalRealExperiment => {
   const expectedArtifactHash = pinnedHash(artifactInput, trustedArtifactHash);
   const emit = emitterFor(options.events);
-  const layers: RoundLayers = options.layers ?? new Map();
   // Anything an artifact that matches its pin then fails is the schema's.
   try {
     const artifact = record(artifactInput, ARTIFACT_KEYS);
-    const decks = deriveDecks(parseArtifact(artifact), artifact);
+    const parsed = parseArtifact(artifact);
+    const decks = deriveDecks(parsed, artifact);
+    const layers: RoundLayers = options.layers?.({ value: artifact, decks: parsed, hash: expectedArtifactHash }) ?? new Map();
     const privateReveals = deepFreeze(Object.fromEntries(decks.flatMap(({ rounds }) =>
       rounds.map(({ privateReveal }) => [privateReveal.roundId, privateReveal]))));
     if (Object.keys(privateReveals).length !== decks.reduce((total, { rounds }) => total + rounds.length, 0)) fail();

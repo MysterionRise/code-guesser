@@ -28,9 +28,10 @@ test("defines one CI workflow that pins the toolchain and runs every verificatio
   assert.equal(existsSync(workspaceFile(workflowPath)), true, `${workflowPath} must exist`);
   const workflow = readWorkspaceFile(workflowPath);
   for (const expected of [
-    "node-version: 20.18.0",
+    "node-version: 24.22.0",
     "version: 9.15.9",
     "pnpm install --frozen-lockfile",
+    "pnpm audit --audit-level=high",
     "pnpm typecheck",
     "pnpm test\n",
     "pnpm test:a11y",
@@ -46,6 +47,18 @@ test("defines one CI workflow that pins the toolchain and runs every verificatio
     assert.ok(workflow.includes(expected), `ci.yml must contain ${JSON.stringify(expected)}`);
   }
   assert.doesNotMatch(workflow, /secrets\.|HF_TOKEN|AWS_|GITHUB_TOKEN|prepare:poc/u, "CI must need no provider secrets and never run live preparation");
+});
+
+test("pins one Node version in the manifest, the version files, CI, and the README", () => {
+  const { engines } = JSON.parse(readWorkspaceFile("package.json"));
+  const version = engines.node;
+  assert.match(version, /^\d+\.\d+\.\d+$/u, "engines.node must pin an exact version");
+  for (const path of [".nvmrc", ".node-version"]) {
+    assert.equal(existsSync(workspaceFile(path)), true, `${path} must exist`);
+    assert.equal(readWorkspaceFile(path), `${version}\n`, `${path} must pin Node ${version}`);
+  }
+  assert.ok(readWorkspaceFile(".github/workflows/ci.yml").includes(`node-version: ${version}\n`), `ci.yml must pin Node ${version}`);
+  assert.ok(readWorkspaceFile("README.md").includes(`Node.js \`${version}\``), `README prerequisites must name Node ${version}`);
 });
 
 test("binds the game's dev and production servers to 127.0.0.1 only", () => {
