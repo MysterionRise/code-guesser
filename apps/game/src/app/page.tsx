@@ -4,18 +4,16 @@ import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
-import { authorizeLocalExperimentReveal, revealLocalExperimentHint } from "./actions";
+import { authorizeLocalExperimentReveal, createDuelChallenge, revealLocalExperimentHint } from "./actions";
 import { ArtifactUnavailable } from "../demo/artifact-unavailable";
 import { DemoArcade } from "../demo/demo-arcade";
 import { DAILY_DESCRIPTION, DAILY_TITLE, gameSources, type GameSource } from "../demo/game-sources.server";
-import {
-  LOCAL_REAL_EXPERIMENT_NOTICE_BODY,
-  LOCAL_REAL_EXPERIMENT_NOTICE_LEAD,
-  activeLocalRealExperiment,
-} from "../demo/local-real-experiment-loader.server";
+import { activeLocalRealExperiment } from "../demo/local-real-experiment-loader.server";
 import { DEAL_SEED, MAXIMUM_GAME, localDate, type DealSeries } from "../demo/local-real-experiment-deal.server";
 import type { LocalRealDeck, LocalRealMix } from "../demo/local-real-experiment.server";
 import { DAILY_DECK, MIXED_DECK, type SessionDeckId } from "../demo/local-real-experiment-domain.server";
+import { PageFrame } from "../demo/page-frame";
+import { DuelPage, duelMetadata, duelRequest } from "../duel/duel-page";
 import { CONTROL, FACTORS, assignArms, labMode, labOverrides, parseDisabled, type Arms, type Level } from "../experiment/arms";
 import { DESIGN_LABELS, READY_DESIGNS, type Design } from "../genui/designs";
 import { publicOrigin } from "../server/public-origin.server";
@@ -47,12 +45,17 @@ const requestedSource = (requested: string | string[] | undefined): GameSource |
 
 /**
  * A deck's title, description, and link preview (#171), from what its deck publishes and never from a round; the
- * chooser keeps the layout's. The preview is an image of the deck's title (`app/og/[deck]/route.tsx`).
+ * chooser keeps the layout's. The preview is an image of the deck's title (`app/og/[deck]/route.tsx`). A duel's page
+ * is never indexed (#173).
  */
 export async function generateMetadata({ searchParams }: PageProps): Promise<Metadata> {
-  const source = requestedSource((await searchParams).deck);
+  const query = await searchParams;
   const origin = publicOrigin(await headers());
   const base: Metadata = origin === null ? {} : { metadataBase: new URL(origin) };
+  const loaded = activeLocalRealExperiment();
+  const duel = duelRequest(query);
+  if (loaded.ok && duel !== null) return { ...base, ...duelMetadata(duel, loaded.experiment) };
+  const source = requestedSource(query.deck);
   if (source === undefined) return base;
   const title = `${source.title} · CodeGuessr`;
   return {
@@ -203,12 +206,14 @@ function DealtSession({ deck, series, arms, record, overrides, origin }: {
   // A shared link deals a friend this very game (#171), so it carries the deal and never a tester's lab picks. Today's
   // five links to its plain address until that carries the date (#172).
   const share = origin === null ? {} : { shareHref: `${origin}${gameHref(deck.id, series)}` };
+  // A finished game can also challenge a friend (#173), with a link of its own.
+  const challenge = origin === null ? {} : { duel: { role: "challenger", origin, createChallenge: createDuelChallenge } as const };
   return (
     <>
       {wrapped && <p className="deal-note">You’ve now seen every round in this deck, so this game starts it over.</p>}
       <DemoArcade key={sessionToken} mode={mode} sessionToken={sessionToken} deckTitle={deck.title} {...(roundDecks ? { roundDecks } : {})}
         authorizeRevealAction={authorizeLocalExperimentReveal} revealHintAction={revealLocalExperimentHint}
-        chooseAnotherDeckHref="/" newGameHref={`${next}${labQuery(overrides)}`} {...share}
+        chooseAnotherDeckHref="/" newGameHref={`${next}${labQuery(overrides)}`} {...share} {...challenge}
         {...(arms.design === "off" ? {} : { genuiDesign: arms.design })} />
     </>
   );
@@ -225,6 +230,11 @@ export default async function Page({ searchParams }: PageProps) {
   const arms = assignArms({ genuiEnabled, disabled: parseDisabled(process.env.EXPERIMENT_DISABLED), overrides });
   const requestHeaders = await headers();
   const record = requestHeaders.get("sec-gpc") !== "1";
+  // A duel's link (#173) shows its own page: a challenge's intro, the friend's game of it, or a result.
+  const duel = duelRequest(query);
+  if (loaded.ok && duel !== null) {
+    return <DuelPage request={duel} experiment={loaded.experiment} record={record} origin={publicOrigin(requestHeaders)} labTheme={overrides.theme} />;
+  }
   const series = seriesOf(query);
   const source = requestedSource(requested);
   // Today's five names its date, so its share line carries it.
@@ -237,11 +247,7 @@ export default async function Page({ searchParams }: PageProps) {
   // A game shows the theme it drew (#125); the chooser, outside any game, keeps the original unless a tester picks one.
   const theme = deck ? arms.theme : overrides.theme ?? CONTROL.theme;
   return (
-    <div className="demo-page" data-theme={theme}>
-      <p className="demo-notice">
-        <strong>{LOCAL_REAL_EXPERIMENT_NOTICE_LEAD}</strong> {LOCAL_REAL_EXPERIMENT_NOTICE_BODY}
-      </p>
-      <noscript><p className="demo-notice">CodeGuessr needs JavaScript to accept answers and reveal progressive evidence.</p></noscript>
+    <PageFrame theme={theme}>
       {!loaded.ok
         ? <ArtifactUnavailable reason={loaded.reason} />
         : deck
@@ -254,6 +260,6 @@ export default async function Page({ searchParams }: PageProps) {
             </>
           )
           : <DeckChooser decks={loaded.experiment.decks} mixed={loaded.experiment.mixed} query={labQuery(overrides)} />}
-    </div>
+    </PageFrame>
   );
 }

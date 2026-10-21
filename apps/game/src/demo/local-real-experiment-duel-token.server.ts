@@ -71,8 +71,9 @@ export interface ResultClaims {
 /** Why a link was refused: not one this server sealed in this context, past its life, or for another round set. */
 export type DuelTokenRefusalReason = "INVALID" | "EXPIRED" | "ROUND_SET";
 
+/** A refusal; one for another round set names the link's deck, which only a link that authenticated can tell. */
 export class DuelTokenRefusal extends Error {
-  public constructor(public readonly reason: DuelTokenRefusalReason) {
+  public constructor(public readonly reason: DuelTokenRefusalReason, public readonly deck?: SessionDeckId) {
     super("DUEL_TOKEN_REFUSED");
     this.name = "DuelTokenRefusal";
   }
@@ -173,12 +174,12 @@ const open = (context: string, token: unknown): unknown => {
   }
 };
 
-/** Claims that authenticated and parsed, checked against their life and this artifact, in that order. */
-const current = <Claims extends Readonly<{ artifact: string; at: number }>>(claims: Claims | null, artifactHash: string, at: number,
-  ttl: number): Claims => {
+/** Claims that authenticated and parsed, checked against their life and then, unless it is null, this artifact. */
+const current = <Claims extends Readonly<{ artifact: string; deck: SessionDeckId; at: number }>>(claims: Claims | null,
+  artifactHash: string | null, at: number, ttl: number): Claims => {
   if (claims === null || at < claims.at) throw new DuelTokenRefusal("INVALID");
   if (at - claims.at > ttl) throw new DuelTokenRefusal("EXPIRED");
-  if (claims.artifact !== artifactPrefix(artifactHash)) throw new DuelTokenRefusal("ROUND_SET");
+  if (artifactHash !== null && claims.artifact !== artifactPrefix(artifactHash)) throw new DuelTokenRefusal("ROUND_SET", claims.deck);
   return claims;
 };
 
@@ -198,6 +199,9 @@ export const sealResult = (claims: ResultClaims): string => {
   return seal(RESULT_CONTEXT, parsed);
 };
 
-/** A result this server issued for this artifact that is still live at `at`. */
-export const openResultToken = (token: unknown, artifactHash: string, at: number): ResultClaims =>
+/**
+ * A result this server issued for this artifact that is still live at `at`. With a null artifact it takes a result of
+ * any round set: a result holds no round, so it can show after the rounds it was played on are gone.
+ */
+export const openResultToken = (token: unknown, artifactHash: string | null, at: number): ResultClaims =>
   current(parseResult(open(RESULT_CONTEXT, token)), artifactHash, at, RESULT_TTL_MS);

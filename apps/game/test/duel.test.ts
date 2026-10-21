@@ -313,11 +313,13 @@ describe("challenge and result tokens (#173)", () => {
     expect(experiment.openResult(issued.resultToken, finishedAt + RESULT_TTL_MS + 1)).toEqual({ ok: false, reason: "EXPIRED" });
   });
 
-  it("names an earlier round set only for a link it can read", () => {
+  it("names an earlier round set only for a link it can read, and its deck only while the round set offers it", () => {
     const { challengeToken } = challengeOf(finished());
     const other = createLocalRealExperiment(artifact(), hashValue(artifact()));
-    expect(other.openChallenge(challengeToken, NOW)).toEqual({ ok: false, reason: "ROUND_SET" });
-    expect(other.dealChallenge(challengeToken, NOW)).toEqual({ ok: false, reason: "ROUND_SET" });
+    expect(other.openChallenge(challengeToken, NOW)).toEqual({ ok: false, reason: "ROUND_SET", deck: "project" });
+    expect(other.dealChallenge(challengeToken, NOW)).toEqual({ ok: false, reason: "ROUND_SET", deck: "project" });
+    const gone = challengeOf(play(deal("exercise", NOW, ARMS, { seed: freshSeed(), game: 0 }))).challengeToken;
+    expect(other.openChallenge(gone, NOW)).toEqual({ ok: false, reason: "ROUND_SET" });
     const flipped = Buffer.from(challengeToken, "base64url");
     flipped[20] = flipped[20]! ^ 1;
     expect(other.openChallenge(flipped.toString("base64url"), NOW)).toEqual({ ok: false, reason: "INVALID" });
@@ -367,7 +369,8 @@ describe("creating a challenge (#173)", () => {
     expect(challenge).toEqual({
       deck: "before-after", deckTitle: experiment.decks.find(({ id }) => id === "before-after")!.title, date: null,
       max: dealt.mode.rounds.reduce((total, round) => total + round.points[0], 0),
-      challenger: { rounds: expected, score: payloadOf(token).score, hints: 4, correct: 4, firstPlay: "yes" }, expiresAt: NOW + CHALLENGE_TTL_MS,
+      challenger: { rounds: expected, score: payloadOf(token).score, hints: 4, correct: 4, firstPlay: "yes" }, theme: "terminal",
+      expiresAt: NOW + CHALLENGE_TTL_MS,
     });
   });
 });
@@ -434,11 +437,13 @@ describe("the friend's game (#173)", () => {
       { ...claims, deal: { kind: "series" as const, seed, game: 1 } },
       { ...claims, digest: "0".repeat(32) },
     ];
-    for (const value of edited) expect(experiment.dealChallenge(sealChallenge(value), NOW, true, ON)).toEqual({ ok: false, reason: "DEAL_DRIFT" });
+    // The refusal names the deck, so the page can deal it afresh.
+    const drift = { ok: false, reason: "DEAL_DRIFT", deck: "algorithm" };
+    for (const value of edited) expect(experiment.dealChallenge(sealChallenge(value), NOW, true, ON)).toEqual(drift);
     // The same artifact without its question layers sells other hints, so the layered game drifted too.
     const bare = load("/no/such/question-layers.json").experiment;
     logged.mockClear();
-    expect(bare.dealChallenge(challengeToken, NOW, true, ON)).toEqual({ ok: false, reason: "DEAL_DRIFT" });
+    expect(bare.dealChallenge(challengeToken, NOW, true, ON)).toEqual(drift);
     expect(logged.mock.calls).toEqual([["DUEL_REFUSED DEAL_DRIFT"]]);
     expect(dealChallenge(challengeToken).ok).toBe(true);
   });
@@ -462,6 +467,22 @@ describe("the result (#173)", () => {
     // A result's verdict is never read from the link: there is none in it.
     expect(Object.keys(JSON.parse(plaintextOf(issued.resultToken, RESULT_CONTEXT))).sort())
       .toEqual(["artifact", "at", "challenged", "challenger", "date", "deck", "id", "max", "v"]);
+    expect(issued.comparison.earlierRoundSet).toBe(false);
+  });
+
+  it("still shows a result once its round set is gone, under a generic title when its deck went too", () => {
+    const other = createLocalRealExperiment(artifact(), hashValue(artifact()));
+    const resultOf = (deck: string) => {
+      const { challengeToken } = challengeOf(play(deal(deck, NOW, CONTROL, { seed: freshSeed(), game: 0 })));
+      const issued = experiment.issueResult(play(dealChallenge(challengeToken).game), challengeToken, NOW);
+      if (!issued.ok) throw new Error(issued.reason);
+      return issued;
+    };
+    const kept = resultOf("language");
+    expect(other.openResult(kept.resultToken, NOW + DAY)).toEqual({ ok: true, comparison: { ...kept.comparison, earlierRoundSet: true } });
+    const gone = resultOf("exercise");
+    expect(other.openResult(gone.resultToken, NOW + DAY)).toEqual({ ok: true,
+      comparison: { ...gone.comparison, deckTitle: "A deck from an earlier round set", earlierRoundSet: true } });
   });
 
   it("takes a result only for the friend's finished game of that very challenge", () => {

@@ -56,7 +56,7 @@ export interface DuelAuthority {
   readonly dealChallenge: (challengeToken: unknown, now?: number, record?: boolean, switches?: ArmSwitches) => DealChallengeResponse;
   /** A result link for the friend's finished game of this challenge. */
   readonly issueResult: (sessionToken: unknown, challengeToken: unknown, now?: number) => IssueResultResponse;
-  /** What a result link shows, with the verdict worked out again. */
+  /** What a result link shows, with the verdict worked out again, even once the round set it was played on is gone. */
   readonly openResult: (resultToken: unknown, now?: number) => OpenResultResponse;
 }
 
@@ -78,11 +78,18 @@ export interface DuelContext {
 /** Duel games record no events until events v2 (X3 of #173) can tell them from a deal's. */
 const DUEL_EVENTS = false;
 
-const refusal = (reason: DuelRefusalReason): DuelRefusal => Object.freeze({ ok: false, reason });
+const refusal = (reason: DuelRefusalReason, deck?: string): DuelRefusal =>
+  Object.freeze(deck === undefined ? { ok: false, reason } : { ok: false, reason, deck });
 
-/** A refusal the browser may learn: the token's or the game's reason, and `INVALID` for anything else. */
-const refusalFor = (error: unknown): DuelRefusal =>
-  error instanceof DuelTokenRefusal ? refusal(error.reason)
+/** What a result of a deck this artifact no longer offers calls it. */
+const EARLIER_DECK_TITLE = "A deck from an earlier round set";
+
+/**
+ * A refusal the browser may learn: the token's or the game's reason, and `INVALID` for anything else. A link for another
+ * round set names its deck when this artifact still offers it (`titles`), so its page can deal that deck afresh.
+ */
+const refusalFor = (error: unknown, titles: ReadonlyMap<string, string>): DuelRefusal =>
+  error instanceof DuelTokenRefusal ? refusal(error.reason, error.deck !== undefined && titles.has(error.deck) ? error.deck : undefined)
     : error instanceof SessionRefusal ? refusal(error.reason === "SESSION_ENDED" ? "SESSION_ENDED" : "NOT_ELIGIBLE")
       : refusal("INVALID");
 
@@ -113,17 +120,21 @@ export const duelAuthority = (context: DuelContext): DuelAuthority => {
     date: claims.deal.kind === "daily" ? claims.deal.date : null,
     max: claims.max,
     challenger: Object.freeze({ ...duelSide(claims.rounds), firstPlay: claims.firstPlay }),
+    theme: claims.arms.theme,
     expiresAt: claims.at + CHALLENGE_TTL_MS,
   });
 
+  // A result names no round, so one played on an earlier round set still shows, under its deck's title while this
+  // artifact offers the deck.
   const comparison = (claims: ResultClaims): DuelComparison => Object.freeze({
     deck: claims.deck,
-    deckTitle: titleOf(claims.deck),
+    deckTitle: titles.get(claims.deck) ?? EARLIER_DECK_TITLE,
     date: claims.date,
     max: claims.max,
     challenger: Object.freeze({ ...duelSide(claims.challenger.rounds), firstPlay: claims.challenger.firstPlay }),
     challenged: Object.freeze({ ...duelSide(claims.challenged.rounds), play: claims.challenged.play }),
     verdict: duelVerdict(claims.challenger.rounds, claims.challenged.rounds),
+    earlierRoundSet: claims.artifact !== artifactPrefix(artifactHash),
   });
 
   /** Whether a re-deal differs from the challenger's game: its digest, its best score, or what any round scored. */
@@ -146,14 +157,14 @@ export const duelAuthority = (context: DuelContext): DuelAuthority => {
         const challengeToken = sealChallenge(claims);
         return Object.freeze({ ok: true, challengeToken, challenge: challengeView(claims), firstIssue: markIssued(claims.id, now) });
       } catch (error) {
-        return refusalFor(error);
+        return refusalFor(error, titles);
       }
     },
     openChallenge: (challengeToken: unknown, now = Date.now()): OpenChallengeResponse => {
       try {
         return Object.freeze({ ok: true, challenge: challengeView(openChallengeToken(challengeToken, artifactHash, now)) });
       } catch (error) {
-        return refusalFor(error);
+        return refusalFor(error, titles);
       }
     },
     dealChallenge: (challengeToken: unknown, now = Date.now(), record = true, switches = configuredSwitches()): DealChallengeResponse => {
@@ -163,7 +174,7 @@ export const duelAuthority = (context: DuelContext): DuelAuthority => {
         claims = openChallengeToken(challengeToken, artifactHash, now);
         challenge = challengeView(claims);
       } catch (error) {
-        return refusalFor(error);
+        return refusalFor(error, titles);
       }
       let dealt: Readonly<{ mode: PublicModeContract; wrapped: boolean }> | null;
       try {
@@ -175,7 +186,7 @@ export const duelAuthority = (context: DuelContext): DuelAuthority => {
       // is logged, never the link.
       if (dealt === null || drifted(dealt.mode, claims)) {
         console.error("DUEL_REFUSED DEAL_DRIFT");
-        return refusal("DEAL_DRIFT");
+        return refusal("DEAL_DRIFT", claims.deck);
       }
       const game = context.start(claims.deck, dealt, now, { arms: challengedArms(claims.arms, switches), record: DUEL_EVENTS && record },
         { kind: "duel", challenge: claims.id });
@@ -195,14 +206,14 @@ export const duelAuthority = (context: DuelContext): DuelAuthority => {
         };
         return Object.freeze({ ok: true, resultToken: sealResult(result), comparison: comparison(result) });
       } catch (error) {
-        return refusalFor(error);
+        return refusalFor(error, titles);
       }
     },
     openResult: (resultToken: unknown, now = Date.now()): OpenResultResponse => {
       try {
-        return Object.freeze({ ok: true, comparison: comparison(openResultToken(resultToken, artifactHash, now)) });
+        return Object.freeze({ ok: true, comparison: comparison(openResultToken(resultToken, null, now)) });
       } catch (error) {
-        return refusalFor(error);
+        return refusalFor(error, titles);
       }
     },
   };

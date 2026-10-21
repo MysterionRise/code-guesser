@@ -192,7 +192,7 @@ gate: changing queries, retries, ceilings, deck rules, or running
   directory, the ledger is memory-only as before. `deriveKey(context)` is HKDF-SHA256 of the session secret, for other
   features' keys. `GET /api/health` (`app/api/health/route.ts`) answers `ok` or 503 with a bare code and records
   nothing. Events stay JSONL.
-- **Duels, server side (#173, X1; the UI is X2, events v2 X3):** a finished game of a seeded deal or of today's five
+- **Duels (#173: X1 the server, X2 the UI; events v2 is X3):** a finished game of a seeded deal or of today's five
   becomes a challenge link, and a friend's finished game of it a result link.
   - Tokens (`demo/local-real-experiment-duel-token.server.ts`): AES-256-GCM under `deriveKey(context)`, a random
     12-byte IV, the context as AAD, `base64url(iv‖ciphertext‖tag)`, at most 1,024 characters. Contexts
@@ -207,14 +207,26 @@ gate: changing queries, retries, ceilings, deck rules, or running
     challenger's theme and layer (the design only while generative UI is on and it isn't switched off,
     `challengedArms`), seals `deal: {kind: "duel"}` with no seed, and records no events until X3. Refusals: `INVALID`,
     `EXPIRED`, `ROUND_SET` (another artifact, told only once the link authenticates), `DEAL_DRIFT`, `NOT_ELIGIBLE`,
-    `SESSION_ENDED`. `duelVerdict` (`components/duel/duel-contract.ts`, the browser-safe types): score, then fewer
-    hints, then more rounds right, else a draw; recomputed on every read. Actions: `createDuelChallenge`,
-    `issueDuelResult`.
+    `SESSION_ENDED`; a `ROUND_SET` or `DEAL_DRIFT` refusal names its deck while this artifact offers it. A result
+    opens on any round set (`earlierRoundSet`, and a generic title once its deck is gone). `duelVerdict`
+    (`components/duel/duel-contract.ts`, the browser-safe types): score, then fewer hints, then more rounds right, else
+    a draw; recomputed on every read. Actions: `createDuelChallenge`, `issueDuelResult`.
   - Plays ledger (`demo/local-real-experiment-plays.server.ts`, no identity): games that revealed a round, per seeded
     deal (`canonicalHash({artifact, deck, seed, game})`) and per challenge id, counted at a game's first reveal; written
     through to the store's `plays` table, 50,000 keys, oldest first. A game seals `priorPlays` at its deal and catches
     up at its first reveal, so a challenge says `firstPlay` `yes`/`no` (`shared` for today's five) and a result which
     play of the link it was.
+  - Pages (`duel/duel-page.tsx`, from `page.tsx` before any deck): `?duel=<t>` is an intro that deals nothing, in the
+    challenger's theme, `noindex`; `&play=1` deals the friend's game (no lab picks or lab bar; "Deal new rounds" and
+    "Rematch" are a fresh deal of the deck, a mix for today's five); `?duel-result=<t>` is read-only, outside any game.
+  - In the game (`components/duel/`): `OpponentStrip` shows each of the challenger's rounds once the friend has locked
+    it (presentation, not secrecy: the page holds them from the deal), and the reveal's live region says it. The friend's
+    game ends on `DuelCompletion` (`issueDuelResult`, the comparison table, "Send your result", "Rematch"); any other
+    finished series or daily game offers `ChallengeFriend`. Share lines (`duel-text.ts`): a challenge's has no grid, a
+    result's has both.
+  - Names live only in the fragment (`#from=Ana`, `&vs=Ben`), which never reaches the server: `sanitizeName` (NFKC,
+    no control or format characters, letters, marks, digits, space, `-`, `'`, `_`, 24 code points, else "A friend"),
+    read in the browser by `useFragmentNames`. `tests/e2e/duel.spec.ts` plays it with two browser contexts.
 - The answer-lock guard (#102) is the only path from round data to a model:
   - `modelContext` on the experiment reads the sealed game, and
     `apps/game/src/genui/round-context.server.ts` builds the round's context.
