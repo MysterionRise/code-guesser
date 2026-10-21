@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import {
-  canonicalHash, parseArtifactDecks, parseQuestionLayers, type LayerContext, type LayerHint, type QuestionLayer,
+  canonicalHash, parseQuestionLayers, type LayerContext, type LayerHint, type ParsedDeck, type QuestionLayer,
 } from "../../../../packages/artifact/src/index";
 import type { HintDetail, RoundScaffold } from "../components/arcade/mode-contract";
 import { TRUSTED_QUESTION_LAYERS_HASH } from "./question-layers.pin.server";
@@ -23,8 +23,18 @@ export interface LayerLoadOptions {
   readonly trustedHash?: string;
 }
 
+/**
+ * The artifact as the game loaded it: matched to its pin and parsed once (#166), so the layers check against those
+ * decks and that hash instead of parsing and hashing the artifact again.
+ */
+export interface PinnedArtifact {
+  readonly value: Readonly<Record<string, unknown>>;
+  readonly decks: readonly ParsedDeck[];
+  readonly hash: string;
+}
+
 /** The layers by round id, or none: a missing, mismatched, or refused file leaves the game without layers. */
-export const loadQuestionLayers = (artifact: unknown, options: LayerLoadOptions = {}): RoundLayers => {
+export const loadQuestionLayers = (artifact: PinnedArtifact, options: LayerLoadOptions = {}): RoundLayers => {
   let value: unknown;
   try {
     value = JSON.parse(readFileSync(options.path ?? join(process.cwd(), QUESTION_LAYERS_RELATIVE_PATH), "utf8"));
@@ -34,10 +44,10 @@ export const loadQuestionLayers = (artifact: unknown, options: LayerLoadOptions 
   try {
     if (canonicalHash(value) !== (options.trustedHash ?? TRUSTED_QUESTION_LAYERS_HASH)) throw new Error("QUESTION_LAYERS_PIN");
     const context: LayerContext = {
-      decks: parseArtifactDecks(artifact),
-      algorithms: ((artifact as { crawlSnapshot?: { curated?: { algorithms?: unknown } } }).crawlSnapshot?.curated?.algorithms ?? []) as LayerContext["algorithms"],
+      decks: artifact.decks,
+      algorithms: ((artifact.value as { crawlSnapshot?: { curated?: { algorithms?: unknown } } }).crawlSnapshot?.curated?.algorithms ?? []) as LayerContext["algorithms"],
     };
-    const file = parseQuestionLayers(value, canonicalHash(artifact), context);
+    const file = parseQuestionLayers(value, artifact.hash, context);
     return new Map(file.layers.map((layer) => [layer.roundId, layer]));
   } catch (error) {
     console.error(`QUESTION_LAYERS_UNAVAILABLE ${error instanceof Error && /^[A-Z_ ]+$/u.test(error.message) ? error.message.replaceAll(" ", "_") : "REJECTED"}`);

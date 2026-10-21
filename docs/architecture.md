@@ -1,9 +1,10 @@
 # Architecture
 
 CodeGuessr runs in two separate phases. At preparation time, `pnpm prepare:poc`
-reads public code over the network and freezes up to six decks into one JSON
-artifact. At play time, the Next.js game serves that artifact from disk and
-makes no outbound requests. Only two committed files pass from one phase to the
+reads public code over the network and freezes up to ten decks into one JSON
+artifact. At play time, the Next.js game serves that artifact from disk; its
+control arm makes no outbound requests, and only opt-in generative UI calls
+OpenRouter, from the server, through the answer-lock guard. Only two committed files pass from one phase to the
 other: the artifact and its pinned hash.
 
 ## The flow
@@ -30,7 +31,7 @@ PREPARATION TIME: pnpm prepare:poc, run by hand on one machine
   apps/game/src/demo/generated/local-real-rounds.json       (committed)
   apps/game/src/demo/local-real-experiment.pin.server.ts    (committed hash)
 ========== no network below this line, except opt-in generative UI ==========
-PLAY TIME: the Next.js server on localhost, and the player's browser
+PLAY TIME: the Next.js server (localhost; one public instance from v1.1, #100), and the player's browser
   local-real-experiment-loader.server.ts: read the artifact once per process
       -> createLocalRealExperiment: canonical hash = pin? parse with packages/artifact
       -> page.tsx: the deck chooser, or dealGame(deck): five rounds and a signed session token
