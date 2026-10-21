@@ -14,7 +14,7 @@
     "@json-render/core": "0.21.1",
     "@json-render/react": "0.21.1",
     "ai": "7.0.140",
-    "next": "15.5.27",
+    "next": "16.4.2",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "server-only": "0.0.1",
