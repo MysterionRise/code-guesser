@@ -13,7 +13,7 @@ import {
   LOCAL_REAL_EXPERIMENT_NOTICE_LEAD,
   activeLocalRealExperiment,
 } from "../demo/local-real-experiment-loader.server";
-import { DEAL_SEED, MAXIMUM_GAME, dailyRandom, localDate, type DealSeries } from "../demo/local-real-experiment-deal.server";
+import { DEAL_SEED, MAXIMUM_GAME, localDate, type DealSeries } from "../demo/local-real-experiment-deal.server";
 import type { LocalRealDeck, LocalRealMix } from "../demo/local-real-experiment.server";
 import { DAILY_DECK, MIXED_DECK, type SessionDeckId } from "../demo/local-real-experiment-domain.server";
 import { CONTROL, FACTORS, assignArms, labMode, labOverrides, parseDisabled, type Arms, type Level } from "../experiment/arms";
@@ -190,9 +190,11 @@ function DealtSession({ deck, series, arms, record, overrides, origin }: {
 }) {
   const loaded = activeLocalRealExperiment();
   if (!loaded.ok) return null;
-  // Today's five deals from the local date, so a reload or a new game that day deals the same five (#74).
-  const random = deck.id === DAILY_DECK ? dailyRandom(loaded.experiment.artifactHash, localDate(new Date())) : Math.random;
-  const { mode, sessionToken, wrapped } = loaded.experiment.dealGame(deck.id, random, Date.now(), { arms, record }, series);
+  // Today's five deals from the local date, so a reload or a new game that day deals the same five (#74). The game
+  // seals its date, as a seeded deal's game seals its seed, so it can become a challenge (#173).
+  const now = Date.now();
+  const deal = deck.id === DAILY_DECK ? { date: localDate(new Date(now)) } : series;
+  const { mode, sessionToken, wrapped } = loaded.experiment.dealGame(deck.id, Math.random, now, { arms, record }, deal);
   // The next game of a seeded deal shares no round with this one until the pool is spent; today's five moves to a mix.
   const next = series ? gameHref(deck.id, { ...series, game: Math.min(series.game + 1, MAXIMUM_GAME) }) : `/?deck=${MIXED_DECK}`;
   // A mixed game names each round's deck; a deck's own game needs no reminder.

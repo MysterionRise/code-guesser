@@ -105,8 +105,25 @@ describe("the event beacon (#107)", () => {
     expect((await beacon({ sessionToken: token, event: { type: "result_shared", via: "clipboard" }, ip: "127.0.0.1" })).status).toBe(400);
     expect((await beacon({ sessionToken: "forged.token", event: { type: "result_shared", via: "clipboard" } })).status).toBe(410);
     expect((await beacon("{not json")).status).toBe(400);
-    expect((await beacon("x".repeat(2_000))).status).toBe(413);
+    expect((await beacon("x".repeat(3_000))).status).toBe(413);
     expect(captured).toEqual([]);
+  });
+
+  it("takes the longest beacon of any deck's finished game, with room to spare (#173)", async () => {
+    // The largest token: a finished game of a seeded deal's last game, both hints bought every round, the longest arms.
+    for (const deck of ["daily", "mixed", ...experiment.decks.map(({ id }) => id)] as const) {
+      const dealt = experiment.dealGame(deck, Math.random, Date.now(), { arms: { design: "visualizer", theme: "contrast", layer: "on" }, record: false },
+        deck === "daily" ? { date: "2026-10-21" } : { seed: "ffffffff", game: 999 });
+      let token = dealt.sessionToken;
+      for (const round of dealt.mode.rounds) {
+        for (let hint = 0; hint < 2; hint += 1) token = (experiment.revealHint({ sessionToken: token, roundId: round.roundId }) as { sessionToken: string }).sessionToken;
+        token = (experiment.answer({ sessionToken: token, roundId: round.roundId, candidateId: fixtures.get(round.roundId)!.correctCandidateId }) as { sessionToken: string })
+          .sessionToken;
+      }
+      const body = JSON.stringify({ sessionToken: token, event: { type: "genui_interaction", round: 5, action: "offer_hint" } });
+      expect(body.length, deck).toBeLessThan(1_536);
+      expect((await beacon(body)).status, deck).toBe(204);
+    }
   });
 
   it("refuses an event about a round the game hasn't reached", async () => {

@@ -5,6 +5,7 @@ import { createHmac, hkdfSync, randomBytes, timingSafeEqual } from "node:crypto"
 import { FACTORS, parseArms, type Arms } from "../experiment/arms";
 import { MIN_SECRET_LENGTH, publicMode } from "../server/environment.server";
 import { stateStore } from "../server/state-store.server";
+import { DEAL_KEYS, parseDeal, type DealDescriptor } from "./local-real-experiment-deal.server";
 import { ROUNDS_PER_SESSION, SESSION_DECK_IDS, type SessionDeckId } from "./local-real-experiment-domain.server";
 
 /**
@@ -13,7 +14,7 @@ import { ROUNDS_PER_SESSION, SESSION_DECK_IDS, type SessionDeckId } from "./loca
  * score and hint count is the server's own.
  */
 export interface GameState {
-  readonly version: 2;
+  readonly version: 3;
   /** Unguessable and random per deal; it links nothing beyond this one game. */
   readonly gameId: string;
   readonly artifactHash: string;
@@ -33,6 +34,11 @@ export interface GameState {
   readonly hintsByRound: readonly number[];
   /** Rounds answered right so far. */
   readonly correct: number;
+  /**
+   * Whether each answered round was right, in play order (#173). With `hintsByRound` and the rounds' points it gives
+   * each round's score, so no score per round is stored.
+   */
+  readonly outcomes: readonly boolean[];
   readonly score: number;
   readonly dealtAt: number;
   /** When the round being played began: the deal, or the previous answer. Events measure time from it (#107). */
@@ -41,6 +47,15 @@ export interface GameState {
   readonly arms: Arms;
   /** Whether this game's events are recorded: false when the browser sent `Sec-GPC: 1` at the deal. */
   readonly record: boolean;
+  /** How the game was dealt (#173), so a challenge can deal a friend the same game. */
+  readonly deal: DealDescriptor;
+  /** The dealt rounds' digest (`dealDigest`), which a friend's re-deal of this game must match. */
+  readonly dealDigest: string;
+  /**
+   * Earlier games of this deal, or of this challenge, that revealed a round, counted with no identity (#173): sealed
+   * at the deal and brought up to date at this game's first reveal. A game of today's five, or an unseeded one, has 0.
+   */
+  readonly priorPlays: number;
 }
 
 /** Why a token was refused: it is not one this server issued for a live game, or the game has already moved past it. */
@@ -57,8 +72,11 @@ export class SessionRefusal extends Error {
 export const GAME_TTL_MS = 6 * 60 * 60 * 1000;
 /** Live games the ledger remembers; past this, the oldest are forgotten first. */
 export const LEDGER_CAPACITY = 50_000;
-const MAC_CONTEXT = "codeguessr-game-session.v2";
-const STATE_KEYS = ["arms", "artifactHash", "correct", "dealtAt", "deck", "gameId", "hints", "hintsByRound", "record", "roundIds", "roundIndex", "roundStartedAt", "score", "step", "version"];
+/** Plays of one deal or challenge counted at most; `priorPlays` stops here. */
+export const MAXIMUM_PLAYS = 999;
+const MAC_CONTEXT = "codeguessr-game-session.v3";
+const STATE_KEYS = ["arms", "artifactHash", "correct", "deal", "dealDigest", "dealtAt", "deck", "gameId", "hints", "hintsByRound", "outcomes",
+  "priorPlays", "record", "roundIds", "roundIndex", "roundStartedAt", "score", "step", "version"];
 
 interface SessionGlobals {
   secret?: Buffer;
@@ -110,7 +128,7 @@ const parseState = (value: unknown): GameState => {
   if (typeof value !== "object" || value === null || Array.isArray(value)) throw new SessionRefusal("SESSION_ENDED");
   const state = value as Record<string, unknown>;
   if (Object.keys(state).sort().join("|") !== STATE_KEYS.join("|")
-    || state.version !== 2
+    || state.version !== 3
     || typeof state.gameId !== "string" || !/^[0-9a-f]{32}$/u.test(state.gameId)
     || typeof state.artifactHash !== "string" || !/^[0-9a-f]{64}$/u.test(state.artifactHash)
     || !SESSION_DECK_IDS.includes(state.deck as SessionDeckId)
@@ -122,19 +140,26 @@ const parseState = (value: unknown): GameState => {
     || !Array.isArray(state.hintsByRound) || state.hintsByRound.length !== state.roundIndex
     || state.hintsByRound.some((count) => !isCount(count, 2))
     || !isCount(state.correct, state.roundIndex as number)
+    || !Array.isArray(state.outcomes) || state.outcomes.length !== state.roundIndex
+    || state.outcomes.some((outcome) => typeof outcome !== "boolean") || state.outcomes.filter(Boolean).length !== state.correct
     || !isCount(state.score, Number.MAX_SAFE_INTEGER)
     || !isCount(state.dealtAt, Number.MAX_SAFE_INTEGER)
     || !isCount(state.roundStartedAt, Number.MAX_SAFE_INTEGER) || (state.roundStartedAt as number) < (state.dealtAt as number)
     || parseArms(state.arms) === null
-    || typeof state.record !== "boolean") throw new SessionRefusal("SESSION_ENDED");
+    || typeof state.record !== "boolean"
+    || parseDeal(state.deal) === null
+    || typeof state.dealDigest !== "string" || !/^[0-9a-f]{32}$/u.test(state.dealDigest)
+    || !isCount(state.priorPlays, MAXIMUM_PLAYS)) throw new SessionRefusal("SESSION_ENDED");
   return Object.freeze({ ...state, roundIds: Object.freeze([...state.roundIds]), hintsByRound: Object.freeze([...(state.hintsByRound as number[])]),
-    arms: parseArms(state.arms)! }) as GameState;
+    outcomes: Object.freeze([...(state.outcomes as boolean[])]), arms: parseArms(state.arms)!, deal: parseDeal(state.deal)! }) as GameState;
 };
 
 /** The state as a token: its canonical JSON in base64url, a dot, and the HMAC of both under this server's secret. */
 export const sealGame = (state: GameState): string => {
-  // The key list orders the JSON and applies at every depth, so it names the arms' own keys too.
-  const payload = Buffer.from(JSON.stringify(parseState(state), [...STATE_KEYS, ...Object.keys(FACTORS)].sort()), "utf8").toString("base64url");
+  // The key list orders the JSON and applies at every depth, so it names the arms' and the deal's own keys too: a
+  // nested key it left out would be dropped without a word.
+  const payload = Buffer.from(JSON.stringify(parseState(state), [...STATE_KEYS, ...Object.keys(FACTORS), ...DEAL_KEYS].sort()), "utf8")
+    .toString("base64url");
   return `${payload}.${mac(payload).toString("base64url")}`;
 };
 
