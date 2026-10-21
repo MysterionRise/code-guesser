@@ -4,7 +4,7 @@ import { appendFileSync, mkdirSync, readFileSync, readdirSync, rmSync } from "no
 import { join } from "node:path";
 
 import { FACTORS, type Arms } from "./arms";
-import { CLIENT_EVENT_TYPES, EVENT_SCHEMA_VERSION, EVENT_TYPES, SOURCES, dayOf, isDay, parseEvent, parsePayload, type EventSource, type EventType, type ExperimentEvent } from "./events";
+import { CLIENT_EVENT_TYPES, EVENT_SCHEMA_VERSION, EVENT_TYPES, RETIRED_EVENT_TYPES, SOURCES, dayOf, isDay, parseEvent, parsePayload, type EventSource, type EventType, type ExperimentEvent } from "./events";
 
 /**
  * Where events go (#107): a small store interface, so a host can put Postgres behind it later. The local store is
@@ -148,5 +148,6 @@ export const eventSinkFromEnv = (decks: readonly string[], env: Readonly<Record<
   return directory === undefined || directory.length === 0 ? null : storeSink(fileEventStore(directory, decks), eventSource(env));
 };
 
-/** The events the server records itself; the rest arrive from the browser through the beacon route. */
-export const SERVER_EVENT_TYPES = Object.freeze(EVENT_TYPES.filter((type) => !(CLIENT_EVENT_TYPES as readonly string[]).includes(type)));
+/** The events the server records itself; the rest arrive from the browser through the beacon route, or are retired. */
+export const SERVER_EVENT_TYPES = Object.freeze(EVENT_TYPES.filter((type) =>
+  !(CLIENT_EVENT_TYPES as readonly string[]).includes(type) && !(RETIRED_EVENT_TYPES as readonly string[]).includes(type)));

@@ -8,6 +8,7 @@ import {
   ArcadeShellRuleError,
   createArcadeSession,
   createPublicModeContract,
+  SHARE_MARKS,
   formatCompletionResult,
   projectDisplayReveal,
   projectSpoilerFreeShare,
@@ -319,13 +320,27 @@ describe("static arcade shell", () => {
     expect(session.roundIndex).toBe(4);
     expect(session.correctRounds).toBe(5);
     expect(session.outcomes).toEqual([true, true, true, true, true]);
-    const share = projectSpoilerFreeShare(session.result!, session.correctRounds, "Which language?");
-    expect(share).toEqual({ text: "CodeGuessr · Which language? · 5/5 correct · 5,000/5,000", score: 5000, rounds: 5, correct: 5 });
-    expect(JSON.stringify(share)).not.toMatch(/candidate|answer|evidence|excerpt/iu);
-    expect(projectSpoilerFreeShare(session.result!, 3).text).toBe("CodeGuessr · 3/5 correct · 5,000/5,000");
-    expect(() => projectSpoilerFreeShare(session.result!, 6)).toThrow(ArcadeShellRuleError);
-    expect(formatCompletionResult(session.result!, session.correctRounds, "Which language?"))
-      .toBe("Run complete — 5,000 points, 5 of 5 correct. Share: CodeGuessr · Which language? · 5/5 correct · 5,000/5,000.");
+    const url = "http://127.0.0.1:3000/?deck=language&deal=0a1b2c3d&game=0";
+    const share = projectSpoilerFreeShare(session.result!, session.history, "Which language?", url);
+    expect(share).toEqual({ text: `CodeGuessr · Which language? · 5/5 · 5,000/5,000\n🟩🟩🟩🟩🟩\n${url}`,
+      message: "CodeGuessr · Which language? · 5/5 · 5,000/5,000\n🟩🟩🟩🟩🟩", url, score: 5000, rounds: 5, correct: 5 });
+    expect(JSON.stringify(share)).not.toMatch(/candidate|answer|evidence|excerpt|Option|round-/iu);
+    expect(projectSpoilerFreeShare(session.result!, session.history).text).toBe("CodeGuessr · 5/5 · 5,000/5,000\n🟩🟩🟩🟩🟩");
+    expect(() => projectSpoilerFreeShare(session.result!, session.history.slice(1))).toThrow(ArcadeShellRuleError);
+    expect(() => projectSpoilerFreeShare(session.result!, session.history, "Which language?", "/?deck=language")).toThrow(ArcadeShellRuleError);
+    expect(() => projectSpoilerFreeShare(session.result!, session.history, "Which language?", "javascript:alert(1)")).toThrow(ArcadeShellRuleError);
+    expect(formatCompletionResult(session.result!, session.correctRounds)).toBe("Run complete — 5,000 points, 5 of 5 correct.");
+    expect(() => formatCompletionResult(session.result!, 6)).toThrow(ArcadeShellRuleError);
+  });
+
+  it("marks each round in play order: right with no hint, right with hints, or missed (#171)", () => {
+    const result = { score: 3_300, attainableMaximum: 5_000, completedRounds: 5, resultVersionId: "result-5" };
+    const rounds = [{ correct: true, hints: 0 }, { correct: true, hints: 1 }, { correct: false, hints: 2 }, { correct: true, hints: 2 },
+      { correct: false, hints: 0 }];
+    expect(projectSpoilerFreeShare(result, rounds, "Which language?").message)
+      .toBe(`CodeGuessr · Which language? · 3/5 · 3,300/5,000\n${SHARE_MARKS.clean}${SHARE_MARKS.hinted}${SHARE_MARKS.missed}${SHARE_MARKS.hinted}${SHARE_MARKS.missed}`);
+    expect(SHARE_MARKS).toEqual({ clean: "🟩", hinted: "🟨", missed: "⬛" });
+    expect(() => projectSpoilerFreeShare({ ...result, completedRounds: 4 }, rounds.slice(1))).toThrow("sharing requires a complete run");
   });
 
   it("keeps every answered round for the game's summary: pick, answer, points, hints, and source (#43)", () => {
