@@ -73,6 +73,10 @@ jobs:
       - name: Acquisition containment
         run: pnpm exec node --test tests/containment/acquisition-boundary.test.mjs
 
+      # Starts the production build in public mode (#97): a missing setting exits 78 with its code and no value.
+      - name: Boot checks
+        run: pnpm test:deploy
+
       - name: Install Playwright Chromium
         run: pnpm exec playwright install --with-deps chromium
 

@@ -89,10 +89,12 @@ export const assignArms = ({ genuiEnabled, disabled, overrides = {}, random = Ma
 
 /**
  * Lab mode lets a local tester pick levels by query and shows the Lab bar: on with `EXPERIMENT_LAB=1`, or under
- * `next dev`. A public server leaves it off, so the draw stands.
+ * `next dev`. A public server (`CODEGUESSR_PUBLIC=1`, #97) leaves it off, so the draw stands, except for a smoke run
+ * whose events are tagged `agent` or `synthetic` (`EXPERIMENT_SOURCE`) and so never mix with real games.
  */
 export const labMode = (env: Readonly<Record<string, string | undefined>> = process.env): boolean =>
-  env.EXPERIMENT_LAB === "1" || env.NODE_ENV === "development";
+  (env.EXPERIMENT_LAB === "1" || env.NODE_ENV === "development")
+  && (env.CODEGUESSR_PUBLIC !== "1" || env.EXPERIMENT_SOURCE === "agent" || env.EXPERIMENT_SOURCE === "synthetic");
 
 /** The levels a lab query names: `?design=`, `?theme=`, `?layer=`; anything unknown is ignored. */
 export const labOverrides = (query: Readonly<Record<string, string | string[] | undefined>>): Partial<Arms> =>

@@ -72,15 +72,27 @@ test("browser and gameplay dependency surfaces exclude acquisition capabilities"
   ];
   assertContainsNoFingerprint(participantSources, "participant dependency surface");
   // Two server endpoints: generative UI's guarded route (#101), off unless enabled and reading round data only
-  // through the answer-lock guard; and the event log's beacon (#107), which reads no round data at all.
+  // through the answer-lock guard; and the event log's beacon (#107), which reads no round data at all. One boot
+  // hook (#97), which only checks the environment and prints codes.
   const routes = participantSources.filter((path) => /(?:^|\/)(?:route|middleware|instrumentation)\.[cm]?[jt]sx?$/u.test(path));
-  assert.deepEqual(routes.map((path) => relative(root, path)), ["apps/game/src/app/api/events/route.ts", "apps/game/src/app/api/genui/route.ts"]);
+  assert.deepEqual(routes.map((path) => relative(root, path)), [
+    "apps/game/src/app/api/events/route.ts",
+    "apps/game/src/app/api/genui/route.ts",
+    "apps/game/src/instrumentation.ts",
+  ]);
   const eventsRoute = read(routes[0]);
   assert.match(eventsRoute, /const MAX_BODY_LENGTH = 1024;/u);
   assert.deepEqual([...eventsRoute.matchAll(/experiment\.(\w+)\(/gu)].map(([, method]) => method), ["recordClientEvent"]);
   const genuiRoute = read(routes[1]);
   assert.match(genuiRoute, /process\.env\.GENUI_ENABLED !== "1"/u);
   assert.match(genuiRoute, /experiment\.modelContext\(/u);
+  const boot = read(routes[2]);
+  assert.deepEqual([...boot.matchAll(/(?:\bfrom|\bimport\s*\()\s*"([^"]+)"/gu)].map(([, specifier]) => specifier), ["./server/environment.server"]);
+  assert.doesNotMatch(boot, /^import\b/mu);
+  assert.match(boot, /if \(process\.env\.NEXT_RUNTIME === "nodejs"\)/u);
+  assert.deepEqual([...boot.matchAll(/console\.\w+\(([^;]*)\);/gu)].map(([, argument]) => argument), ["`GAME_ENVIRONMENT_REJECTED ${code}`"]);
+  assert.match(boot, /process\.exit\(78\);/u);
+  assert.doesNotMatch(boot, /experiment|activeLocalRealExperiment|readFileSync|process\.env\.(?!NEXT_RUNTIME\b)\w/u);
   assert.equal(participantSources.some((path) => /\bfetch\s*\(/u.test(read(path))), false);
 
   const contentPackage = JSON.parse(read(join(root, "packages", "content", "package.json")));
@@ -129,6 +141,20 @@ test("the model provider's key and address never reach the browser", () => {
   }
   const model = read(join(game, "src", "genui", "model.server.ts"));
   assert.match(model, /^import "server-only";/u);
+});
+
+test("the session secret, preparation credentials, and the preparer never reach the browser", () => {
+  const serverFingerprints = [/CODEGUESSR_SESSION_SECRET/u, /HF_TOKEN/u, /huggingface\.co/iu, /ops\/poc\/prepare/iu];
+  const clientFiles = filesUnder(join(built, "static")).filter((path) => textExtensions.has(extname(path)));
+  assert.ok(clientFiles.length > 0, "production build emitted no client files");
+  for (const path of clientFiles) {
+    for (const fingerprint of serverFingerprints) {
+      assert.doesNotMatch(read(path), fingerprint, `${fingerprint} reached the browser through ${relative(root, path)}`);
+    }
+  }
+  for (const path of filesUnder(join(game, "src", "server"))) {
+    assert.match(read(path), /^import "server-only";/u, `${relative(root, path)} must be server-only`);
+  }
 });
 
 test("production artifacts, manifests, telemetry and routes contain no acquisition runtime", () => {

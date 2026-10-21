@@ -36,6 +36,7 @@ test("defines one CI workflow that pins the toolchain and runs every verificatio
     "pnpm test\n",
     "pnpm test:a11y",
     "pnpm test:performance",
+    "pnpm test:deploy",
     "pnpm --filter @codeguessr/game build",
     "pnpm exec node --test tests/containment/acquisition-boundary.test.mjs",
     "pnpm exec playwright install --with-deps chromium",
