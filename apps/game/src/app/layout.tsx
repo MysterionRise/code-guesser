@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { connection } from "next/server";
 import type { ReactNode } from "react";
 import "./globals.css";
 
@@ -12,6 +13,9 @@ export const metadata: Metadata = {
   openGraph: { type: "website", siteName: "CodeGuessr", title: TITLE, description: DESCRIPTION },
 };
 
-export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
+export default async function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
+  // Every page renders per request, so Next.js tags its scripts with that request's CSP nonce (#97); a page built
+  // ahead of time, such as the 404, would carry none, and its scripts would be refused.
+  await connection();
   return <html lang="en"><body>{children}</body></html>;
 }

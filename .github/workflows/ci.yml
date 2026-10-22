@@ -73,12 +73,14 @@ jobs:
       - name: Acquisition containment
         run: pnpm exec node --test tests/containment/acquisition-boundary.test.mjs
 
-      # Starts the production build in public mode (#97): a missing setting exits 78 with its code and no value.
-      - name: Boot checks
-        run: pnpm test:deploy
-
+      # The boot checks drive the production build in Chromium too, so the browser is installed before them.
       - name: Install Playwright Chromium
         run: pnpm exec playwright install --with-deps chromium
+
+      # Starts the production build in public mode (#97): a missing setting exits 78 with its code and no value, and
+      # every generative design plays under the nonce policy without one violation.
+      - name: Boot checks
+        run: pnpm test:deploy
 
       - name: Browser scenarios
         run: pnpm test:e2e
