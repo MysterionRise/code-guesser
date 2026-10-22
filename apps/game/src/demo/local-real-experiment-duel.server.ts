@@ -15,6 +15,7 @@ import {
   type OpenResultResponse,
 } from "../components/duel/duel-contract";
 import { challengedArms, parseDisabled, type AssignOptions } from "../experiment/arms";
+import type { DuelOutcome } from "../experiment/events";
 import { gameSources } from "./game-sources.server";
 import type { DealDescriptor } from "./local-real-experiment-deal.server";
 import { ROUNDS_PER_SESSION, type SessionDeckId } from "./local-real-experiment-domain.server";
@@ -25,11 +26,13 @@ import {
   challengeId,
   openChallengeToken,
   openResultToken,
+  resultMark,
   sealChallenge,
   sealResult,
   type ChallengeClaims,
   type ResultClaims,
 } from "./local-real-experiment-duel-token.server";
+import type { Emit } from "./local-real-experiment-events.server";
 import { markIssued } from "./local-real-experiment-plays.server";
 import type { DerivedRound } from "./local-real-experiment-rounds.server";
 import { SessionRefusal, readGame, type GameState } from "./local-real-experiment-session.server";
@@ -73,10 +76,13 @@ export interface DuelContext {
     descriptor: DealDescriptor) => DealtGame;
   readonly digestOf: (mode: PublicModeContract, arms: DealSeal["arms"]) => string;
   readonly maximumOf: (roundIds: readonly string[]) => number;
+  /** Reports a duel's events (X3 of #173) on the game they belong to, when it records events. */
+  readonly emit: Emit;
 }
 
-/** Duel games record no events until events v2 (X3 of #173) can tell them from a deal's. */
-const DUEL_EVENTS = false;
+/** A duel's outcome as the friend's game records it: the verdict from the friend's side. */
+const OUTCOMES: Readonly<Record<"challenger" | "challenged" | "draw", DuelOutcome>> =
+  Object.freeze({ challenged: "won", challenger: "lost", draw: "drew" });
 
 const refusal = (reason: DuelRefusalReason, deck?: string): DuelRefusal =>
   Object.freeze(deck === undefined ? { ok: false, reason } : { ok: false, reason, deck });
@@ -155,7 +161,11 @@ export const duelAuthority = (context: DuelContext): DuelAuthority => {
           firstPlay: deal.kind === "daily" ? "shared" : state.priorPlays === 0 ? "yes" : "no", at: now,
         };
         const challengeToken = sealChallenge(claims);
-        return Object.freeze({ ok: true, challengeToken, challenge: challengeView(claims), firstIssue: markIssued(claims.id, now) });
+        const challenge = challengeView(claims);
+        const firstIssue = markIssued(claims.id, now);
+        // The event log hears of a challenge once, at its first link, however often its game asks for the link again.
+        if (firstIssue) context.emit(state, "duel_created", { firstPlay: claims.firstPlay }, now);
+        return Object.freeze({ ok: true, challengeToken, challenge, firstIssue });
       } catch (error) {
         return refusalFor(error, titles);
       }
@@ -188,7 +198,7 @@ export const duelAuthority = (context: DuelContext): DuelAuthority => {
         console.error("DUEL_REFUSED DEAL_DRIFT");
         return refusal("DEAL_DRIFT", claims.deck);
       }
-      const game = context.start(claims.deck, dealt, now, { arms: challengedArms(claims.arms, switches), record: DUEL_EVENTS && record },
+      const game = context.start(claims.deck, dealt, now, { arms: challengedArms(claims.arms, switches), record },
         { kind: "duel", challenge: claims.id });
       return Object.freeze({ ok: true, game, challenge });
     },
@@ -204,7 +214,15 @@ export const duelAuthority = (context: DuelContext): DuelAuthority => {
           max: claims.max, challenger: { rounds: claims.rounds, firstPlay: claims.firstPlay },
           challenged: { rounds: roundsOf(state), play: state.priorPlays + 1 }, at: now,
         };
-        return Object.freeze({ ok: true, resultToken: sealResult(result), comparison: comparison(result) });
+        const resultToken = sealResult(result);
+        const shown = comparison(result);
+        // The friend's game records the duel once, at its first result, from the friend's side: how it went and what
+        // decided it, never the challenge, the challenger's game, or their score.
+        if (markIssued(resultMark(state.gameId), now)) {
+          const { winner, decidedBy } = shown.verdict;
+          context.emit(state, "duel_completed", { outcome: OUTCOMES[winner ?? "draw"], decidedBy }, now);
+        }
+        return Object.freeze({ ok: true, resultToken, comparison: shown });
       } catch (error) {
         return refusalFor(error, titles);
       }

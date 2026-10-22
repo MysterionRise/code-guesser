@@ -1,7 +1,7 @@
 import type { ArmComparison, Interval } from "./statistics";
-import type { FactorReport, Interaction, Report } from "./report";
+import type { DuelReport, FactorReport, Interaction, Report } from "./report";
 
-/** The report as Markdown: the plan first, then whether it may be read, then each factor and the interactions. */
+/** The report as Markdown: the plan first, then whether it may be read, then each factor, the interactions, and the duels. */
 
 const percent = (value: number | null): string => value === null ? "—" : `${(value * 100).toFixed(1)}%`;
 const points = (value: number): string => `${value >= 0 ? "+" : "−"}${Math.abs(value * 100).toFixed(1)}`;
@@ -59,6 +59,33 @@ const interactionSection = ({ factors: [rows, columns], cells }: Interaction): s
   })]))].join("\n");
 };
 
+const FIRST_PLAY_NAMES: Readonly<Record<string, string>> = { yes: "first try", no: "a later try", shared: "today's five" };
+
+/** `a 3, b 1`: each value's count, in the schema's order. */
+const counts = (tallies: Readonly<Record<string, number>>, names: Readonly<Record<string, string>> = {}): string =>
+  Object.entries(tallies).map(([value, total]) => `${names[value] ?? value} ${count(total)}`).join(", ");
+
+const duelSection = (duels: DuelReport, completed: number): string => {
+  const results = Object.values(duels.outcomes).reduce((sum, own) => sum + own, 0);
+  const rates = table(["Factor", "Level", "Completed", "Challenged", "Challenge rate"], duels.challenges.map(({ factor, level, completed: own, challenged }) => [
+    factor, level, count(own), count(challenged), percent(own === 0 ? null : challenged / own),
+  ]));
+  return [
+    "## Duels",
+    "",
+    "Descriptive only, outside the pre-registered plan. A friend's game of a challenge plays the challenger's arms, which were never drawn for it, so duel games count in none of the comparisons above.",
+    "",
+    `Challenges: ${count(duels.challenged)} from ${count(completed)} completed games (${percent(completed === 0 ? null : duels.challenged / completed)}); ${counts(duels.firstPlay, FIRST_PLAY_NAMES)}.`,
+    "",
+    rates,
+    "",
+    `Friends' games: ${count(duels.dealt)} dealt, ${count(duels.completed)} completed, ${count(duels.rematches)} ended in a rematch. Results: ${count(results)}, the friend ${counts(duels.outcomes)}; decided by ${counts(duels.decidedBy)}.`,
+    "",
+    `Links sent: ${Object.entries(duels.links).map(([link, routes]) =>
+      `${link} ${count(Object.values(routes).reduce((sum, own) => sum + own, 0))} (${counts(routes, { share: "share sheet" })})`).join(", ")}.`,
+  ].join("\n");
+};
+
 export const renderReport = (report: Report): string => {
   const window = report.from === null ? `no games up to ${report.to}` : `${report.from} to ${report.to}`;
   const notes = [
@@ -71,7 +98,7 @@ export const renderReport = (report: Report): string => {
   return [
     "# CodeGuessr experiment report",
     "",
-    `Source: ${report.source} · ${window} · ${count(report.games)} games, ${count(report.completed)} completed.`,
+    `Source: ${report.source} · ${window} · ${count(report.games)} games, ${count(report.completed)} completed · ${count(report.duels.dealt)} duel games, outside the comparisons.`,
     ...(notes.length > 0 ? ["", ...notes] : []),
     "",
     "## Pre-registered plan",
@@ -82,6 +109,7 @@ export const renderReport = (report: Report): string => {
     `- Each factor's levels are compared with its control: Beta posteriors under a uniform prior, 95% intervals, and P(best). Targets detect a ${report.plan.lift * 100}-point rise over ${report.plan.base * 100}% with power ${report.plan.power}, at α ${report.plan.alpha} split over the factor's comparisons with control: ${Object.entries(report.plan.targets).map(([factor, target]) => `${factor} ${count(target)}`).join(", ")} completed games per level.`,
     `- Read the result when every level reaches its target, or after ${report.plan.maximumDays} days, whichever comes first.`,
     "- Playtest and synthetic events are reported only on their own (`--source`), never mixed with real games.",
+    "- Only games of a deal count. A friend's game of a duel challenge plays the challenger's arms, so it is described under Duels instead.",
     "",
     readiness,
     "",
@@ -91,5 +119,7 @@ export const renderReport = (report: Report): string => {
     "Deal-again rate (completed games) for each pair of factors. These are descriptive only: the plan makes no claim about them.",
     "",
     ...report.interactions.flatMap((pair) => [interactionSection(pair), ""]),
+    duelSection(report.duels, report.completed),
+    "",
   ].join("\n");
 };
