@@ -3,6 +3,7 @@
 import dynamic from "next/dynamic";
 
 import type { HintRequest, HintResponse, RevealRequest, RevealResponse } from "../components/arcade";
+import type { GameRecords } from "../components/arcade/local-records";
 import type { PublicModeContract } from "../components/arcade/mode-contract";
 import type { GameDuel } from "../components/duel/duel-contract";
 import type { Design } from "../genui/designs";
@@ -24,6 +25,7 @@ interface DemoArcadeProps {
   readonly roundDecks?: Readonly<Record<string, string>>;
   readonly genuiDesign?: Design;
   readonly duel?: GameDuel;
+  readonly records?: GameRecords;
 }
 
 export function DemoArcade(props: DemoArcadeProps) {

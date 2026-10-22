@@ -9,6 +9,7 @@ import type { GameDuel } from "../duel/duel-contract";
 import { OpponentStrip } from "../duel/duel-game";
 import { useFragmentNames } from "../duel/duel-names";
 import { DEFAULT_NAME } from "../duel/duel-text";
+import { localDate } from "../local-date";
 import { AnswerOptions } from "./answer-options";
 import {
   createArcadeSession,
@@ -22,6 +23,7 @@ import {
 import { RATE_LIMITED_MESSAGE, SESSION_ENDED_MESSAGE, points } from "./arcade-text";
 import { CodePanes } from "./code-panes";
 import { HintBar } from "./hint-bar";
+import { keepGame, type GameRecords } from "./local-records";
 import { LINE_KINDS, optionLine, type PublicModeContract } from "./mode-contract";
 import { ArcadeHeader, RoundTrack } from "./round-header";
 import { QuestionScaffold, markedLines } from "./question-layer";
@@ -50,9 +52,11 @@ interface ArcadeShellProps {
   genuiDesign?: Design;
   /** When set, a finished game can challenge a friend, or this game answers a friend's challenge (#173). */
   duel?: GameDuel;
+  /** When set, a finished game joins the player's records in this browser (#63), under this round set and deck. */
+  records?: GameRecords;
 }
 
-export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealHintAction, chooseAnotherDeckHref, newGameHref, shareHref, deckTitle, roundDecks, genuiDesign, duel }: ArcadeShellProps) {
+export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealHintAction, chooseAnotherDeckHref, newGameHref, shareHref, deckTitle, roundDecks, genuiDesign, duel, records }: ArcadeShellProps) {
   const [session, setSession] = React.useState(() => createArcadeSession(mode));
   // A challenge link names its challenger in its fragment, which only the browser reads (#173).
   const opponentName = useFragmentNames().from;
@@ -100,6 +104,14 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
   }, [track]);
   const roundNumber = session.roundIndex + 1;
   const trackGenui = React.useCallback((event: GenuiEvent) => track({ ...event, round: roundNumber }), [track, roundNumber]);
+
+  // A finished game joins the player's records (#63), once, in this browser alone: nothing is sent anywhere.
+  const kept = React.useRef(false);
+  React.useEffect(() => {
+    if (session.status !== "complete" || records === undefined || kept.current) return;
+    kept.current = true;
+    keepGame(records.artifact, { deck: records.deck, score: session.score, correct: session.correctRounds, date: records.date }, localDate(new Date()));
+  }, [session.status, session.score, session.correctRounds, records]);
 
   // Keyboard and screen-reader users land on the verdict after answering and on the next prompt after
   // moving on; the first render leaves focus alone.

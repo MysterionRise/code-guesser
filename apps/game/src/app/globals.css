@@ -308,6 +308,12 @@ noscript { display: block; padding: 12px; margin-bottom: 16px; background: var(-
 .candidate.missed { border-color: var(--miss); background: var(--miss-bg); }
 .answer-line { margin: 0 0 8px; }
 .deck-size { color: var(--subtle); font-size: .88rem; }
+/* The player's records (#63), which only their browser holds. */
+.deck-record { color: var(--text); font-size: .88rem; font-weight: 700; }
+.records-clear { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin-top: 28px; }
+.records-clear p { margin: 0; flex-basis: 100%; }
+.records-clear button { border: 2px solid var(--accent); border-radius: var(--radius-control); padding: 8px 14px; background: transparent; color: var(--accent); font-weight: 700; cursor: pointer; }
+.records-status { margin: 28px 0 0; font-weight: 700; }
 .deck-link { margin-right: 16px; }
 @media (max-width: 760px) { .code-panes.compare { grid-template-columns: 1fr; } }
 @media (min-width: 640px) { .deck-list { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

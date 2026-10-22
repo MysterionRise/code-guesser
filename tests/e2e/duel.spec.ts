@@ -229,11 +229,17 @@ test("two tabs of one browser share nothing: the friend's tab names only what it
   await playRound(second, RIGHT);
   expect(await stripMarks(second)).toEqual(["1 ✓", "?", "?", "?", "?"]);
   await expect(second.locator(".reveal .duel-line")).toHaveText("A friend: right, no hints, +1,000 points.");
-  // The first tab's finished game is as it was, and neither tab keeps anything in storage.
+  // The first tab's finished game is as it was, and neither tab keeps anything in storage but the player's own records
+  // (#63), which name no one and hold no round.
   await expect(first.locator(".arcade-header .score")).toHaveText(total);
   await expect(first.locator(".duel-share .share-status")).toHaveText("Challenge link copied");
   await expect(first.locator(".duel-strip")).toHaveCount(0);
-  for (const tab of [first, second]) expect(await tab.evaluate(() => localStorage.length + sessionStorage.length)).toBe(0);
+  for (const tab of [first, second]) {
+    expect(await tab.evaluate(() => ({ local: Object.keys(localStorage), session: sessionStorage.length }))).toEqual({ local: ["codeguessr.records"], session: 0 });
+  }
+  const kept = await first.evaluate(() => localStorage.getItem("codeguessr.records")!);
+  expect(kept).not.toContain("Ana");
+  expect(Object.keys((JSON.parse(kept) as { decks: object }).decks)).toEqual(["algorithm"]);
   expect(await context.cookies()).toEqual([]);
   await context.close();
 });
