@@ -88,6 +88,14 @@ export const assignArms = ({ genuiEnabled, disabled, overrides = {}, random = Ma
 };
 
 /**
+ * A challenger's arms as their friend plays them (#173): the same theme and question layer, so both see the same
+ * scaffolds and are sold the same hints, and the same design while generative UI is on and the design isn't switched
+ * off; otherwise the static game.
+ */
+export const challengedArms = (arms: Arms, { genuiEnabled, disabled }: Pick<AssignOptions, "genuiEnabled" | "disabled">): Arms =>
+  Object.freeze({ ...arms, design: genuiEnabled && !disabled.has(`design:${arms.design}`) ? arms.design : CONTROL.design });
+
+/**
  * Lab mode lets a local tester pick levels by query and shows the Lab bar: on with `EXPERIMENT_LAB=1`, or under
  * `next dev`. A public server (`CODEGUESSR_PUBLIC=1`, #97) leaves it off, so the draw stands, except for a smoke run
  * whose events are tagged `agent` or `synthetic` (`EXPERIMENT_SOURCE`) and so never mix with real games.

@@ -88,7 +88,7 @@ test("browser and gameplay dependency surfaces exclude acquisition capabilities"
     "apps/game/src/middleware.ts",
   ]);
   const eventsRoute = read(join(game, "src", "app", "api", "events", "route.ts"));
-  assert.match(eventsRoute, /const MAX_BODY_LENGTH = 1024;/u);
+  assert.match(eventsRoute, /const MAX_BODY_LENGTH = 2048;/u);
   assert.deepEqual([...eventsRoute.matchAll(/experiment\.(\w+)\(/gu)].map(([, method]) => method), ["recordClientEvent"]);
   const genuiRoute = read(join(game, "src", "app", "api", "genui", "route.ts"));
   assert.match(genuiRoute, /process\.env\.GENUI_ENABLED !== "1"/u);
