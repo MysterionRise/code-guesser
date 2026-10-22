@@ -73,7 +73,8 @@ describe("deck leakage", () => {
     if (deck("vulnerable-line") !== undefined) memoryWithinReplay(deck("vulnerable-line")!.fixtures);
   });
 
-  // #81: six families of four, each member the answer once, so three reveals in a family give the fourth away;
+  // #81: six families of four, so a family's reveals rule its members out. Answering each member twice (v7) halved
+  // the gain, to 36.4% in game two against replaying reveals' 32.8% (v6: 48.0% against 40.6%), still past the slack;
   // breaking the families needs the two the profile left out, which the journal does not hold.
   it.runIf(deck("algorithm") !== undefined).fails("remembering algorithm reveals earns little beyond replaying them (#81)", () => {
     memoryWithinReplay(deck("algorithm")!.fixtures);
@@ -97,7 +98,7 @@ describe("deck leakage", () => {
     expect(accuracy(fixtures, paneOverlapSolver)).toBeLessThanOrEqual(chance(fixtures[0]!) + TOLERANCE);
   });
 
-  it.runIf(deck("algorithm") !== undefined)("algorithm options are whole families, each member the answer once", () => {
+  it.runIf(deck("algorithm") !== undefined)("algorithm options are whole families, each member answered equally often", () => {
     const { fixtures } = deck("algorithm")!;
     const limit = chance(fixtures[0]!) + TOLERANCE;
     for (const solver of [sameOptionsSolver(fixtures), frequencySolver(fixtures), raritySolver(fixtures), alphabeticalSolver]) {

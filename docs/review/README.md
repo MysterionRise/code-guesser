@@ -1,9 +1,10 @@
 # Reviews and plans
 
-Current state, 2026-10-20: Phases 0 to 3b of the deck pipeline are merged into
-`main`, and the v1.0 data run has frozen ten decks in one committed artifact
-(schema `local-experiment-artifact.v5`, profile `local-real-rounds.v6`): 296
-rounds, each deck a pool of 20 to 52, and a game deals five. The public-app track (#109) has
+Current state, 2026-10-21: Phases 0 to 3b of the deck pipeline are merged into
+`main`, and the v7 data run (v1.1, #167) has frozen ten decks in one committed artifact
+(schema `local-experiment-artifact.v6`, profile `local-real-rounds.v7`): 422
+rounds, each deck a pool of 30 to 52, and a game deals five. The v1.0 data run's
+artifact held 296. The public-app track (#109) has
 merged Phases 1 and 2. **v1.0** (milestone #4, checklist #130) is merged:
 - more decks and bigger pools;
 - a cleaner UI;
@@ -38,7 +39,7 @@ designs with an anonymous first-party event log.
 | 1 | Server-held game state; the answer-lock guard; generative UI on the Vercel AI SDK through OpenRouter, behind `GENUI_ENABLED`; fixes from the first live check | #110, #111, #112, and this phase's completion PR | #96, #102, #101; [live check](evidence/2026-10-14-genui-live-check.md) |
 | 2 | Open-ended designs compared locally: a design switcher, the json-render composer, a sandboxed visualizer, and the host chat; a Claude Code agent playtest team and the fixes from its first run | #117, #118, #119, and #116's PR | #114, #115, #104, #116; [agent playtest](evidence/2026-10-14-agent-playtest.md) |
 | v1.0 | Arm assignment and the event log, the report, themes, question layers, the UI pass, the v6 data run, and agent playtest run 2; hardening comes after | #131–#162; [release notes](../releases/v1.0.0.md) | #106–#108, #125–#130; [language option sets](evidence/2026-10-15-language-pairing-offline.md), [v6 leak rules dry run](evidence/2026-10-19-v6-leak-rules-dry-run.md), [v6 data run](evidence/2026-10-19-v6-data-run.md), [agent playtest run 2](evidence/2026-10-20-agent-playtest-run-2.md) |
-| v1.1 | Planned 2026-10-20: public launch on one instance of the owner's server, async duel challenge links, bigger pools from the current sources (profile v7), Node 24, and a dated change log for the experiment | planned | #164–#174 (checklist #174); [next-phase plan](2026-10-20-next-phase-plan.md), [v7 dry run](evidence/2026-10-21-v7-dry-run.md) |
+| v1.1 | Planned 2026-10-20: public launch on one instance of the owner's server, async duel challenge links, bigger pools from the current sources (profile v7), Node 24, and a dated change log for the experiment | in progress; the v7 data run (422 rounds) is in | #164–#174 (checklist #174); [next-phase plan](2026-10-20-next-phase-plan.md), [v7 dry run](evidence/2026-10-21-v7-dry-run.md), [v7 data run](evidence/2026-10-21-v7-data-run.md) |
 
 - [Architecture](../architecture.md): the flow from preparation to play, the
   artifact's shape, and a glossary.
