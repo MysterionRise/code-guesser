@@ -1,8 +1,10 @@
+import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { FACTORS, type Arms } from "../../apps/game/src/experiment/arms";
+import { MAXIMUM_CHANGE_LENGTH, parseChanges, parsePeriod, readChanges } from "./changes";
 import { buildReport, layerDecksFrom, readStore, targetFor, type Report } from "./report";
 import { renderReport } from "./render";
 import { compareArms, normalQuantile, sampleSize } from "./statistics";
@@ -19,13 +21,15 @@ afterEach(() => { for (const directory of stores.splice(0)) rmSync(directory, { 
 const LAYER_DECKS = ["algorithm", "language"];
 
 /**
- * A synthetic store: `perCell` games for every combination of levels, on the given decks in turn, each dealt and played
- * to the end. Successes are handed out by quota rather than drawn, so each group's rates are exactly what `effects`
- * gives (deal-again per arms and deck, accuracy per arms) and a test checks the report, not a seed's luck.
+ * A synthetic store: `perCell` games for every combination of levels, on the given decks in turn, each dealt, viewed,
+ * and played to the end. Successes are handed out by quota rather than drawn, so each group's rates are exactly what
+ * `effects` gives (deal-again per arms and deck, accuracy per arms) and a test checks the report, not a seed's luck.
+ * `into` adds the games to another store's directory, on their own day, and the result counts both.
  */
-const syntheticStore = (perCell: number, effects: Effects = {}, options: Readonly<{ decks?: readonly string[]; source?: string; day?: string }> = {}): Store => {
-  const directory = mkdtempSync(join(tmpdir(), "codeguessr-report-"));
-  stores.push(directory);
+const syntheticStore = (perCell: number, effects: Effects = {},
+  options: Readonly<{ decks?: readonly string[]; source?: string; day?: string; into?: Store }> = {}): Store => {
+  const directory = options.into?.directory ?? mkdtempSync(join(tmpdir(), "codeguessr-report-"));
+  if (options.into === undefined) stores.push(directory);
   const quotas = new Map<string, { trials: number; successes: number }>();
   const succeeds = (key: string, rate: number): boolean => {
     const quota = quotas.get(key) ?? { trials: 0, successes: 0 };
@@ -38,7 +42,7 @@ const syntheticStore = (perCell: number, effects: Effects = {}, options: Readonl
   const decks = options.decks ?? ["algorithm", "fix"];
   const day = options.day ?? "2026-11-02";
   const lines: string[] = [];
-  let games = 0;
+  let games = options.into?.games ?? 0;
   for (const design of FACTORS.design) for (const theme of FACTORS.theme) for (const layer of FACTORS.layer) {
     for (let index = 0; index < perCell; index += 1) {
       const arms: Arms = { design, theme, layer };
@@ -47,6 +51,7 @@ const syntheticStore = (perCell: number, effects: Effects = {}, options: Readonl
       const base = { v: 1, game, day, source: options.source ?? "real", deck, ...arms };
       const event = (type: string, fields: Record<string, unknown> = {}) => lines.push(JSON.stringify({ ...base, type, ...fields }));
       event("game_dealt");
+      event("game_viewed", { viewport: "phone" });
       let correct = 0;
       for (let round = 1; round <= 5; round += 1) {
         const right = succeeds(`accuracy ${design} ${theme} ${layer}`, effects.accuracy?.(arms) ?? 0.5);
@@ -57,7 +62,7 @@ const syntheticStore = (perCell: number, effects: Effects = {}, options: Readonl
       if (succeeds(`deal ${design} ${theme} ${layer} ${deck}`, effects.dealAgain?.(arms, deck) ?? 0.3)) event("deal_again", { to: "same-deck" });
     }
   }
-  writeFileSync(join(directory, `events-${day}.jsonl`), `${lines.join("\n")}\n`);
+  writeFileSync(join(directory, `events-${day}.jsonl`), `${lines.join("\n")}\n`, { flag: "a" });
   return { directory, games };
 };
 
@@ -184,10 +189,128 @@ describe("experiment report", () => {
 
   it("renders the plan, each factor, and the interactions as descriptive tables", () => {
     const markdown = renderReport(report(syntheticStore(3)));
-    for (const heading of ["## Pre-registered plan", "## Design", "## Theme", "## Layer", "### design × theme", "### theme × layer"]) {
+    for (const heading of ["## Changes", "## Pre-registered plan", "## Design", "## Theme", "## Layer", "### design × theme", "### theme × layer"]) {
       expect(markdown).toContain(heading);
     }
+    expect(markdown).toContain("No player-visible change is dated inside this window");
     expect(markdown).toContain("off (control)");
     expect(markdown).toContain("descriptive only");
+  });
+
+  it("counts completion over viewed games, so a crawler's or a link preview's deal never lowers it (#169)", () => {
+    const store = syntheticStore(1);
+    const line = (game: string, type: string, fields: Record<string, unknown> = {}) => JSON.stringify({ v: 1, type, game, day: "2026-11-02",
+      source: "real", deck: "fix", design: "off", theme: "terminal", layer: "off", ...fields });
+    // Three deals no browser ran, and one game a player opened and left after a round.
+    const extra = ["a", "b", "c"].map((id) => line(id.repeat(32), "game_dealt"));
+    extra.push(line("d".repeat(32), "game_dealt"), line("d".repeat(32), "game_viewed", { viewport: "phone" }),
+      line("d".repeat(32), "round_revealed", { round: 1, correct: true, hints: 0, ms: 9000 }));
+    writeFileSync(join(store.directory, "events-2026-11-02.jsonl"), `${extra.join("\n")}\n`, { flag: "a" });
+    const built = report(store);
+    expect(built).toMatchObject({ v: 2, games: store.games + 4, viewed: store.games + 1, completed: store.games });
+    // Control's cells hold one played game each, and the four extra games: completion is over the viewed ones only.
+    const control = level(built, "design", "off").secondary;
+    expect(control.games).toBe(FACTORS.theme.length * FACTORS.layer.length + 4);
+    expect(control.completion).toBeCloseTo((control.games - 4) / (control.games - 3), 9);
+    expect(renderReport(built)).toContain(`${built.games} games, ${built.viewed} viewed, ${built.completed} completed.`);
+  });
+
+  it("splits a window at each change, and reads one period between changes on its own (#169)", () => {
+    // The host chat lifts the deal-again rate until a change on 2026-11-05 takes the lift away.
+    const before = syntheticStore(20, { dealAgain: ({ design }) => design === "host" ? 0.6 : 0.3 }, { day: "2026-11-02" });
+    const store = syntheticStore(20, {}, { day: "2026-11-05", into: before });
+    const changes = parseChanges([
+      { date: "2026-11-05", change: "The host chat answers | in one line.", factors: ["design"], pr: 210 },
+      { date: "2026-11-20", change: "A new artifact.", factors: ["all"] },
+    ])!;
+    const whole = report(store, { to: "2026-11-10", changes });
+    expect(whole.games).toBe(store.games);
+    expect(whole.changes.map(({ date }) => date)).toEqual(["2026-11-05"]);
+    expect(whole.periods).toEqual([{ from: "2026-11-02", to: "2026-11-04" }, { from: "2026-11-05", to: "2026-11-10" }]);
+    const markdown = renderReport(whole);
+    expect(markdown).toContain("| 2026-11-05 | The host chat answers \\| in one line. | design | #210 |");
+    expect(markdown).not.toContain("A new artifact.");
+    expect(markdown).toContain("Read one at a time: `--period=2026-11-02..2026-11-04`, `--period=2026-11-05..2026-11-10`.");
+
+    const periodReport = (text: string): Report => {
+      const asked = parsePeriod(text, changes);
+      if (!("period" in asked)) throw new Error(asked.refused);
+      const { from, to } = asked.period;
+      return buildReport({ read: readStore(store.directory, "real", from, to), source: "real", to, layerDecks: LAYER_DECKS, changes, period: asked.period });
+    };
+    const first = periodReport("2026-11-02..2026-11-04");
+    expect(first).toMatchObject({ games: before.games, changes: [], periods: [{ from: "2026-11-02", to: "2026-11-04" }] });
+    expect(level(first, "design", "host").primary.difference!.low).toBeGreaterThan(0);
+    const second = periodReport("2026-11-05..2026-11-10");
+    expect(second.games).toBe(store.games - before.games);
+    const { difference } = level(second, "design", "host").primary;
+    expect(difference!.low).toBeLessThan(0);
+    expect(difference!.high).toBeGreaterThan(0);
+    // The change that starts a period is listed with it.
+    expect(second.changes.map(({ pr }) => pr)).toEqual([210]);
+    expect(renderReport(second)).toContain("Period: 2026-11-05 to 2026-11-10, one stretch between player-visible changes");
+    expect(renderReport(second)).not.toContain("--period=");
+  });
+});
+
+describe("the change log (#169)", () => {
+  const entry = (fields: Record<string, unknown> = {}) => ({ date: "2026-11-03", change: "The host chat gets a hint button.", factors: ["design"], ...fields });
+
+  it("parses the committed log, empty until launch day", () => {
+    expect(readChanges(join(process.cwd(), "ops/experiment/changes.json"))).toEqual([]);
+    expect(readChanges(join(tmpdir(), "codeguessr-no-such-changes.json"))).toBeNull();
+  });
+
+  it("takes exact keys, real days in order, one line of text, and known factors, `all` alone", () => {
+    expect(parseChanges([entry(), entry({ factors: ["theme", "layer"], pr: 212 }), entry({ date: "2026-11-09", factors: ["all"] })]))
+      .toEqual([entry(), entry({ factors: ["theme", "layer"], pr: 212 }), entry({ date: "2026-11-09", factors: ["all"] })]);
+    for (const refused of [
+      {}, [null], [entry({ note: "x" })], [{ date: "2026-11-03", change: "x" }], [entry({ date: "2026-11-31" })],
+      [entry({ date: "2026-11-04" }), entry({ date: "2026-11-03" })],
+      [entry({ change: "" })], [entry({ change: " padded" })], [entry({ change: "two\nlines" })], [entry({ change: "x".repeat(MAXIMUM_CHANGE_LENGTH + 1) })],
+      [entry({ factors: [] })], [entry({ factors: ["colour"] })], [entry({ factors: ["design", "design"] })], [entry({ factors: ["all", "theme"] })],
+      [entry({ pr: 0 })], [entry({ pr: "212" })], [entry({ pr: null })],
+    ]) {
+      expect(parseChanges(refused), JSON.stringify(refused)).toBeNull();
+    }
+  });
+
+  it("reads `--period` as two real days in order with no change inside, though a change may start it", () => {
+    const changes = parseChanges([entry({ date: "2026-11-05" })])!;
+    expect(parsePeriod("2026-11-01..2026-11-04", changes)).toEqual({ period: { from: "2026-11-01", to: "2026-11-04" } });
+    expect(parsePeriod("2026-11-05..2026-11-30", changes)).toEqual({ period: { from: "2026-11-05", to: "2026-11-30" } });
+    expect(parsePeriod("2026-11-03..2026-11-03", changes)).toEqual({ period: { from: "2026-11-03", to: "2026-11-03" } });
+    expect(parsePeriod("2026-11-01..2026-11-05", changes)).toEqual({ refused: "PERIOD_SPANS_CHANGE" });
+    for (const malformed of ["2026-11-01", "2026-11-01..", "2026-11-04..2026-11-01", "2026-11-01..2026-11-31", "2026-11-01..2026-11-02..2026-11-03",
+      "11/01..11/04"]) {
+      expect(parsePeriod(malformed, changes), malformed).toEqual({ refused: "PERIOD_MALFORMED" });
+    }
+  });
+});
+
+describe("pnpm experiment:report (#169)", () => {
+  /** The command as an operator runs it, on a store of its own; it reads the committed change log. */
+  const run = (...args: string[]) => spawnSync(process.execPath, ["--import", "tsx", "ops/experiment/index.ts", ...args], {
+    cwd: process.cwd(), encoding: "utf8", env: { ...process.env, EXPERIMENT_EVENTS_DIR: "" },
+  });
+
+  it("reads one period when `--period` names two days in order, and refuses anything else with a code", () => {
+    const store = syntheticStore(1);
+    const read = run(`--dir=${store.directory}`, "--period=2026-11-01..2026-11-03");
+    expect(read.stderr).toBe("");
+    expect(read.status).toBe(0);
+    expect(read.stdout).toContain("Period: 2026-11-01 to 2026-11-03");
+    expect(read.stdout).toContain(`${store.games} games, ${store.games} viewed, ${store.games} completed.`);
+    for (const [args, code] of [
+      [["--period=2026-11-03..2026-11-01"], "EXPERIMENT_REPORT_PERIOD_MALFORMED"],
+      [["--period=2026-11-01..2026-11-31"], "EXPERIMENT_REPORT_PERIOD_MALFORMED"],
+      [["--period=2026-11-01..2026-11-03", "--from=2026-11-01"], "EXPERIMENT_REPORT_ARGUMENTS"],
+      [["--period=2026-11-01..2026-11-03", "--to=2026-11-03"], "EXPERIMENT_REPORT_ARGUMENTS"],
+    ] as const) {
+      const refused = run(`--dir=${store.directory}`, ...args);
+      expect(refused.status, args.join(" ")).toBe(1);
+      expect(refused.stderr.split("\n")[0], args.join(" ")).toBe(code);
+      expect(refused.stdout).toBe("");
+    }
   });
 });
