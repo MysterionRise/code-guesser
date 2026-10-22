@@ -38,7 +38,7 @@ export const dailyRandom = (artifactHash: string, date: string): (() => number) 
 const DAY_MS = 86_400_000;
 /**
  * The date a page's address asks today's five for (#172): the player's own, which only their browser knows
- * (`localDate` in `components/daily-link.tsx`). A real date within a day of the server's UTC date is dealt, which
+ * (`localDate` in `components/local-date.ts`). A real date within a day of the server's UTC date is dealt, which
  * covers every time zone from UTC−12 to UTC+14; any other is null, so no address deals a five that isn't today's
  * somewhere.
  */

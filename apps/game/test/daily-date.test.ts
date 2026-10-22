@@ -14,7 +14,7 @@ const { SESSION_DECK_IDS } = await import("../src/demo/local-real-experiment-dom
 const { parseEvent } = await import("../src/experiment/events");
 const { storeSink } = await import("../src/experiment/event-store.server");
 const { dailyDateOf } = await import("../src/demo/local-real-experiment-deal.server");
-const { localDate } = await import("../src/components/daily-link");
+const { localDate } = await import("../src/components/local-date");
 const { SURFACES } = await import("../src/server/rate-limit.server");
 
 /** An event store in memory, holding to the same parser as the file store. */

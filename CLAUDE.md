@@ -157,8 +157,9 @@ gate: changing queries, retries, ceilings, deck rules, or running
   `attainableMaximum` is the sum of its rounds' top points.
 - **Today's five on the player's date (#172):** the date is the browser's, in the address (`&date=YYYY-MM-DD`).
   `dailyDateOf` (deal module) accepts a real date within a day of the server's UTC date (UTC−12 to UTC+14). A bare
-  `/?deck=daily` renders `DailyRedirect` (`components/daily-link.tsx`, which also holds `localDate` and the chooser's
-  `DailyCard`): it deals, spends, and records nothing, and `location.replace`s itself with the local date. A refused
+  `/?deck=daily` renders `DailyRedirect` (`components/daily-link.tsx`, beside the chooser's `DailyCard`; the date is
+  `localDate` in `components/local-date.ts`): it deals, spends, and records nothing, and `location.replace`s itself with
+  the local date. A refused
   date renders "That day's five isn't open". The deck title, the sealed `daily {date}` (so a challenge's date), the
   share link, and "Play again" (`&replay=1`, sealed `record: false`) all carry the player's date.
 - **Seeded deals (#40):** a deck's or the mix's address without `&deal=<8 hex>&game=<n>` redirects to a fresh seed's

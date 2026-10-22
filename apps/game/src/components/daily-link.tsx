@@ -2,14 +2,12 @@
 
 import * as React from "react";
 
+import { localDate } from "./local-date";
+
 /**
  * Today's five on the player's own date (#172). Only the browser knows that date, so the chooser's card and a bare
  * `/?deck=daily` add it here; the server deals it only within a day of its own (`dailyDateOf`).
  */
-
-/** A date as the player's machine names it, `YYYY-MM-DD`. */
-export const localDate = (now: Date): string =>
-  `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 
 /** Today's five on a date; `query` carries a lab tester's picks. */
 const dailyHref = (date: string, query: string): string => `/?deck=daily&date=${date}${query}`;
