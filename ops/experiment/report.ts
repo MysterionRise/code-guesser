@@ -4,15 +4,19 @@ import { join } from "node:path";
 import { CONTROL, FACTORS, type Arms, type Factor } from "../../apps/game/src/experiment/arms";
 import { isDay, parseEvent, type EventSource, type ExperimentEvent } from "../../apps/game/src/experiment/events";
 import { DECK_IDS } from "../../packages/artifact/src/index";
+import { changesWithin, periodsOf, type Change, type Period } from "./changes";
 import { compareArms, median, percentile95, sampleSize, type ArmComparison } from "./statistics";
 
 /**
  * The experiment report (#108): reads the event store (#107) with no network and compares each factor's levels
  * (#106) on the pre-registered primary metric, with the secondary metrics and the accuracy guardrail beside it.
- * Factors are drawn independently, so each factor's comparison counts every game, whatever its other levels.
+ * Factors are drawn independently, so each factor's comparison counts every game, whatever its other levels. The game
+ * keeps changing after launch, so the report lists the dated changes in its window and can read one period between
+ * them (#169).
  */
 
-export const REPORT_VERSION = 1;
+/** Version 2 (#169): completion counts viewed games, and the report carries its changes, periods, and viewed count. */
+export const REPORT_VERSION = 2;
 const FACTOR_NAMES = Object.keys(FACTORS) as Factor[];
 
 /** The decks a stored event may name: every artifact deck, the mix, and today's five. */
@@ -84,7 +88,8 @@ export interface Game {
   readonly deck: string;
   readonly arms: Arms;
   readonly firstDay: string;
-  readonly dealt: boolean;
+  /** Its page sent `game_viewed`, so a browser ran it; a crawler's or a link preview's deal never does (#169). */
+  readonly viewed: boolean;
   readonly completed: boolean;
   readonly dealtAgain: boolean;
   readonly rounds: readonly Readonly<{ correct: boolean; hints: number; ms: number }>[];
@@ -104,7 +109,7 @@ export const gamesOf = (events: readonly ExperimentEvent[]): readonly Game[] => 
       deck: first.deck,
       arms: Object.freeze(Object.fromEntries(FACTOR_NAMES.map((factor) => [factor, first[factor]]))) as Arms,
       firstDay: own.map(({ day }) => day).sort()[0]!,
-      dealt: of("game_dealt").length > 0,
+      viewed: of("game_viewed").length > 0,
       completed: of("game_completed").length > 0,
       dealtAgain: of("deal_again").length > 0,
       rounds: of("round_revealed").map((event) => ({ correct: event.correct === true, hints: event.hints as number, ms: event.ms as number })),
@@ -121,7 +126,7 @@ export type Prices = Readonly<{ input: number; output: number }> | null;
 /** The secondary metrics of a group of games. */
 export interface Secondary {
   readonly games: number;
-  /** Dealt games that reached their fifth round. */
+  /** Viewed games that reached their fifth round (#169): a deal no browser ran never counts against it. */
   readonly completion: number | null;
   readonly accuracy: number | null;
   readonly hintsPerRound: number | null;
@@ -136,7 +141,7 @@ const ratio = (part: number, whole: number): number | null => whole === 0 ? null
 const sum = (values: readonly number[]): number => values.reduce((total, value) => total + value, 0);
 
 export const secondaryOf = (games: readonly Game[], prices: Prices): Secondary => {
-  const dealt = games.filter(({ dealt: isDealt }) => isDealt);
+  const viewed = games.filter(({ viewed: isViewed }) => isViewed);
   const rounds = games.flatMap(({ rounds: own }) => own);
   const calls = games.flatMap(({ calls: own }) => own);
   const roundMs = median(rounds.map(({ ms }) => ms));
@@ -145,7 +150,7 @@ export const secondaryOf = (games: readonly Game[], prices: Prices): Secondary =
     : (sum(calls.map(({ tokensIn }) => tokensIn)) * prices.input + sum(calls.map(({ tokensOut }) => tokensOut)) * prices.output) / 1_000_000;
   return Object.freeze({
     games: games.length,
-    completion: ratio(dealt.filter(({ completed }) => completed).length, dealt.length),
+    completion: ratio(viewed.filter(({ completed }) => completed).length, viewed.length),
     accuracy: ratio(rounds.filter(({ correct }) => correct).length, rounds.length),
     hintsPerRound: ratio(sum(rounds.map(({ hints }) => hints)), rounds.length),
     medianRoundSeconds: roundMs === null ? null : roundMs / 1000,
@@ -186,10 +191,17 @@ export interface Report {
   readonly source: EventSource;
   readonly from: string | null;
   readonly to: string;
+  /** The one period between changes this report reads, when `--period` names it (#169). */
+  readonly period: Period | null;
   readonly games: number;
+  /** Games whose page sent `game_viewed`: completion's denominator. */
+  readonly viewed: number;
   readonly completed: number;
   readonly refused: number;
   readonly rolledUp: number;
+  /** The player-visible changes dated inside the window, and the periods between them that the window holds. */
+  readonly changes: readonly Change[];
+  readonly periods: readonly Period[];
   readonly plan: typeof PLAN & Readonly<{ targets: Readonly<Record<Factor, number>>; layerDecks: readonly string[] }>;
   /** The stopping rule: whether the result may be read now, and why not. */
   readonly readiness: Readonly<{ ready: boolean; day: number | null; short: readonly string[] }>;
@@ -240,12 +252,17 @@ const interaction = (pair: readonly [Factor, Factor], games: readonly Game[], la
   });
 };
 
-/** The whole report for one source's events, read up to `to`, the day the report is for. */
-export const buildReport = ({ read, source, to, layerDecks, prices = null }: Readonly<{
+/**
+ * The whole report for one source's events, read up to `to`, the day the report is for. Its window starts at the
+ * period it was asked for, or else at its first game, and `changes` is the whole log; the report keeps those inside.
+ */
+export const buildReport = ({ read, source, to, layerDecks, prices = null, changes = [], period = null }: Readonly<{
   read: StoreRead; source: EventSource; to: string; layerDecks: readonly string[]; prices?: Prices;
+  changes?: readonly Change[]; period?: Period | null;
 }>): Report => {
   const games = gamesOf(read.events);
   const from = games.length === 0 ? null : games.map(({ firstDay }) => firstDay).sort()[0]!;
+  const start = period?.from ?? from;
   const factors = FACTOR_NAMES.map((factor, index) => factorReport(factor, games, layerDecks, prices, 108 + 10 * index));
   const short = factors.flatMap(({ factor, levels }) => levels.filter(({ completed, target }) => completed < target)
     .map(({ level, completed, target }) => `${factor}:${level} ${completed}/${target}`));
@@ -255,10 +272,14 @@ export const buildReport = ({ read, source, to, layerDecks, prices = null }: Rea
     source,
     from,
     to,
+    period,
     games: games.length,
+    viewed: games.filter(({ viewed }) => viewed).length,
     completed: games.filter(({ completed }) => completed).length,
     refused: read.refused,
     rolledUp: read.rolledUp,
+    changes: changesWithin(changes, start, to),
+    periods: start === null ? Object.freeze([]) : periodsOf(changes, start, to),
     plan: Object.freeze({
       ...PLAN,
       targets: Object.freeze(Object.fromEntries(FACTOR_NAMES.map((factor) => [factor, targetFor(factor)]))) as Readonly<Record<Factor, number>>,

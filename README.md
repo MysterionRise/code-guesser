@@ -369,16 +369,26 @@ report (`--json=<path>` also writes it as JSON):
 
 ```bash
 EXPERIMENT_EVENTS_DIR=… pnpm experiment:report [--source=real|agent|synthetic] \
-  [--from=YYYY-MM-DD] [--to=YYYY-MM-DD] [--price-in=<USD/M>] [--price-out=<USD/M>]
+  [--from=YYYY-MM-DD] [--to=YYYY-MM-DD | --period=YYYY-MM-DD..YYYY-MM-DD] \
+  [--price-in=<USD/M>] [--price-out=<USD/M>]
 ```
 
 - **Plan:** the report opens with its pre-registered plan.
+- **Changes:** the game keeps changing after launch, so every player-visible
+  change is dated in [`ops/experiment/changes.json`](ops/experiment/changes.json)
+  (#169), as `{ "date", "change", "factors", "pr" }` with factors from
+  `design`, `theme`, `layer`, or `all`. The report lists the changes inside
+  its window and the periods they split it into. `--period=<from>..<to>`
+  reads one of those periods, and it is refused if a change falls inside it.
+  A change dated by the UTC day it went live starts the period that includes
+  that day.
 - **Primary metric:** the deal-again rate, the share of completed games whose
   player dealt new rounds or chose another deck. Each level gets a Beta
   posterior, a 95% interval, P(best), and its difference from control.
 - **Secondary metrics:** completion, hints per round, median time per round,
   chat turns, fallbacks, p95 model latency, and cost per game, which needs the
-  model's prices.
+  model's prices. Completion counts only viewed games, those whose page sent
+  `game_viewed`, so a crawler's or a link preview's deal never lowers it.
 - **Guardrail:** accuracy against control. A level whose accuracy is clearly
   higher may be leaking answers, and the report names the
   `EXPERIMENT_DISABLED` value that switches it off.
