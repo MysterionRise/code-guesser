@@ -47,7 +47,7 @@ const answerRounds = async (page: Page, full: number, firstRoundHint: boolean): 
 
 test("the root route offers every deck under the permanent notice", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByText(/Local unreviewed experiment/)).toBeVisible();
+  await expect(page.getByText(/chosen and checked automatically, not reviewed by hand/u)).toBeVisible();
   await expect(page.getByRole("heading", { level: 1, name: "Pick a deck" })).toBeVisible();
   expect(artifact.decks.map(({ id }) => id)).toEqual(["project", "language", "before-after", "algorithm", "output", "fix", "missing-line",
     "name-function", "framework", "exercise"]);
@@ -70,7 +70,7 @@ for (const deck of artifact.decks) {
     // A deck's link starts a fresh seeded deal at its first game (#40).
     await expect(page).toHaveURL(new RegExp(`\\?deck=${deck.id}&deal=[0-9a-f]{8}&game=0$`, "u"));
     const seed = new URL(page.url()).searchParams.get("deal")!;
-    await expect(page.getByText(/Local unreviewed experiment/)).toBeVisible();
+    await expect(page.getByText(/chosen and checked automatically, not reviewed by hand/u)).toBeVisible();
     if (deck.id === "before-after") await expect(page.locator("figcaption")).toHaveText(["Version A", "Version B"]);
 
     const first = await answerRounds(page, full, true);

@@ -79,6 +79,17 @@ test("the chooser and a deck's game carry every header, and a fresh nonce on eve
   expect(nonces.size).toBe(3);
 });
 
+test("About and the not-found page carry every header, and the request's nonce on every script they serve (#168)", async ({ request }) => {
+  for (const [path, status] of [["/about", 200], ["/no-such-page", 404]] as const) {
+    const response = await request.get(path);
+    expect(response.status(), path).toBe(status);
+    const nonce = checkPageHeaders(response);
+    const scripts = [...(await response.text()).matchAll(/<script\b[^>]*>/gu)].map(([tag]) => tag);
+    expect(scripts.length, path).toBeGreaterThan(0);
+    for (const script of scripts) expect(script, path).toContain(` nonce="${nonce}"`);
+  }
+});
+
 test("the visualizer's frame route serves a constant shell under the visualizer's own policy", async ({ request }) => {
   const responses = [await request.get("/genui/frame"), await request.get("/genui/frame?round=x")];
   for (const response of responses) {
