@@ -114,10 +114,14 @@ or `exercise`.
 
 Two cards come first in the chooser:
 
-- **Today's five** (`/?deck=daily`) deals a mixed game seeded by the artifact
-  and the local date. Every load that day deals the same five rounds in the
-  same order, and its share line carries the date. Its link is
-  `/?deck=daily` for now; #172 adds the date to it.
+- **Today's five** (`/?deck=daily&date=2026-10-22`) deals a mixed game seeded
+  by the artifact and the player's own date. The browser adds its date to a
+  bare `/?deck=daily`, which deals nothing itself. Every load of a date deals
+  the same five rounds in the same order, and its share line and link carry
+  the date. The server deals a date only within a day of its own UTC date,
+  which covers every time zone from UTC−12 to UTC+14, and refuses any other.
+  Once a game is done, "Play again" deals the same five again
+  (`&replay=1`) and records no events.
 - **Mixed** (`/?deck=mixed`) deals one round from each of five decks drawn at
   random. Each round's header names its deck, and the game scores up to the
   sum of its rounds' top points.

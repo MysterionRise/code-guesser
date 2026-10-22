@@ -53,15 +53,16 @@ function GameSummary({ history, result }: { readonly history: readonly RoundReco
 /**
  * Where a finished game can go next, and its spoiler-free share line (#171): through the browser's share sheet where
  * it has one, otherwise onto the clipboard. A status line says which, for screen readers too. A game of a seeded deal
- * or of today's five can also challenge a friend (#173).
+ * or of today's five can also challenge a friend (#173), and today's five can be played again (#172).
  */
-function CompletionActions({ result, correctRounds, history, deckTitle, shareHref, newGameHref, chooseAnotherDeckHref, challenge, sessionToken, track }: {
+function CompletionActions({ result, correctRounds, history, deckTitle, shareHref, newGameHref, replayHref, chooseAnotherDeckHref, challenge, sessionToken, track }: {
   readonly result: EntertainmentResultProjection;
   readonly correctRounds: number;
   readonly history: readonly RoundRecord[];
   readonly deckTitle: string | undefined;
   readonly shareHref: string | undefined;
   readonly newGameHref: string | undefined;
+  readonly replayHref: string | undefined;
   readonly chooseAnotherDeckHref: string | undefined;
   readonly challenge: ChallengerDuel | undefined;
   readonly sessionToken: () => string;
@@ -85,6 +86,7 @@ function CompletionActions({ result, correctRounds, history, deckTitle, shareHre
       <div className="completion-actions">
         {newGameHref && <a className="primary-action" href={newGameHref} onClick={() => track({ type: "deal_again", to: "same-deck" })}>Deal new rounds</a>}
         <button className="secondary-action" type="button" onClick={shareResult}>{sheet ? "Share result" : "Copy result"}</button>
+        {replayHref && <a className="deck-link" href={replayHref} onClick={() => track({ type: "deal_again", to: "same-deck" })}>Play again</a>}
         {chooseAnotherDeckHref && <a className="deck-link" href={chooseAnotherDeckHref} onClick={() => track({ type: "deal_again", to: "chooser" })}>Choose another deck</a>}
       </div>
       <p className="share-status" role="status">{status}</p>
@@ -100,7 +102,7 @@ function CompletionActions({ result, correctRounds, history, deckTitle, shareHre
  * In a friend's game of a challenge (#173), it also says how the challenger did on this round, and the game ends on
  * the duel's comparison instead of the usual way on.
  */
-export function RoundReveal({ round, reveal, hintsUsed, pickLabel, complete, correctRounds, history, deckTitle, shareHref, newGameHref, chooseAnotherDeckHref, genuiDesign, duel, opponentName, sessionToken, onNext, headingRef, track, trackGenui }: {
+export function RoundReveal({ round, reveal, hintsUsed, pickLabel, complete, correctRounds, history, deckTitle, shareHref, newGameHref, replayHref, chooseAnotherDeckHref, genuiDesign, duel, opponentName, sessionToken, onNext, headingRef, track, trackGenui }: {
   readonly round: Readonly<PublicRound>;
   readonly reveal: AuthorizedReveal;
   readonly hintsUsed: number;
@@ -114,6 +116,8 @@ export function RoundReveal({ round, reveal, hintsUsed, pickLabel, complete, cor
   /** The finished game's own address, which its share line links to. */
   readonly shareHref: string | undefined;
   readonly newGameHref: string | undefined;
+  /** Today's five again, recording nothing (#172). */
+  readonly replayHref: string | undefined;
   readonly chooseAnotherDeckHref: string | undefined;
   readonly genuiDesign: Design | undefined;
   readonly duel: GameDuel | undefined;
@@ -143,7 +147,8 @@ export function RoundReveal({ round, reveal, hintsUsed, pickLabel, complete, cor
             ? <DuelCompletion duel={duel} name={opponentName} sessionToken={sessionToken} chooseAnotherDeckHref={chooseAnotherDeckHref} />
             : (
               <CompletionActions result={reveal.result} correctRounds={correctRounds} history={history} deckTitle={deckTitle} shareHref={shareHref}
-                newGameHref={newGameHref} chooseAnotherDeckHref={chooseAnotherDeckHref} challenge={duel} sessionToken={sessionToken} track={track} />
+                newGameHref={newGameHref} replayHref={replayHref} chooseAnotherDeckHref={chooseAnotherDeckHref} challenge={duel} sessionToken={sessionToken}
+                track={track} />
             )}
         </>
       )}

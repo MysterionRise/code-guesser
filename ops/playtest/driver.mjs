@@ -142,7 +142,8 @@ const actions = {
   start: async (session, { deck, design, theme, layer }) => {
     const picks = Object.entries({ design, theme, layer }).filter(([, value]) => value)
       .map(([name, value]) => `&${name}=${encodeURIComponent(String(value))}`).join("");
-    // The deck's address redirects to a fresh seeded deal (#40), carrying the lab picks along.
+    // The deck's address redirects to a fresh seeded deal (#40), and today's five to the browser's date (#172), carrying
+    // the lab picks along.
     await session.page.goto(`${GAME}/?deck=${encodeURIComponent(deck)}${picks}`);
     await session.page.locator(".eyebrow").filter({ hasText: /^Round 1 of 5/u }).waitFor();
   },
