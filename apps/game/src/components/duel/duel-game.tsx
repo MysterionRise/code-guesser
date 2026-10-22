@@ -1,5 +1,6 @@
 import * as React from "react";
 
+import type { ClientEvent } from "../../experiment/events";
 import { RATE_LIMITED_MESSAGE, SESSION_ENDED_MESSAGE } from "../arcade/arcade-text";
 import { hasShareSheet, shareOrCopy } from "../arcade/share-sheet";
 import { DuelComparisonTable } from "./duel-comparison";
@@ -72,14 +73,22 @@ function NameField({ id, value, onChange, inputRef }: {
 /** A name that fits a link, or null. */
 const linkName = (value: string): string | null => sanitizeName(value, "") || null;
 
+/** Reports browser-only events to the event log (#107). */
+type Track = (event: ClientEvent) => void;
+
 const CHALLENGE_FAILED = "Couldn’t make a challenge link. Try again.";
 
 /**
  * "Challenge a friend", under a finished game of a seeded deal or of today's five: the server seals the game as a
  * challenge, then the player's name, if they give one, goes into the link's fragment, and the link onto the share
- * sheet or the clipboard. Its share line has no grid, so the friend learns only the total to beat.
+ * sheet or the clipboard. Its share line has no grid, so the friend learns only the total to beat. The event log hears
+ * only that a challenge link went out, and how (#173).
  */
-export function ChallengeFriend({ duel, sessionToken }: { readonly duel: ChallengerDuel; readonly sessionToken: () => string }) {
+export function ChallengeFriend({ duel, sessionToken, track }: {
+  readonly duel: ChallengerDuel;
+  readonly sessionToken: () => string;
+  readonly track: Track;
+}) {
   const sheet = hasShareSheet();
   const [issued, setIssued] = React.useState<Extract<CreateChallengeResponse, { ok: true }> | null>(null);
   const [pending, setPending] = React.useState(false);
@@ -123,6 +132,7 @@ export function ChallengeFriend({ duel, sessionToken }: { readonly duel: Challen
     if (outcome !== "dismissed") {
       setStatus(outcome === "shared" ? "Challenge shared" : outcome === "copied" ? "Challenge link copied" : "Couldn’t copy the link. Try again.");
     }
+    if (outcome === "shared" || outcome === "copied") track({ type: "duel_link_copied", link: "challenge", via: outcome === "shared" ? "share" : "clipboard" });
   };
   const note = firstPlayNote(challenge.challenger.firstPlay, "You");
   return (
@@ -140,12 +150,13 @@ export function ChallengeFriend({ duel, sessionToken }: { readonly duel: Challen
 }
 
 /** "Send your result": the friend's name, if they give one, joins the challenger's in the result link's fragment. */
-function SendResult({ comparison, resultToken, origin, challenger }: {
+function SendResult({ comparison, resultToken, origin, challenger, track }: {
   readonly comparison: DuelComparison;
   readonly resultToken: string;
   readonly origin: string;
   /** The challenger's name, from the challenge link. */
   readonly challenger: string | null;
+  readonly track: Track;
 }) {
   const sheet = hasShareSheet();
   const [name, setName] = React.useState("");
@@ -158,6 +169,7 @@ function SendResult({ comparison, resultToken, origin, challenger }: {
     if (outcome !== "dismissed") {
       setStatus(outcome === "shared" ? "Result shared" : outcome === "copied" ? "Result link copied" : "Couldn’t copy the link. Try again.");
     }
+    if (outcome === "shared" || outcome === "copied") track({ type: "duel_link_copied", link: "result", via: outcome === "shared" ? "share" : "clipboard" });
   };
   return (
     <form className="duel-share" aria-labelledby="send-result-title" onSubmit={(event) => { event.preventDefault(); void send(); }}>
@@ -173,14 +185,16 @@ const COMPARE_FAILED = "Couldn’t compare your games. Try again.";
 
 /**
  * The friend's finished game: the server seals it as the challenge's result, and the comparison it sends back shows
- * under the game's summary, then the result link to send, a rematch on a fresh deal of the deck, and the chooser.
+ * under the game's summary, then the result link to send, a rematch on a fresh deal of the deck, and the chooser. The
+ * event log hears where the friend went next and whether the result link went out, as it does for any finished game.
  */
-export function DuelCompletion({ duel, name, sessionToken, chooseAnotherDeckHref }: {
+export function DuelCompletion({ duel, name, sessionToken, chooseAnotherDeckHref, track }: {
   readonly duel: ChallengedDuel;
   /** The challenger's name, from the challenge link. */
   readonly name: string | null;
   readonly sessionToken: () => string;
   readonly chooseAnotherDeckHref: string | undefined;
+  readonly track: Track;
 }) {
   const [issued, setIssued] = React.useState<Extract<IssueResultResponse, { ok: true }> | null>(null);
   const [pending, setPending] = React.useState(false);
@@ -218,11 +232,11 @@ export function DuelCompletion({ duel, name, sessionToken, chooseAnotherDeckHref
         </>
       )}
       {issued && duel.origin !== null && (
-        <SendResult comparison={issued.comparison} resultToken={issued.resultToken} origin={duel.origin} challenger={name} />
+        <SendResult comparison={issued.comparison} resultToken={issued.resultToken} origin={duel.origin} challenger={name} track={track} />
       )}
       <div className="completion-actions">
-        <a className="primary-action" href={duel.rematchHref}>Rematch</a>
-        {chooseAnotherDeckHref && <a className="deck-link" href={chooseAnotherDeckHref}>Choose another deck</a>}
+        <a className="primary-action" href={duel.rematchHref} onClick={() => track({ type: "deal_again", to: "rematch" })}>Rematch</a>
+        {chooseAnotherDeckHref && <a className="deck-link" href={chooseAnotherDeckHref} onClick={() => track({ type: "deal_again", to: "chooser" })}>Choose another deck</a>}
       </div>
     </>
   );

@@ -236,7 +236,11 @@ an answer. A finished game ends on a comparison and a result link, such as
 - **The secret:** duel links need a fixed `CODEGUESSR_SESSION_SECRET`. With
   the random secret a server makes without one, every link dies when it
   restarts.
-- **Events:** duel games record none until events v2 (X3 of #173).
+- **Events:** a friend's game records events under the friend's own
+  `Sec-GPC`, marked as a duel's (`origin: duel`), so the report keeps it out
+  of the comparisons. The log hears that a challenge was made, that a link
+  went out, and how the friend's game went against it; never a link, a name,
+  or anything that ties the two games together.
 
 To try it on one machine, finish a game, choose "Challenge a friend", copy the
 link, and open it in a second tab. The tabs share nothing: the friend's tab
@@ -346,8 +350,8 @@ seals them into the game's token:
   "Ask of the code") and generated hints, including a step-through.
 
 The factors are drawn independently, so every game counts toward every
-comparison. Nothing identifies a player: a returning player simply draws
-again.
+comparison, except a friend's game of a duel, which plays the challenger's
+arms. Nothing identifies a player: a returning player simply draws again.
 
 | Variable | Effect |
 | --- | --- |
@@ -356,13 +360,18 @@ again.
 | `EXPERIMENT_EVENTS_DIR` | Records the anonymous event log here, one JSON-lines file per UTC day. Unset, nothing is recorded |
 | `EXPERIMENT_SOURCE` | Tags events `agent` (playtests) or `synthetic` (tests), so they never mix with real games |
 
-The event log records what happened in a game and under which arms: the deal,
-hints, answers, the finished game, the way on, a shared result (by share
-sheet or clipboard), and generative-panel use and model calls, with durations
-and token counts. It never records an IP address,
-user agent, cookie, persistent id, chat text, round content, or the option
-chosen. A browser that sends `Sec-GPC: 1` gets a game that records nothing.
-Raw events are kept for 90 days and then rolled up into daily totals.
+The event log (schema v2) records what happened in a game, under which arms,
+and whether it was a deal of its own or a friend's game of a duel: the deal,
+hints, answers, the finished game, the way on (a rematch included), a shared
+result or duel link (by share sheet or clipboard), a challenge made (with
+whether it was its deal's first try), a duel's outcome from the friend's
+side and what decided it, and generative-panel use and model calls, with
+durations and token counts. It never records an IP address,
+user agent, cookie, persistent id, chat text, round content, the option
+chosen, a duel link, a name, or the other player's score.
+A browser that sends `Sec-GPC: 1` gets a game that records nothing.
+Raw events are kept for 90 days and then rolled up into daily totals. Lines
+stored under schema v1 still read, as deals'.
 
 `pnpm experiment:report` reads the log with no network and prints a Markdown
 report (`--json=<path>` also writes it as JSON):
@@ -388,6 +397,11 @@ EXPERIMENT_EVENTS_DIR=… pnpm experiment:report [--source=real|agent|synthetic]
   completed games per design, 475 per theme, and 356 per layer level. Layers
   count only on decks that have them.
 - **Interactions:** two-way tables per pair of factors, descriptive only.
+- **Duels:** only games of a deal count above, since a friend's game of a
+  challenge plays the challenger's arms. A descriptive block of its own, outside
+  the plan, gives the challenge rate per completed game under each level, the
+  friends' games dealt and completed, their outcomes and rematches, and the
+  links sent.
 
 It reads one source at a time and defaults to real games, so playtests never
 mix with them.
