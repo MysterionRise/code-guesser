@@ -43,6 +43,7 @@ import {
   type DealDescriptor,
   type DealSeries,
 } from "./local-real-experiment-deal.server";
+import { creditsOf, type Credit } from "./local-real-experiment-credits.server";
 import { duelAuthority, type DuelAuthority } from "./local-real-experiment-duel.server";
 import { roundHints, scaffoldOf, type PinnedArtifact, type RoundLayers } from "./local-real-experiment-layers.server";
 import { countPlay, playsKey, playsOf } from "./local-real-experiment-plays.server";
@@ -58,6 +59,7 @@ import {
 
 export { LocalRealExperimentError };
 export type { LocalRealDeck } from "./local-real-experiment-rounds.server";
+export type { Credit } from "./local-real-experiment-credits.server";
 
 /** The mixed game (#56), offered when the artifact holds at least a game's worth of decks. */
 export interface LocalRealMix {
@@ -77,6 +79,8 @@ export interface LocalRealExperiment extends DuelAuthority {
   readonly artifactHash: string;
   readonly decks: readonly LocalRealDeck[];
   readonly mixed: LocalRealMix | null;
+  /** Every source file the rounds show, for the credits page (#99); no credit names its round. */
+  readonly credits: readonly Credit[];
   readonly privateReveals: Readonly<Record<string, PrivateReveal>>;
   /**
    * Five rounds drawn at random from the deck's pool, or for the mix one round from each of five decks drawn at
@@ -363,6 +367,7 @@ export const createLocalRealExperiment = (
       artifactHash: expectedArtifactHash,
       decks: listed,
       mixed,
+      credits: creditsOf(parsed),
       privateReveals,
       dealSession,
       dealGame: (deckId: SessionDeckId, random: () => number = Math.random, now = Date.now(), seal: DealSeal = { arms: CONTROL, record: true },
