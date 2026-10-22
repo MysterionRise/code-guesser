@@ -128,7 +128,7 @@ test("today's five deals the same five, in the same order, on every load of the 
   const card = page.getByRole("link", { name: /^Today’s five/u });
   await expect(card).toContainText(/\d{4}-\d{2}-\d{2}/u);
   await card.click();
-  await expect(page).toHaveURL(/\?deck=daily$/u);
+  await expect(page).toHaveURL(/\?deck=daily&date=\d{4}-\d{2}-\d{2}$/u);
   const dealt = async () => {
     await expect(page.getByText("Round 1 of 5")).toBeVisible();
     return { round: await currentRound(page), options: await page.locator(".candidate").allTextContents() };

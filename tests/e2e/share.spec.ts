@@ -78,19 +78,22 @@ test("a finished game shares its grid and its own address, without lab picks, th
   ]);
 });
 
-test("without Web Share, today's five copies its grid and its plain address to the clipboard", async ({ page, context }) => {
+test("without Web Share, today's five copies its grid and its dated address to the clipboard", async ({ page, context }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await stubShare(page, null);
   await page.goto("/?deck=daily&design=off");
-  // The server's local date, as the game names it; the test runs on the same machine.
-  const now = new Date();
-  const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  // The browser adds its own date (#172), keeping the lab picks; the share line names that date and links to it.
+  await expect(page).toHaveURL(/\?deck=daily&date=\d{4}-\d{2}-\d{2}&design=off$/u);
+  const date = new URL(page.url()).searchParams.get("date")!;
+  expect(date).toBe(await page.evaluate(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  }));
   const { score, best } = await playGame(page);
   await page.getByRole("button", { name: "Copy result" }).click();
   await expect(status(page)).toHaveText("Result copied");
   const copied = await page.evaluate(() => navigator.clipboard.readText());
-  // Today's five links to its plain address until that address carries the date (#172).
-  expect(copied).toBe(`CodeGuessr · Today’s five, ${date} · 4/5 · ${points(score)}/${points(best)}\n🟨⬛🟩🟩🟩\n${new URL(page.url()).origin}/?deck=daily`);
+  expect(copied).toBe(`CodeGuessr · Today’s five, ${date} · 4/5 · ${points(score)}/${points(best)}\n🟨⬛🟩🟩🟩\n${new URL(page.url()).origin}/?deck=daily&date=${date}`);
 });
 
 test("a share sheet that fails falls back to the clipboard", async ({ page, context }) => {

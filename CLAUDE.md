@@ -152,9 +152,15 @@ gate: changing queries, retries, ceilings, deck rules, or running
     data run resumed on a copy of it and published the dry run's artifact byte for byte (below).
 - **Mixed and daily play (#56, #74):** `/?deck=mixed` deals one round from each of five decks drawn at random
   (`MIXED_DECK`, offered when the artifact holds five decks or more); `/?deck=daily` deals the same mix seeded by
-  the artifact's hash and the local date (`dailyRandom` in `local-real-experiment-deal.server.ts`). Both are
+  the artifact's hash and the date (`dailyRandom` in `local-real-experiment-deal.server.ts`). Both are
   `SessionDeckId`s, sealed in the token and named in events; each round's eyebrow names its deck, and a game's
   `attainableMaximum` is the sum of its rounds' top points.
+- **Today's five on the player's date (#172):** the date is the browser's, in the address (`&date=YYYY-MM-DD`).
+  `dailyDateOf` (deal module) accepts a real date within a day of the server's UTC date (UTC−12 to UTC+14). A bare
+  `/?deck=daily` renders `DailyRedirect` (`components/daily-link.tsx`, which also holds `localDate` and the chooser's
+  `DailyCard`): it deals, spends, and records nothing, and `location.replace`s itself with the local date. A refused
+  date renders "That day's five isn't open". The deck title, the sealed `daily {date}` (so a challenge's date), the
+  share link, and "Play again" (`&replay=1`, sealed `record: false`) all carry the player's date.
 - **Seeded deals (#40):** a deck's or the mix's address without `&deal=<8 hex>&game=<n>` redirects to a fresh seed's
   game 0. Game n takes positions 5n to 5n + 4 of the pool in the seed's order (`seriesRounds` in
   `local-real-experiment-deal.server.ts`, a fresh order each pass), and its options in a seeded order, so a reload
@@ -171,8 +177,8 @@ gate: changing queries, retries, ceilings, deck rules, or running
     round and option ids in dealt order, and each layer's hash when the game shows layers), per-round `outcomes`, and
     `priorPlays`. Per-round points are recomputed, never stored. Its MAC context is `codeguessr-game-session.v3`, so
     v2 tokens end as `SESSION_ENDED`. `sealGame`'s JSON key list names every nested key (arms, `DEAL_KEYS`): a key it
-    leaves out is dropped silently. `page.tsx` deals today's five with `{ date: localDate(now) }`, so it seals its
-    date.
+    leaves out is dropped silently. `page.tsx` deals today's five with `{ date }` from `dailyDateOf`, so it seals the
+    player's date.
 - **Public mode (#97, L4):** `CODEGUESSR_PUBLIC=1` marks a public server, and `checkEnvironment`
   (`apps/game/src/server/environment.server.ts`) holds it to anonymous play:
   - it requires the session secret, an https `CODEGUESSR_PUBLIC_ORIGIN` with no path, absolute `CODEGUESSR_STATE_DIR`
