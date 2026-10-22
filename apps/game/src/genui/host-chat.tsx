@@ -1,5 +1,8 @@
 "use client";
 
+// First, so zod runs without eval (`z.config` there) before the chat libraries below build their schemas (#97).
+import "./composer-spec";
+
 import * as React from "react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, type UIMessage } from "ai";

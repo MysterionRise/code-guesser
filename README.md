@@ -262,6 +262,17 @@ server exits with status 78.
 | `EXPERIMENT_LAB` | Refused, unless `EXPERIMENT_SOURCE` is `agent` or `synthetic`; lab mode stays off for real games |
 | `EXPERIMENT_DISABLED` | Only known `factor:level` pairs |
 
+Every page carries a Content Security Policy with a fresh nonce per request
+(`apps/game/src/middleware.ts`): only the scripts the server rendered for
+that response run. Styles may be inline, nothing loads from another origin,
+and no other site may frame the game. Responses also send `Referrer-Policy:
+no-referrer`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
+`Cross-Origin-Opener-Policy: same-origin`, and a `Permissions-Policy` that
+turns off the camera, microphone, location, payments, USB, and topics. A
+public server also upgrades insecure requests and sends HSTS, for now with
+`max-age=300`. The visualizer's page runs in its own frame route,
+`/genui/frame`, under its own stricter policy.
+
 A page that fails shows a plain error page with a link back to the decks; it
 says nothing about the error. The `dev` and `start` scripts still listen on
 127.0.0.1 only.

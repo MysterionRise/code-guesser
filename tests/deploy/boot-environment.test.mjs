@@ -8,6 +8,10 @@ import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { after, before, test } from "node:test";
 
+import { chromium } from "@playwright/test";
+
+import { startFakeOpenRouter } from "../e2e/fake-openrouter.mjs";
+
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const game = join(root, "apps", "game");
 const built = join(game, ".next");
@@ -109,10 +113,60 @@ test("a public server without its session secret refuses to start, naming the co
   assert.doesNotMatch(`${stdout}${stderr}`, new RegExp(SENTINEL, "u"));
 });
 
+test("the production build plays every generative design under its nonce policy, eval refused, without one violation", async () => {
+  const fake = await startFakeOpenRouter();
+  try {
+    const { code, signal, stdout, stderr } = await start({
+      GENUI_ENABLED: "1", OPENROUTER_API_KEY: "fake-key", OPENROUTER_BASE_URL: `http://127.0.0.1:${fake.port}/api/v1`,
+      EXPERIMENT_LAB: "1", EXPERIMENT_SOURCE: "synthetic",
+    }, async (port) => {
+      const base = `http://127.0.0.1:${port}`;
+      const browser = await chromium.launch();
+      try {
+        const page = await browser.newPage();
+        const violations = [];
+        await page.exposeFunction("reportCspViolation", (violation) => { violations.push(violation); });
+        await page.addInitScript(() => {
+          if (window !== window.top) return;
+          document.addEventListener("securitypolicyviolation", (event) => { void window.reportCspViolation(`${event.violatedDirective} ${event.blockedURI}`); });
+        });
+        // A page built ahead of time would carry no nonce; the 404 renders per request like every other page.
+        await page.goto(`${base}/no-such-page`);
+        assert.ok(await page.evaluate(() => [...document.scripts].every((script) => script.nonce.length > 0)));
+        for (const design of ["catalog", "composer", "visualizer"]) {
+          await page.goto(`${base}/?deck=algorithm&design=${design}`);
+          await page.locator("input[type=radio]").first().check();
+          await page.getByRole("button", { name: "Lock in answer" }).click();
+          await page.getByRole("button", { name: design === "visualizer" ? "Visualize this round" : "Explain this round" }).click();
+          await (design === "visualizer" ? page.frameLocator("iframe.visualizer-frame").locator("#status")
+            : page.locator(design === "catalog" ? ".genui-takeaway" : ".composer-callout")).waitFor();
+        }
+        await page.goto(`${base}/?deck=project&design=host`);
+        await page.getByLabel("Ask the host").fill("Any tips?");
+        await page.getByRole("button", { name: "Send" }).click();
+        await page.locator(".genui-host").first().waitFor();
+        assert.deepEqual(violations, []);
+      } finally {
+        await browser.close();
+      }
+    });
+    assert.ok(code === 0 || signal === "SIGTERM", `the server stopped badly (${code}, ${signal})\n${stdout}\n${stderr}`);
+  } finally {
+    await fake.close();
+  }
+});
+
 test("a configured public server starts, answers its health check, and keeps each dealt game in its state store", async () => {
   const { code, signal, stdout, stderr } = await start(PUBLIC, async (port, response) => {
     assert.equal(response.status, 200);
     assert.match(await response.text(), /Pick a deck/u);
+    // Public mode, read at start rather than at build (#97): HTTPS pinned briefly to begin with, requests upgraded, and
+    // a production policy without eval.
+    assert.equal(response.headers.get("strict-transport-security"), "max-age=300");
+    const policy = response.headers.get("content-security-policy");
+    assert.match(policy, /; upgrade-insecure-requests$/u);
+    assert.match(policy, /script-src 'self' 'nonce-[A-Za-z0-9+/]{22}==' 'strict-dynamic';/u);
+    assert.doesNotMatch(policy, /unsafe-eval/u);
     const health = await fetch(`http://127.0.0.1:${port}/api/health`);
     assert.deepEqual([health.status, await health.text()], [200, "ok"]);
     // A deck's address redirects to a seeded deal, whose page deals a game; node:sqlite loads at run time, unbundled.

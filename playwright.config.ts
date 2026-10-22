@@ -72,5 +72,10 @@ export default defineConfig({
       testMatch: /(?:arcade-shell|accessibility-local|genui|events|themes|layers|share|rate-limits|duel)\.spec\.ts/,
       use: { baseURL },
     },
+    {
+      name: "security-headers",
+      testMatch: /security-headers\.spec\.ts/,
+      use: { baseURL },
+    },
   ],
 });
