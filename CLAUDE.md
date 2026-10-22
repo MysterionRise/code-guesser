@@ -205,6 +205,19 @@ gate: changing queries, retries, ceilings, deck rules, or running
   directory, the ledger is memory-only as before. `deriveKey(context)` is HKDF-SHA256 of the session secret, for other
   features' keys. `GET /api/health` (`app/api/health/route.ts`) answers `ok` or 503 with a bare code and records
   nothing. Events stay JSONL.
+- **Rate limits (#98, L6):** token buckets per client and surface (`SURFACES` in `server/rate-limit.server.ts`, on
+  `globalThis` like the ledger, full buckets swept): deal 20/min burst 10 (a dealt game; the redirect to a fresh deal spends nothing, and
+  playing a duel challenge is a deal), hint and reveal 60, beacon 120, genui 10 burst 4, a global `genui-all` 120,
+  `duel_create` (challenge and result links) and `duel_open` (a duel's intro or result page), and `og` declared. A game also gets 12 explainer calls and 8 host turns a round (`GENUI_CAPS`, `capped`).
+  - They apply in public mode or with `CODEGUESSR_RATE_LIMITS` (`on`, or a multiplier; the e2e server runs at 10).
+  - `server/client-key.server.ts` is the one module that reads the client address: the last entry of
+    `CODEGUESSR_CLIENT_IP_HEADER` (the one the proxy appended), an IPv6 address cut to its /64, then a truncated
+    HMAC-SHA256 under a per-process salt. No header, or no readable address, is one shared key.
+    `test/rate-limits.test.ts` holds every other module to that and checks that no log line or stored event holds an
+    address.
+  - A limited page shows "Too many new games — wait a minute"; actions refuse with `RATE_LIMITED` (duel actions and pages too); routes answer 429
+    with `Retry-After` (`tooMany`), and genui's per-game caps 429 `GAME_CAP`. The panel and the host report a 429 as
+    the `genui_fallback` reason `limited` (schema still v1) and keep the static reveal.
 - **Duels (#173: X1 the server, X2 the UI; events v2 is X3):** a finished game of a seeded deal or of today's five
   becomes a challenge link, and a friend's finished game of it a result link.
   - Tokens (`demo/local-real-experiment-duel-token.server.ts`): AES-256-GCM under `deriveKey(context)`, a random
@@ -220,7 +233,7 @@ gate: changing queries, retries, ceilings, deck rules, or running
     challenger's theme and layer (the design only while generative UI is on and it isn't switched off,
     `challengedArms`), seals `deal: {kind: "duel"}` with no seed, and records no events until X3. Refusals: `INVALID`,
     `EXPIRED`, `ROUND_SET` (another artifact, told only once the link authenticates), `DEAL_DRIFT`, `NOT_ELIGIBLE`,
-    `SESSION_ENDED`; a `ROUND_SET` or `DEAL_DRIFT` refusal names its deck while this artifact offers it. A result
+    `SESSION_ENDED`, `RATE_LIMITED` (#98); a `ROUND_SET` or `DEAL_DRIFT` refusal names its deck while this artifact offers it. A result
     opens on any round set (`earlierRoundSet`, and a generic title once its deck is gone). `duelVerdict`
     (`components/duel/duel-contract.ts`, the browser-safe types): score, then fewer hints, then more rounds right, else
     a draw; recomputed on every read. Actions: `createDuelChallenge`, `issueDuelResult`.

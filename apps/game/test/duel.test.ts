@@ -6,6 +6,8 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
+// The duel actions read the request's headers for their rate limits (#98), which are off outside public mode.
+vi.mock("next/headers", () => ({ headers: async () => new Headers() }));
 
 import { artifact, hashValue } from "./support/local-real-artifact";
 

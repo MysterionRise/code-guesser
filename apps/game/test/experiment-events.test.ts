@@ -77,6 +77,13 @@ describe("the event schema (#107)", () => {
     expect(parseEvent({ ...base("result_shared"), via: "share", url: "http://127.0.0.1:3000/?deck=fix" }, DECKS)).toBeNull();
     expect(parseEvent(base("result_copied"), DECKS)).not.toBeNull();
   });
+
+  it("names a panel that a rate limit or a game's cap turned away (#98), within version 1", () => {
+    for (const reason of ["unavailable", "refused", "failed", "rejected", "limited"]) {
+      expect(parseEvent({ ...base("genui_fallback"), round: 2, reason }, DECKS), reason).not.toBeNull();
+    }
+    expect(parseEvent({ ...base("genui_fallback"), round: 2, reason: "RATE_LIMITED" }, DECKS)).toBeNull();
+  });
 });
 
 describe("the event store (#107)", () => {

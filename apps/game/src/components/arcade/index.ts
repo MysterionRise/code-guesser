@@ -12,6 +12,7 @@ export {
   type RevealResponse,
 } from "./arcade-session";
 export {
+  RATE_LIMITED_MESSAGE,
   SESSION_ENDED_MESSAGE,
   SHARE_MARKS,
   formatCompletionResult,
