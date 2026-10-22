@@ -20,6 +20,7 @@ import {
   type PrivateReveal,
 } from "./local-real-experiment-domain.server";
 import {
+  GAME_TTL_MS,
   SessionRefusal,
   advanceGame,
   newGameId,
@@ -150,6 +151,8 @@ export type ModelContextResponse =
     codeLines: readonly string[];
     /** The game's sealed arms; the route serves only the design the game drew. */
     arms: Arms;
+    /** The game's random id and when it expires, for the route's per-game caps (#98); never sent to a model. */
+    game: Readonly<{ id: string; expiresAt: number }>;
     /** Records one model call for this round in the event log, when the game records events. */
     recordCall: (outcome: ModelCallOutcome, now?: number) => void;
   }>
@@ -223,6 +226,7 @@ const contextFor = (round: DerivedRound, deckTitle: string, state: GameState, in
     }),
     codeLines: Object.freeze(publicRound.content.panes.flatMap(({ text }) => text.split("\n"))),
     arms: state.arms,
+    game: Object.freeze({ id: state.gameId, expiresAt: state.dealtAt + GAME_TTL_MS }),
     recordCall: (outcome: ModelCallOutcome, now = Date.now()) => emit(state, "genui_call", { round: index + 1, phase, ...outcome }, now),
   });
 };

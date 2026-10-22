@@ -1,12 +1,16 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { after, before, test } from "node:test";
+
+import { chromium } from "@playwright/test";
+
+import { startFakeOpenRouter } from "../e2e/fake-openrouter.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const game = join(root, "apps", "game");
@@ -109,10 +113,60 @@ test("a public server without its session secret refuses to start, naming the co
   assert.doesNotMatch(`${stdout}${stderr}`, new RegExp(SENTINEL, "u"));
 });
 
+test("the production build plays every generative design under its nonce policy, eval refused, without one violation", async () => {
+  const fake = await startFakeOpenRouter();
+  try {
+    const { code, signal, stdout, stderr } = await start({
+      GENUI_ENABLED: "1", OPENROUTER_API_KEY: "fake-key", OPENROUTER_BASE_URL: `http://127.0.0.1:${fake.port}/api/v1`,
+      EXPERIMENT_LAB: "1", EXPERIMENT_SOURCE: "synthetic",
+    }, async (port) => {
+      const base = `http://127.0.0.1:${port}`;
+      const browser = await chromium.launch();
+      try {
+        const page = await browser.newPage();
+        const violations = [];
+        await page.exposeFunction("reportCspViolation", (violation) => { violations.push(violation); });
+        await page.addInitScript(() => {
+          if (window !== window.top) return;
+          document.addEventListener("securitypolicyviolation", (event) => { void window.reportCspViolation(`${event.violatedDirective} ${event.blockedURI}`); });
+        });
+        // A page built ahead of time would carry no nonce; the 404 renders per request like every other page.
+        await page.goto(`${base}/no-such-page`);
+        assert.ok(await page.evaluate(() => [...document.scripts].every((script) => script.nonce.length > 0)));
+        for (const design of ["catalog", "composer", "visualizer"]) {
+          await page.goto(`${base}/?deck=algorithm&design=${design}`);
+          await page.locator("input[type=radio]").first().check();
+          await page.getByRole("button", { name: "Lock in answer" }).click();
+          await page.getByRole("button", { name: design === "visualizer" ? "Visualize this round" : "Explain this round" }).click();
+          await (design === "visualizer" ? page.frameLocator("iframe.visualizer-frame").locator("#status")
+            : page.locator(design === "catalog" ? ".genui-takeaway" : ".composer-callout")).waitFor();
+        }
+        await page.goto(`${base}/?deck=project&design=host`);
+        await page.getByLabel("Ask the host").fill("Any tips?");
+        await page.getByRole("button", { name: "Send" }).click();
+        await page.locator(".genui-host").first().waitFor();
+        assert.deepEqual(violations, []);
+      } finally {
+        await browser.close();
+      }
+    });
+    assert.ok(code === 0 || signal === "SIGTERM", `the server stopped badly (${code}, ${signal})\n${stdout}\n${stderr}`);
+  } finally {
+    await fake.close();
+  }
+});
+
 test("a configured public server starts, answers its health check, and keeps each dealt game in its state store", async () => {
   const { code, signal, stdout, stderr } = await start(PUBLIC, async (port, response) => {
     assert.equal(response.status, 200);
     assert.match(await response.text(), /Pick a deck/u);
+    // Public mode, read at start rather than at build (#97): HTTPS pinned briefly to begin with, requests upgraded, and
+    // a production policy without eval.
+    assert.equal(response.headers.get("strict-transport-security"), "max-age=300");
+    const policy = response.headers.get("content-security-policy");
+    assert.match(policy, /; upgrade-insecure-requests$/u);
+    assert.match(policy, /script-src 'self' 'nonce-[A-Za-z0-9+/]{22}==' 'strict-dynamic';/u);
+    assert.doesNotMatch(policy, /unsafe-eval/u);
     const health = await fetch(`http://127.0.0.1:${port}/api/health`);
     assert.deepEqual([health.status, await health.text()], [200, "ok"]);
     // A deck's address redirects to a seeded deal, whose page deals a game; node:sqlite loads at run time, unbundled.
@@ -128,4 +182,33 @@ test("a configured public server starts, answers its health check, and keeps eac
   assert.ok(code === 0 || signal === "SIGTERM", `the server stopped badly (${code}, ${signal})\n${stdout}\n${stderr}`);
   assert.doesNotMatch(`${stdout}${stderr}`, /GAME_ENVIRONMENT_REJECTED/u);
   assert.doesNotMatch(`${stdout}${stderr}`, new RegExp(SENTINEL, "u"));
+});
+
+test("a public server limits deals by the address its proxy appended, an IPv6 client by its /64, and keeps no address", async () => {
+  const { code, signal, stdout, stderr } = await start(PUBLIC, async (port) => {
+    const deal = async (forwarded, game) =>
+      (await fetch(`http://127.0.0.1:${port}/?deck=project&deal=0badcafe&game=${game}`, { headers: { "x-forwarded-for": forwarded } })).text();
+    /** Deals from one client until the server refuses: how many it dealt, and how many ten at once and one every three seconds allow. */
+    const dealUntilRefused = async (forwarded) => {
+      const started = Date.now();
+      for (let game = 0; game < 40; game += 1) {
+        if (/Too many new games — wait a minute/u.test(await deal(forwarded(game), game))) {
+          return { dealt: game, allowed: 10 + Math.floor((Date.now() - started) / 3_000) };
+        }
+      }
+      return { dealt: 40, allowed: 0 };
+    };
+    // Every entry before the last is whatever the client sent, so forging them never wins a fresh allowance.
+    const forged = await dealUntilRefused((game) => `198.51.100.${game + 1}, 203.0.113.40`);
+    assert.ok(forged.dealt >= 10 && forged.dealt <= forged.allowed, JSON.stringify(forged));
+    assert.doesNotMatch(await deal("203.0.113.40, 198.51.100.41", 0), /Too many new games/u);
+    const network = await dealUntilRefused((game) => `2001:db8:5:6:${game.toString(16)}::1`);
+    assert.ok(network.dealt >= 10 && network.dealt <= network.allowed, JSON.stringify(network));
+  });
+  assert.ok(code === 0 || signal === "SIGTERM", `the server stopped badly (${code}, ${signal})\n${stdout}\n${stderr}`);
+  // Nothing the server printed or wrote, its event log and state store included, holds an address.
+  const written = (path) => statSync(path).isDirectory() ? readdirSync(path).flatMap((name) => written(join(path, name))) : [readFileSync(path, "latin1")];
+  const kept = [stdout, stderr, ...written(data)].join("\n");
+  assert.match(kept, /"type":"game_dealt"/u);
+  assert.doesNotMatch(kept, /203\.0\.113|198\.51\.100|2001:0?db8/iu);
 });

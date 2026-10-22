@@ -59,6 +59,7 @@ const CHALLENGE_REFUSALS: Readonly<Record<DuelRefusalReason, string>> = Object.f
   DEAL_DRIFT: "This challenge was for an earlier round set. Its rounds are gone.",
   NOT_ELIGIBLE: "This challenge link isn’t valid.",
   SESSION_ENDED: "This challenge link isn’t valid.",
+  RATE_LIMITED: "Too many duel links at once. Wait a minute, then open this one again.",
 });
 
 /** A refused link: why, and a fresh deal of its deck when the refusal names one this server still offers. */
@@ -86,9 +87,11 @@ const DuelNav = () => <nav className="deck-nav" aria-label="Decks"><a href="/">A
  * new rounds are a fresh deal of the deck, never the challenger's next game. A result, like a refused link, is outside
  * any game, so it keeps the original theme unless a lab tester picks one.
  */
-export function DuelPage({ request, experiment, record, origin, labTheme }: {
+export function DuelPage({ request, experiment, record, origin, labTheme, rateLimited }: {
   readonly request: DuelRequest;
   readonly experiment: LocalRealExperiment;
+  /** The player is past this link's rate limit (#98): opening a link spends a duel open, playing one a deal. */
+  readonly rateLimited: boolean;
   /** Whether the friend's game may record events; until events v2 a duel game records none. */
   readonly record: boolean;
   readonly origin: string | null;
@@ -101,6 +104,8 @@ export function DuelPage({ request, experiment, record, origin, labTheme }: {
     <PageFrame theme={outside}><DuelNav /><DuelRefused message={message} deck={sourceOf(deck)} /></PageFrame>
   );
 
+  // Past the limit nothing is opened or dealt, and the player may open the same link again in a minute.
+  if (rateLimited) return refused(CHALLENGE_REFUSALS.RATE_LIMITED);
   if (request.kind === "result") {
     const opened = experiment.openResult(request.token);
     if (!opened.ok) return refused(opened.reason === "EXPIRED" ? "This result has expired." : "This result link isn’t valid.");

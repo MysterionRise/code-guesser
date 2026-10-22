@@ -66,9 +66,10 @@ export interface DuelComparison {
 /**
  * Why the server would not act on a duel: a link it didn't issue or can't read (`INVALID`), one past its life
  * (`EXPIRED`), one for an earlier round set (`ROUND_SET`), a re-deal that no longer matches the challenger's game
- * (`DEAL_DRIFT`), a game that can't challenge or answer this challenge (`NOT_ELIGIBLE`), or a game that has ended.
+ * (`DEAL_DRIFT`), a game that can't challenge or answer this challenge (`NOT_ELIGIBLE`), a game that has ended, or a
+ * player past the duel rate limit (`RATE_LIMITED`, #98).
  */
-export type DuelRefusalReason = "INVALID" | "EXPIRED" | "ROUND_SET" | "DEAL_DRIFT" | "NOT_ELIGIBLE" | "SESSION_ENDED";
+export type DuelRefusalReason = "INVALID" | "EXPIRED" | "ROUND_SET" | "DEAL_DRIFT" | "NOT_ELIGIBLE" | "SESSION_ENDED" | "RATE_LIMITED";
 /**
  * A refusal. One for a link that authenticated but can't deal (`ROUND_SET`, `DEAL_DRIFT`) names its deck when this
  * server still offers it, so the page can deal that deck afresh.

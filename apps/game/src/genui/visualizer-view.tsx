@@ -20,9 +20,14 @@ export const reportedHeight = (data: unknown): number | null => {
  * A checked visualizer page in a sandbox: scripts may run, but with an opaque origin, so the page can't reach the
  * game, its storage, or its cookies; it may not open windows, submit forms, or navigate the game; and its own CSP
  * allows no network. The summary beside it says in words what it shows.
+ *
+ * The frame loads the game's constant shell (`app/genui/frame/route.ts`), which brings the visualizer's own policy,
+ * and is then sent the page once. A `srcdoc` frame would inherit the game's nonce policy and block the page's scripts.
+ * The shell's origin is opaque, so the message can only be addressed to `"*"`; it goes once, to the shell just loaded.
  */
 export function VisualizerView({ visualizer }: { readonly visualizer: Visualizer }) {
   const frame = React.useRef<HTMLIFrameElement>(null);
+  const sent = React.useRef(false);
   const [height, setHeight] = React.useState(START_HEIGHT);
   // The page's theme tokens, read once in the browser, so the model's page starts in the player's colours.
   const palette = React.useMemo(() => typeof window === "undefined" ? TERMINAL_PALETTE
@@ -40,7 +45,11 @@ export function VisualizerView({ visualizer }: { readonly visualizer: Visualizer
     <figure className="genui-visualizer">
       <figcaption>{visualizer.title}</figcaption>
       <iframe ref={frame} className="visualizer-frame" title={visualizer.title} sandbox="allow-scripts" allow="" referrerPolicy="no-referrer"
-        srcDoc={visualizerDocument(visualizer.html, palette)} style={{ height }} />
+        src="/genui/frame" style={{ height }} onLoad={() => {
+          if (sent.current) return;
+          sent.current = true;
+          frame.current?.contentWindow?.postMessage(visualizerDocument(visualizer.html, palette), "*");
+        }} />
       <p className="visualizer-summary">{visualizer.summary}</p>
     </figure>
   );

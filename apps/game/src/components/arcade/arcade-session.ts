@@ -18,8 +18,11 @@ export interface HintRequest {
   roundId: string;
 }
 
-/** Why the server would not act: it cannot continue this game, or the request does not fit the game's state. */
-export type GameRefusal = Readonly<{ ok: false; reason: "SESSION_ENDED" | "REJECTED" }>;
+/**
+ * Why the server would not act: it cannot continue this game, the request does not fit the game's state, or the
+ * player is past a rate limit (#98) and may try again shortly.
+ */
+export type GameRefusal = Readonly<{ ok: false; reason: "SESSION_ENDED" | "REJECTED" | "RATE_LIMITED" }>;
 export type RevealResponse = Readonly<{ ok: true; reveal: AuthorizedReveal; sessionToken: string }> | GameRefusal;
 /** A bought hint: its text, and for a question-layer hint (#128) what it shows beside the text. */
 export type HintResponse = Readonly<{ ok: true; hint: string; detail?: HintDetail; sessionToken: string }> | GameRefusal;

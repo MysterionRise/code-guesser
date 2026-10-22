@@ -1,6 +1,6 @@
 import * as React from "react";
 
-import { SESSION_ENDED_MESSAGE } from "../arcade/arcade-text";
+import { RATE_LIMITED_MESSAGE, SESSION_ENDED_MESSAGE } from "../arcade/arcade-text";
 import { hasShareSheet, shareOrCopy } from "../arcade/share-sheet";
 import { DuelComparisonTable } from "./duel-comparison";
 import type { ChallengedDuel, ChallengerDuel, CreateChallengeResponse, DuelComparison, DuelRound, IssueResultResponse } from "./duel-contract";
@@ -99,7 +99,7 @@ export function ChallengeFriend({ duel, sessionToken }: { readonly duel: Challen
     try {
       const response = await duel.createChallenge(sessionToken());
       if (response.ok) setIssued(response);
-      else setError(response.reason === "SESSION_ENDED" ? SESSION_ENDED_MESSAGE : CHALLENGE_FAILED);
+      else setError(response.reason === "SESSION_ENDED" ? SESSION_ENDED_MESSAGE : response.reason === "RATE_LIMITED" ? RATE_LIMITED_MESSAGE : CHALLENGE_FAILED);
     } catch {
       setError(CHALLENGE_FAILED);
     } finally {
@@ -191,7 +191,7 @@ export function DuelCompletion({ duel, name, sessionToken, chooseAnotherDeckHref
     try {
       const response = await duel.issueResult({ sessionToken: sessionToken(), challengeToken: duel.challengeToken });
       if (response.ok) setIssued(response);
-      else setError(response.reason === "SESSION_ENDED" ? SESSION_ENDED_MESSAGE : COMPARE_FAILED);
+      else setError(response.reason === "SESSION_ENDED" ? SESSION_ENDED_MESSAGE : response.reason === "RATE_LIMITED" ? RATE_LIMITED_MESSAGE : COMPARE_FAILED);
     } catch {
       setError(COMPARE_FAILED);
     } finally {

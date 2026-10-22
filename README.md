@@ -257,14 +257,49 @@ server exits with status 78.
 | `CODEGUESSR_STATE_DIR` | Required: an absolute directory for the server's own state, the session ledger's `state.sqlite` |
 | `EXPERIMENT_EVENTS_DIR` | Required: an absolute directory for the event log |
 | `CODEGUESSR_CLIENT_IP_HEADER` | Required: the header the reverse proxy sets to the client's address, such as `X-Forwarded-For`, for rate limits (#98) |
+| `CODEGUESSR_RATE_LIMITS` | Optional: `on`, or a positive multiplier of every rate limit such as `2` or `0.5`; anything else is refused |
 | `OPENROUTER_API_KEY` | Required when `GENUI_ENABLED=1` |
 | `OPENROUTER_BASE_URL` | Unset or `https://openrouter.ai/api/v1`, unless `EXPERIMENT_SOURCE` is `agent` or `synthetic` |
 | `EXPERIMENT_LAB` | Refused, unless `EXPERIMENT_SOURCE` is `agent` or `synthetic`; lab mode stays off for real games |
 | `EXPERIMENT_DISABLED` | Only known `factor:level` pairs |
 
+Every page carries a Content Security Policy with a fresh nonce per request
+(`apps/game/src/middleware.ts`): only the scripts the server rendered for
+that response run. Styles may be inline, nothing loads from another origin,
+and no other site may frame the game. Responses also send `Referrer-Policy:
+no-referrer`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
+`Cross-Origin-Opener-Policy: same-origin`, and a `Permissions-Policy` that
+turns off the camera, microphone, location, payments, USB, and topics. A
+public server also upgrades insecure requests and sends HSTS, for now with
+`max-age=300`. The visualizer's page runs in its own frame route,
+`/genui/frame`, under its own stricter policy.
+
 A page that fails shows a plain error page with a link back to the decks; it
 says nothing about the error. The `dev` and `start` scripts still listen on
 127.0.0.1 only.
+
+#### Rate limits
+
+A public server limits each client (#98), and so does any server with
+`CODEGUESSR_RATE_LIMITS` set; a local one, as for playtests and demo
+recording, is never throttled. Each surface has a token bucket per client:
+
+| Surface | Per minute | Burst | When it runs out |
+| --- | --- | --- | --- |
+| A deck's address (a deal, or its redirect to a fresh seed) | 20 | 10 | The page says "Too many new games — wait a minute" and deals nothing |
+| A hint | 60 | 60 | The hint bar asks the player to wait a few seconds |
+| An answer | 60 | 60 | The answer button does the same |
+| The event beacon | 120 | 120 | 429; the event is dropped |
+| Generative UI, per client | 10 | 4 | 429; the panel keeps the static reveal and reports `limited` |
+| Generative UI, the whole server | 120 | 120 | The same |
+
+A game may also make at most 12 explainer calls, and 8 host turns a round.
+A client is the last address in `CODEGUESSR_CLIENT_IP_HEADER`, the one the
+proxy appended, and an IPv6 client is its /64. The address is read in one
+module (`apps/game/src/server/client-key.server.ts`) and kept only as a
+salted hash in memory, for this process; it is never logged or stored. A
+missing or unreadable header counts as one shared client. The buckets live in
+the process, so they assume one instance.
 
 ### Generative UI (experimental)
 
