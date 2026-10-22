@@ -218,6 +218,24 @@ gate: changing queries, retries, ceilings, deck rules, or running
   - A limited page shows "Too many new games — wait a minute"; actions refuse with `RATE_LIMITED` (duel actions and pages too); routes answer 429
     with `Retry-After` (`tooMany`), and genui's per-game caps 429 `GAME_CAP`. The panel and the host report a 429 as
     the `genui_fallback` reason `limited` (added within v1, part of v2) and keep the static reveal.
+- **Credits and privacy (#99, L8):** a site footer in `app/layout.tsx` links `/credits` and `/privacy`. Both are outside any
+  game, in the original theme unless a lab tester picks one.
+  - `/credits` (`app/credits/page.tsx`) reads the experiment only through `experiment.credits`. `creditsOf`
+    (`demo/local-real-experiment-credits.server.ts`) reads each round's `fixture.source`: repository, path, commit,
+    file URL, licence id, name, and file URL, and author. Credits are deduplicated by repository, path, and commit,
+    then sorted by licence, repository, and path. They carry no round id, deck, order, or excerpt hash, since round
+    ids are in a game's DOM and paths name answers.
+  - The page groups credits by licence, then repository. It links each repository's licence file at its commit and
+    each licence's SPDX text, and says excerpts are changed copies. `docs/licences.md` records what MIT, Apache-2.0,
+    BSD-2/3, ISC, and Python-2.0 ask, and the Apache NOTICE judgment call.
+  - `/privacy` (`app/privacy/page.tsx`) renders `privacy/disclosures.ts`, a registry of what each feature keeps or
+    sends, with lifetimes read from the code's own constants. A feature that starts keeping or sending something adds
+    its entry; the browser-storage entry is an empty slot for #63.
+  - The event log's entry is `experiment/event-docs.ts`, every base key and payload field in words, with closed
+    choices listed from the schema's exported values. `test/credits-privacy.test.tsx` holds its keys to
+    `EVENT_BASE_KEYS` and `EVENT_FIELDS` and checks that the credits page shows no round id, pane line, or option label.
+  - The containment test reads both pages' code, and `tests/e2e/credits-privacy.spec.ts` runs axe on both in every
+    theme at 320 px.
 - **Duels (#173: X1 the server, X2 the UI, X3 events v2 and the report):** a finished game of a seeded deal or of today's five
   becomes a challenge link, and a friend's finished game of it a result link.
   - Tokens (`demo/local-real-experiment-duel-token.server.ts`): AES-256-GCM under `deriveKey(context)`, a random

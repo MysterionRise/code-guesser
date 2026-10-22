@@ -246,6 +246,26 @@ To try it on one machine, finish a game, choose "Challenge a friend", copy the
 link, and open it in a second tab. The tabs share nothing: the friend's tab
 shows only what its own link carries.
 
+### Credits and privacy
+
+Every page's footer links two pages (#99):
+
+- **`/credits`** lists every file the rounds show, grouped by licence and then
+  repository. It is built from the committed artifact. Each repository links
+  its licence file at the commit its files were read at, and each licence links
+  its text on spdx.org.
+  - A file's path often names its round's answer (`sorts/SelectionSort.java`),
+    so a credit never names its round: no round id, deck, order, or hash.
+  - [`docs/licences.md`](docs/licences.md) sets out what each allowed licence
+    asks of excerpts. Apache-2.0's NOTICE files are an open judgment call.
+- **`/privacy`** says what the game records and what it never records. It is
+  rendered from `privacy/disclosures.ts`, a registry of what each feature keeps
+  or sends: the event log, game progress, plays, share and duel links, browser
+  storage (none yet), the client address for rate limits, the model calls, server
+  logs, and `Sec-GPC`.
+  - The event log's part is the event schema in words
+    (`experiment/event-docs.ts`), and a test holds its fields to the schema's.
+
 ### Public mode
 
 `CODEGUESSR_PUBLIC=1` marks a server for anonymous public play (#100). It
@@ -703,6 +723,7 @@ Each path has a status:
 | `tsconfig.base.json` | Compiler options every package and `ops/` extend | PoC support |
 | `compose.test.yaml` | A Postgres 16 test service. No script, test, or workflow uses it | Contract-era |
 | [`docs/architecture.md`](docs/architecture.md) | The flow from preparation to play, the artifact's shape, and a glossary of field names | live |
+| [`docs/licences.md`](docs/licences.md) | What each allowed licence asks of excerpts, and how the credits page meets it | live |
 | [`docs/review`](docs/review/README.md) | Current state, reviews, plans, and run evidence | live |
 | `docs/media` | README media, written by `pnpm demo:record` | PoC support |
 | [`docs/releases`](docs/releases/v1.0.0.md) | Release notes | live |

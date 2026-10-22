@@ -28,14 +28,15 @@ export type EventSource = (typeof SOURCES)[number];
 export const ORIGINS = Object.freeze(["deal", "duel"] as const);
 export type EventOrigin = (typeof ORIGINS)[number];
 
-const VIEWPORTS = ["phone", "tablet", "desktop"] as const;
-const PHASES = ["before-lock", "after-lock"] as const;
+// Every closed choice is exported, so the privacy page (#99) lists the very values the parser takes.
+export const VIEWPORTS = Object.freeze(["phone", "tablet", "desktop"] as const);
+export const PHASES = Object.freeze(["before-lock", "after-lock"] as const);
 /** Where a finished game went: a new deal of its deck, the chooser, or, from a friend's game of a duel, a rematch. */
-const DEAL_TARGETS = ["same-deck", "chooser", "rematch"] as const;
+export const DEAL_TARGETS = Object.freeze(["same-deck", "chooser", "rematch"] as const);
 export const SHARE_ROUTES = Object.freeze(["share", "clipboard"] as const);
-const GENUI_ACTIONS = ["explain", "chat", "quiz", "offer_hint", "step"] as const;
+export const GENUI_ACTIONS = Object.freeze(["explain", "chat", "quiz", "offer_hint", "step"] as const);
 /** Why a generative panel fell back; `limited` is a rate limit or a game's cap (#98). */
-const GENUI_FALLBACKS = ["unavailable", "refused", "failed", "rejected", "limited"] as const;
+export const GENUI_FALLBACKS = Object.freeze(["unavailable", "refused", "failed", "rejected", "limited"] as const);
 /** Whether a challenger's game was its deal's first try (`FirstPlay`); today's five is everyone's, so `shared`. */
 export const FIRST_PLAYS = Object.freeze(["yes", "no", "shared"] as const satisfies readonly FirstPlay[]);
 /** A duel's outcome, from the friend's side, and what decided it (`duelVerdict`). */
@@ -89,6 +90,11 @@ export type EventType = keyof typeof PAYLOADS | keyof typeof RETIRED;
 /** Every type a stored line may carry, the retired ones included. */
 export const EVENT_TYPES = Object.freeze([...Object.keys(PAYLOADS), ...Object.keys(RETIRED)] as EventType[]);
 export const RETIRED_EVENT_TYPES = Object.freeze(Object.keys(RETIRED) as (keyof typeof RETIRED)[]);
+/** The types the current version writes. */
+export type CurrentEventType = keyof typeof PAYLOADS;
+/** Each type's own fields by name, as the current version writes them: what the privacy page lists (#99). */
+export const EVENT_FIELDS = Object.freeze(Object.fromEntries(Object.entries(PAYLOADS)
+  .map(([type, checks]) => [type, Object.freeze(Object.keys(checks))]))) as Readonly<Record<CurrentEventType, readonly string[]>>;
 
 /** The events only a browser sees; it sends them to the beacon route, which adds the game's own fields. */
 export const CLIENT_EVENT_TYPES = Object.freeze(["game_viewed", "deal_again", "result_shared", "genui_interaction", "genui_fallback",
@@ -129,6 +135,8 @@ export type ExperimentEvent = EventBase & Readonly<Record<string, string | numbe
 
 const BASE_KEYS = ["v", "type", "game", "day", "source", "origin", "deck", ...Object.keys(FACTORS)];
 const V1_BASE_KEYS = BASE_KEYS.filter((key) => key !== "origin");
+/** The fields every event carries under the current version, in the order a stored line writes them. */
+export const EVENT_BASE_KEYS: readonly string[] = Object.freeze([...BASE_KEYS]);
 
 export const isDay = (value: unknown): value is string => {
   if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/u.test(value)) return false;

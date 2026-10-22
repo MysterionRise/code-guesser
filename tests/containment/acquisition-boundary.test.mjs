@@ -149,6 +149,19 @@ test("browser and gameplay dependency surfaces exclude acquisition capabilities"
   assert.match(frameRoute, /return new Response\(SHELL, \{/u);
   assert.doesNotMatch(frameRoute, roundData);
   assert.doesNotMatch(frameRoute, /\brequest\b|headers\(|process\.env|\bfetch\b|experiment|console\./u);
+  // The credits page (#99) reads the experiment only through its credits, and they read only each round's source's
+  // public provenance: no round id, deck, order, or hash ties a credit to its round. The privacy page reads no
+  // experiment and no request.
+  const creditsPage = code(join(game, "src", "app", "credits", "page.tsx"));
+  assert.deepEqual([...new Set([...creditsPage.matchAll(/\bloaded\.(\w+)/gu)].map(([, key]) => key))].sort(), ["experiment", "ok", "reason"]);
+  assert.deepEqual([...creditsPage.matchAll(/(?<![\w-])experiment\.(\w+)/gu)].map(([, key]) => key), ["credits"]);
+  assert.doesNotMatch(creditsPage, /privateReveals|fixtures?\b|panes?\b|candidates?\b|roundIds?\b|excerptHash|headers\(|cookies\(/u);
+  const credits = code(join(game, "src", "demo", "local-real-experiment-credits.server.ts"));
+  assert.deepEqual([...new Set([...credits.matchAll(/\bsource\.(\w+)/gu)].map(([, key]) => key))].sort(),
+    ["authorName", "blobUrl", "commit", "licenseFileUrl", "licenseName", "licenseSpdx", "path", "repository", "repositoryUrl"]);
+  assert.doesNotMatch(credits, /roundId|excerptHash|\bdeck\.|\.id\b|\bindex\b/u);
+  const privacyPage = code(join(game, "src", "app", "privacy", "page.tsx"));
+  assert.doesNotMatch(privacyPage, /activeLocalRealExperiment|\bloaded\b|headers\(|cookies\(|\bfetch\b/u);
   assert.equal(participantSources.some((path) => /\bfetch\s*\(/u.test(read(path))), false);
 
   const contentPackage = JSON.parse(read(join(root, "packages", "content", "package.json")));
