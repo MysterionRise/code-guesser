@@ -5,6 +5,8 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { authorizeLocalExperimentReveal, createDuelChallenge, revealLocalExperimentHint } from "./actions";
+import { recordsArtifact } from "../components/arcade/local-records";
+import { ClearRecords, DayStreak, DeckRecord } from "../components/chooser-records";
 import { ArtifactUnavailable } from "../demo/artifact-unavailable";
 import { DemoArcade } from "../demo/demo-arcade";
 import { DAILY_DESCRIPTION, DAILY_TITLE, gameSources, type GameSource } from "../demo/game-sources.server";
@@ -74,9 +76,12 @@ export async function generateMetadata({ searchParams }: PageProps): Promise<Met
 
 /**
  * The chooser (#126): the mix first when the artifact offers one (#56), then decks grouped by what they ask; in lab
- * mode `query` carries the tester's picks onto each link.
+ * mode `query` carries the tester's picks onto each link. Each card shows the player's records for it, which only their
+ * browser holds (#63), under this round set's `artifact`.
  */
-function DeckChooser({ decks, mixed, query }: { readonly decks: readonly LocalRealDeck[]; readonly mixed: LocalRealMix | null; readonly query: string }) {
+function DeckChooser({ decks, mixed, query, artifact }: {
+  readonly decks: readonly LocalRealDeck[]; readonly mixed: LocalRealMix | null; readonly query: string; readonly artifact: string;
+}) {
   const groups = (["Recognise", "Reason"] as const).map((tag) => ({ tag, decks: decks.filter(({ id }) => (DECK_TAGS[id] ?? "Reason") === tag) }))
     .filter(({ decks: grouped }) => grouped.length > 0);
   return (
@@ -94,14 +99,16 @@ function DeckChooser({ decks, mixed, query }: { readonly decks: readonly LocalRe
               <a className="deck-card" href={`/?deck=${DAILY_DECK}${query}`}>
                 <span className="deck-title">{DAILY_TITLE}</span>{" "}
                 <span className="deck-description">{DAILY_DESCRIPTION}</span>{" "}
-                <span className="deck-size">{localDate(new Date())}</span>
+                <span className="deck-size">{localDate(new Date())}</span>{" "}
+                <DayStreak artifact={artifact} />
               </a>
             </li>
             <li>
               <a className="deck-card" href={`/?deck=${MIXED_DECK}${query}`}>
                 <span className="deck-title">{mixed.title}</span>{" "}
                 <span className="deck-description">{mixed.description}</span>{" "}
-                <span className="deck-size">Drawn from {mixed.deckCount} decks</span>
+                <span className="deck-size">Drawn from {mixed.deckCount} decks</span>{" "}
+                <DeckRecord artifact={artifact} deck={MIXED_DECK} />
               </a>
             </li>
           </ul>
@@ -116,13 +123,15 @@ function DeckChooser({ decks, mixed, query }: { readonly decks: readonly LocalRe
                 <a className="deck-card" href={`/?deck=${deck.id}${query}`}>
                   <span className="deck-title">{deck.title}</span>{" "}
                   <span className="deck-description">{deck.description}</span>{" "}
-                  <span className="deck-size">{deck.poolSize} rounds in the deck</span>
+                  <span className="deck-size">{deck.poolSize} rounds in the deck</span>{" "}
+                  <DeckRecord artifact={artifact} deck={deck.id} />
                 </a>
               </li>
             ))}
           </ul>
         </section>
       ))}
+      <ClearRecords artifact={artifact} />
     </main>
   );
 }
@@ -220,12 +229,14 @@ function DealtSession({ deck, series, arms, record, overrides, origin }: {
   const share = origin === null ? {} : { shareHref: `${origin}${gameHref(deck.id, series)}` };
   // A finished game can also challenge a friend (#173), with a link of its own.
   const challenge = origin === null ? {} : { duel: { role: "challenger", origin, createChallenge: createDuelChallenge } as const };
+  // A finished game joins the player's records in their browser (#63), under this round set.
+  const records = { artifact: recordsArtifact(loaded.experiment.artifactHash), deck: deck.id, date: deal !== undefined && "date" in deal ? deal.date : null };
   return (
     <>
       {wrapped && <p className="deal-note">You’ve now seen every round in this deck, so this game starts it over.</p>}
       <DemoArcade key={sessionToken} mode={mode} sessionToken={sessionToken} deckTitle={deck.title} {...(roundDecks ? { roundDecks } : {})}
         authorizeRevealAction={authorizeLocalExperimentReveal} revealHintAction={revealLocalExperimentHint}
-        chooseAnotherDeckHref="/" newGameHref={`${next}${labQuery(overrides)}`} {...share} {...challenge}
+        chooseAnotherDeckHref="/" newGameHref={`${next}${labQuery(overrides)}`} {...share} {...challenge} records={records}
         {...(arms.design === "off" ? {} : { genuiDesign: arms.design })} />
     </>
   );
@@ -283,7 +294,8 @@ export default async function Page({ searchParams }: PageProps) {
                 )}
             </>
           )
-          : <DeckChooser decks={loaded.experiment.decks} mixed={loaded.experiment.mixed} query={labQuery(overrides)} />}
+          : <DeckChooser decks={loaded.experiment.decks} mixed={loaded.experiment.mixed} query={labQuery(overrides)}
+            artifact={recordsArtifact(loaded.experiment.artifactHash)} />}
     </PageFrame>
   );
 }
