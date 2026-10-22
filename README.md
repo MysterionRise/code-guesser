@@ -110,7 +110,17 @@ code under each line's own indentation.
 
 `/?deck=<id>` opens a deck directly: `project`, `language`, `before-after`,
 `algorithm`, `output`, `fix`, `missing-line`, `name-function`, `framework`,
-or `exercise`.
+or `exercise`. An id this artifact doesn't hold shows the chooser under a
+note that the deck isn't available.
+
+A notice above every page names the sources, says the rounds are chosen and
+checked automatically, not reviewed by hand, and links `/about`: how to play,
+scoring and keys, every deck by its own description, duels, and what the
+experiment draws and records. Any other address gets a 404 page with the way
+back to the decks. `robots.txt` lets crawlers read the chooser and About but
+never a deck's or a duel's address, since those deal a game or open a duel.
+With `CODEGUESSR_PUBLIC_ORIGIN` set, every page's link preview resolves
+against it.
 
 Two cards come first in the chooser:
 

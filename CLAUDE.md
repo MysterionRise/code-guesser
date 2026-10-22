@@ -197,6 +197,17 @@ gate: changing queries, retries, ceilings, deck rules, or running
     that module before the AI SDK, which builds its schemas as it loads; imported later, the probe still fired.
   - `tests/e2e/security-headers.spec.ts` checks every header and nonce, and that no deck and no design breaks the
     policy. `pnpm test:deploy` checks the same on the production build, where eval is refused.
+- **Public copy (#168, L10):** the notice above every page (`LOCAL_REAL_EXPERIMENT_NOTICE_BODY` and `_LINK` in the
+  loader) names the sources, says the rounds are chosen and checked automatically, not reviewed by hand, says each game
+  tries a random look and explainer, and links About. `accessibility-local.spec.ts` holds it to five lines at 320 px;
+  CI's Chromium draws it in DejaVu Sans, wider than macOS's font, so measure a new wording on Linux.
+  - `app/about/page.tsx`: how to play, scoring, keys, every deck through `gameSources` (never a round), duels, and what
+    the experiment draws and records. `PRIVACY_HREF` is the slot for #99's privacy page.
+  - `app/not-found.tsx` (the original theme, the way back); a `?deck=` the artifact doesn't hold shows the chooser
+    under "That deck isn’t available" (#70), never echoing the id.
+  - `app/robots.ts` allows `/` and `/about` and disallows `/*?deck=` and `/*?duel`; `app/icon.svg` is the monogram.
+  - The layout's title template (`%s · CodeGuessr`) reaches child segments only, so the root page and the 404 spell
+    their titles whole; its `metadataBase` is `configuredOrigin()` (`CODEGUESSR_PUBLIC_ORIGIN`) when set.
 - **State store and health (#164, L7):** with `CODEGUESSR_STATE_DIR`, `recordStep` writes each game's step through to
   `<dir>/state.sqlite` (`server/state-store.server.ts`, on `node:sqlite` via `server/sqlite.server.ts`, loaded with
   `process.getBuiltinModule` so webpack never sees it; WAL, `busy_timeout`). `readGame` checks memory, then the store,

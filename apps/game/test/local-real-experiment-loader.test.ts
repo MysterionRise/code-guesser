@@ -10,7 +10,7 @@ vi.mock("server-only", () => ({}));
 
 const loaderModule = await import("../src/demo/local-real-experiment-loader.server");
 const {
-  ARTIFACT_RELATIVE_PATH, LOCAL_REAL_EXPERIMENT_NOTICE, LOCAL_REAL_EXPERIMENT_NOTICE_BODY, LOCAL_REAL_EXPERIMENT_NOTICE_LEAD,
+  ARTIFACT_RELATIVE_PATH, LOCAL_REAL_EXPERIMENT_NOTICE, LOCAL_REAL_EXPERIMENT_NOTICE_BODY, LOCAL_REAL_EXPERIMENT_NOTICE_LINK,
   activeLocalRealExperiment, loadLocalRealExperiment,
 } = loaderModule;
 
@@ -89,17 +89,18 @@ describe("server-only local real experiment loader", () => {
     }
   });
 
-  it("names every round source and the unreviewed localhost status in a short permanent notice", () => {
+  it("names every round source, how rounds were chosen, and the experiment in a short permanent notice", () => {
     for (const source of ["The Stack v2", "GitHub", "TheAlgorithms", "Defects4J", "BugsInPy", "TodoMVC", "Exercism"]) {
       expect(LOCAL_REAL_EXPERIMENT_NOTICE).toContain(source);
     }
-    expect(LOCAL_REAL_EXPERIMENT_NOTICE).toMatch(/^Local unreviewed experiment\./u);
-    expect(LOCAL_REAL_EXPERIMENT_NOTICE).toMatch(/localhost/u);
-    expect(LOCAL_REAL_EXPERIMENT_NOTICE).toMatch(/Not approved beta content/u);
-    expect(LOCAL_REAL_EXPERIMENT_NOTICE).toBe(`${LOCAL_REAL_EXPERIMENT_NOTICE_LEAD} ${LOCAL_REAL_EXPERIMENT_NOTICE_BODY}`);
-    // The old notice ran to nine lines on a 320 px screen; the browser test holds this one, with v1.0's two new
-    // sources, to five.
-    expect(LOCAL_REAL_EXPERIMENT_NOTICE.length).toBeLessThanOrEqual(170);
+    expect(LOCAL_REAL_EXPERIMENT_NOTICE).toContain("chosen and checked automatically, not reviewed by hand");
+    expect(LOCAL_REAL_EXPERIMENT_NOTICE).toContain("Each game tries a random look and explainer.");
+    expect(LOCAL_REAL_EXPERIMENT_NOTICE).not.toMatch(/localhost|unreviewed experiment|beta/iu);
+    expect(LOCAL_REAL_EXPERIMENT_NOTICE).toBe(`${LOCAL_REAL_EXPERIMENT_NOTICE_BODY} ${LOCAL_REAL_EXPERIMENT_NOTICE_LINK}`);
+    expect(LOCAL_REAL_EXPERIMENT_NOTICE_LINK).toBe("About");
+    // The browser test holds the notice to five lines on a 320 px screen; this many characters is what fits there in
+    // the DejaVu Sans of a Linux browser, the widest font a CI run draws it in.
+    expect(LOCAL_REAL_EXPERIMENT_NOTICE.length).toBeLessThanOrEqual(190);
   });
 
   it("binds the root route and its reveal action to the local experiment loader", () => {

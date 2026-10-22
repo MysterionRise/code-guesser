@@ -3,14 +3,24 @@ import { connection } from "next/server";
 import type { ReactNode } from "react";
 import "./globals.css";
 
+import { configuredOrigin } from "../server/public-origin.server";
+
 const TITLE = "CodeGuessr — Read the code. Make your call.";
 const DESCRIPTION = "A five-round code-reading arcade.";
+const origin = configuredOrigin();
 
-/** The chooser's title and link preview; a deck's page names its deck instead (#171). */
+/**
+ * Every page's metadata defaults (#168): the chooser's title and description, which another page's title joins
+ * ("About · CodeGuessr"), and a link preview that takes each page's own title and description. A deck's page names its
+ * deck and image instead (#171), and `metadataBase` is the public origin when a host sets one.
+ */
 export const metadata: Metadata = {
-  title: TITLE,
+  ...(origin === null ? {} : { metadataBase: new URL(origin) }),
+  title: { default: TITLE, template: "%s · CodeGuessr" },
   description: DESCRIPTION,
-  openGraph: { type: "website", siteName: "CodeGuessr", title: TITLE, description: DESCRIPTION },
+  applicationName: "CodeGuessr",
+  openGraph: { type: "website", siteName: "CodeGuessr", locale: "en" },
+  twitter: { card: "summary" },
 };
 
 export default async function RootLayout({ children }: Readonly<{ children: ReactNode }>) {

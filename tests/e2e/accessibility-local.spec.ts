@@ -25,20 +25,22 @@ test("the deck chooser and every deck fit the minimum viewport", async ({ page }
   }
 });
 
-test("the permanent notice names every round source and wraps to at most five lines", async ({ page }) => {
+test("the permanent notice names every round source, links About, and wraps to at most five lines on every page", async ({ page }) => {
   const lines = (element: HTMLElement) => {
     const range = document.createRange();
     range.selectNodeContents(element);
     return new Set([...range.getClientRects()].map((rect) => Math.round(rect.top))).size;
   };
-  for (const path of ["/", `/?deck=${deckIds[0]}`]) {
+  for (const path of ["/", `/?deck=${deckIds[0]}`, "/about", "/no-such-page"]) {
     await page.goto(path);
     const notice = page.locator(".demo-notice");
-    await expect(notice).toContainText(/^Local unreviewed experiment\./u);
-    for (const source of ["The Stack v2", "GitHub", "TheAlgorithms", "Defects4J", "BugsInPy", "TodoMVC", "Exercism", "localhost", "Not approved beta content"]) {
-      await expect(notice).toContainText(source);
+    for (const text of ["The Stack v2", "GitHub", "TheAlgorithms", "Defects4J", "BugsInPy", "TodoMVC", "Exercism",
+      "chosen and checked automatically, not reviewed by hand", "Each game tries a random look and explainer."]) {
+      await expect(notice).toContainText(text);
     }
+    await expect(notice.getByRole("link", { name: "About" })).toHaveAttribute("href", "/about");
     expect(await notice.evaluate(lines), path).toBeLessThanOrEqual(5);
+    expect(await page.evaluate(noHorizontalScroll), path).toBe(true);
   }
 });
 
@@ -48,6 +50,9 @@ test("the deck chooser is keyboard operable with named links", async ({ page }) 
   const links = page.getByRole("list").getByRole("link");
   // Today's five and the mix come first (#56, #74), then every deck.
   await expect(links).toHaveCount(deckIds.length + 2);
+  // The notice above the chooser links About (#168) first.
+  await page.keyboard.press("Tab");
+  await expect(page.locator(".demo-notice").getByRole("link", { name: "About" })).toBeFocused();
   await page.keyboard.press("Tab");
   await expect(links.first()).toBeFocused();
   await page.keyboard.press("Tab");
