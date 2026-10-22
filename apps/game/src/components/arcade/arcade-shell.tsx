@@ -76,6 +76,9 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
   const lines = LINE_KINDS.has(round.mode.kind);
   // A layered round numbers its lines, since its hints may point at them (a Trace it frame cites "lines 15-16").
   const numbered = (lines || round.scaffold !== undefined) && round.content.panes.length === 1;
+  // A game that shows question layers (#128) says when a round plays without one, as one the audit or a review refused
+  // does (#161). The server deals scaffolds only to a game drawn with layers, so a game with none says nothing.
+  const layered = mode.rounds.some(({ scaffold }) => scaffold !== undefined);
   const paneLines = numbered ? round.content.panes[0]!.text.split("\n") : [];
   const labelOf = (candidateId: string | null) => round.mode.candidates.find((candidate) => candidate.candidateId === candidateId)?.label ?? "";
   const highlighted = numbered && lines
@@ -214,12 +217,12 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
         <p className="eyebrow">Round {session.roundIndex + 1} of {mode.rounds.length}
           {roundDecks?.[round.mode.kind] !== undefined && <> · <span className="round-deck">{roundDecks[round.mode.kind]}</span></>}</p>
         <h1 id="round-title" ref={roundTitle} tabIndex={-1}>{round.mode.prompt}</h1>
-        {round.scaffold && <QuestionScaffold scaffold={round.scaffold} />}
+        {round.scaffold ? <QuestionScaffold scaffold={round.scaffold} /> : layered && <p className="layer-note">No question layer for this round.</p>}
         <CodePanes round={round} numbered={numbered} paneLines={paneLines} highlighted={highlighted} marked={markedLines(session.hintDetails)}
           wrap={wrap} onToggleWrap={() => setWrap((current) => !current)} />
 
         <HintBar round={round} hints={session.hints} details={session.hintDetails} disabled={busy || ended || session.lockedCandidateId !== null}
-          error={hintError} onRequest={requestHint} buttonRef={hintButton} latestHintRef={latestHint} />
+          locked={session.reveal !== null} error={hintError} onRequest={requestHint} buttonRef={hintButton} latestHintRef={latestHint} />
 
         {/* A form, so Enter on a chosen option locks it in (#71). */}
         <form className="answer-form" onSubmit={(event) => { event.preventDefault(); void submit(); }}
@@ -235,11 +238,16 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
             answerCandidateId={session.reveal?.answerCandidateId ?? null} lockedCandidateId={session.lockedCandidateId}
             disabled={session.reveal !== null || busy} onSelect={setSelection} onFocusCandidate={setFocusedCandidate} />
 
-          <button className="answer-button" type="submit" ref={answerButton} disabled={selection === "" || session.reveal !== null || busy || ended || hintLoading}>
-            {busy ? "Checking…" : "Lock in answer"}
-          </button>
+          {/* Once the answer is locked, the controls that asked for it give way to the verdict, which takes focus (#161). */}
+          {session.reveal === null && (
+            <button className="answer-button" type="submit" ref={answerButton} disabled={selection === "" || busy || ended || hintLoading}>
+              {busy ? "Checking…" : "Lock in answer"}
+            </button>
+          )}
         </form>
-        <p className="keys-note">Keys: <kbd>1</kbd>–<kbd>{round.mode.candidates.length}</kbd> pick, <kbd>Enter</kbd> locks in, <kbd>H</kbd> buys a hint, <kbd>N</kbd> moves on.</p>
+        {session.reveal === null && (
+          <p className="keys-note">Keys: <kbd>1</kbd>–<kbd>{round.mode.candidates.length}</kbd> pick, <kbd>Enter</kbd> locks in, <kbd>H</kbd> buys a hint, <kbd>N</kbd> moves on.</p>
+        )}
         {error && <p className="demo-error" role="alert">{error}</p>}
         {ended && (
           <p className="demo-error" role="alert">
@@ -251,7 +259,7 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
           {session.reveal && (
             <RoundReveal round={round} reveal={session.reveal} hintsUsed={session.visibleHintCount}
               pickLabel={labelOf(session.lockedCandidateId)} complete={session.status === "complete"}
-              correctRounds={session.correctRounds} history={session.history} deckTitle={deckTitle} shareHref={shareHref} newGameHref={newGameHref}
+              correctRounds={session.correctRounds} history={session.history} deckTitle={deckTitle} roundDecks={roundDecks} shareHref={shareHref} newGameHref={newGameHref}
               chooseAnotherDeckHref={chooseAnotherDeckHref} genuiDesign={genuiDesign} duel={duel} opponentName={opponentName} sessionToken={currentToken}
               onNext={next} headingRef={revealHeading} track={track} trackGenui={trackGenui} />
           )}

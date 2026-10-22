@@ -376,9 +376,11 @@ test("a round plays from the keyboard alone: Tab, arrows, Enter, and the N, numb
   await page.keyboard.press("2");
   await expect(page.getByRole("group", { name: "Choose one answer" }).getByRole("radio").nth(1)).toBeChecked();
   await expect(page.getByRole("group", { name: "Choose one answer" }).getByRole("radio").nth(1)).toBeFocused();
-  await page.keyboard.press("Enter");
-  await expect(page.getByRole("heading", { name: /Nice read\.|Not this time\./u })).toBeVisible();
   await expect(page.locator(".keys-note")).toContainText("Enter locks in");
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("heading", { name: /Nice read\.|Not this time\./u })).toBeFocused();
+  // The keys line goes with the controls it names once the answer is locked (#161).
+  await expect(page.locator(".keys-note")).toHaveCount(0);
 });
 
 test("on a phone no fix option's code is cut off, and wrapped lines keep their indentation (#46, #85)", async ({ page }) => {
