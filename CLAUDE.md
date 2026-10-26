@@ -1077,15 +1077,31 @@ pnpm exec tsc --noEmit -p ops/tsconfig.json
 uv run --project ops/poc/stack --locked python -m unittest discover -s ops/poc/stack
 pnpm test
 pnpm typecheck
+pnpm --filter @codeguessr/game build
+pnpm exec node --test tests/containment/acquisition-boundary.test.mjs
+pnpm test:deploy
 pnpm test:a11y
 pnpm test:performance
 pnpm test:e2e
-pnpm exec node --test tests/containment/acquisition-boundary.test.mjs
-pnpm --filter @codeguessr/game build
-pnpm test:deploy
 pnpm test:container
 pnpm audit --audit-level=high
 ```
+
+- `pnpm test`: the workspace test, then Vitest under `apps/`, `packages/`, and `ops/`, the leakage test among them.
+- The containment test, `pnpm test:deploy`, `pnpm test:a11y`, and `pnpm test:performance` reuse a production build
+  newer than its inputs (`ensureProductionBuild` in `tests/production/build.mjs`) and build one otherwise. `next dev`
+  replaces it, so `pnpm test:e2e` runs last in CI.
+- `pnpm test:deploy` (`tests/deploy/`) boots the production build in public mode.
+- `pnpm test:a11y` and `pnpm test:performance` (#45, #66, #70) run `playwright.production.config.ts`: `next start` on
+  `E2E_PORT` + 10, lab mode, generative UI off, and a fixed session secret.
+  - `tests/accessibility/`: axe's WCAG 2 A and AA rules at 320 and 1280 px on the chooser, About, Credits, Privacy,
+    the 404, a duel's pages, and every deck, the mix, and today's five at round 1, after a hint, after a reveal, and
+    at the end (`scan` also refuses sideways scroll and any animation under reduced motion). Also a whole game from the
+    keyboard alone, and the friendly pages odd addresses end on, an expired duel link resealed with the secret among
+    them.
+  - `tests/performance/`: script bytes on a first visit (chooser 125,000, game 135,000), "Round 1 of 5" within
+    1,000 ms (1,500 on CI), and a whole game that requests nothing from another origin.
+- `pnpm test:e2e`: the browser scenarios on `next dev`, with the OpenRouter stand-in on `E2E_PORT` + 1.
 
 ## Done means
 
