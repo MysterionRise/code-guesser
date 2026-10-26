@@ -1,4 +1,4 @@
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const gameRoot = dirname(fileURLToPath(import.meta.url));
@@ -16,9 +16,23 @@ const SECURITY_HEADERS = [
   { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), payment=(), usb=(), browsing-topics=()" },
 ];
 
+/**
+ * The container image (#170) sets `CODEGUESSR_STANDALONE=1` to build Next's standalone server: only the files the
+ * server needs, traced from the workspace root so pnpm's linked packages come along. TypeScript and the image
+ * optimizer's sharp are traced but never loaded, since the config is plain JavaScript and the optimizer is off. Every
+ * other build keeps `next start` and the game's own root.
+ */
+const standalone = process.env.CODEGUESSR_STANDALONE === "1";
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  outputFileTracingRoot: gameRoot,
+  ...(standalone ? {
+    output: "standalone",
+    outputFileTracingExcludes: { "*": ["**/node_modules/typescript/**", "**/node_modules/sharp/**", "**/node_modules/@img/**"] },
+  } : {}),
+  outputFileTracingRoot: standalone ? join(gameRoot, "..", "..") : gameRoot,
+  // The game shows no `next/image`, so `/_next/image` answers 404 rather than resize images on request.
+  images: { unoptimized: true },
   poweredByHeader: false,
   productionBrowserSourceMaps: false,
   reactStrictMode: true,
