@@ -46,8 +46,8 @@ const COMMON_WORDS: ReadonlySet<string> = new Set(("the and for with that this f
  * A text's distinctive words, each cut to its first five letters: words split at case changes and at anything but
  * letters and digits, of three characters or more, common words and bare numbers aside. `Aws::SQS` gives `aws` and
  * `sqs`; "A utility-first CSS framework" gives `utili`, `first`, `css`, and `frame`. With `whole` (v7, #200), a word
- * split at a case change counts whole too: `GitHub` gives `git`, `hub`, and `githu`, so it meets the `GITHUB` of
- * `GITHUB_TOKEN`, which no case change splits.
+ * split at a case change counts whole too: `GitHub` gives `git`, `hub`, and `githu`, so it meets an upper-case
+ * `GITHUB`, which no case change splits.
  */
 export const wordStems = (text: string, whole = false): ReadonlySet<string> => new Set([
   ...text.replace(/([a-z0-9])([A-Z])/gu, "$1 $2").replace(/([A-Z]+)([A-Z][a-z])/gu, "$1 $2").toLocaleLowerCase("en-US").split(/[^a-z0-9]+/u),
