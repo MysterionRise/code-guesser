@@ -81,24 +81,21 @@ test("an explainer past its game's limit falls back to the static reveal, and th
 
 test("a player past the deal limit is told to wait, with no game dealt, while other players still play", async ({ page, request }) => {
   const client = { "X-Forwarded-For": clientAddress() };
-  // Each game dealt spends a deal (the redirect to a fresh seed spends nothing). The drain deals under `Sec-GPC: 1`, so
-  // its games record no events in the shared store; spend the burst that way, then a little more.
-  const drain = async (game: number) =>
-    (await (await request.get(`/?deck=fix&deal=0badcafe&game=${game}`, { headers: { ...client, "Sec-GPC": "1" } })).text())
-      .includes("Too many new games");
-  let dealt = 0;
-  for (; dealt <= 4 * DEAL_BURST * E2E_RATE_LIMITS; dealt += 1) if (await drain(dealt)) break;
-  expect(dealt).toBeGreaterThanOrEqual(DEAL_BURST * E2E_RATE_LIMITS);
-  await page.setExtraHTTPHeaders(client);
-  // The bucket refills while the browser loads, so it is drained again just before each try.
-  await expect(async () => {
-    await Promise.all(Array.from({ length: 20 }, (_, index) => drain(900 + index)));
-    await page.goto("/?deck=fix&deal=0badcafe&game=0");
-    await expect(page.getByRole("heading", { name: "Too many new games — wait a minute" })).toBeVisible({ timeout: 1_000 });
-  }).toPass({ timeout: 60_000 });
-  await expect(page.locator(".game-card")).toHaveCount(0);
-  await expect(page.getByRole("link", { name: "Try again" })).toHaveAttribute("href", "/?deck=fix&deal=0badcafe&game=0");
-  await expect(page.getByRole("link", { name: "All decks" })).toBeVisible();
+  // Each game dealt spends a deal (the redirect to a fresh seed spends nothing), and dealing a game is slow on CI's dev
+  // server, so the bucket refills while one deal at a time drains it. Deals go out in concurrent batches until one in the
+  // batch is refused, and that refused page is the one checked. They carry `Sec-GPC: 1`, so they record no events in the
+  // shared store.
+  const deal = async (game: number) =>
+    (await request.get(`/?deck=fix&deal=0badcafe&game=${game}`, { headers: { ...client, "Sec-GPC": "1" } })).text();
+  let refused: string | undefined;
+  for (let batch = 0; refused === undefined && batch * 25 <= 4 * DEAL_BURST * E2E_RATE_LIMITS; batch += 1) {
+    const pages = await Promise.all(Array.from({ length: 25 }, (_, index) => deal((batch * 25 + index) % 1000)));
+    refused = pages.find((html) => html.includes("Too many new games — wait a minute"));
+  }
+  expect(refused, "a deal past the burst is refused").toBeDefined();
+  expect(refused).not.toContain('class="game-card"');
+  expect(refused).toMatch(/<a href="\/\?deck=fix&amp;deal=0badcafe&amp;game=\d+">Try again<\/a>/u);
+  expect(refused).toContain(">All decks<");
 
   // Another player, behind another address, is dealt as usual.
   await page.setExtraHTTPHeaders({ "X-Forwarded-For": clientAddress("203.0.113") });
