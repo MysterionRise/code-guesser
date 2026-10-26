@@ -10,7 +10,7 @@ import { changeKind, fixWindows, type FixWindow } from "./fix-window";
 import type { DatasetBug, FixPointer } from "./github-fixes";
 import { FIX_OPTIONS } from "./profile";
 import { balancedChoice, sha256 } from "./round-helpers";
-import { addHashes, collidesWithSelected, revealsProtected, unreportable } from "./selection";
+import { addHashes, collidesWithSelected, protectedScreen, unreportable } from "./selection";
 import type { Context, PreparationDependencies } from "./types";
 
 /** A fix round in waiting: everything but the final snapshot it is bound to. */
@@ -144,7 +144,7 @@ export const selectFix = async (
         state.duplicatesRejected += 1;
         fail("SOURCE_DUPLICATE");
       }
-      if (shown.some((selection) => revealsProtected(profile, selection, [...otherDecks(), ...chosen]))) fail("PUBLIC_CONTAINMENT_REJECTED");
+      if (shown.some(protectedScreen(profile, [...otherDecks(), ...chosen]))) fail("PUBLIC_CONTAINMENT_REJECTED");
       if (unreportable(pending)) fail("SOURCE_IDENTITY_UNREPORTABLE");
       state.screened += 1;
       perRepository.set(project.repository, (perRepository.get(project.repository) ?? 0) + 1);
