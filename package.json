@@ -14,6 +14,7 @@
     "test:e2e": "node tests/e2e/run-playwright.mjs",
     "test:performance": "node --test tests/performance/*.test.mjs",
     "test:deploy": "node --test tests/deploy/*.test.mjs",
+    "test:container": "node --test tests/container/*.test.mjs",
     "acquire:content": "node --import tsx ops/content/acquire/index.ts",
     "prepare:poc": "node --import tsx ops/poc/prepare/index.ts",
     "prepare:questions": "node --import tsx ops/poc/questions/index.ts",

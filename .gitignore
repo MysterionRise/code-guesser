@@ -27,3 +27,4 @@ ops/poc/stack/**/*.py[cod]
 docs/media/.work/
 ops/playtest/tmp/
 ops/poc/questions/tmp/
+ops/experiment/tmp/
