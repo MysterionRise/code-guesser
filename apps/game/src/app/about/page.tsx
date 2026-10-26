@@ -9,12 +9,6 @@ const DESCRIPTION = "How to play CodeGuessr: the decks, scoring, keys, duels, an
 
 export const metadata: Metadata = { title: "About", description: DESCRIPTION };
 
-/**
- * The privacy page this one links to. It is #99's (L8), which isn't built yet: set this to "/privacy" when it is, and
- * the experiment section links it.
- */
-const PRIVACY_HREF: string | null = null;
-
 interface PageProps {
   readonly searchParams: Promise<Readonly<Record<string, string | string[] | undefined>>>;
 }
@@ -115,7 +109,7 @@ export default async function AboutPage({ searchParams }: PageProps) {
           from game to game, nor chat text, the round’s code, or the option you chose. A browser that sends Global
           Privacy Control (<code>Sec-GPC: 1</code>) gets games that record nothing.
         </p>
-        {PRIVACY_HREF !== null && <p><a href={PRIVACY_HREF}>Privacy</a></p>}
+        <p>The <a href="/privacy">privacy page</a> lists every field an event may hold.</p>
       </main>
     </PageFrame>
   );

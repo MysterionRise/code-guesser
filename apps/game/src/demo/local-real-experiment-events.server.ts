@@ -1,7 +1,7 @@
 import "server-only";
 
 import type { EventSink } from "../experiment/event-store.server";
-import { CLIENT_EVENT_TYPES, parsePayload, type EventType } from "../experiment/events";
+import { CLIENT_EVENT_TYPES, parsePayload, type EventOrigin, type EventType } from "../experiment/events";
 import { ROUNDS_PER_SESSION } from "./local-real-experiment-domain.server";
 import { GAME_TTL_MS, SessionRefusal, openGame, type GameState } from "./local-real-experiment-session.server";
 
@@ -10,8 +10,11 @@ import { GAME_TTL_MS, SessionRefusal, openGame, type GameState } from "./local-r
 /** Reports one event about a game, when the game records events and the server has somewhere to put them. */
 export type Emit = (state: GameState, type: EventType, fields: Readonly<Record<string, string | number | boolean>>, now: number) => void;
 
+/** Where a game came from (#173): a friend's game of a challenge is a duel's, and every other game a deal's. */
+export const originOf = (state: GameState): EventOrigin => state.deal.kind === "duel" ? "duel" : "deal";
+
 export const emitterFor = (sink: EventSink | null | undefined): Emit => (state, type, fields, now) => {
-  if (sink && state.record) sink({ type, game: state.gameId, deck: state.deck, arms: state.arms, fields }, now);
+  if (sink && state.record) sink({ type, game: state.gameId, origin: originOf(state), deck: state.deck, arms: state.arms, fields }, now);
 };
 
 /**

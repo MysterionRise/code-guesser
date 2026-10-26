@@ -88,7 +88,7 @@ function CompletionActions({ result, correctRounds, history, deckTitle, shareHre
         {chooseAnotherDeckHref && <a className="deck-link" href={chooseAnotherDeckHref} onClick={() => track({ type: "deal_again", to: "chooser" })}>Choose another deck</a>}
       </div>
       <p className="share-status" role="status">{status}</p>
-      {challenge && <ChallengeFriend duel={challenge} sessionToken={sessionToken} />}
+      {challenge && <ChallengeFriend duel={challenge} sessionToken={sessionToken} track={track} />}
     </>
   );
 }
@@ -140,7 +140,7 @@ export function RoundReveal({ round, reveal, hintsUsed, pickLabel, complete, cor
         <>
           <GameSummary history={history} result={reveal.result} />
           {duel?.role === "challenged"
-            ? <DuelCompletion duel={duel} name={opponentName} sessionToken={sessionToken} chooseAnotherDeckHref={chooseAnotherDeckHref} />
+            ? <DuelCompletion duel={duel} name={opponentName} sessionToken={sessionToken} chooseAnotherDeckHref={chooseAnotherDeckHref} track={track} />
             : (
               <CompletionActions result={reveal.result} correctRounds={correctRounds} history={history} deckTitle={deckTitle} shareHref={shareHref}
                 newGameHref={newGameHref} chooseAnotherDeckHref={chooseAnotherDeckHref} challenge={duel} sessionToken={sessionToken} track={track} />
