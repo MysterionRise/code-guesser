@@ -18,6 +18,10 @@ const acquisitionFingerprints = [
   /DRAFT_REVIEW_REQUIRED/u,
   /RAW_OBJECT_CREATED/u,
   /encrypted-store/iu,
+  // The current preparer (#66): its code, its Hugging Face token, and the dataset host it reads.
+  /ops\/poc\/prepare/iu,
+  /HF_TOKEN/u,
+  /huggingface\.co/iu,
 ];
 
 function filesUnder(directory) {
