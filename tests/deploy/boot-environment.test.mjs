@@ -1,20 +1,17 @@
 import assert from "node:assert/strict";
-import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { fileURLToPath } from "node:url";
 import { after, before, test } from "node:test";
 
 import { chromium } from "@playwright/test";
 
 import { startFakeOpenRouter } from "../e2e/fake-openrouter.mjs";
+import { ensureProductionBuild, game } from "../production/build.mjs";
 
-const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const game = join(root, "apps", "game");
-const built = join(game, ".next");
 const next = join(game, "node_modules", "next", "dist", "bin", "next");
 const SENTINEL = "boot-sentinel-5d1e8b";
 const data = mkdtempSync(join(tmpdir(), "codeguessr-boot-"));
@@ -29,12 +26,6 @@ const PUBLIC = Object.freeze({
 });
 
 after(() => rmSync(data, { recursive: true, force: true }));
-
-function newestUnder(path) {
-  const stat = statSync(path);
-  if (!stat.isDirectory()) return stat.mtimeMs;
-  return Math.max(0, ...readdirSync(path).map((name) => newestUnder(join(path, name))));
-}
 
 /** A free local port for one server. */
 function freePort() {
@@ -82,20 +73,8 @@ async function start(env, ready) {
   }
 }
 
-// The production build is reused when it is newer than the game's sources, and built otherwise; a loaded machine
-// takes over three minutes to build.
-before(() => {
-  const fresh = existsSync(join(built, "BUILD_ID")) && existsSync(join(built, "server", "instrumentation.js"))
-    && statSync(join(built, "BUILD_ID")).mtimeMs > Math.max(newestUnder(join(game, "src")), newestUnder(join(game, "next.config.mjs")));
-  if (fresh) return;
-  const result = spawnSync("pnpm", ["--filter", "@codeguessr/game", "build"], {
-    cwd: root,
-    encoding: "utf8",
-    env: { ...process.env, NEXT_TELEMETRY_DISABLED: "1" },
-    timeout: 400_000,
-  });
-  assert.equal(result.status, 0, `game build failed\n${result.stdout}\n${result.stderr}`);
-});
+// The production build is reused when it is newer than what it is made from, and built otherwise.
+before(() => { ensureProductionBuild(); });
 
 test("a public server without its session secret refuses to start, naming the code and printing no value", async () => {
   const { CODEGUESSR_SESSION_SECRET: _, ...withoutSecret } = PUBLIC;

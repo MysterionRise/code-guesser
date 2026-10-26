@@ -1,13 +1,10 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { readFileSync, readdirSync, statSync } from "node:fs";
-import { dirname, extname, join, relative } from "node:path";
-import { fileURLToPath } from "node:url";
+import { extname, join, relative } from "node:path";
 import { before, test } from "node:test";
 
-const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const game = join(root, "apps", "game");
-const built = join(game, ".next");
+import { built, ensureProductionBuild, game, root } from "../production/build.mjs";
+
 const textExtensions = new Set([".css", ".html", ".js", ".json", ".map", ".rsc", ".txt"]);
 const acquisitionFingerprints = [
   /@codeguessr\/content\/operator\/acquisition/iu,
@@ -55,14 +52,10 @@ function assertContainsNoFingerprint(paths, label) {
   }
 }
 
+// The scan reads a production build newer than everything it is made from, such as the one CI just made (#66), and
+// builds one otherwise.
 before(() => {
-  const result = spawnSync("pnpm", ["--filter", "@codeguessr/game", "build"], {
-    cwd: root,
-    encoding: "utf8",
-    env: { ...process.env, NEXT_TELEMETRY_DISABLED: "1" },
-    timeout: 180_000,
-  });
-  assert.equal(result.status, 0, `game build failed\n${result.stdout}\n${result.stderr}`);
+  ensureProductionBuild();
   assert.ok(statSync(join(built, "BUILD_ID")).isFile(), "production build has no BUILD_ID");
 });
 
