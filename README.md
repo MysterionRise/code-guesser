@@ -126,6 +126,18 @@ Two cards come first in the chooser:
   random. Each round's header names its deck, and the game scores up to the
   sum of its rounds' top points.
 
+Each card also shows your records once you've finished a game of it, such as
+"Best 3,250 · streak 4". A streak counts games in a row with at least three of
+five right. Today's five shows a day streak ("Day streak 3"): the days in a
+row, by your own date, on which you finished it. It counts once a day.
+A friend's game of a duel counts toward its deck like any other.
+
+Records live only in your browser's local storage, under the key
+`codeguessr.records`. Nothing about them reaches the server, and there is no
+account. They start afresh when the round set changes. "Clear records", under
+the decks, forgets them after asking. A browser that refuses storage, such as
+some private windows, plays the same and keeps none.
+
 A leakage test (`packages/artifact/test/deck-leakage.test.ts`) checks that
 solvers which never read the code, or only skim it, stay within chance plus
 ten points:

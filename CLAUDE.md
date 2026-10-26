@@ -260,6 +260,16 @@ gate: changing queries, retries, ceilings, deck rules, or running
   - Names live only in the fragment (`#from=Ana`, `&vs=Ben`), which never reaches the server: `sanitizeName` (NFKC,
     no control or format characters, letters, marks, digits, space, `-`, `'`, `_`, 24 code points, else "A friend"),
     read in the browser by `useFragmentNames`. `tests/e2e/duel.spec.ts` plays it with two browser contexts.
+- **Local records (#63):** `components/arcade/local-records.ts` keeps one versioned `localStorage` object
+  (`codeguessr.records`, v1) for the round set `recordsArtifact(hash)` (the hash's first 16 hex digits).
+  - It holds each deck's best, games played, streak (consecutive games with 3+ of 5 right), and best streak, plus
+    today's five's day streak (consecutive dates by the player's `localDate`, `components/local-date.ts`).
+  - `parseRecords` reads anything malformed, of another version, or of another round set as none, and the next game
+    replaces it. Storage errors (quota, blocked, private mode) are swallowed, and play goes on.
+  - `ArcadeShell` keeps a finished game once (`keepGame`, from its `records` prop). Duel games count toward the
+    challenge's deck, and today's five counts once a day.
+  - `components/chooser-records.tsx` renders the badges ("Best 3,250 · streak 4", "Day streak 3") and "Clear records"
+    (an inline confirm) in the browser only. Nothing reaches the server.
 - The answer-lock guard (#102) is the only path from round data to a model:
   - `modelContext` on the experiment reads the sealed game, and
     `apps/game/src/genui/round-context.server.ts` builds the round's context.

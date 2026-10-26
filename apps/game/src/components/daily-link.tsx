@@ -17,14 +17,19 @@ const unchanging = (): (() => void) => () => {};
 /** The player's date once the page hydrates; the server, which can't know it, renders null. */
 const useLocalDate = (): string | null => React.useSyncExternalStore(unchanging, () => localDate(new Date()), () => null);
 
-/** The chooser's card for today's five: until the page hydrates it links to the bare address, which adds the date. */
-export function DailyCard({ title, description, query }: { readonly title: string; readonly description: string; readonly query: string }) {
+/**
+ * The chooser's card for today's five: until the page hydrates it links to the bare address, which adds the date.
+ * `children` follow the date, such as the player's day streak (#63).
+ */
+export function DailyCard({ title, description, query, children }: {
+  readonly title: string; readonly description: string; readonly query: string; readonly children?: React.ReactNode;
+}) {
   const date = useLocalDate();
   return (
     <a className="deck-card" href={date === null ? `/?deck=daily${query}` : dailyHref(date, query)}>
       <span className="deck-title">{title}</span>{" "}
       <span className="deck-description">{description}</span>{" "}
-      <span className="deck-size">{date}</span>
+      <span className="deck-size">{date}</span>{children !== undefined && " "}{children}
     </a>
   );
 }
