@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -75,10 +75,8 @@ describe("the About page (#168)", () => {
     expect(aboutMetadata).toMatchObject({ title: "About" });
   });
 
-  it("links the privacy page exactly when there is one (#99)", async () => {
-    const html = await render(AboutPage(query()));
-    const privacy = fileURLToPath(new URL("../src/app/privacy/page.tsx", import.meta.url));
-    expect(html.includes('<a href="/privacy">Privacy</a>')).toBe(existsSync(privacy));
+  it("links the privacy page (#99)", async () => {
+    expect(await render(AboutPage(query()))).toContain('<a href="/privacy">privacy page</a>');
   });
 
   it("keeps the original theme, unless a lab tester picks one", async () => {
