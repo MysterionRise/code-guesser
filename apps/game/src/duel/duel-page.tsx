@@ -3,6 +3,7 @@ import * as React from "react";
 
 import { authorizeLocalExperimentReveal, issueDuelResult, revealLocalExperimentHint } from "../app/actions";
 import { points } from "../components/arcade/arcade-text";
+import { recordsArtifact } from "../components/arcade/local-records";
 import type { DuelRefusalReason } from "../components/duel/duel-contract";
 import { ChallengeIntro, DuelResult } from "../components/duel/duel-pages";
 import { duelDeckTitle, sideLine } from "../components/duel/duel-text";
@@ -137,12 +138,14 @@ export function DuelPage({ request, experiment, record, origin, labTheme, rateLi
   // A mixed game names each round's deck, as it does outside a duel.
   const roundDecks = challenge.deck === MIXED_DECK || challenge.deck === DAILY_DECK
     ? Object.fromEntries(experiment.decks.map(({ id, title }) => [id, title])) : undefined;
+  // The friend's game is a game of the challenge's deck, new to them, so it joins their records as any game would (#63).
+  const records = { artifact: recordsArtifact(experiment.artifactHash), deck: challenge.deck, date: challenge.date };
   return (
     <PageFrame theme={game.arms.theme}>
       <DuelNav />
       <DemoArcade key={game.sessionToken} mode={game.mode} sessionToken={game.sessionToken} deckTitle={duelDeckTitle(challenge)}
         {...(roundDecks ? { roundDecks } : {})} authorizeRevealAction={authorizeLocalExperimentReveal} revealHintAction={revealLocalExperimentHint}
-        chooseAnotherDeckHref="/" newGameHref={rematchHref}
+        chooseAnotherDeckHref="/" newGameHref={rematchHref} records={records}
         duel={{ role: "challenged", origin, challengeToken: request.token, challenge, rematchHref, issueResult: issueDuelResult }}
         {...(game.arms.design === "off" ? {} : { genuiDesign: game.arms.design })} />
     </PageFrame>

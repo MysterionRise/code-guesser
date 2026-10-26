@@ -124,13 +124,29 @@ against it.
 
 Two cards come first in the chooser:
 
-- **Today's five** (`/?deck=daily`) deals a mixed game seeded by the artifact
-  and the local date. Every load that day deals the same five rounds in the
-  same order, and its share line carries the date. Its link is
-  `/?deck=daily` for now; #172 adds the date to it.
+- **Today's five** (`/?deck=daily&date=2026-10-22`) deals a mixed game seeded
+  by the artifact and the player's own date. The browser adds its date to a
+  bare `/?deck=daily`, which deals nothing itself. Every load of a date deals
+  the same five rounds in the same order, and its share line and link carry
+  the date. The server deals a date only within a day of its own UTC date,
+  which covers every time zone from UTC−12 to UTC+14, and refuses any other.
+  Once a game is done, "Play again" deals the same five again
+  (`&replay=1`) and records no events.
 - **Mixed** (`/?deck=mixed`) deals one round from each of five decks drawn at
   random. Each round's header names its deck, and the game scores up to the
   sum of its rounds' top points.
+
+Each card also shows your records once you've finished a game of it, such as
+"Best 3,250 · streak 4". A streak counts games in a row with at least three of
+five right. Today's five shows a day streak ("Day streak 3"): the days in a
+row, by your own date, on which you finished it. It counts once a day.
+A friend's game of a duel counts toward its deck like any other.
+
+Records live only in your browser's local storage, under the key
+`codeguessr.records`. Nothing about them reaches the server, and there is no
+account. They start afresh when the round set changes. "Clear records", under
+the decks, forgets them after asking. A browser that refuses storage, such as
+some private windows, plays the same and keeps none.
 
 A leakage test (`packages/artifact/test/deck-leakage.test.ts`) checks that
 solvers which never read the code, or only skim it, stay within chance plus
@@ -271,7 +287,7 @@ Every page's footer links two pages (#99):
 - **`/privacy`** says what the game records and what it never records. It is
   rendered from `privacy/disclosures.ts`, a registry of what each feature keeps
   or sends: the event log, game progress, plays, share and duel links, browser
-  storage (none yet), the client address for rate limits, the model calls, server
+  storage (the local records' one key), the client address for rate limits, the model calls, server
   logs, and `Sec-GPC`.
   - The event log's part is the event schema in words
     (`experiment/event-docs.ts`), and a test holds its fields to the schema's.

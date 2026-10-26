@@ -128,7 +128,7 @@ test("today's five deals the same five, in the same order, on every load of the 
   const card = page.getByRole("link", { name: /^Today’s five/u });
   await expect(card).toContainText(/\d{4}-\d{2}-\d{2}/u);
   await card.click();
-  await expect(page).toHaveURL(/\?deck=daily$/u);
+  await expect(page).toHaveURL(/\?deck=daily&date=\d{4}-\d{2}-\d{2}$/u);
   const dealt = async () => {
     await expect(page.getByText("Round 1 of 5")).toBeVisible();
     return { round: await currentRound(page), options: await page.locator(".candidate").allTextContents() };
@@ -376,9 +376,11 @@ test("a round plays from the keyboard alone: Tab, arrows, Enter, and the N, numb
   await page.keyboard.press("2");
   await expect(page.getByRole("group", { name: "Choose one answer" }).getByRole("radio").nth(1)).toBeChecked();
   await expect(page.getByRole("group", { name: "Choose one answer" }).getByRole("radio").nth(1)).toBeFocused();
-  await page.keyboard.press("Enter");
-  await expect(page.getByRole("heading", { name: /Nice read\.|Not this time\./u })).toBeVisible();
   await expect(page.locator(".keys-note")).toContainText("Enter locks in");
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("heading", { name: /Nice read\.|Not this time\./u })).toBeFocused();
+  // The keys line goes with the controls it names once the answer is locked (#161).
+  await expect(page.locator(".keys-note")).toHaveCount(0);
 });
 
 test("on a phone no fix option's code is cut off, and wrapped lines keep their indentation (#46, #85)", async ({ page }) => {

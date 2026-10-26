@@ -9,6 +9,7 @@ import type { GameDuel } from "../duel/duel-contract";
 import { OpponentStrip } from "../duel/duel-game";
 import { useFragmentNames } from "../duel/duel-names";
 import { DEFAULT_NAME } from "../duel/duel-text";
+import { localDate } from "../local-date";
 import { AnswerOptions } from "./answer-options";
 import {
   createArcadeSession,
@@ -22,6 +23,7 @@ import {
 import { RATE_LIMITED_MESSAGE, SESSION_ENDED_MESSAGE, points } from "./arcade-text";
 import { CodePanes } from "./code-panes";
 import { HintBar } from "./hint-bar";
+import { keepGame, type GameRecords } from "./local-records";
 import { LINE_KINDS, optionLine, type PublicModeContract } from "./mode-contract";
 import { ArcadeHeader, RoundTrack } from "./round-header";
 import { QuestionScaffold, markedLines } from "./question-layer";
@@ -40,6 +42,8 @@ interface ArcadeShellProps {
   chooseAnotherDeckHref?: string;
   /** When set, completion links to a freshly dealt game from the same deck. */
   newGameHref?: string;
+  /** When set, as for today's five (#172), completion links to this game again, which records nothing. */
+  replayHref?: string;
   /** When set, the share line links to this game: its absolute address, with no lab picks (#171). */
   shareHref?: string;
   /** When set, the share line names the deck. */
@@ -50,9 +54,11 @@ interface ArcadeShellProps {
   genuiDesign?: Design;
   /** When set, a finished game can challenge a friend, or this game answers a friend's challenge (#173). */
   duel?: GameDuel;
+  /** When set, a finished game joins the player's records in this browser (#63), under this round set and deck. */
+  records?: GameRecords;
 }
 
-export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealHintAction, chooseAnotherDeckHref, newGameHref, shareHref, deckTitle, roundDecks, genuiDesign, duel }: ArcadeShellProps) {
+export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealHintAction, chooseAnotherDeckHref, newGameHref, replayHref, shareHref, deckTitle, roundDecks, genuiDesign, duel, records }: ArcadeShellProps) {
   const [session, setSession] = React.useState(() => createArcadeSession(mode));
   // A challenge link names its challenger in its fragment, which only the browser reads (#173).
   const opponentName = useFragmentNames().from;
@@ -76,6 +82,9 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
   const lines = LINE_KINDS.has(round.mode.kind);
   // A layered round numbers its lines, since its hints may point at them (a Trace it frame cites "lines 15-16").
   const numbered = (lines || round.scaffold !== undefined) && round.content.panes.length === 1;
+  // A game that shows question layers (#128) says when a round plays without one, as one the audit or a review refused
+  // does (#161). The server deals scaffolds only to a game drawn with layers, so a game with none says nothing.
+  const layered = mode.rounds.some(({ scaffold }) => scaffold !== undefined);
   const paneLines = numbered ? round.content.panes[0]!.text.split("\n") : [];
   const labelOf = (candidateId: string | null) => round.mode.candidates.find((candidate) => candidate.candidateId === candidateId)?.label ?? "";
   const highlighted = numbered && lines
@@ -100,6 +109,14 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
   }, [track]);
   const roundNumber = session.roundIndex + 1;
   const trackGenui = React.useCallback((event: GenuiEvent) => track({ ...event, round: roundNumber }), [track, roundNumber]);
+
+  // A finished game joins the player's records (#63), once, in this browser alone: nothing is sent anywhere.
+  const kept = React.useRef(false);
+  React.useEffect(() => {
+    if (session.status !== "complete" || records === undefined || kept.current) return;
+    kept.current = true;
+    keepGame(records.artifact, { deck: records.deck, score: session.score, correct: session.correctRounds, date: records.date }, localDate(new Date()));
+  }, [session.status, session.score, session.correctRounds, records]);
 
   // Keyboard and screen-reader users land on the verdict after answering and on the next prompt after
   // moving on; the first render leaves focus alone.
@@ -214,12 +231,12 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
         <p className="eyebrow">Round {session.roundIndex + 1} of {mode.rounds.length}
           {roundDecks?.[round.mode.kind] !== undefined && <> · <span className="round-deck">{roundDecks[round.mode.kind]}</span></>}</p>
         <h1 id="round-title" ref={roundTitle} tabIndex={-1}>{round.mode.prompt}</h1>
-        {round.scaffold && <QuestionScaffold scaffold={round.scaffold} />}
+        {round.scaffold ? <QuestionScaffold scaffold={round.scaffold} /> : layered && <p className="layer-note">No question layer for this round.</p>}
         <CodePanes round={round} numbered={numbered} paneLines={paneLines} highlighted={highlighted} marked={markedLines(session.hintDetails)}
           wrap={wrap} onToggleWrap={() => setWrap((current) => !current)} />
 
         <HintBar round={round} hints={session.hints} details={session.hintDetails} disabled={busy || ended || session.lockedCandidateId !== null}
-          error={hintError} onRequest={requestHint} buttonRef={hintButton} latestHintRef={latestHint} />
+          locked={session.reveal !== null} error={hintError} onRequest={requestHint} buttonRef={hintButton} latestHintRef={latestHint} />
 
         {/* A form, so Enter on a chosen option locks it in (#71). */}
         <form className="answer-form" onSubmit={(event) => { event.preventDefault(); void submit(); }}
@@ -235,11 +252,16 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
             answerCandidateId={session.reveal?.answerCandidateId ?? null} lockedCandidateId={session.lockedCandidateId}
             disabled={session.reveal !== null || busy} onSelect={setSelection} onFocusCandidate={setFocusedCandidate} />
 
-          <button className="answer-button" type="submit" ref={answerButton} disabled={selection === "" || session.reveal !== null || busy || ended || hintLoading}>
-            {busy ? "Checking…" : "Lock in answer"}
-          </button>
+          {/* Once the answer is locked, the controls that asked for it give way to the verdict, which takes focus (#161). */}
+          {session.reveal === null && (
+            <button className="answer-button" type="submit" ref={answerButton} disabled={selection === "" || busy || ended || hintLoading}>
+              {busy ? "Checking…" : "Lock in answer"}
+            </button>
+          )}
         </form>
-        <p className="keys-note">Keys: <kbd>1</kbd>–<kbd>{round.mode.candidates.length}</kbd> pick, <kbd>Enter</kbd> locks in, <kbd>H</kbd> buys a hint, <kbd>N</kbd> moves on.</p>
+        {session.reveal === null && (
+          <p className="keys-note">Keys: <kbd>1</kbd>–<kbd>{round.mode.candidates.length}</kbd> pick, <kbd>Enter</kbd> locks in, <kbd>H</kbd> buys a hint, <kbd>N</kbd> moves on.</p>
+        )}
         {error && <p className="demo-error" role="alert">{error}</p>}
         {ended && (
           <p className="demo-error" role="alert">
@@ -251,7 +273,7 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
           {session.reveal && (
             <RoundReveal round={round} reveal={session.reveal} hintsUsed={session.visibleHintCount}
               pickLabel={labelOf(session.lockedCandidateId)} complete={session.status === "complete"}
-              correctRounds={session.correctRounds} history={session.history} deckTitle={deckTitle} shareHref={shareHref} newGameHref={newGameHref}
+              correctRounds={session.correctRounds} history={session.history} deckTitle={deckTitle} roundDecks={roundDecks} shareHref={shareHref} newGameHref={newGameHref} replayHref={replayHref}
               chooseAnotherDeckHref={chooseAnotherDeckHref} genuiDesign={genuiDesign} duel={duel} opponentName={opponentName} sessionToken={currentToken}
               onNext={next} headingRef={revealHeading} track={track} trackGenui={trackGenui} />
           )}

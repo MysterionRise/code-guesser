@@ -35,9 +35,21 @@ export const dailyRandom = (artifactHash: string, date: string): (() => number) 
   if (!DEAL_DATE.test(date)) fail();
   return seededRandom({ artifactHash, date });
 };
-/** A date as the player's machine names it, `YYYY-MM-DD`. */
-export const localDate = (now: Date): string =>
-  `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+const DAY_MS = 86_400_000;
+/**
+ * The date a page's address asks today's five for (#172): the player's own, which only their browser knows
+ * (`localDate` in `components/local-date.ts`). A real date within a day of the server's UTC date is dealt, which
+ * covers every time zone from UTC−12 to UTC+14; any other is null, so no address deals a five that isn't today's
+ * somewhere.
+ */
+export const dailyDateOf = (query: Readonly<Record<string, string | string[] | undefined>>, now: number): string | null => {
+  const { date } = query;
+  if (typeof date !== "string" || !DEAL_DATE.test(date)) return null;
+  const day = Date.parse(`${date}T00:00:00Z`);
+  // A date that doesn't exist, such as 2026-02-30, reads back as another day or none.
+  if (Number.isNaN(day) || new Date(day).toISOString().slice(0, 10) !== date) return null;
+  return Math.abs(day - (now - (now % DAY_MS))) <= DAY_MS ? date : null;
+};
 
 /** The mix's rounds: five decks drawn at random, and one round drawn from each. */
 export const mixedRounds = <Round>(decks: readonly Readonly<{ rounds: readonly Round[] }>[], random: () => number): readonly Round[] =>

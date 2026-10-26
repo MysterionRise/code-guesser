@@ -154,9 +154,16 @@ gate: changing queries, retries, ceilings, deck rules, or running
     data run resumed on a copy of it and published the dry run's artifact byte for byte (below).
 - **Mixed and daily play (#56, #74):** `/?deck=mixed` deals one round from each of five decks drawn at random
   (`MIXED_DECK`, offered when the artifact holds five decks or more); `/?deck=daily` deals the same mix seeded by
-  the artifact's hash and the local date (`dailyRandom` in `local-real-experiment-deal.server.ts`). Both are
+  the artifact's hash and the date (`dailyRandom` in `local-real-experiment-deal.server.ts`). Both are
   `SessionDeckId`s, sealed in the token and named in events; each round's eyebrow names its deck, and a game's
   `attainableMaximum` is the sum of its rounds' top points.
+- **Today's five on the player's date (#172):** the date is the browser's, in the address (`&date=YYYY-MM-DD`).
+  `dailyDateOf` (deal module) accepts a real date within a day of the server's UTC date (UTC−12 to UTC+14). A bare
+  `/?deck=daily` renders `DailyRedirect` (`components/daily-link.tsx`, beside the chooser's `DailyCard`; the date is
+  `localDate` in `components/local-date.ts`): it deals, spends, and records nothing, and `location.replace`s itself with
+  the local date. A refused
+  date renders "That day's five isn't open". The deck title, the sealed `daily {date}` (so a challenge's date), the
+  share link, and "Play again" (`&replay=1`, sealed `record: false`) all carry the player's date.
 - **Seeded deals (#40):** a deck's or the mix's address without `&deal=<8 hex>&game=<n>` redirects to a fresh seed's
   game 0. Game n takes positions 5n to 5n + 4 of the pool in the seed's order (`seriesRounds` in
   `local-real-experiment-deal.server.ts`, a fresh order each pass), and its options in a seeded order, so a reload
@@ -173,8 +180,8 @@ gate: changing queries, retries, ceilings, deck rules, or running
     round and option ids in dealt order, and each layer's hash when the game shows layers), per-round `outcomes`, and
     `priorPlays`. Per-round points are recomputed, never stored. Its MAC context is `codeguessr-game-session.v3`, so
     v2 tokens end as `SESSION_ENDED`. `sealGame`'s JSON key list names every nested key (arms, `DEAL_KEYS`): a key it
-    leaves out is dropped silently. `page.tsx` deals today's five with `{ date: localDate(now) }`, so it seals its
-    date.
+    leaves out is dropped silently. `page.tsx` deals today's five with `{ date }` from `dailyDateOf`, so it seals the
+    player's date.
 - **Public mode (#97, L4):** `CODEGUESSR_PUBLIC=1` marks a public server, and `checkEnvironment`
   (`apps/game/src/server/environment.server.ts`) holds it to anonymous play:
   - it requires the session secret, an https `CODEGUESSR_PUBLIC_ORIGIN` with no path, absolute `CODEGUESSR_STATE_DIR`
@@ -243,7 +250,7 @@ gate: changing queries, retries, ceilings, deck rules, or running
     BSD-2/3, ISC, and Python-2.0 ask, and the Apache NOTICE judgment call.
   - `/privacy` (`app/privacy/page.tsx`) renders `privacy/disclosures.ts`, a registry of what each feature keeps or
     sends, with lifetimes read from the code's own constants. A feature that starts keeping or sending something adds
-    its entry; the browser-storage entry is an empty slot for #63.
+    its entry; the browser-storage entry lists `codeguessr.records` (#63), its one key.
   - The event log's entry is `experiment/event-docs.ts`, every base key and payload field in words, with closed
     choices listed from the schema's exported values. `test/credits-privacy.test.tsx` holds its keys to
     `EVENT_BASE_KEYS` and `EVENT_FIELDS` and checks that the credits page shows no round id, pane line, or option label.
@@ -287,6 +294,16 @@ gate: changing queries, retries, ceilings, deck rules, or running
   - Names live only in the fragment (`#from=Ana`, `&vs=Ben`), which never reaches the server: `sanitizeName` (NFKC,
     no control or format characters, letters, marks, digits, space, `-`, `'`, `_`, 24 code points, else "A friend"),
     read in the browser by `useFragmentNames`. `tests/e2e/duel.spec.ts` plays it with two browser contexts.
+- **Local records (#63):** `components/arcade/local-records.ts` keeps one versioned `localStorage` object
+  (`codeguessr.records`, v1) for the round set `recordsArtifact(hash)` (the hash's first 16 hex digits).
+  - It holds each deck's best, games played, streak (consecutive games with 3+ of 5 right), and best streak, plus
+    today's five's day streak (consecutive dates by the player's `localDate`, `components/local-date.ts`).
+  - `parseRecords` reads anything malformed, of another version, or of another round set as none, and the next game
+    replaces it. Storage errors (quota, blocked, private mode) are swallowed, and play goes on.
+  - `ArcadeShell` keeps a finished game once (`keepGame`, from its `records` prop). Duel games count toward the
+    challenge's deck, and today's five counts once a day.
+  - `components/chooser-records.tsx` renders the badges ("Best 3,250 · streak 4", "Day streak 3") and "Clear records"
+    (an inline confirm) in the browser only. Nothing reaches the server.
 - The answer-lock guard (#102) is the only path from round data to a model:
   - `modelContext` on the experiment reads the sealed game, and
     `apps/game/src/genui/round-context.server.ts` builds the round's context.
@@ -391,8 +408,12 @@ gate: changing queries, retries, ceilings, deck rules, or running
         - a failed panel offers "Try again" once;
         - marked lines are named for screen readers, and layered rounds number their lines;
         - a review-refused trace (`reviewed.ts`).
-    - Open: #120 (model per design), #159 (check traces against the code), #160 (the algorithm layer's fairness),
-      #161 (UI polish).
+      - Its UI polish (#161): a Deck column in mixed and daily summaries (`RoundRecord.deck`, by round kind); a
+        cue beside the verdict that moves focus to the host's chat (`hostInputId`, never the address's fragment);
+        the lock button, hint button, and keys line gone once the answer is locked; and "No question layer for this
+        round" on a round without a scaffold in a game whose rounds carry any. Marker hunt questions the pane can't
+        answer are a data change for the next questions run.
+    - Open: #120 (model per design), #159 (check traces against the code), #160 (the algorithm layer's fairness).
   - Composer and visualizer requests keep only the first panel or page
     (`ONE_ONLY`) and ask for `parallel_tool_calls: false`; live, Haiku
     sometimes wrote several pages at once.

@@ -4,14 +4,16 @@ import { hintCostNote } from "./arcade-text";
 import type { HintDetail, PublicRound } from "./mode-contract";
 import { TraceStepper } from "./question-layer";
 
-/** The round's hint costs and its hints: each one bought so far, then the button for the next. */
-export function HintBar({ round, hints, details, disabled, error, onRequest, buttonRef, latestHintRef }: {
+/** The round's hint costs and its hints: each one bought so far, then, until the answer is locked, the button for the next. */
+export function HintBar({ round, hints, details, disabled, locked, error, onRequest, buttonRef, latestHintRef }: {
   readonly round: Readonly<PublicRound>;
   /** The hints bought for this round, in order. */
   readonly hints: readonly string[];
   /** What each bought hint shows beside its text, when it is a question layer's (#128). */
   readonly details: readonly (HintDetail | null)[];
   readonly disabled: boolean;
+  /** The answer is locked, so no hint is left to buy and the button goes (#161). */
+  readonly locked: boolean;
   readonly error: string | null;
   readonly onRequest: () => void;
   readonly buttonRef: React.Ref<HTMLButtonElement>;
@@ -29,7 +31,7 @@ export function HintBar({ round, hints, details, disabled, error, onRequest, but
               {details[index]?.kind === "trace" && <TraceStepper detail={details[index] as Extract<HintDetail, { kind: "trace" }>} />}
             </React.Fragment>
           )
-          : index === hints.length
+          : index === hints.length && !locked
             ? <button className="hint-button" type="button" key={clue.order} ref={buttonRef} aria-describedby={`hint-cost-${round.roundId}`} disabled={disabled} onClick={onRequest}>
                 Reveal hint {clue.order}
               </button>

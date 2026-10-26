@@ -362,6 +362,21 @@ describe("static arcade shell", () => {
     ]);
     expect(session.history.reduce((total, { points }) => total + points, 0)).toBe(session.score);
     expect(session.history[2]!.source).toBe("https://github.com/acme/repo/blob/abc/file-2.py");
+    // Each names its deck by round kind, so a mixed game's summary can show it (#161).
+    expect(session.history.map(({ deck }) => deck)).toEqual(Array(5).fill("language"));
+  });
+
+  it("says when a round of a layered game plays without its layer, and says nothing in a game without layers (#161)", () => {
+    const input = modeInput();
+    const scaffold = { design: "marker-hunt" as const, prompts: ["How are comments written?", "How does a block end?", "How is a name declared?"] };
+    const layered = createPublicModeContract({ ...input, rounds: input.rounds.map((round, index) => index === 1 ? { ...round, scaffold } : round) });
+    const note = "No question layer for this round.";
+    expect(renderToStaticMarkup(createElement(ArcadeShell, { mode: layered, ...unusedActions }))).toContain(`<p class="layer-note">${note}</p>`);
+    const first = createPublicModeContract({ ...input, rounds: input.rounds.map((round, index) => index === 0 ? { ...round, scaffold } : round) });
+    const html = renderToStaticMarkup(createElement(ArcadeShell, { mode: first, ...unusedActions }));
+    expect(html).toContain("Ask of the code");
+    expect(html).not.toContain(note);
+    expect(renderToStaticMarkup(createElement(ArcadeShell, { mode: createPublicModeContract(input), ...unusedActions }))).not.toContain(note);
   });
 
   it("never replays revealed rounds: a finished run takes no further action, and unknown actions are refused", () => {
@@ -400,7 +415,7 @@ describe("static arcade shell", () => {
     expect(contract.rounds[0]!.mode.candidates[0]!.candidateId).toBe("candidate-a");
   });
 
-  it("keeps excluded country attribution out and exposes demo errors and a fresh deal, never a replay", () => {
+  it("keeps excluded country attribution out and exposes demo errors and a fresh deal, never a replay in place", () => {
     const page = readFileSync(new URL("../src/app/page.tsx", import.meta.url), "utf8");
     const layout = readFileSync(new URL("../src/app/layout.tsx", import.meta.url), "utf8");
     const shell = ["arcade-shell.tsx", "round-reveal.tsx"]
@@ -408,7 +423,11 @@ describe("static arcade shell", () => {
     expect(`${page}\n${layout}`).not.toMatch(/country|code-location|where did this code come from|finland|brazil|japan|germany|india/iu);
     expect(existsSync(new URL("../src/app/actions.ts", import.meta.url))).toBe(true);
     expect(shell).toContain('role="alert"');
-    expect(shell).not.toContain("Play again");
+    // No game restarts on its revealed rounds (#39). Only today's five plays again, as a new deal of its date that
+    // records nothing (#172).
+    expect(shell.match(/Play again/gu)).toHaveLength(1);
+    expect(shell).toMatch(/<a className="deck-link" href=\{replayHref\}.*?>Play again<\/a>/u);
+    expect(page).toContain("&replay=1");
     expect(shell).not.toMatch(/type: "restart"/u);
     expect(shell).toMatch(/<a className="primary-action" href=\{newGameHref\}.*?>Deal new rounds<\/a>/u);
     expect(shell).toContain("Choose another deck");
