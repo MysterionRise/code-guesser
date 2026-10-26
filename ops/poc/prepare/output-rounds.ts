@@ -161,9 +161,9 @@ export const generateOutputRounds = (options: Readonly<{ profile: CrawlProfile; 
     const worded = candidates.map(({ answer, decoys }) => [answer, ...decoys]).filter((examples) => !numericOutputs(examples.map(({ output }) => output)));
     const score = worded.reduce((sum, examples) => sum + transformScore(examples[0]!.call, examples[0]!.output, examples.map(({ output }) => output)), 0);
     if (score > transformLimit(worded.length) + SCORE_TOLERANCE) fail("OUTPUT_TRANSFORM_UNBALANCED");
-    if (candidates.some((left, index) => candidates.slice(index + 1).some((right) => sameIdea(left.functionName, right.functionName)))) {
-      fail("OUTPUT_IDEA_REPEATED");
-    }
+    // One round per idea (#84); from v7 on, synonyms and inverse conversions name one idea too (#200).
+    if (candidates.some((left, index) => candidates.slice(index + 1)
+      .some((right) => sameIdea(left.functionName, right.functionName, profile.profileVersion)))) fail("OUTPUT_IDEA_REPEATED");
   }
   return orderedPool(fixtures);
 };

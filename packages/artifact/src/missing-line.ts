@@ -1,4 +1,4 @@
-import { GAP_MARKER, STACK_LANGUAGES, type CandidateRecord, type Pane } from "./domain";
+import { GAP_MARKER, STACK_LANGUAGES, profileAtLeast, type CandidateRecord, type Pane, type ProfileVersion } from "./domain";
 import { fail } from "./errors";
 import { rawHash, type JsonRecord } from "./validation";
 
@@ -54,7 +54,8 @@ const optionLabel = (label: string): string =>
 /**
  * The pane is a window of the file with exactly one line replaced by the gap marker, at the place its source names;
  * the options are four distinct lines, none of them visible in the pane; the first hint names what the answer does,
- * and at least one other option does the same; the second names the answer and one other option.
+ * and at least one other option does the same; the second names the answer and one other option, from v7 on one that
+ * does the same (#200): paired with a line the first hint rules out, the answer was the only line both hints allow.
  */
 export const validateMissingLine = ({ panes, candidates, clues, correctCandidateId, source }: Readonly<{
   panes: readonly Pane[]; candidates: readonly CandidateRecord[]; clues: readonly string[]; correctCandidateId: string; source: JsonRecord;
@@ -75,6 +76,8 @@ export const validateMissingLine = ({ panes, candidates, clues, correctCandidate
   const pair = PAIR_HINT.exec(clues[1] ?? "") ?? fail();
   const named = [pair[1]!, pair[2]!];
   if (named[0]! >= named[1]! || !named.includes(answer) || named.some((label) => !labels.includes(label))) fail();
+  if (profileAtLeast(source.profileVersion as ProfileVersion, "local-real-rounds.v7")
+    && lineKind(named.find((label) => label !== answer)!) !== kind) fail();
 };
 
 /**

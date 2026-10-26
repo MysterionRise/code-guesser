@@ -87,13 +87,56 @@ describe("project rounds", () => {
   it("finds the distinctive words a pane shares with an option's name and description (#77)", () => {
     // The three rounds #77 found, each echoing its own option.
     expect(sharedOptionWords("let client = Aws::SQS::Client.new(region: 'us-west-2')", "awsdocs/aws-doc-sdk-examples",
-      "Welcome to the AWS Code Examples Repository.")).toEqual(["aws"]);
+      "Welcome to the AWS Code Examples Repository.", "local-real-rounds.v6")).toEqual(["aws"]);
     expect(sharedOptionWords("pub enum Utility {\n    Static(Static),\n}", "tailwindlabs/tailwindcss",
-      "A utility-first CSS framework for rapid UI development.")).toEqual(["utili"]);
+      "A utility-first CSS framework for rapid UI development.", "local-real-rounds.v6")).toEqual(["utili"]);
     expect(sharedOptionWords("class Layout extends React.Component {", "gatsbyjs/gatsby",
-      "React-based framework with performance, scalability, and security built in.")).toEqual(["react"]);
+      "React-based framework with performance, scalability, and security built in.", "local-real-rounds.v6")).toEqual(["react"]);
     // Common code and English words, short words, and numbers tie a pane to nothing.
-    expect(sharedOptionWords("for (const item of items) return value + 10;", "orbitlabs/quasar", "A tool for the items you return in 10 ms.")).toEqual([]);
+    expect(sharedOptionWords("for (const item of items) return value + 10;", "orbitlabs/quasar", "A tool for the items you return in 10 ms.",
+      "local-real-rounds.v6")).toEqual([]);
+  });
+
+  it("from profile v7 on, reads a word split at a case change whole too, and a script other than Latin as a word (#200)", () => {
+    const words = (pane: string, detail: string) => (["local-real-rounds.v6", "local-real-rounds.v7"] as const)
+      .map((version) => sharedOptionWords(pane, "cli/cli", detail, version));
+    // The two rounds #200 found: `GITHUB` is no word v6 splits, and `GitHub` one it does.
+    expect(words('authCfg.SetToken("token", "GITHUB_TOKEN")', "GitHub’s official command line tool")).toEqual([[], ["githu"]]);
+    expect(words("var hub = gitHub.Client()", "Talks to GITHUB.")).toEqual([[], ["githu"]]);
+    expect(words('@Schema(description = "管理后台 - 角色创建 Request VO")', "一个后台管理系统")).toEqual([[], ["script:Han"]]);
+    // A script only one side shows ties nothing, and neither do common words read whole.
+    expect(words('@Schema(description = "管理后台")', "A management system.")).toEqual([[], []]);
+    expect(words("val name = \"Привет\"", "一个后台管理系统")).toEqual([[], []]);
+    expect(words("for (const item of items) return item.toString();", "A tool for the items you return.")).toEqual([[], []]);
+  });
+
+  it("from profile v7 on, refuses a round whose code shares a word read whole, or a script, with an option (#200)", () => {
+    const v7 = loadDeckProfile("local-real-rounds.v7", { projectRoundsPerLanguage: 4 });
+    const inputs = (from: typeof profile) => projectRoundInputs(from, snapshotIdFor(from));
+    const echoing = (from: typeof profile, extra: string, description: string) => inputs(from).map((round, index) => index === 0
+      ? { ...round, description, candidate: { ...round.candidate, excerpt: `${round.candidate.excerpt}\n${extra}`,
+        excerptHash: sha256(`${round.candidate.excerpt}\n${extra}`) } }
+      : round);
+    for (const [extra, description] of [['token = env("GITHUB_TOKEN")', "Work with GitHub from the terminal."],
+      ['label = "后台管理"', "一个后台管理系统"]] as const) {
+      expect(generateProjectRounds({ profile: v6, rounds: echoing(v6, extra, description) }).fixtures).toHaveLength(24);
+      expect(() => generateProjectRounds({ profile: v7, rounds: echoing(v7, extra, description) })).toThrow("PROJECT_WORDS_SHOWN");
+    }
+    // The parser holds a v7 round to the same rule, and a v6 round to v6's.
+    const composed = new Map([v6, v7].map((from) => [from, composeExperimentArtifact(composeInput(from)).artifact] as const));
+    const withPane = (from: typeof profile, extra: string, detail: string): any => {
+      const value: any = structuredClone(composed.get(from));
+      const fixture = value.decks.find(({ id }: any) => id === "project").fixtures[0];
+      fixture.panes[0].text = `${fixture.panes[0].text}\n${extra}`;
+      fixture.source.excerptHash = sha256(fixture.panes[0].text);
+      fixture.candidates.find(({ id }: any) => id !== fixture.correctCandidateId).detail = detail;
+      return value;
+    };
+    expect(() => parseExperimentArtifact(structuredClone(composed.get(v7)))).not.toThrow();
+    for (const [extra, detail] of [['token = env("GITHUB_TOKEN")', "Work with GitHub from the terminal."], ['label = "后台管理"', "一个后台管理系统"]]) {
+      expect(() => parseExperimentArtifact(withPane(v6, extra!, detail!))).not.toThrow();
+      expect(() => parseExperimentArtifact(withPane(v7, extra!, detail!))).toThrow(ExperimentRecordError);
+    }
   });
 
   it("from profile v6 on, refuses a round whose code shares a word with any option, and v5 does not (#77)", () => {

@@ -1,6 +1,6 @@
 import { screenBlob } from "@codeguessr/content/local-poc-support";
 
-import { CROSS_DECK_KEYS_BY_KIND, deduplicationKeys } from "../../../packages/artifact/src/index";
+import { CROSS_DECK_KEYS_BY_KIND, answerName, deduplicationKeys, profileAtLeast } from "../../../packages/artifact/src/index";
 import { DECK_SHORT, noteRejection, rejectCandidate, type DeckAttempts, type DeckOutcome, type RunState } from "./diagnostics";
 import { looksGenerated } from "./excerpt-window";
 import { withoutCommentary } from "./function-windows";
@@ -38,7 +38,8 @@ const withChoice = (round: PendingRound, choice: NameChoice): NameFunctionSelect
  * them, skipping files another deck shows. Each file is read and its commentary removed, so no comment names the
  * function; only a file with a function a round can ask about has its licence and author bound. Once the deck is
  * full, one search picks every round's function and decoys so the answer takes each rank equally often in text and
- * length order, and no solver that picks the name with the most or fewest of a feature scores past its limit.
+ * length order, and no solver that picks the name with the most or fewest of a feature scores past its limit. From v7
+ * on (#200) the search answers each name once, so two files that declare `addEdge` do not both ask for it.
  */
 export const selectNameFunction = async (
   context: Context,
@@ -132,7 +133,9 @@ export const selectNameFunction = async (
   }
   if (rounds.length < deck.rounds) return { skipped: DECK_SHORT };
   const picks = balancedChoice(rounds.map(({ choices }) => choices.map(({ ranks }) => ranks)), 4, nameSlack(rounds.length),
-    { costs: rounds.map(({ choices }) => choices.map(({ extremes }) => extremes)), limits: nameExtremeLimits(rounds.length) });
+    { costs: rounds.map(({ choices }) => choices.map(({ extremes }) => extremes)), limits: nameExtremeLimits(rounds.length) },
+    profileAtLeast(profile.profileVersion, "local-real-rounds.v7")
+      ? rounds.map(({ choices }) => choices.map(({ answer }) => answerName(answer))) : undefined);
   if (!picks || rounds.some(({ choices }) => choices.some(({ ranks }) => ranks.length !== NAME_ORDERS))) {
     noteRejection(state, "SELECTION", new Error("NAME_FUNCTION_RANKS_UNBALANCED"));
     return { skipped: DECK_SHORT };

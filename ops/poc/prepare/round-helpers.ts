@@ -72,14 +72,16 @@ export interface ChoiceBudget {
  * `slack` (none by default, which makes every rank equally often), and each kind of score in a `budget`, if given,
  * adds up to no more than its limit. An undefined choice is not allowed. Choices with the same ranks and scores are
  * interchangeable, so each round keeps its first of each and tries the lowest-scoring first; rounds with the fewest
- * options are placed first, and each round first tries the rank next in turn. Deterministic; undefined when no
- * choice exists.
+ * options are placed first, and each round first tries the rank next in turn. With `keys` (`keys[round][choice]`, such
+ * as the answer's name), no two rounds take choices of one key: of the interchangeable choices, a round takes the first
+ * whose key no other round holds. Deterministic; undefined when no choice exists.
  */
 export const balancedChoice = (
   rounds: readonly (readonly (readonly number[] | undefined)[])[],
   ranks: number,
   slack: readonly number[] = [],
   budget?: ChoiceBudget,
+  keys?: readonly (readonly string[])[],
 ): readonly number[] | undefined => {
   if (rounds.length % ranks !== 0) return undefined;
   const quota = rounds.length / ranks;
@@ -87,12 +89,13 @@ export const balancedChoice = (
   const costOf = (round: number, choice: number): readonly number[] => limits.map((_, score) => budget!.costs[round]![choice]![score]!);
   const total = (costs: readonly number[]): number => costs.reduce((sum, cost) => sum + cost, 0);
   const distinct = rounds.map((choices, round) => {
-    const seen = new Map<string, Readonly<{ choice: number; vector: readonly number[]; costs: readonly number[] }>>();
+    const seen = new Map<string, Readonly<{ alike: number[]; vector: readonly number[]; costs: readonly number[] }>>();
     choices.forEach((vector, choice) => {
       if (!vector) return;
       const costs = costOf(round, choice);
       const key = `${vector.join(",")}:${costs.join(",")}`;
-      if (!seen.has(key)) seen.set(key, Object.freeze({ choice, vector, costs }));
+      if (seen.has(key)) seen.get(key)!.alike.push(choice);
+      else seen.set(key, Object.freeze({ alike: [choice], vector, costs }));
     });
     return [...seen.values()].sort((left, right) => total(left.costs) - total(right.costs));
   });
@@ -106,22 +109,27 @@ export const balancedChoice = (
   const counts = Array.from({ length: orders }, () => Array.from({ length: ranks }, () => 0));
   const spent = limits.map(() => 0);
   const picked = new Map<number, number>();
+  const taken = new Set<string>();
   let tries = 0;
   const visit = (position: number): boolean => {
     if (position === sequence.length) return true;
     if (overBudget(spent.map((sum, score) => sum + floors[position]![score]!))) return false;
     const round = sequence[position]!;
     for (let step = 0; step < ranks; step += 1) {
-      for (const { choice, vector, costs } of distinct[round]!) {
+      for (const { alike, vector, costs } of distinct[round]!) {
         if (vector[0] !== (position + step) % ranks || overBudget(spent.map((sum, score) => sum + costs[score]!))) continue;
         if (vector.some((rank, order) => counts[order]![rank]! >= quota + (slack[order] ?? 0)) || (tries += 1) > BALANCE_SEARCH_LIMIT) continue;
+        const choice = alike.find((option) => keys === undefined || !taken.has(keys[round]![option]!));
+        if (choice === undefined) continue;
         vector.forEach((rank, order) => { counts[order]![rank]! += 1; });
         costs.forEach((cost, score) => { spent[score]! += cost; });
         picked.set(round, choice);
+        if (keys !== undefined) taken.add(keys[round]![choice]!);
         if (visit(position + 1)) return true;
         vector.forEach((rank, order) => { counts[order]![rank]! -= 1; });
         costs.forEach((cost, score) => { spent[score]! -= cost; });
         picked.delete(round);
+        if (keys !== undefined) taken.delete(keys[round]![choice]!);
       }
     }
     return false;

@@ -71,6 +71,11 @@ describe("fix rounds", () => {
     const costs = [[[1], [0.5]], [[0.5]], [[0]], [[0]]];
     expect(balancedChoice(budgetRounds, 4, [], { costs, limits: [1] })).toEqual([1, 0, 0, 0]);
     expect(balancedChoice(budgetRounds, 4, [], { costs, limits: [0.9] })).toBeUndefined();
+    // With keys (#200), no two rounds take one key: a round takes the first interchangeable choice whose key is free.
+    const keyed = [[[0], [0]], [[1], [1]], [[2]], [[3]]];
+    expect(balancedChoice(keyed, 4)).toEqual([0, 0, 0, 0]);
+    expect(balancedChoice(keyed, 4, [], undefined, [["a", "b"], ["a", "c"], ["d"], ["e"]])).toEqual([0, 1, 0, 0]);
+    expect(balancedChoice(keyed, 4, [], undefined, [["a", "a"], ["a", "a"], ["d"], ["e"]])).toBeUndefined();
     // A pool whose answers all sit at one position is refused, and so is a fourth round from one repository.
     const moved = candidates.map((candidate) => {
       const [first, ...rest] = [...candidate.decoys, candidate.answer].sort((left, right) => left - right);
