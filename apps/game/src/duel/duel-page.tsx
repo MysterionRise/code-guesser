@@ -93,7 +93,7 @@ export function DuelPage({ request, experiment, record, origin, labTheme, rateLi
   readonly experiment: LocalRealExperiment;
   /** The player is past this link's rate limit (#98): opening a link spends a duel open, playing one a deal. */
   readonly rateLimited: boolean;
-  /** Whether the friend's game may record events; until events v2 a duel game records none. */
+  /** Whether the friend's game records events (#173): false when the friend's own browser sent `Sec-GPC: 1`. */
   readonly record: boolean;
   readonly origin: string | null;
   readonly labTheme: Level<"theme"> | undefined;

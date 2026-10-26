@@ -25,6 +25,7 @@ import { MAXIMUM_PLAYS, deriveKey } from "./local-real-experiment-session.server
 export const CHALLENGE_CONTEXT = "codeguessr-duel.v1";
 export const RESULT_CONTEXT = "codeguessr-duel-result.v1";
 const ID_CONTEXT = "codeguessr-duel-id.v1";
+const RESULT_MARK_CONTEXT = "codeguessr-duel-result-mark.v1";
 /** A challenge deals for a week from its issue, and a result shows for thirty days. */
 export const CHALLENGE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 export const RESULT_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -86,9 +87,18 @@ const POINTS: ReadonlySet<unknown> = new Set([0,
 export const MAXIMUM_SCORE = ROUNDS_PER_SESSION * Math.max(...[...POINTS].map(Number));
 const FIRST_PLAYS: readonly unknown[] = ["yes", "no", "shared"];
 
+/** A game's id under a keyed hash of its own context: stable for the game, and unlinkable to it without the secret. */
+const keyedId = (context: string, gameId: string): string =>
+  createHmac("sha256", deriveKey(context)).update(`${context}.${gameId}`).digest("hex").slice(0, 32);
+
 /** The challenge id for a game: stable for the game, and unlinkable to its id, and so to its events, without the secret. */
-export const challengeId = (gameId: string): string =>
-  createHmac("sha256", deriveKey(ID_CONTEXT)).update(`${ID_CONTEXT}.${gameId}`).digest("hex").slice(0, 32);
+export const challengeId = (gameId: string): string => keyedId(ID_CONTEXT, gameId);
+
+/**
+ * What a friend's game's result is marked issued under in the plays ledger, so the event log hears of the duel once
+ * (X3 of #173): like a challenge id, it names neither the game nor its challenge.
+ */
+export const resultMark = (gameId: string): string => keyedId(RESULT_MARK_CONTEXT, gameId);
 
 /** The part of an artifact's hash a link names. */
 export const artifactPrefix = (artifactHash: string): string => artifactHash.slice(0, 16);

@@ -10,7 +10,7 @@ import { fixExtremeLimits, fixSlack } from "./model";
 import { FIX_OPTIONS } from "./profile";
 import { balancedChoice, sha256 } from "./round-helpers";
 import { FIX_WINDOW_LINES } from "./select-fix";
-import { addHashes, collidesWithSelected, revealsProtected, unreportable } from "./selection";
+import { addHashes, collidesWithSelected, protectedScreen, unreportable } from "./selection";
 import type { Context, PreparationDependencies } from "./types";
 import type { VulnerableLineCandidate } from "./vulnerable-line-rounds";
 
@@ -136,7 +136,7 @@ export const selectVulnerableLine = async (
         state.duplicatesRejected += 1;
         fail("SOURCE_DUPLICATE");
       }
-      if (shown.some((selection) => revealsProtected(profile, selection, [...otherDecks(), ...chosen]))) fail("PUBLIC_CONTAINMENT_REJECTED");
+      if (shown.some(protectedScreen(profile, [...otherDecks(), ...chosen]))) fail("PUBLIC_CONTAINMENT_REJECTED");
       if (unreportable(pending)) fail("SOURCE_IDENTITY_UNREPORTABLE");
       state.screened += 1;
       repositories.add(bound.repository.toLowerCase());

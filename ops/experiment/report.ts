@@ -2,17 +2,31 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { CONTROL, FACTORS, type Arms, type Factor } from "../../apps/game/src/experiment/arms";
-import { isDay, parseEvent, type EventSource, type ExperimentEvent } from "../../apps/game/src/experiment/events";
+import {
+  DUEL_DECIDERS,
+  DUEL_LINKS,
+  DUEL_OUTCOMES,
+  FIRST_PLAYS,
+  SHARE_ROUTES,
+  isDay,
+  parseEvent,
+  type EventOrigin,
+  type EventSource,
+  type ExperimentEvent,
+} from "../../apps/game/src/experiment/events";
 import { DECK_IDS } from "../../packages/artifact/src/index";
 import { compareArms, median, percentile95, sampleSize, type ArmComparison } from "./statistics";
 
 /**
  * The experiment report (#108): reads the event store (#107) with no network and compares each factor's levels
  * (#106) on the pre-registered primary metric, with the secondary metrics and the accuracy guardrail beside it.
- * Factors are drawn independently, so each factor's comparison counts every game, whatever its other levels.
+ * Factors are drawn independently, so each factor's comparison counts every game of a deal, whatever its other levels.
+ *
+ * Version 2 (#173) counts only games of a deal in the comparisons: a friend's game of a duel challenge plays the
+ * challenger's arms, which were never drawn for it. Duels get a descriptive block of their own, outside the plan.
  */
 
-export const REPORT_VERSION = 1;
+export const REPORT_VERSION = 2;
 const FACTOR_NAMES = Object.keys(FACTORS) as Factor[];
 
 /** The decks a stored event may name: every artifact deck, the mix, and today's five. */
@@ -82,6 +96,8 @@ export const readStore = (directory: string, source: EventSource, from = "0000-0
 /** One game as its events tell it. */
 export interface Game {
   readonly deck: string;
+  /** A deal's game, or a friend's game of a duel challenge (#173). */
+  readonly origin: EventOrigin;
   readonly arms: Arms;
   readonly firstDay: string;
   readonly dealt: boolean;
@@ -91,17 +107,27 @@ export interface Game {
   readonly calls: readonly Readonly<{ ms: number; tokensIn: number; tokensOut: number }>[];
   readonly chatTurns: number;
   readonly fallbacks: number;
+  /** A deal's game that became a challenge: whether it was its deal's first try; null for any other game. */
+  readonly challenge: string | null;
+  /** A duel's game that got its result: how the friend did, and what decided it; null for any other game. */
+  readonly duel: Readonly<{ outcome: string; decidedBy: string }> | null;
+  /** The duel links that went out from this game, and how. */
+  readonly links: readonly Readonly<{ link: string; via: string }>[];
+  readonly rematch: boolean;
 }
 
-/** Groups events by game; a game's arms are sealed at its deal, so every event of it carries the same ones. */
+/** Groups events by game; a game's origin and arms are sealed at its deal, so every event of it carries the same ones. */
 export const gamesOf = (events: readonly ExperimentEvent[]): readonly Game[] => {
   const byGame = new Map<string, ExperimentEvent[]>();
   for (const event of events) byGame.set(event.game, [...byGame.get(event.game) ?? [], event]);
   return Object.freeze([...byGame.values()].map((own) => {
     const first = own[0]!;
     const of = (type: string) => own.filter((event) => event.type === type);
+    const [created] = of("duel_created");
+    const [result] = of("duel_completed");
     return Object.freeze({
       deck: first.deck,
+      origin: first.origin,
       arms: Object.freeze(Object.fromEntries(FACTOR_NAMES.map((factor) => [factor, first[factor]]))) as Arms,
       firstDay: own.map(({ day }) => day).sort()[0]!,
       dealt: of("game_dealt").length > 0,
@@ -111,6 +137,10 @@ export const gamesOf = (events: readonly ExperimentEvent[]): readonly Game[] => 
       calls: of("genui_call").map((event) => ({ ms: event.ms as number, tokensIn: event.tokensIn as number, tokensOut: event.tokensOut as number })),
       chatTurns: of("genui_interaction").filter((event) => event.action === "chat").length,
       fallbacks: of("genui_fallback").length,
+      challenge: created === undefined ? null : created.firstPlay as string,
+      duel: result === undefined ? null : Object.freeze({ outcome: result.outcome as string, decidedBy: result.decidedBy as string }),
+      links: Object.freeze(of("duel_link_copied").map((event) => Object.freeze({ link: event.link as string, via: event.via as string }))),
+      rematch: of("deal_again").some((event) => event.to === "rematch"),
     });
   }));
 };
@@ -181,11 +211,34 @@ export interface FactorReport {
 export interface InteractionCell { readonly rows: string; readonly columns: string; readonly completed: number; readonly dealtAgain: number }
 export interface Interaction { readonly factors: readonly [Factor, Factor]; readonly cells: readonly InteractionCell[] }
 
+/** One factor level's completed games of a deal, and how many of them became a challenge. */
+export interface ChallengeRow { readonly factor: Factor; readonly level: string; readonly completed: number; readonly challenged: number }
+
+/** The duels (#173), descriptive only: the plan makes no claim about them. */
+export interface DuelReport {
+  /** The challenge rate per completed game of a deal, for each factor's levels, scoped as that factor's comparison. */
+  readonly challenges: readonly ChallengeRow[];
+  /** Games of a deal that became a challenge, and those by whether the challenger's game was its deal's first try. */
+  readonly challenged: number;
+  readonly firstPlay: Readonly<Record<string, number>>;
+  /** Friends' games of a challenge: dealt, and played to the end. */
+  readonly dealt: number;
+  readonly completed: number;
+  /** Friends' results, by outcome from the friend's side and by what decided them. */
+  readonly outcomes: Readonly<Record<string, number>>;
+  readonly decidedBy: Readonly<Record<string, number>>;
+  /** Duel links that went out, by kind and then by route. */
+  readonly links: Readonly<Record<string, Readonly<Record<string, number>>>>;
+  /** Friends' games that ended in a rematch. */
+  readonly rematches: number;
+}
+
 export interface Report {
   readonly v: typeof REPORT_VERSION;
   readonly source: EventSource;
   readonly from: string | null;
   readonly to: string;
+  /** Games of a deal, the only ones the comparisons count; duel games are under `duels`. */
   readonly games: number;
   readonly completed: number;
   readonly refused: number;
@@ -196,6 +249,7 @@ export interface Report {
   readonly factors: readonly FactorReport[];
   /** Two-way tables of the primary metric, descriptive only: the plan makes no claim about them. */
   readonly interactions: readonly Interaction[];
+  readonly duels: DuelReport;
 }
 
 const daysBetween = (from: string, to: string): number => Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000) + 1;
@@ -240,12 +294,42 @@ const interaction = (pair: readonly [Factor, Factor], games: readonly Game[], la
   });
 };
 
+/** Counts each value, with every known value present. */
+const tally = (known: readonly string[], values: readonly string[]): Readonly<Record<string, number>> =>
+  Object.freeze(Object.fromEntries(known.map((value) => [value, values.filter((own) => own === value).length])));
+
+/**
+ * The duels: how often a completed game of a deal became a challenge, under each level, and how friends' games of
+ * challenges went. Friends' games are counted apart, since their arms are the challengers'.
+ */
+const duelReport = (deals: readonly Game[], duels: readonly Game[], layerDecks: readonly string[]): DuelReport => {
+  const completed = deals.filter((game) => game.completed);
+  const results = duels.flatMap(({ duel }) => duel === null ? [] : [duel]);
+  return Object.freeze({
+    challenges: Object.freeze(FACTOR_NAMES.flatMap((factor) => (FACTORS[factor] as readonly string[]).map((level) => {
+      const own = completed.filter((game) => inScope(factor, layerDecks)(game) && game.arms[factor] === level);
+      return Object.freeze({ factor, level, completed: own.length, challenged: own.filter(({ challenge }) => challenge !== null).length });
+    }))),
+    challenged: deals.filter(({ challenge }) => challenge !== null).length,
+    firstPlay: tally(FIRST_PLAYS, deals.flatMap(({ challenge }) => challenge === null ? [] : [challenge])),
+    dealt: duels.filter(({ dealt }) => dealt).length,
+    completed: duels.filter((game) => game.completed).length,
+    outcomes: tally(DUEL_OUTCOMES, results.map(({ outcome }) => outcome)),
+    decidedBy: tally(DUEL_DECIDERS, results.map(({ decidedBy }) => decidedBy)),
+    links: Object.freeze(Object.fromEntries(DUEL_LINKS.map((link) => [link, tally(SHARE_ROUTES, [...deals, ...duels]
+      .flatMap(({ links }) => links.filter((sent) => sent.link === link).map(({ via }) => via)))]))),
+    rematches: duels.filter(({ rematch }) => rematch).length,
+  });
+};
+
 /** The whole report for one source's events, read up to `to`, the day the report is for. */
 export const buildReport = ({ read, source, to, layerDecks, prices = null }: Readonly<{
   read: StoreRead; source: EventSource; to: string; layerDecks: readonly string[]; prices?: Prices;
 }>): Report => {
-  const games = gamesOf(read.events);
-  const from = games.length === 0 ? null : games.map(({ firstDay }) => firstDay).sort()[0]!;
+  const all = gamesOf(read.events);
+  // Only a deal's game drew its arms; a friend's game of a challenge plays the challenger's, so it stays out of the plan.
+  const games = all.filter(({ origin }) => origin === "deal");
+  const from = all.length === 0 ? null : all.map(({ firstDay }) => firstDay).sort()[0]!;
   const factors = FACTOR_NAMES.map((factor, index) => factorReport(factor, games, layerDecks, prices, 108 + 10 * index));
   const short = factors.flatMap(({ factor, levels }) => levels.filter(({ completed, target }) => completed < target)
     .map(({ level, completed, target }) => `${factor}:${level} ${completed}/${target}`));
@@ -267,6 +351,7 @@ export const buildReport = ({ read, source, to, layerDecks, prices = null }: Rea
     readiness: Object.freeze({ ready: short.length === 0 || (day !== null && day >= PLAN.maximumDays), day, short: Object.freeze(short) }),
     factors: Object.freeze(factors),
     interactions: Object.freeze(([["design", "theme"], ["design", "layer"], ["theme", "layer"]] as const).map((pair) => interaction(pair, games, layerDecks))),
+    duels: duelReport(games, all.filter(({ origin }) => origin === "duel"), layerDecks),
   });
 };
 

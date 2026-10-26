@@ -504,3 +504,27 @@ noscript { display: block; padding: 12px; margin-bottom: 16px; background: var(-
 .duel-share input { min-width: 0; padding: 10px 12px; border: 1px solid var(--border-soft); border-radius: var(--radius-small); background: var(--code-bg); color: var(--text); }
 .reveal .duel-share button, .reveal .duel-challenge button { margin: 0; justify-self: start; }
 .reveal .duel-retry { margin: 8px 0 0; }
+/* Credits and privacy (#99): reading pages outside any game, on the page's own background, and the footer that links them. */
+.info-page { width: min(980px, calc(100% - 32px)); margin: auto; padding: 36px 0 32px; line-height: 1.5; }
+.info-page h1 { margin: 0 0 12px; }
+.info-page h2 { margin: 32px 0 8px; color: var(--accent); font-size: 1.25rem; }
+.info-page h3 { margin: 18px 0 4px; font-size: 1rem; }
+.info-page p, .info-page li, .info-page dd { overflow-wrap: anywhere; }
+.info-page p { margin: 8px 0; }
+.info-page a { color: var(--accent); }
+.info-page code { font-family: var(--font-mono); font-size: .9em; }
+.info-lead, .info-empty, .credit-meta, .credit-spdx { color: var(--muted-light); }
+.info-list { margin: 8px 0; padding-left: 1.3em; }
+.info-fields { display: grid; grid-template-columns: minmax(0, max-content) minmax(0, 1fr); gap: 6px 16px; margin: 10px 0; }
+.info-fields dt { overflow-wrap: anywhere; }
+.info-fields dd { margin: 0; }
+.info-event { margin: 0 0 0 4px; padding-left: 14px; border-left: 2px solid var(--border); }
+.credit-repositories, .credit-files { list-style: none; margin: 0; padding: 0; }
+.credit-repository { margin: 0 0 14px; }
+.credit-repository h3 { margin: 18px 0 2px; }
+.credit-license-files { margin: 0 0 6px; font-size: .9rem; }
+.credit-files li { margin: 2px 0; }
+@media (max-width: 600px) { .info-fields { grid-template-columns: minmax(0, 1fr); gap: 2px; } .info-fields dd { margin-bottom: 8px; } }
+.site-footer { width: min(980px, calc(100% - 32px)); margin: 0 auto; padding: 0 0 32px; }
+.site-footer nav { display: flex; flex-wrap: wrap; gap: 8px 20px; padding-top: 14px; border-top: 1px solid var(--border); font-size: .9rem; }
+.site-footer a { color: var(--muted-light); }
