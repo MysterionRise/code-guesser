@@ -219,8 +219,26 @@ gate: changing queries, retries, ceilings, deck rules, or running
     address.
   - A limited page shows "Too many new games — wait a minute"; actions refuse with `RATE_LIMITED` (duel actions and pages too); routes answer 429
     with `Retry-After` (`tooMany`), and genui's per-game caps 429 `GAME_CAP`. The panel and the host report a 429 as
-    the `genui_fallback` reason `limited` (schema still v1) and keep the static reveal.
-- **Duels (#173: X1 the server, X2 the UI; events v2 is X3):** a finished game of a seeded deal or of today's five
+    the `genui_fallback` reason `limited` (added within v1, part of v2) and keep the static reveal.
+- **Credits and privacy (#99, L8):** a site footer in `app/layout.tsx` links `/credits` and `/privacy`. Both are outside any
+  game, in the original theme unless a lab tester picks one.
+  - `/credits` (`app/credits/page.tsx`) reads the experiment only through `experiment.credits`. `creditsOf`
+    (`demo/local-real-experiment-credits.server.ts`) reads each round's `fixture.source`: repository, path, commit,
+    file URL, licence id, name, and file URL, and author. Credits are deduplicated by repository, path, and commit,
+    then sorted by licence, repository, and path. They carry no round id, deck, order, or excerpt hash, since round
+    ids are in a game's DOM and paths name answers.
+  - The page groups credits by licence, then repository. It links each repository's licence file at its commit and
+    each licence's SPDX text, and says excerpts are changed copies. `docs/licences.md` records what MIT, Apache-2.0,
+    BSD-2/3, ISC, and Python-2.0 ask, and the Apache NOTICE judgment call.
+  - `/privacy` (`app/privacy/page.tsx`) renders `privacy/disclosures.ts`, a registry of what each feature keeps or
+    sends, with lifetimes read from the code's own constants. A feature that starts keeping or sending something adds
+    its entry; the browser-storage entry is an empty slot for #63.
+  - The event log's entry is `experiment/event-docs.ts`, every base key and payload field in words, with closed
+    choices listed from the schema's exported values. `test/credits-privacy.test.tsx` holds its keys to
+    `EVENT_BASE_KEYS` and `EVENT_FIELDS` and checks that the credits page shows no round id, pane line, or option label.
+  - The containment test reads both pages' code, and `tests/e2e/credits-privacy.spec.ts` runs axe on both in every
+    theme at 320 px.
+- **Duels (#173: X1 the server, X2 the UI, X3 events v2 and the report):** a finished game of a seeded deal or of today's five
   becomes a challenge link, and a friend's finished game of it a result link.
   - Tokens (`demo/local-real-experiment-duel-token.server.ts`): AES-256-GCM under `deriveKey(context)`, a random
     12-byte IV, the context as AAD, `base64url(iv‖ciphertext‖tag)`, at most 1,024 characters. Contexts
@@ -233,7 +251,8 @@ gate: changing queries, retries, ceilings, deck rules, or running
     `openChallenge`, `dealChallenge`, `issueResult`, `openResult`. A friend's game is re-dealt and checked against the
     digest, the maximum, and every round's points (`DEAL_DRIFT`, logged as `DUEL_REFUSED DEAL_DRIFT`), plays the
     challenger's theme and layer (the design only while generative UI is on and it isn't switched off,
-    `challengedArms`), seals `deal: {kind: "duel"}` with no seed, and records no events until X3. Refusals: `INVALID`,
+    `challengedArms`), seals `deal: {kind: "duel"}` with no seed, and records events under the friend's own `Sec-GPC`, as
+    `origin: duel` (X3). Refusals: `INVALID`,
     `EXPIRED`, `ROUND_SET` (another artifact, told only once the link authenticates), `DEAL_DRIFT`, `NOT_ELIGIBLE`,
     `SESSION_ENDED`, `RATE_LIMITED` (#98); a `ROUND_SET` or `DEAL_DRIFT` refusal names its deck while this artifact offers it. A result
     opens on any round set (`earlierRoundSet`, and a generic title once its deck is gone). `duelVerdict`
@@ -243,7 +262,9 @@ gate: changing queries, retries, ceilings, deck rules, or running
     deal (`canonicalHash({artifact, deck, seed, game})`) and per challenge id, counted at a game's first reveal; written
     through to the store's `plays` table, 50,000 keys, oldest first. A game seals `priorPlays` at its deal and catches
     up at its first reveal, so a challenge says `firstPlay` `yes`/`no` (`shared` for today's five) and a result which
-    play of the link it was.
+    play of the link it was. `markIssued` notes a challenge id's first link (`firstIssue`), and a friend's game's first
+    result under `resultMark` (a keyed hash of its game id, `codeguessr-duel-result-mark.v1`), so each duel event is
+    recorded once.
   - Pages (`duel/duel-page.tsx`, from `page.tsx` before any deck): `?duel=<t>` is an intro that deals nothing, in the
     challenger's theme, `noindex`; `&play=1` deals the friend's game (no lab picks or lab bar; "Deal new rounds" and
     "Rematch" are a fresh deal of the deck, a mix for today's five); `?duel-result=<t>` is read-only, outside any game.
@@ -391,15 +412,21 @@ gate: changing queries, retries, ceilings, deck rules, or running
       switchers). Playtests on `next start` need it.
   - **Event log** (`experiment/events.ts`, `experiment/event-store.server.ts`,
     `demo/local-real-experiment-events.server.ts`):
-    - schema v1, one strict parser: exact keys, closed enums, bounded
+    - schema v2 (X3 of #173), one strict parser: exact keys, closed enums, bounded
       numbers, so no IP, user agent, id, chat text, round content, or chosen
       option can be stored;
+    - every event carries `origin`: `duel` for a friend's game of a challenge (its deal's `kind`), `deal` for any
+      other. `parseEvent` still reads v1 lines (no origin) as `deal`, under v1's own payloads (no duel events, no
+      rematch, the retired `result_copied`); the store writes only v2, and `totals()` reads a v1 total as a deal's;
     - the server records `game_dealt`, `hint_revealed`, `round_revealed`,
-      `game_completed`, and `genui_call` itself; the browser sends
-      `game_viewed`, `deal_again`, `result_shared` (`via: share | clipboard`, #171), `genui_interaction`, and
+      `game_completed`, and `genui_call` itself, and two duel events: `duel_created {firstPlay}` on the challenger's
+      game at its challenge's first link, and `duel_completed {outcome: won|lost|drew, decidedBy}` on the friend's game
+      at its first result, from the friend's side. The browser sends
+      `game_viewed`, `deal_again` (`to: same-deck | chooser | rematch`), `result_shared` (`via: share | clipboard`,
+      #171), `duel_link_copied {link: challenge|result, via}`, `genui_interaction`, and
       `genui_fallback` to the beacon route `app/api/events/route.ts`
-      (2 KB since game state v3's longer token, a live signed token, 60 per game); the retired `result_copied` still
-      parses in stored lines;
+      (2 KB since game state v3's longer token, a live signed token, 60 per game). No event holds a challenge id, a
+      link, a name, the other side's score, or anything that ties a challenger's game to a friend's;
     - opt-in: nothing is recorded without `EXPERIMENT_EVENTS_DIR` (one JSONL
       file per UTC day, rolled up into `totals.jsonl` after 90 days), and a
       deal under `Sec-GPC: 1` seals `record: false`;
@@ -411,7 +438,7 @@ gate: changing queries, retries, ceilings, deck rules, or running
     - Each factor's levels are compared on the deal-again rate of completed games: seeded Beta draws
       (`statistics.ts`), 95% intervals, P(best) among levels with data, and the difference from control.
     - The secondaries come beside it, and the accuracy guardrail flags a level clearly above control. Completion counts
-      viewed games (`game_viewed`) only, so a crawler's or a link preview's deal never lowers it (#169, report v2).
+      viewed games (`game_viewed`) only, so a crawler's or a link preview's deal never lowers it (#169, report v3).
     - The change log (#169, `changes.ts`): `changes.json` parses strictly (exact keys, a real day, one line of text,
       factors `design`/`theme`/`layer` or `all` alone, a positive `pr`, dates in order), or the command fails with
       `EXPERIMENT_REPORT_CHANGES`. The report lists the changes inside its window and the periods between them, and
@@ -422,6 +449,9 @@ gate: changing queries, retries, ceilings, deck rules, or running
       comparisons, so 506 games per design, 475 per theme, and 356 per layer level. The read waits for every target or
       day 56.
     - Layers count only on decks in `question-layers.json`, and rolled-up totals are left out.
+    - Report v2 (X3 of #173): the comparisons, interactions, and readiness count only `origin: deal` games, since a
+      friend's game plays the challenger's arms. A descriptive Duels block, outside the plan, gives the challenge rate per
+      completed game under each level, `firstPlay`, duel games dealt and completed, outcomes, rematches, and links sent.
     - Tests recover known effects from quota-built synthetic stores, and `events.spec.ts` reads the e2e store.
 - Question layers (#127, #128; v1.0): generative UI inside the question,
   written at preparation time and frozen in

@@ -89,7 +89,7 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
   const settled = React.useRef(false);
 
   // The event log (#107) hears from the browser only what the server can't see: the viewport, the way on from a
-  // finished game, a shared result, and what the player does with a generative panel.
+  // finished game, a shared result or duel link, and what the player does with a generative panel.
   const track = React.useCallback((event: ClientEvent) => sendEvent(token.current, event), []);
   // Once per game, though React's strict mode runs effects twice in development.
   const viewed = React.useRef(false);

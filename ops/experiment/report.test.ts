@@ -24,10 +24,11 @@ const LAYER_DECKS = ["algorithm", "language"];
  * A synthetic store: `perCell` games for every combination of levels, on the given decks in turn, each dealt, viewed,
  * and played to the end. Successes are handed out by quota rather than drawn, so each group's rates are exactly what
  * `effects` gives (deal-again per arms and deck, accuracy per arms) and a test checks the report, not a seed's luck.
- * `into` adds the games to another store's directory, on their own day, and the result counts both.
+ * `into` adds the games to another store's directory, on their own day, and the result counts both. `v1` writes them
+ * as events schema v1 did, before origins (#173).
  */
 const syntheticStore = (perCell: number, effects: Effects = {},
-  options: Readonly<{ decks?: readonly string[]; source?: string; day?: string; into?: Store }> = {}): Store => {
+  options: Readonly<{ decks?: readonly string[]; source?: string; day?: string; into?: Store; v1?: boolean }> = {}): Store => {
   const directory = options.into?.directory ?? mkdtempSync(join(tmpdir(), "codeguessr-report-"));
   if (options.into === undefined) stores.push(directory);
   const quotas = new Map<string, { trials: number; successes: number }>();
@@ -48,7 +49,9 @@ const syntheticStore = (perCell: number, effects: Effects = {},
       const arms: Arms = { design, theme, layer };
       const deck = decks[games % decks.length]!;
       const game = (games += 1).toString(16).padStart(32, "0");
-      const base = { v: 1, game, day, source: options.source ?? "real", deck, ...arms };
+      // Version 1 stored no origin; version 2 names a deal's game.
+      const base = options.v1 ? { v: 1, game, day, source: options.source ?? "real", deck, ...arms }
+        : { v: 2, game, day, source: options.source ?? "real", origin: "deal", deck, ...arms };
       const event = (type: string, fields: Record<string, unknown> = {}) => lines.push(JSON.stringify({ ...base, type, ...fields }));
       event("game_dealt");
       event("game_viewed", { viewport: "phone" });
@@ -162,9 +165,10 @@ describe("experiment report", () => {
     const store = syntheticStore(1);
     const extra = [
       "not json",
-      JSON.stringify({ v: 1, type: "game_dealt", game: "f".repeat(32), day: "2026-11-02", source: "real", deck: "fix", design: "off", theme: "terminal", layer: "off", ip: "127.0.0.1" }),
-      JSON.stringify({ v: 1, type: "genui_call", game: "1".padStart(32, "0"), day: "2026-11-02", source: "real", deck: "algorithm", design: "off", theme: "terminal", layer: "off",
-        round: 1, phase: "after-lock", ok: true, status: 0, calls: 1, tokensIn: 7000, tokensOut: 1000, ms: 4000 }),
+      JSON.stringify({ v: 2, type: "game_dealt", game: "f".repeat(32), day: "2026-11-02", source: "real", origin: "deal", deck: "fix", design: "off", theme: "terminal",
+        layer: "off", ip: "127.0.0.1" }),
+      JSON.stringify({ v: 2, type: "genui_call", game: "1".padStart(32, "0"), day: "2026-11-02", source: "real", origin: "deal", deck: "algorithm", design: "off",
+        theme: "terminal", layer: "off", round: 1, phase: "after-lock", ok: true, status: 0, calls: 1, tokensIn: 7000, tokensOut: 1000, ms: 4000 }),
     ];
     writeFileSync(join(store.directory, "events-2026-11-02.jsonl"), `${extra.join("\n")}\n`, { flag: "a" });
     const built = report(store, { prices: { input: 1, output: 5 } });
@@ -177,14 +181,73 @@ describe("experiment report", () => {
 
   it("reads shared results, and the copied results stored before them, without counting either as a game (#171)", () => {
     const store = syntheticStore(1);
-    const line = (type: string, fields: Record<string, unknown> = {}) => JSON.stringify({ v: 1, type, game: "1".padStart(32, "0"), day: "2026-11-02",
-      source: "real", deck: "algorithm", design: "off", theme: "terminal", layer: "off", ...fields });
-    const shared = [line("result_shared", { via: "share" }), line("result_shared", { via: "clipboard" }), line("result_copied"), line("result_shared", { via: "email" })];
+    const line = (type: string, fields: Record<string, unknown> = {}, v = 2) => JSON.stringify({ v, type, game: "1".padStart(32, "0"), day: "2026-11-02",
+      source: "real", ...v === 2 ? { origin: "deal" } : {}, deck: "algorithm", design: "off", theme: "terminal", layer: "off", ...fields });
+    const shared = [line("result_shared", { via: "share" }), line("result_shared", { via: "clipboard" }), line("result_copied", {}, 1), line("result_shared", { via: "email" })];
     writeFileSync(join(store.directory, "events-2026-11-02.jsonl"), `${shared.join("\n")}\n`, { flag: "a" });
     const built = report(store);
     expect(built.refused).toBe(1);
     expect(built.games).toBe(store.games);
     expect(built.completed).toBe(report(syntheticStore(1)).completed);
+  });
+
+  it("reads a store schema v1 wrote as deals' games, the same as version 2's (#173)", () => {
+    const effects: Effects = { dealAgain: ({ design }) => design === "host" ? 0.6 : 0.3 };
+    const before = report(syntheticStore(3, effects, { v1: true }));
+    expect(before).toEqual(report(syntheticStore(3, effects)));
+    expect(before.refused).toBe(0);
+    expect(before.games).toBe(FACTORS.design.length * FACTORS.theme.length * FACTORS.layer.length * 3);
+  });
+
+  it("keeps friends' duel games out of every comparison, and describes the duels on their own (#173)", () => {
+    const store = syntheticStore(4);
+    const plain = report(syntheticStore(4));
+    // Every challenger on the host design challenges a friend; each friend's game plays the challenger's arms, deals again
+    // every time, and gets every round right, so it would move the host's deal-again rate and accuracy if it counted.
+    const lines: string[] = [];
+    const day = "2026-11-02";
+    const tallied = { later: 0, completed: 0, won: 0, rematches: 0 };
+    const challengers = readStore(store.directory, "real").events.filter(({ type, design }) => type === "game_dealt" && design === "host");
+    for (const [index, challenger] of challengers.entries()) {
+      const later = index % 3 === 0;
+      tallied.later += later ? 1 : 0;
+      const own = (type: string, fields: Record<string, unknown>) => JSON.stringify({ ...challenger, type, ...fields });
+      lines.push(own("duel_created", { firstPlay: later ? "no" : "yes" }), own("duel_link_copied", { link: "challenge", via: "clipboard" }));
+      const game = (0xf0000 + index).toString(16).padStart(32, "0");
+      const friend = (type: string, fields: Record<string, unknown> = {}) => JSON.stringify({ ...challenger, game, origin: "duel", type, ...fields });
+      lines.push(friend("game_dealt"));
+      // Every fourth friend leaves before the end.
+      if (index % 4 === 3) continue;
+      tallied.completed += 1;
+      for (let round = 1; round <= 5; round += 1) lines.push(friend("round_revealed", { round, correct: true, hints: 0, ms: 10_000 }));
+      const won = index % 2 === 0;
+      tallied.won += won ? 1 : 0;
+      tallied.rematches += won ? 1 : 0;
+      lines.push(friend("game_completed", { score: 5_000, correct: 5, hints: 0, ms: 60_000 }), friend("deal_again", { to: won ? "rematch" : "chooser" }),
+        friend("duel_completed", won ? { outcome: "won", decidedBy: "score" } : { outcome: "drew", decidedBy: "draw" }));
+      if (won) lines.push(friend("duel_link_copied", { link: "result", via: "share" }));
+    }
+    writeFileSync(join(store.directory, `events-${day}.jsonl`), `${lines.join("\n")}\n`, { flag: "a" });
+    const built = report(store);
+    expect(built.refused).toBe(0);
+    // The comparisons, the interactions, and the readiness are exactly those without any duel game.
+    expect({ games: built.games, completed: built.completed, factors: built.factors, interactions: built.interactions, readiness: built.readiness })
+      .toEqual({ games: plain.games, completed: plain.completed, factors: plain.factors, interactions: plain.interactions, readiness: plain.readiness });
+    const host = challengers.length;
+    expect(built.duels).toEqual({
+      challenges: expect.any(Array), challenged: host, firstPlay: { yes: host - tallied.later, no: tallied.later, shared: 0 },
+      dealt: host, completed: tallied.completed, rematches: tallied.rematches,
+      outcomes: { won: tallied.won, lost: 0, drew: tallied.completed - tallied.won },
+      decidedBy: { score: tallied.won, hints: 0, correct: 0, draw: tallied.completed - tallied.won },
+      links: { challenge: { share: 0, clipboard: host }, result: { share: tallied.won, clipboard: 0 } },
+    });
+    expect(built.duels.challenges.find(({ factor, level }) => factor === "design" && level === "host")).toEqual({ factor: "design", level: "host", completed: host, challenged: host });
+    expect(built.duels.challenges.find(({ factor, level }) => factor === "design" && level === "off")).toMatchObject({ challenged: 0 });
+    const markdown = renderReport(built);
+    expect(markdown).toContain("## Duels");
+    expect(markdown).toContain(`${host} duel games, outside the comparisons`);
+    expect(markdown).toContain(`Challenges: ${host} from ${built.completed} completed games`);
+    expect(markdown).toContain(`Links sent: challenge ${host} (share sheet 0, clipboard ${host}), result ${tallied.won} (share sheet ${tallied.won}, clipboard 0).`);
   });
 
   it("renders the plan, each factor, and the interactions as descriptive tables", () => {
@@ -207,12 +270,12 @@ describe("experiment report", () => {
       line("d".repeat(32), "round_revealed", { round: 1, correct: true, hints: 0, ms: 9000 }));
     writeFileSync(join(store.directory, "events-2026-11-02.jsonl"), `${extra.join("\n")}\n`, { flag: "a" });
     const built = report(store);
-    expect(built).toMatchObject({ v: 2, games: store.games + 4, viewed: store.games + 1, completed: store.games });
+    expect(built).toMatchObject({ v: 3, games: store.games + 4, viewed: store.games + 1, completed: store.games });
     // Control's cells hold one played game each, and the four extra games: completion is over the viewed ones only.
     const control = level(built, "design", "off").secondary;
     expect(control.games).toBe(FACTORS.theme.length * FACTORS.layer.length + 4);
     expect(control.completion).toBeCloseTo((control.games - 4) / (control.games - 3), 9);
-    expect(renderReport(built)).toContain(`${built.games} games, ${built.viewed} viewed, ${built.completed} completed.`);
+    expect(renderReport(built)).toContain(`${built.games} games, ${built.viewed} viewed, ${built.completed} completed · 0 duel games`);
   });
 
   it("splits a window at each change, and reads one period between changes on its own (#169)", () => {
@@ -300,7 +363,7 @@ describe("pnpm experiment:report (#169)", () => {
     expect(read.stderr).toBe("");
     expect(read.status).toBe(0);
     expect(read.stdout).toContain("Period: 2026-11-01 to 2026-11-03");
-    expect(read.stdout).toContain(`${store.games} games, ${store.games} viewed, ${store.games} completed.`);
+    expect(read.stdout).toContain(`${store.games} games, ${store.games} viewed, ${store.games} completed · 0 duel games`);
     for (const [args, code] of [
       [["--period=2026-11-03..2026-11-01"], "EXPERIMENT_REPORT_PERIOD_MALFORMED"],
       [["--period=2026-11-01..2026-11-31"], "EXPERIMENT_REPORT_PERIOD_MALFORMED"],

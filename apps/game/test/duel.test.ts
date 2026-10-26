@@ -421,13 +421,15 @@ describe("the friend's game (#173)", () => {
     expect(off.ok && off.game.arms).toEqual({ ...ARMS, design: "off" });
   });
 
-  it("seals the friend's game with its challenge and no seed, and records none of its events", () => {
+  it("seals the friend's game with its challenge and no seed, and records its events as the friend's own Sec-GPC says (X3)", () => {
     const seed = freshSeed();
     const { challengeToken } = challengeOf(play(deal("framework", NOW, ARMS, { seed, game: 4 })));
     const friend = dealChallenge(challengeToken);
     const state = payloadOf(friend.game.sessionToken);
     expect(state.deal).toEqual({ kind: "duel", challenge: openChallengeToken(challengeToken, experiment.artifactHash, NOW).id });
-    expect(state.record).toBe(false);
+    expect(state.record).toBe(true);
+    const quiet = experiment.dealChallenge(challengeToken, NOW, false, ON);
+    expect(quiet.ok && payloadOf(quiet.game.sessionToken).record).toBe(false);
     expect(Buffer.from(friend.game.sessionToken.split(".")[0]!, "base64url").toString("utf8")).not.toMatch(new RegExp(`${seed}|"seed"|"game":`, "u"));
   });
 
