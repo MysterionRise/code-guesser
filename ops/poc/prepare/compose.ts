@@ -18,7 +18,9 @@ import {
   type ExperimentArtifact,
   type ExperimentFixture,
 } from "./model";
-import { namesAdvisory, showsFrameworkSymbol, spellsFramework } from "../../../packages/artifact/src/index";
+import {
+  containsProtected, namesAdvisory, protectedIndex, showsFrameworkSymbol, spellsFramework,
+} from "../../../packages/artifact/src/index";
 import { namesExercise } from "./exercise-rounds";
 import {
   STACK_LANGUAGES, mentionsLabel, poolSizes, type AlgorithmEntry, type CrawlProfile, type ExerciseEntry, type FrameworkEntry,
@@ -56,11 +58,6 @@ export interface ComposedExperiment {
 const fail = (code?: string): never => { throw new ComposeError(code); };
 const sameBytes = (left: Uint8Array, right: Uint8Array): boolean =>
   left.byteLength === right.byteLength && left.every((value, index) => value === right[index]);
-/** True when the protected value appears in public text as a whole token (non-alphanumeric boundaries). */
-export const containsProtected = (publicText: string, value: string): boolean => {
-  const escaped = value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
-  return new RegExp(`(^|[^A-Za-z0-9_])${escaped}([^A-Za-z0-9_]|$)`, "u").test(publicText);
-};
 export const PROTECTED_SOURCE_KEYS = [
   "repository", "repositoryUrl", "authorName", "authorLogin", "authorSourceUrl", "path",
   "blob", "rawContentHash", "licenseName", "licenseSpdx", "licenseFileUrl", "commit",
@@ -147,7 +144,8 @@ const requirePublicContainment = (fixtures: readonly ExperimentFixture[], profil
   const frameworkEntries = profile.curated?.framework?.families.flatMap(({ frameworks }) => frameworks) ?? [];
   const exerciseEntries = profile.curated?.exercise?.families.flatMap(({ exercises }) => exercises) ?? [];
   const shown = fixtures.map(publicParts);
-  const publicText = shown.map((parts) => Object.values(parts).join("\n")).join("\n");
+  // The public text is indexed once (#166): a value with a word run it lacks is settled by set lookups.
+  const shows = protectedIndex(shown.map((parts) => Object.values(parts).join("\n")).join("\n"));
   for (const fixture of fixtures) {
     requireOwnCandidatesAbsent(fixture, algorithmEntries, frameworkEntries, exerciseEntries);
     const protectedEntries: readonly (readonly [string, unknown])[] = [
@@ -155,7 +153,7 @@ const requirePublicContainment = (fixtures: readonly ExperimentFixture[], profil
       ...PROTECTED_SOURCE_KEYS.map((key) => [key, fixture.source[key]] as const),
     ];
     for (const [name, value] of protectedEntries) {
-      if (typeof value !== "string" || !containsProtected(publicText, value)) continue;
+      if (typeof value !== "string" || !shows(value)) continue;
       // A whole-file excerpt makes rawContentHash equal the public excerpt hash: a hash of public text.
       if (name === "rawContentHash" && (value === fixture.source.excerptHash || value === fixture.source.parentExcerptHash)) continue;
       const part = shown.flatMap((parts) => Object.entries(parts)).find(([, text]) => containsProtected(text, value))?.[0] ?? "UNKNOWN";

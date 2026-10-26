@@ -7,7 +7,7 @@ import { looksGenerated } from "./excerpt-window";
 import { askable, balancedAnswers, outputPane, type OutputCandidate } from "./output-rounds";
 import type { ProfileVersion } from "./model";
 import { sha256 } from "./round-helpers";
-import { addHashes, collidesWithSelected, revealsProtected, unreportable } from "./selection";
+import { addHashes, collidesWithSelected, protectedScreen, unreportable } from "./selection";
 import type { Context, PreparationDependencies } from "./types";
 
 /** An output round in waiting: everything but the final snapshot it is bound to. */
@@ -150,7 +150,7 @@ export const selectOutput = async (
         state.duplicatesRejected += 1;
         fail("SOURCE_DUPLICATE");
       }
-      if (panes.some((pane) => revealsProtected(profile, pane, [...otherDecks(), ...chosen]))) fail("PUBLIC_CONTAINMENT_REJECTED");
+      if (panes.some(protectedScreen(profile, [...otherDecks(), ...chosen]))) fail("PUBLIC_CONTAINMENT_REJECTED");
       if (unreportable(pending)) fail("SOURCE_IDENTITY_UNREPORTABLE");
       state.screened += 1;
       examplesSeen.add(round.key);
