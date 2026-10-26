@@ -1,7 +1,7 @@
 import * as React from "react";
 
 import type { ClientEvent, GenuiEvent } from "../../experiment/events";
-import type { Design } from "../../genui/designs";
+import { hostInputId, type Design } from "../../genui/designs";
 import type { GenuiPanelProps } from "../../genui/genui-panel";
 import type { ChallengerDuel, GameDuel } from "../duel/duel-contract";
 import { ChallengeFriend, DuelCompletion } from "../duel/duel-game";
@@ -25,26 +25,39 @@ const GenuiPanel = React.lazy(() => import("../../genui/genui-panel")) as React.
 /** A label that may break after each slash on a narrow screen, so `owner/name` never splits inside a word. */
 const breakable = (label: string): React.ReactNode[] => label.split("/").flatMap((part, index) => index === 0 ? [part] : [<wbr key={index} />, `/${part}`]);
 
-/** "Your game" (#43): every round's pick, answer, points, and source, and the total against the most it could earn. */
-function GameSummary({ history, result }: { readonly history: readonly RoundRecord[]; readonly result: EntertainmentResultProjection }) {
+/**
+ * "Your game" (#43): every round's pick, answer, points, and source, and the total against the most it could earn. A
+ * mixed game's rounds each name their deck (#161), since picks like "Line 7" read alike across decks.
+ */
+function GameSummary({ history, result, roundDecks }: {
+  readonly history: readonly RoundRecord[];
+  readonly result: EntertainmentResultProjection;
+  readonly roundDecks: Readonly<Record<string, string>> | undefined;
+}) {
   return (
     <section className="game-summary" aria-labelledby="game-summary-title">
       <h3 id="game-summary-title">Your game</h3>
-      <table>
-        <thead><tr><th scope="col"><abbr title="Round">#</abbr></th><th scope="col">Your pick</th><th scope="col">Answer</th><th scope="col">Points</th></tr></thead>
+      <table className={roundDecks ? "with-decks" : undefined}>
+        <thead>
+          <tr>
+            <th scope="col"><abbr title="Round">#</abbr></th>{roundDecks && <th scope="col">Deck</th>}<th scope="col">Your pick</th><th scope="col">Answer</th>
+            <th scope="col">Points</th>
+          </tr>
+        </thead>
         <tbody>
           {history.map((entry, index) => (
             <tr key={entry.roundId} className={entry.correct ? "summary-right" : "summary-missed"}>
               <th scope="row">
                 {entry.source ? <a href={entry.source} rel="noreferrer noopener" target="_blank">{index + 1}<span className="visually-hidden"> (source)</span></a> : index + 1}
               </th>
-              <td><span aria-hidden="true">{entry.correct ? "✓ " : "✗ "}</span>{breakable(entry.picked)}<span className="visually-hidden">{entry.correct ? ", right" : ", missed"}</span></td>
+              {roundDecks && <td className="summary-deck">{roundDecks[entry.deck] ?? entry.deck}</td>}
+              <td className="summary-pick"><span aria-hidden="true">{entry.correct ? "✓ " : "✗ "}</span>{breakable(entry.picked)}<span className="visually-hidden">{entry.correct ? ", right" : ", missed"}</span></td>
               <td>{breakable(entry.answer)}</td>
               <td>{points(entry.points)}{entry.hints > 0 && <span className="summary-hints"> ({entry.hints === 1 ? "1 hint" : `${entry.hints} hints`})</span>}</td>
             </tr>
           ))}
         </tbody>
-        <tfoot><tr><th scope="row" colSpan={2}>Total</th><td colSpan={2}>{points(result.score)} of {points(result.attainableMaximum)}</td></tr></tfoot>
+        <tfoot><tr><th scope="row" colSpan={roundDecks ? 3 : 2}>Total</th><td colSpan={2}>{points(result.score)} of {points(result.attainableMaximum)}</td></tr></tfoot>
       </table>
     </section>
   );
@@ -96,13 +109,13 @@ function CompletionActions({ result, correctRounds, history, deckTitle, shareHre
 }
 
 /**
- * A revealed round (#126): the verdict, what it earned, and the answer first; on the last round the game's summary and
- * the way on right after; then why, which folds away once a generative explainer has rendered (#121); then the
- * explainer, the round's source, and the next round. The parent renders it only after the server authorized the reveal.
- * In a friend's game of a challenge (#173), it also says how the challenger did on this round, and the game ends on
- * the duel's comparison instead of the usual way on.
+ * A revealed round (#126): the verdict, what it earned, and the answer first, with a way to the host's chat when the
+ * host is on (#161); on the last round the game's summary and the way on right after; then why, which folds away once
+ * a generative explainer has rendered (#121); then the explainer, the round's source, and the next round. The parent
+ * renders it only after the server authorized the reveal. In a friend's game of a challenge (#173), it also says how
+ * the challenger did on this round, and the game ends on the duel's comparison instead of the usual way on.
  */
-export function RoundReveal({ round, reveal, hintsUsed, pickLabel, complete, correctRounds, history, deckTitle, shareHref, newGameHref, replayHref, chooseAnotherDeckHref, genuiDesign, duel, opponentName, sessionToken, onNext, headingRef, track, trackGenui }: {
+export function RoundReveal({ round, reveal, hintsUsed, pickLabel, complete, correctRounds, history, deckTitle, roundDecks, shareHref, newGameHref, replayHref, chooseAnotherDeckHref, genuiDesign, duel, opponentName, sessionToken, onNext, headingRef, track, trackGenui }: {
   readonly round: Readonly<PublicRound>;
   readonly reveal: AuthorizedReveal;
   readonly hintsUsed: number;
@@ -113,6 +126,8 @@ export function RoundReveal({ round, reveal, hintsUsed, pickLabel, complete, cor
   /** Every answered round so far, for the summary once the game is complete. */
   readonly history: readonly RoundRecord[];
   readonly deckTitle: string | undefined;
+  /** Each deck's title by round kind, in a mixed game, so its summary names each round's deck. */
+  readonly roundDecks: Readonly<Record<string, string>> | undefined;
   /** The finished game's own address, which its share line links to. */
   readonly shareHref: string | undefined;
   readonly newGameHref: string | undefined;
@@ -140,9 +155,17 @@ export function RoundReveal({ round, reveal, hintsUsed, pickLabel, complete, cor
         <p className="duel-line">{opponentRoundLine(opponentName ?? DEFAULT_NAME, duel.challenge.challenger.rounds[history.length - 1]!)}</p>
       )}
       <p className="answer-line">The answer: <strong>{answer}</strong></p>
+      {/* The host's chat sits below the round (#161): this moves focus to it, and leaves the address alone, since its
+          fragment may name a duel's players (#173). */}
+      {genuiDesign === "host" && (
+        <p className="host-cue">
+          <a href={`#${hostInputId(round.roundId)}`}
+            onClick={(event) => { event.preventDefault(); document.getElementById(hostInputId(round.roundId))?.focus(); }}>Ask the host about this round</a>
+        </p>
+      )}
       {complete && (
         <>
-          <GameSummary history={history} result={reveal.result} />
+          <GameSummary history={history} result={reveal.result} roundDecks={roundDecks} />
           {duel?.role === "challenged"
             ? <DuelCompletion duel={duel} name={opponentName} sessionToken={sessionToken} chooseAnotherDeckHref={chooseAnotherDeckHref} />
             : (

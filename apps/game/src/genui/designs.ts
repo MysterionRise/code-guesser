@@ -18,3 +18,6 @@ export const READY_DESIGNS: readonly Design[] = Object.freeze(["catalog", "compo
 /** A ready design by name, or null. */
 export const readyDesign = (value: unknown): Design | null =>
   typeof value === "string" && (READY_DESIGNS as readonly string[]).includes(value) ? value as Design : null;
+
+/** The host chat's question field for a round, which a revealed round's cue moves focus to (#161). */
+export const hostInputId = (roundId: string): string => `host-input-${roundId}`;

@@ -362,6 +362,21 @@ describe("static arcade shell", () => {
     ]);
     expect(session.history.reduce((total, { points }) => total + points, 0)).toBe(session.score);
     expect(session.history[2]!.source).toBe("https://github.com/acme/repo/blob/abc/file-2.py");
+    // Each names its deck by round kind, so a mixed game's summary can show it (#161).
+    expect(session.history.map(({ deck }) => deck)).toEqual(Array(5).fill("language"));
+  });
+
+  it("says when a round of a layered game plays without its layer, and says nothing in a game without layers (#161)", () => {
+    const input = modeInput();
+    const scaffold = { design: "marker-hunt" as const, prompts: ["How are comments written?", "How does a block end?", "How is a name declared?"] };
+    const layered = createPublicModeContract({ ...input, rounds: input.rounds.map((round, index) => index === 1 ? { ...round, scaffold } : round) });
+    const note = "No question layer for this round.";
+    expect(renderToStaticMarkup(createElement(ArcadeShell, { mode: layered, ...unusedActions }))).toContain(`<p class="layer-note">${note}</p>`);
+    const first = createPublicModeContract({ ...input, rounds: input.rounds.map((round, index) => index === 0 ? { ...round, scaffold } : round) });
+    const html = renderToStaticMarkup(createElement(ArcadeShell, { mode: first, ...unusedActions }));
+    expect(html).toContain("Ask of the code");
+    expect(html).not.toContain(note);
+    expect(renderToStaticMarkup(createElement(ArcadeShell, { mode: createPublicModeContract(input), ...unusedActions }))).not.toContain(note);
   });
 
   it("never replays revealed rounds: a finished run takes no further action, and unknown actions are refused", () => {

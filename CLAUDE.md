@@ -374,8 +374,12 @@ gate: changing queries, retries, ceilings, deck rules, or running
         - a failed panel offers "Try again" once;
         - marked lines are named for screen readers, and layered rounds number their lines;
         - a review-refused trace (`reviewed.ts`).
-    - Open: #120 (model per design), #159 (check traces against the code), #160 (the algorithm layer's fairness),
-      #161 (UI polish).
+      - Its UI polish (#161): a Deck column in mixed and daily summaries (`RoundRecord.deck`, by round kind); a
+        cue beside the verdict that moves focus to the host's chat (`hostInputId`, never the address's fragment);
+        the lock button, hint button, and keys line gone once the answer is locked; and "No question layer for this
+        round" on a round without a scaffold in a game whose rounds carry any. Marker hunt questions the pane can't
+        answer are a data change for the next questions run.
+    - Open: #120 (model per design), #159 (check traces against the code), #160 (the algorithm layer's fairness).
   - Composer and visualizer requests keep only the first panel or page
     (`ONE_ONLY`) and ask for `parallel_tool_calls: false`; live, Haiku
     sometimes wrote several pages at once.

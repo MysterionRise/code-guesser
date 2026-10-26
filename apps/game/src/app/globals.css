@@ -307,6 +307,9 @@ noscript { display: block; padding: 12px; margin-bottom: 16px; background: var(-
 .candidate.correct { border-color: var(--win); background: var(--win-bg); box-shadow: inset 0 0 0 1px var(--win); }
 .candidate.missed { border-color: var(--miss); background: var(--miss-bg); }
 .answer-line { margin: 0 0 8px; }
+/* With the host on, a link beside the verdict to its chat, which sits below the round (#161). */
+.host-cue { margin: 0 0 8px; }
+.host-cue a { color: var(--accent); font-weight: 800; }
 .deck-size { color: var(--subtle); font-size: .88rem; }
 /* The player's records (#63), which only their browser holds. */
 .deck-record { color: var(--text); font-size: .88rem; font-weight: 700; }
@@ -416,6 +419,8 @@ noscript { display: block; padding: 12px; margin-bottom: 16px; background: var(-
 .scaffold-list { margin: 0; padding-left: 1.2em; color: var(--text-soft); }
 .scaffold-list code, .trace-stepper code { font-family: var(--font-mono); color: var(--code-text); }
 .scaffold-role { color: var(--muted); }
+/* A layered game's round that plays without its layer says so where the scaffold would be (#161). */
+.layer-note { margin: -12px 0 14px; color: var(--muted); font-size: .88rem; }
 .code-line.hinted { background: var(--highlight-bg); box-shadow: inset 3px 0 0 var(--focus); }
 .trace-stepper { flex-basis: 100%; padding: 10px 13px; border: 1px dashed var(--border-soft); border-radius: var(--radius-chip); background: var(--chip); color: var(--text-soft); }
 .trace-input, .trace-frame { margin: 0 0 6px; overflow-wrap: anywhere; }
@@ -442,7 +447,12 @@ noscript { display: block; padding: 12px; margin-bottom: 16px; background: var(-
 .game-summary thead th { color: var(--muted); font-weight: 700; border-top: 0; }
 .game-summary tfoot th, .game-summary tfoot td { font-weight: 800; }
 .game-summary tfoot td { text-align: right; }
-.game-summary .summary-missed td:nth-child(2) { color: var(--miss); }
+.game-summary .summary-missed .summary-pick { color: var(--miss); }
+/* A mixed game's summary has a deck column too (#161); on a phone its cells break wherever they must to fit. */
+@media (max-width: 480px) {
+  .game-summary .with-decks th, .game-summary .with-decks td { padding: 6px 5px; overflow-wrap: anywhere; }
+  .game-summary .with-decks td:last-child { white-space: normal; }
+}
 .game-summary .summary-hints { color: var(--muted); }
 .game-summary a { color: var(--accent); }
 .deck-group { margin: 0 0 22px; }

@@ -9,6 +9,7 @@ import { DefaultChatTransport, type UIMessage } from "ai";
 
 import type { GenuiEvent } from "../experiment/events";
 import { CatalogView, type HintOffer } from "./catalog-view";
+import { hostInputId } from "./designs";
 import { renderViews, wasLimited, type GenuiPanelProps } from "./genui-panel";
 import { isSafeText, type RoundPhase } from "./render-catalog";
 
@@ -103,7 +104,7 @@ export default function HostChat({ roundId, phase, panes, optionLabels, sessionT
   const limits = React.useMemo(() => ({ paneLineCounts: panes.map(({ text }) => text.split("\n").length), optionLabels }), [panes, optionLabels]);
   const busy = status === "submitted" || status === "streaming";
   const headingId = `host-heading-${roundId}`;
-  const inputId = `host-input-${roundId}`;
+  const inputId = hostInputId(roundId);
 
   const send = (event: React.FormEvent) => {
     event.preventDefault();

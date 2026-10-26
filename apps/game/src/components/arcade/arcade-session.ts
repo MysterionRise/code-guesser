@@ -1,4 +1,4 @@
-import { ArcadeShellRuleError, requirePublicText as required, type HintDetail, type PublicModeContract } from "./mode-contract";
+import { ArcadeShellRuleError, requirePublicText as required, type HintDetail, type PublicModeContract, type RoundModeKind } from "./mode-contract";
 
 /**
  * A game's client-side session: the rounds played so far, the hints bought, and the locked answer. The server holds
@@ -73,6 +73,8 @@ export interface ArcadeSession {
 /** One answered round, as the five-round summary shows it. */
 export interface RoundRecord {
   readonly roundId: string;
+  /** The deck the round came from, by its kind, so a mixed game's summary can name it (#161). */
+  readonly deck: RoundModeKind;
   readonly picked: string;
   readonly answer: string;
   readonly correct: boolean;
@@ -198,7 +200,7 @@ export function transitionArcadeSession(
     }
     const labelOf = (candidateId: string | null) => round.mode.candidates.find((candidate) => candidate.candidateId === candidateId)?.label ?? "";
     const record: RoundRecord = Object.freeze({
-      roundId: round.roundId, picked: labelOf(session.lockedCandidateId), answer: labelOf(reveal.answerCandidateId), correct: reveal.correct,
+      roundId: round.roundId, deck: round.mode.kind, picked: labelOf(session.lockedCandidateId), answer: labelOf(reveal.answerCandidateId), correct: reveal.correct,
       points: reveal.score, hints: session.visibleHintCount, source: SOURCE_ADDRESS.exec(reveal.attribution)?.[0] ?? null,
     });
     return Object.freeze({ ...session, reveal, result: reveal.result,
