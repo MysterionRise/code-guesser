@@ -287,7 +287,7 @@ Every page's footer links two pages (#99):
 - **`/privacy`** says what the game records and what it never records. It is
   rendered from `privacy/disclosures.ts`, a registry of what each feature keeps
   or sends: the event log, game progress, plays, share and duel links, browser
-  storage (none yet), the client address for rate limits, the model calls, server
+  storage (the local records' one key), the client address for rate limits, the model calls, server
   logs, and `Sec-GPC`.
   - The event log's part is the event schema in words
     (`experiment/event-docs.ts`), and a test holds its fields to the schema's.

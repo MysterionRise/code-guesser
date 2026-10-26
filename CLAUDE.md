@@ -248,7 +248,7 @@ gate: changing queries, retries, ceilings, deck rules, or running
     BSD-2/3, ISC, and Python-2.0 ask, and the Apache NOTICE judgment call.
   - `/privacy` (`app/privacy/page.tsx`) renders `privacy/disclosures.ts`, a registry of what each feature keeps or
     sends, with lifetimes read from the code's own constants. A feature that starts keeping or sending something adds
-    its entry; the browser-storage entry is an empty slot for #63.
+    its entry; the browser-storage entry lists `codeguessr.records` (#63), its one key.
   - The event log's entry is `experiment/event-docs.ts`, every base key and payload field in words, with closed
     choices listed from the schema's exported values. `test/credits-privacy.test.tsx` holds its keys to
     `EVENT_BASE_KEYS` and `EVENT_FIELDS` and checks that the credits page shows no round id, pane line, or option label.

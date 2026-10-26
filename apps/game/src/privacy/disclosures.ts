@@ -1,5 +1,6 @@
 import "server-only";
 
+import { RECORDS_KEY, STREAK_CORRECT } from "../components/arcade/local-records";
 import { CHALLENGE_TTL_MS, MAX_TOKEN_LENGTH, RESULT_TTL_MS } from "../demo/local-real-experiment-duel-token.server";
 import { GAME_TTL_MS } from "../demo/local-real-experiment-session.server";
 import { BASE_FIELD_DOCS, EVENT_DOCS, type EventDoc } from "../experiment/event-docs";
@@ -108,9 +109,12 @@ export const DISCLOSURES: readonly Disclosure[] = Object.freeze([
   {
     id: "browser",
     title: "Your browser's storage",
-    summary: ["CodeGuessr sets no cookies and keeps nothing in your browser's storage."],
-    items: [],
-    empty: "No keys yet. If a later version keeps your own records in this browser, each key is listed here.",
+    summary: [
+      "CodeGuessr sets no cookies. Your bests and streaks stay in this browser's storage, under the one key below, and are never sent anywhere. \"Clear records\" on the list of decks deletes them, as clearing the browser's data for this site does, and a new set of rounds starts them afresh.",
+    ],
+    items: items({
+      [RECORDS_KEY]: `For each deck: your best score, games played, and your current and best streak of games with ${STREAK_CORRECT} or more of 5 right. For today's five: the last date you finished it, by your own clock, and your current and best run of days. And a short prefix of the set of rounds' hash, so another set's records are never shown.`,
+    }),
   },
   {
     id: "address",

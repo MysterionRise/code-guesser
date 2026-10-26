@@ -22,6 +22,7 @@ vi.mock("../src/demo/local-real-experiment-loader.server", async (importOriginal
 const { EVENT_BASE_KEYS, EVENT_FIELDS } = await import("../src/experiment/events");
 const { BASE_FIELD_DOCS, EVENT_DOCS } = await import("../src/experiment/event-docs");
 const { DISCLOSURES, NEVER_RECORDED } = await import("../src/privacy/disclosures");
+const { RECORDS_KEY } = await import("../src/components/arcade/local-records");
 type Page = (props: { searchParams: Promise<Readonly<Record<string, string>>> }) => Promise<ReactElement>;
 // Loaded by a computed path, so Next.js's own declarations stay out of the tests' typecheck.
 const pages = ["../src/app/credits/page", "../src/app/privacy/page"];
@@ -110,9 +111,9 @@ describe("privacy (#99)", () => {
     expect(html).not.toContain("github.com");
   });
 
-  it("keep a slot for this browser's storage, which holds no key yet", () => {
+  it("list every key this browser's storage holds: the records alone (#63)", () => {
     const storage = DISCLOSURES.find(({ id }) => id === "browser")!;
-    expect(storage.items).toEqual([]);
-    expect(storage.empty).toMatch(/No keys yet/u);
+    expect(storage.items.map(({ name }) => name)).toEqual([RECORDS_KEY]);
+    expect(storage.empty).toBeUndefined();
   });
 });
