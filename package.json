@@ -33,7 +33,8 @@
   },
   "pnpm": {
     "overrides": {
-      "next>postcss": "8.5.31"
+      "next>postcss": "8.5.31",
+      "undici@<7.30.1": ">=7.30.1 <8"
     }
   }
 }
