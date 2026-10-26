@@ -5,6 +5,10 @@ import { sendEvent } from "../../experiment/beacon";
 import { viewportBucket, type ClientEvent, type GenuiEvent } from "../../experiment/events";
 import type { Design } from "../../genui/designs";
 import type { HostChatProps } from "../../genui/host-chat";
+import type { GameDuel } from "../duel/duel-contract";
+import { OpponentStrip } from "../duel/duel-game";
+import { useFragmentNames } from "../duel/duel-names";
+import { DEFAULT_NAME } from "../duel/duel-text";
 import { AnswerOptions } from "./answer-options";
 import {
   createArcadeSession,
@@ -15,7 +19,7 @@ import {
   type RevealRequest,
   type RevealResponse,
 } from "./arcade-session";
-import { SESSION_ENDED_MESSAGE, points } from "./arcade-text";
+import { RATE_LIMITED_MESSAGE, SESSION_ENDED_MESSAGE, points } from "./arcade-text";
 import { CodePanes } from "./code-panes";
 import { HintBar } from "./hint-bar";
 import { LINE_KINDS, optionLine, type PublicModeContract } from "./mode-contract";
@@ -44,10 +48,14 @@ interface ArcadeShellProps {
   roundDecks?: Readonly<Record<string, string>>;
   /** When set, a revealed round offers this generative design (#101, #114); the server decides with `GENUI_ENABLED`. */
   genuiDesign?: Design;
+  /** When set, a finished game can challenge a friend, or this game answers a friend's challenge (#173). */
+  duel?: GameDuel;
 }
 
-export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealHintAction, chooseAnotherDeckHref, newGameHref, shareHref, deckTitle, roundDecks, genuiDesign }: ArcadeShellProps) {
+export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealHintAction, chooseAnotherDeckHref, newGameHref, shareHref, deckTitle, roundDecks, genuiDesign, duel }: ArcadeShellProps) {
   const [session, setSession] = React.useState(() => createArcadeSession(mode));
+  // A challenge link names its challenger in its fragment, which only the browser reads (#173).
+  const opponentName = useFragmentNames().from;
   const token = React.useRef(sessionToken);
   const currentToken = React.useCallback(() => token.current, []);
   const hintPending = React.useRef(false);
@@ -147,7 +155,7 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
       const response = await authorizeRevealAction({ sessionToken: token.current, roundId: round.roundId, candidateId: choice });
       if (!response.ok) {
         if (response.reason === "SESSION_ENDED") setEnded(true);
-        else setError("Couldn’t check that answer. Try again.");
+        else setError(response.reason === "RATE_LIMITED" ? RATE_LIMITED_MESSAGE : "Couldn’t check that answer. Try again.");
         return;
       }
       const result = projectDisplayReveal(response.reveal);
@@ -171,7 +179,7 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
       const response = await revealHintAction({ sessionToken: token.current, roundId: round.roundId });
       if (!response.ok) {
         if (response.reason === "SESSION_ENDED") setEnded(true);
-        else setHintError("Couldn’t get that hint. Try again.");
+        else setHintError(response.reason === "RATE_LIMITED" ? RATE_LIMITED_MESSAGE : "Couldn’t get that hint. Try again.");
         return;
       }
       setSession((current) => transitionArcadeSession(mode, current, { type: "reveal-hint", label: response.hint, detail: response.detail ?? null }));
@@ -198,6 +206,9 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
       <ArcadeHeader score={session.score}>
         <RoundTrack rounds={mode.rounds} roundIndex={session.roundIndex} outcomes={session.outcomes} />
       </ArcadeHeader>
+      {duel?.role === "challenged" && (
+        <OpponentStrip name={opponentName ?? DEFAULT_NAME} rounds={duel.challenge.challenger.rounds} answered={session.completedRounds} />
+      )}
 
       <section className="game-card" aria-labelledby="round-title" data-round-id={round.roundId}>
         <p className="eyebrow">Round {session.roundIndex + 1} of {mode.rounds.length}
@@ -241,7 +252,7 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
             <RoundReveal round={round} reveal={session.reveal} hintsUsed={session.visibleHintCount}
               pickLabel={labelOf(session.lockedCandidateId)} complete={session.status === "complete"}
               correctRounds={session.correctRounds} history={session.history} deckTitle={deckTitle} shareHref={shareHref} newGameHref={newGameHref}
-              chooseAnotherDeckHref={chooseAnotherDeckHref} genuiDesign={genuiDesign} sessionToken={currentToken}
+              chooseAnotherDeckHref={chooseAnotherDeckHref} genuiDesign={genuiDesign} duel={duel} opponentName={opponentName} sessionToken={currentToken}
               onNext={next} headingRef={revealHeading} track={track} trackGenui={trackGenui} />
           )}
         </div>

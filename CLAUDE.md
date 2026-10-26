@@ -3,20 +3,20 @@
 ## Mission
 
 A "guess from the code" game. One preparation run crawls real
-open-source code before play and freezes ten decks (296 rounds since the v1.0
+open-source code before play and freezes ten decks (422 rounds since the v7
 data run), each a pool of rounds from which every game deals five:
 
-- "Which project?": 24 rounds of popular repositories from The Stack v2.
+- "Which project?": 48 rounds of popular repositories from The Stack v2.
 - "Which language?": 52 rounds over 26 languages in look-alike pairs,
   from The Stack v2.
-- "Before or after?": 20 refactor commits from GitHub search.
-- "Which algorithm?": 24 TheAlgorithms files (Python, Go, Java), names hidden
+- "Before or after?": 30 refactor commits from GitHub search.
+- "Which algorithm?": 48 TheAlgorithms files (Python, Go, Java), names hidden
   as `mystery`, offered against their family of four.
-- "Predict the output": 24 TheAlgorithms/Python functions and one doctest
+- "Predict the output": 40 TheAlgorithms/Python functions and one doctest
   call each, read as text and never run.
-- "Spot the fix": 24 one-line fixes that Defects4J and BugsInPy record,
+- "Spot the fix": 36 one-line fixes that Defects4J and BugsInPy record,
   confirmed against each upstream fix commit.
-- "Missing line" and "Name the function": 24 rounds each from TheAlgorithms.
+- "Missing line" and "Name the function": 40 and 48 rounds from TheAlgorithms.
 - "Which framework?": 32 TodoMVC files; "Which exercise?": 48 Exercism
   reference solutions.
 
@@ -83,8 +83,8 @@ gate: changing queries, retries, ceilings, deck rules, or running
 - v1.0 (milestone #4, checklist #130) is merged too: #131–#162, from 2026-10-15 to 2026-10-20, on top of the
   public-app Phases 1 and 2 (#110–#123). Its release notes are `docs/releases/v1.0.0.md`. The `v1.0.0` tag and GitHub
   release wait for the owner's go-ahead.
-- The game plays profile `ops/poc/profiles/local-real-rounds.v6.json` and
-  artifact schema `local-experiment-artifact.v5` from the root-route deck
+- The game plays profile `ops/poc/profiles/local-real-rounds.v7.json` and
+  artifact schema `local-experiment-artifact.v6` from the root-route deck
   chooser (`/?deck=<deck id>`). A
   page load deals five rounds from the deck's pool; `dealGame` in
   `apps/game/src/demo/local-real-experiment.server.ts` does it server-side.
@@ -96,8 +96,8 @@ gate: changing queries, retries, ceilings, deck rules, or running
   - `PROFILE_VERSIONS` and `ARTIFACT_SCHEMA_VERSIONS` (`packages/artifact/src/domain.ts`) pair each profile with
     its schema: v5 with `local-experiment-artifact.v4`, v6 with `.v5`. The parser holds an artifact to its
     snapshot's version, in its schema and every source.
-  - The preparer runs v6 (`PROFILE_VERSION`) since the data run (2026-10-19). Rules for v6 apply to v6 artifacts
-    only (`profileAtLeast`), and the parser still reads v5 artifacts.
+  - The preparer ran v6 (`PROFILE_VERSION`) from its data run (2026-10-19) to v7's (2026-10-21). Rules for v6 apply
+    to v6 artifacts and later ones (`profileAtLeast`), and the parser still reads v5 artifacts.
   - v6 rules so far:
     - **#78, output answers read off the call:** `transformsArgument` reads an output off its call when it
       reorders the call's numbers or, not being a number, is a piece of the arguments or an anagram of a string
@@ -124,10 +124,10 @@ gate: changing queries, retries, ceilings, deck rules, or running
       patch changes only comments, or whose files differ only in comments, docstrings, or string text
       (`changesOnlyProse` in `code-skeleton.ts`), is refused. The v6 pool is 20 rounds.
     - Dry run of these rules on the v5 data: `docs/review/evidence/2026-10-19-v6-leak-rules-dry-run.md`.
-- **Profile v7 (#167, beside v6):** `ops/poc/profiles/local-real-rounds.v7.json` grows the pools from v6's sources
-  only; `PROFILE_VERSIONS` pairs it with `local-experiment-artifact.v6`, and `PROFILE_VERSION` stays v6 until the
-  v7 data run (D4), so the v6 `--offline` rebuild still gives `1abc21f8…`. `pnpm prepare:poc --resume
-  --profile=local-real-rounds.v7 --journal=<copy of run.jsonl>` runs it.
+- **Profile v7 (#167):** `ops/poc/profiles/local-real-rounds.v7.json` grows the pools from v6's sources only;
+  `PROFILE_VERSIONS` pairs it with `local-experiment-artifact.v6`, and `PROFILE_VERSION` names it since the v7 data
+  run (2026-10-21, D4). `--offline --profile=local-real-rounds.v6 --journal=run.jsonl.v6-resume-2026-10-19` still
+  rebuilds the v1.0 artifact, `1abc21f8…`.
   - Caps per version (`CURATED_CAPS` in `profile.ts`): through v6 the algorithm, output, fix, and vulnerable-line
     decks hold at most 40 rounds and a deck reads at most 240 files or patches; from v7 every curated deck may fill a
     pool (`MAXIMUM_POOL_SIZE`, 60) and read 480. `ops/poc/limits.json` allows 10,000 requests and 600 blob attempts;
@@ -148,8 +148,8 @@ gate: changing queries, retries, ceilings, deck rules, or running
     - before-after keeps v6's seven searches (django's empty window dropped), since GitHub's secondary limit refused
       every new date window;
     - fix's bug lists run out at 36; missing-line balances at 40, not 48.
-  - Its journal, with discovery complete, is `ops/poc/stack/tmp/journal/dry-v7-2026-10-21.jsonl` (ignored); D4
-    resumes on a copy of it.
+  - Its journal, with discovery complete, is `ops/poc/stack/tmp/journal/dry-v7-2026-10-21.jsonl` (ignored); the
+    data run resumed on a copy of it and published the dry run's artifact byte for byte (below).
 - **Mixed and daily play (#56, #74):** `/?deck=mixed` deals one round from each of five decks drawn at random
   (`MIXED_DECK`, offered when the artifact holds five decks or more); `/?deck=daily` deals the same mix seeded by
   the artifact's hash and the local date (`dailyRandom` in `local-real-experiment-deal.server.ts`). Both are
@@ -166,6 +166,13 @@ gate: changing queries, retries, ceilings, deck rules, or running
   text never ships with the page. `CODEGUESSR_SESSION_SECRET` (32+ chars)
   keeps games alive across restarts; without it each local process makes a random
   secret.
+  - The token holds game state v3 (#173): beside progress it seals how the game was dealt (`deal`: `series`
+    `{seed, game}`, `daily {date}`, `duel {challenge}`, or `unseeded`), `dealDigest` (`dealDigest` in the deal module:
+    round and option ids in dealt order, and each layer's hash when the game shows layers), per-round `outcomes`, and
+    `priorPlays`. Per-round points are recomputed, never stored. Its MAC context is `codeguessr-game-session.v3`, so
+    v2 tokens end as `SESSION_ENDED`. `sealGame`'s JSON key list names every nested key (arms, `DEAL_KEYS`): a key it
+    leaves out is dropped silently. `page.tsx` deals today's five with `{ date: localDate(now) }`, so it seals its
+    date.
 - **Public mode (#97, L4):** `CODEGUESSR_PUBLIC=1` marks a public server, and `checkEnvironment`
   (`apps/game/src/server/environment.server.ts`) holds it to anonymous play:
   - it requires the session secret, an https `CODEGUESSR_PUBLIC_ORIGIN` with no path, absolute `CODEGUESSR_STATE_DIR`
@@ -177,14 +184,75 @@ gate: changing queries, retries, ceilings, deck rules, or running
   - In public mode `secret()` throws rather than make a secret up, and `labMode()` is off for real games.
     `app/error.tsx` and `app/global-error.tsx` say nothing internal. The `dev` and `start` scripts still bind
     127.0.0.1; only the container (#170) will bind 0.0.0.0.
+- **Security headers and the nonce CSP (#97, L5):** `src/middleware.ts` makes a nonce per request and sets the page's
+  policy on the request (Next.js tags its scripts from it) and the response: `script-src 'self' 'nonce-…'
+  'strict-dynamic'`, `style-src 'self' 'unsafe-inline'` (panes and the visualizer frame size themselves with `style=`),
+  `frame-ancestors 'none'`, and the rest of #97's list. Public mode adds `upgrade-insecure-requests` and HSTS
+  (`max-age=300`), and development `'unsafe-eval'`. The middleware sets them per request, because `next.config.mjs`
+  `headers()` is fixed at build. That file sends `Referrer-Policy`, `nosniff`, `X-Frame-Options` (SAMEORIGIN on
+  `/genui/frame`), COOP, and a `Permissions-Policy` that leaves Web Share and the clipboard alone. Server actions take
+  16 KB.
+  - The root layout awaits `connection()`, so every page, the 404 included, renders per request with a nonce.
+  - `z.config({ jitless: true })` in `genui/composer-spec.ts` stops zod's eval probe. The panel and the host import
+    that module before the AI SDK, which builds its schemas as it loads; imported later, the probe still fired.
+  - `tests/e2e/security-headers.spec.ts` checks every header and nonce, and that no deck and no design breaks the
+    policy. `pnpm test:deploy` checks the same on the production build, where eval is refused.
 - **State store and health (#164, L7):** with `CODEGUESSR_STATE_DIR`, `recordStep` writes each game's step through to
   `<dir>/state.sqlite` (`server/state-store.server.ts`, on `node:sqlite` via `server/sqlite.server.ts`, loaded with
   `process.getBuiltinModule` so webpack never sees it; WAL, `busy_timeout`). `readGame` checks memory, then the store,
   and ends a game the store doesn't know (`SESSION_ENDED`), so a restart can't replay a seen round. Migrations count
-  in `user_version`; add a table (duels, #173) as a new migration. Without the directory, the ledger is memory-only as
-  before. `deriveKey(context)` is HKDF-SHA256 of the session secret, for other features' signing keys.
-  `GET /api/health` (`app/api/health/route.ts`) answers `ok` or 503 with a bare code and records nothing. Events stay
-  JSONL.
+  in `user_version`; a feature adds its tables as a new migration (the second is the duel `plays`, #173). Without the
+  directory, the ledger is memory-only as before. `deriveKey(context)` is HKDF-SHA256 of the session secret, for other
+  features' keys. `GET /api/health` (`app/api/health/route.ts`) answers `ok` or 503 with a bare code and records
+  nothing. Events stay JSONL.
+- **Rate limits (#98, L6):** token buckets per client and surface (`SURFACES` in `server/rate-limit.server.ts`, on
+  `globalThis` like the ledger, full buckets swept): deal 20/min burst 10 (a dealt game; the redirect to a fresh deal spends nothing, and
+  playing a duel challenge is a deal), hint and reveal 60, beacon 120, genui 10 burst 4, a global `genui-all` 120,
+  `duel_create` (challenge and result links) and `duel_open` (a duel's intro or result page), and `og` declared. A game also gets 12 explainer calls and 8 host turns a round (`GENUI_CAPS`, `capped`).
+  - They apply in public mode or with `CODEGUESSR_RATE_LIMITS` (`on`, or a multiplier; the e2e server runs at 10).
+  - `server/client-key.server.ts` is the one module that reads the client address: the last entry of
+    `CODEGUESSR_CLIENT_IP_HEADER` (the one the proxy appended), an IPv6 address cut to its /64, then a truncated
+    HMAC-SHA256 under a per-process salt. No header, or no readable address, is one shared key.
+    `test/rate-limits.test.ts` holds every other module to that and checks that no log line or stored event holds an
+    address.
+  - A limited page shows "Too many new games — wait a minute"; actions refuse with `RATE_LIMITED` (duel actions and pages too); routes answer 429
+    with `Retry-After` (`tooMany`), and genui's per-game caps 429 `GAME_CAP`. The panel and the host report a 429 as
+    the `genui_fallback` reason `limited` (schema still v1) and keep the static reveal.
+- **Duels (#173: X1 the server, X2 the UI; events v2 is X3):** a finished game of a seeded deal or of today's five
+  becomes a challenge link, and a friend's finished game of it a result link.
+  - Tokens (`demo/local-real-experiment-duel-token.server.ts`): AES-256-GCM under `deriveKey(context)`, a random
+    12-byte IV, the context as AAD, `base64url(iv‖ciphertext‖tag)`, at most 1,024 characters. Contexts
+    `codeguessr-duel.v1` (challenge, 7 days from issue) and `codeguessr-duel-result.v1` (result, 30 days), so neither
+    passes for the other. Encryption keeps the seed from the friend. A challenge holds the deal, digest, the
+    challenger's arms, `[correct, hints, points]` per round, the maximum, `firstPlay`, and its id (an HMAC of the game
+    id under `codeguessr-duel-id.v1`, unlinkable to its events); never a round, option, label, game id, or name. Both
+    parse strictly (exact keys, closed enums, points a round can score).
+  - The authority (`demo/local-real-experiment-duel.server.ts`, spread into the experiment): `createChallenge`,
+    `openChallenge`, `dealChallenge`, `issueResult`, `openResult`. A friend's game is re-dealt and checked against the
+    digest, the maximum, and every round's points (`DEAL_DRIFT`, logged as `DUEL_REFUSED DEAL_DRIFT`), plays the
+    challenger's theme and layer (the design only while generative UI is on and it isn't switched off,
+    `challengedArms`), seals `deal: {kind: "duel"}` with no seed, and records no events until X3. Refusals: `INVALID`,
+    `EXPIRED`, `ROUND_SET` (another artifact, told only once the link authenticates), `DEAL_DRIFT`, `NOT_ELIGIBLE`,
+    `SESSION_ENDED`, `RATE_LIMITED` (#98); a `ROUND_SET` or `DEAL_DRIFT` refusal names its deck while this artifact offers it. A result
+    opens on any round set (`earlierRoundSet`, and a generic title once its deck is gone). `duelVerdict`
+    (`components/duel/duel-contract.ts`, the browser-safe types): score, then fewer hints, then more rounds right, else
+    a draw; recomputed on every read. Actions: `createDuelChallenge`, `issueDuelResult`.
+  - Plays ledger (`demo/local-real-experiment-plays.server.ts`, no identity): games that revealed a round, per seeded
+    deal (`canonicalHash({artifact, deck, seed, game})`) and per challenge id, counted at a game's first reveal; written
+    through to the store's `plays` table, 50,000 keys, oldest first. A game seals `priorPlays` at its deal and catches
+    up at its first reveal, so a challenge says `firstPlay` `yes`/`no` (`shared` for today's five) and a result which
+    play of the link it was.
+  - Pages (`duel/duel-page.tsx`, from `page.tsx` before any deck): `?duel=<t>` is an intro that deals nothing, in the
+    challenger's theme, `noindex`; `&play=1` deals the friend's game (no lab picks or lab bar; "Deal new rounds" and
+    "Rematch" are a fresh deal of the deck, a mix for today's five); `?duel-result=<t>` is read-only, outside any game.
+  - In the game (`components/duel/`): `OpponentStrip` shows each of the challenger's rounds once the friend has locked
+    it (presentation, not secrecy: the page holds them from the deal), and the reveal's live region says it. The friend's
+    game ends on `DuelCompletion` (`issueDuelResult`, the comparison table, "Send your result", "Rematch"); any other
+    finished series or daily game offers `ChallengeFriend`. Share lines (`duel-text.ts`): a challenge's has no grid, a
+    result's has both.
+  - Names live only in the fragment (`#from=Ana`, `&vs=Ben`), which never reaches the server: `sanitizeName` (NFKC,
+    no control or format characters, letters, marks, digits, space, `-`, `'`, `_`, 24 code points, else "A friend"),
+    read in the browser by `useFragmentNames`. `tests/e2e/duel.spec.ts` plays it with two browser contexts.
 - The answer-lock guard (#102) is the only path from round data to a model:
   - `modelContext` on the experiment reads the sealed game, and
     `apps/game/src/genui/round-context.server.ts` builds the round's context.
@@ -238,7 +306,10 @@ gate: changing queries, retries, ceilings, deck rules, or running
     lets the model write one small HTML page that shows the round's code at
     work. It runs in an iframe with `sandbox="allow-scripts"` (opaque origin)
     and a CSP of `default-src 'none'` put ahead of the model's markup: no
-    network, storage, or game access.
+    network, storage, or game access. Since #97 the frame loads the constant
+    shell `app/genui/frame/route.ts` (that CSP as a header, `sandbox
+    allow-scripts`, `frame-ancestors 'self'`) and is posted the page once; a
+    `srcdoc` frame would inherit the game's nonce policy and block its scripts.
     - `parseVisualizer` refuses external URLs, links, meta, base, frames,
       forms, network and storage APIs, parent, top, or location access, and
       pages over 40 KB. It matches access patterns, not words.
@@ -325,7 +396,8 @@ gate: changing queries, retries, ceilings, deck rules, or running
       `game_completed`, and `genui_call` itself; the browser sends
       `game_viewed`, `deal_again`, `result_shared` (`via: share | clipboard`, #171), `genui_interaction`, and
       `genui_fallback` to the beacon route `app/api/events/route.ts`
-      (1 KB, a live signed token, 60 per game); the retired `result_copied` still parses in stored lines;
+      (2 KB since game state v3's longer token, a live signed token, 60 per game); the retired `result_copied` still
+      parses in stored lines;
     - opt-in: nothing is recorded without `EXPERIMENT_EVENTS_DIR` (one JSONL
       file per UTC day, rolled up into `totals.jsonl` after 90 days), and a
       deal under `Sec-GPC: 1` seals `record: false`;
@@ -376,25 +448,29 @@ gate: changing queries, retries, ceilings, deck rules, or running
     step-through). Layered rounds number their lines; the genui guard's
     `boughtHints` are the game's own hints.
   - Evidence: `docs/review/evidence/2026-10-15-question-layers-first-build.md`; the v6 artifact's layers (67 of
-    76 rounds kept) are in `docs/review/evidence/2026-10-19-v6-data-run.md`.
+    76 rounds kept) are in `docs/review/evidence/2026-10-19-v6-data-run.md`, the v7 artifact's (74 of 100) in
+    `docs/review/evidence/2026-10-21-v7-data-run.md`.
   - **Review refusals:** a layer a reader found wrong is listed in `ops/poc/questions/reviewed.ts` and never written
     (`REVIEW_<code>` in the `QUESTIONS_DECK` line), since nothing runs a round's code to check a step-through. Agent
-    playtest run 2 refused the counting-sort trace, so 66 layers are published.
+    playtest run 2 refused the counting-sort trace; the v7 data run read every algorithm trace against its code and
+    refused six more (four new in v7, two published since v6), so 74 layers are published: 50 Marker hunt, 24 Trace it.
 - The committed artifact `apps/game/src/demo/generated/local-real-rounds.json`
-  came from the 2026-10-19 v6 data run (#129): a live run (4,089 of 5,000
-  requests), then a `--resume` (29 live) for requests the live run gave up
-  on a rate limit with its retries spent, which journals as of this run.
+  came from the 2026-10-21 v7 data run (#167, D4): one `--resume` on the dry
+  run's journal (6,151 requests, 5 live), which published the dry run's
+  artifact byte for byte, then two `--offline` replays.
   - Its canonical SHA-256
-    `1abc21f8b819f40e45dc690d63cf89ad2fa1b22355ffdc321d1ac1ffb09b9522` is
+    `81f310573a94ed9c7fa43b29442453b78d378647c3a35e7031b1b73b7d8bcce7` is
     pinned in `apps/game/src/demo/local-real-experiment.pin.server.ts`; the
-    preparer writes the pin.
-  - Evidence: `docs/review/evidence/2026-10-19-v6-data-run.md`. The v5
-    artifact's runs are `docs/review/evidence/2026-10-13-v5-six-decks-run.md`
-    and the offline rebuilds after it.
+    preparer writes the pin. The v1.0 artifact it replaced was `1abc21f8…`.
+  - Evidence: `docs/review/evidence/2026-10-21-v7-data-run.md`; the v6
+    artifact's is `docs/review/evidence/2026-10-19-v6-data-run.md`, the v5
+    artifact's `docs/review/evidence/2026-10-13-v5-six-decks-run.md` and the
+    offline rebuilds after it.
   - The run's journal is in `ops/poc/stack/tmp/journal/run.jsonl` on this
-    machine, so `STACK_V2_ACKNOWLEDGED_USABLE_REVISION=… pnpm prepare:poc
-    --offline` rebuilds it byte for byte with no network. The v5 journal is
-    `run.jsonl.v5-2026-10-15`.
+    machine (a copy as `run.jsonl.v7-2026-10-21`), so
+    `STACK_V2_ACKNOWLEDGED_USABLE_REVISION=… pnpm prepare:poc --offline`
+    rebuilds it byte for byte with no network. The v6 journal is
+    `run.jsonl.v6-resume-2026-10-19`, the v5 journal `run.jsonl.v5-2026-10-15`.
   - The journal holds provider bodies, so it is gitignored and never
     committed; a fresh clone has none, and `--offline` or `--resume` fails
     with `JOURNAL_MISSING`. A fresh run writes its own journal when it ends,

@@ -11,9 +11,9 @@ export const SHARE_MARKS = Object.freeze({ clean: "🟩", hinted: "🟨", missed
 /** What the share line may know of a round: whether it was right, and whether it took hints. */
 export type SharedRound = Pick<RoundRecord, "correct" | "hints">;
 
-const shareMark = ({ correct, hints }: SharedRound): string => !correct ? SHARE_MARKS.missed : hints === 0 ? SHARE_MARKS.clean : SHARE_MARKS.hinted;
+export const shareMark = ({ correct, hints }: SharedRound): string => !correct ? SHARE_MARKS.missed : hints === 0 ? SHARE_MARKS.clean : SHARE_MARKS.hinted;
 
-const SHARE_URL = /^https?:\/\/\S+$/u;
+export const SHARE_URL = /^https?:\/\/\S+$/u;
 
 /**
  * The share line (#171): the deck, the tally, one mark per round in play order, and the game's own address, so a
@@ -72,3 +72,6 @@ export const PANE_CAPTIONS: Readonly<Partial<Record<RoundModeKind, string>>> = O
 
 /** What the player sees when the server can no longer continue this game, for example after it restarts. */
 export const SESSION_ENDED_MESSAGE = "This game can’t continue. Deal new rounds to keep playing.";
+
+/** What the player sees when a hint or an answer came too fast for the server's rate limit (#98); the game goes on. */
+export const RATE_LIMITED_MESSAGE = "That was too many requests at once. Wait a few seconds, then try again.";

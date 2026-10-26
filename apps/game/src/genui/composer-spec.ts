@@ -2,6 +2,11 @@ import { z } from "zod";
 
 import { isSafeText } from "./render-catalog";
 
+// Zod compiles faster checks with `new Function` when it can, and probes for that when it builds its first object
+// schema; the game's CSP (#97) refuses eval, and the refused probe is still reported as a violation. The panel and
+// the host import this module before the AI SDK, whose schemas are built as it loads, so no schema ever probes.
+z.config({ jitless: true });
+
 /**
  * The composer design (#114): after the lock, the model lays out the whole explainer panel itself, as a tree of
  * building blocks. The tree becomes a json-render spec, but only plain layout is allowed: every element carries a

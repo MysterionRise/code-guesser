@@ -34,9 +34,21 @@ function read(path) {
   return readFileSync(path, "utf8");
 }
 
+const roundsArtifact = join(game, "src", "demo", "generated", "local-real-rounds.json");
+/**
+ * A file as the fingerprints read it. The rounds artifact's panes are third-party code shown to players, which may
+ * name a variable such as GITHUB_TOKEN without holding or reading one (cli/cli's tests, v7), so their text is
+ * blanked; every other field of the artifact, and every other file, is read whole.
+ */
+function scanned(path) {
+  if (path !== roundsArtifact) return read(path);
+  return JSON.stringify(JSON.parse(read(path)), (key, value) =>
+    key === "panes" && Array.isArray(value) ? value.map((pane) => ({ ...pane, text: "" })) : value);
+}
+
 function assertContainsNoFingerprint(paths, label) {
   for (const path of paths) {
-    const content = read(path);
+    const content = scanned(path);
     for (const fingerprint of acquisitionFingerprints) {
       assert.doesNotMatch(content, fingerprint, `${label} leaked through ${relative(root, path)}`);
     }
@@ -75,17 +87,20 @@ test("browser and gameplay dependency surfaces exclude acquisition capabilities"
   // through the answer-lock guard; the event log's beacon (#107), which reads no round data at all; each deck's link
   // preview (#171), an image of its title drawn at build time; and the health check (#164), which reads neither the
   // request nor round data and records nothing. One boot hook (#97), which only checks the environment and prints
-  // codes.
+  // codes. The visualizer's frame (#97), a constant shell that reads nothing; and one middleware (#97), which only
+  // sets the page's nonce policy and HSTS.
   const routes = participantSources.filter((path) => /(?:^|\/)(?:route|middleware|instrumentation)\.[cm]?[jt]sx?$/u.test(path));
   assert.deepEqual(routes.map((path) => relative(root, path)).sort(), [
     "apps/game/src/app/api/events/route.ts",
     "apps/game/src/app/api/genui/route.ts",
     "apps/game/src/app/api/health/route.ts",
+    "apps/game/src/app/genui/frame/route.ts",
     "apps/game/src/app/og/[deck]/route.tsx",
     "apps/game/src/instrumentation.ts",
+    "apps/game/src/middleware.ts",
   ]);
   const eventsRoute = read(join(game, "src", "app", "api", "events", "route.ts"));
-  assert.match(eventsRoute, /const MAX_BODY_LENGTH = 1024;/u);
+  assert.match(eventsRoute, /const MAX_BODY_LENGTH = 2048;/u);
   assert.deepEqual([...eventsRoute.matchAll(/experiment\.(\w+)\(/gu)].map(([, method]) => method), ["recordClientEvent"]);
   const genuiRoute = read(join(game, "src", "app", "api", "genui", "route.ts"));
   assert.match(genuiRoute, /process\.env\.GENUI_ENABLED !== "1"/u);
@@ -116,6 +131,24 @@ test("browser and gameplay dependency surfaces exclude acquisition capabilities"
   assert.match(sources, /= \(\{ decks, mixed \}: Pick<LocalRealExperiment, "decks" \| "mixed">\)/u);
   assert.match(sources, /decks\.map\(\(\{ id, title, description \}\) => \(\{ id, title, description \}\)\)/u);
   assert.doesNotMatch(sources, roundData);
+  // The middleware reads only the request's headers, to copy them, and two settings; it sets the policy and HSTS.
+  const importsOf = (source) => [...source.matchAll(/(?:\bfrom|\bimport\s*\()\s*"([^"]+)"/gu)].map(([, specifier]) => specifier);
+  const middleware = code(join(game, "src", "middleware.ts"));
+  assert.deepEqual(importsOf(middleware), ["next/server"]);
+  assert.deepEqual([...middleware.matchAll(/\brequest\.(\w+)/gu)].map(([, key]) => key), ["headers"]);
+  assert.deepEqual([...new Set([...middleware.matchAll(/process\.env\.(\w+)/gu)].map(([, name]) => name))].sort(), ["CODEGUESSR_PUBLIC", "NODE_ENV"]);
+  assert.deepEqual([...new Set([...middleware.matchAll(/headers\.set\("([^"]+)"/gu)].map(([, name]) => name))].sort(),
+    ["content-security-policy", "strict-transport-security"]);
+  assert.doesNotMatch(middleware, roundData);
+  assert.doesNotMatch(middleware, /\bfetch\b|console\.|cookies|experiment|redirect|rewrite/u);
+  // The visualizer's frame route answers every request with the same shell under the visualizer's own policy.
+  const frameRoute = code(join(game, "src", "app", "genui", "frame", "route.ts"));
+  assert.deepEqual(importsOf(frameRoute), ["../../../genui/visualizer-spec"]);
+  assert.match(frameRoute, /^export const dynamic = "force-static";$/mu);
+  assert.deepEqual([...frameRoute.matchAll(/^export (?:async )?function (\w+)\(([^)]*)\)/gmu)].map(([, name, parameters]) => `${name}(${parameters})`), ["GET()"]);
+  assert.match(frameRoute, /return new Response\(SHELL, \{/u);
+  assert.doesNotMatch(frameRoute, roundData);
+  assert.doesNotMatch(frameRoute, /\brequest\b|headers\(|process\.env|\bfetch\b|experiment|console\./u);
   assert.equal(participantSources.some((path) => /\bfetch\s*\(/u.test(read(path))), false);
 
   const contentPackage = JSON.parse(read(join(root, "packages", "content", "package.json")));

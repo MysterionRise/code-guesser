@@ -11,7 +11,7 @@ other: the artifact and its pinned hash.
 
 ```text
 PREPARATION TIME: pnpm prepare:poc, run by hand on one machine
-  profile (ops/poc/profiles/local-real-rounds.v5.json) + ops/poc/limits.json
+  profile (ops/poc/profiles/local-real-rounds.v7.json) + ops/poc/limits.json
       |
       v
   ops/poc/prepare/pipeline.ts: prepareLocalExperiment
@@ -158,7 +158,7 @@ Beyond the shape, the parser checks:
 | Source | `fixtures[].source` | The round's provenance: repository, commit, path, blob, licence, author, and `discoverySource`. Its protected values (`PROTECTED_SOURCE_KEYS`) may not appear in public text. |
 | Discovery source | `source.discoverySource` | How the source was found: `GITHUB_COMMIT_SEARCH`, `STACK_V2`, `CURATED_GITHUB`, or `CURATED_DATASET`. |
 | Masking | `MASKED_NAME` | An algorithm round shows the algorithm's own names as `mystery`, cased like the name it replaces. |
-| Profile | `profileVersion`, `profileHash` | The crawl settings in `ops/poc/profiles/local-real-rounds.v5.json`. Changing it changes every round's version. |
+| Profile | `profileVersion`, `profileHash` | The crawl settings in `ops/poc/profiles/local-real-rounds.v7.json` (one file a version). Changing it changes every round's version. |
 | Limits | `ops/poc/limits.json` | The pinned Stack v2 revision and hard ceilings that no profile may exceed. |
 | Budget | profile `capacity`; `capacity.ts` | Per-run ceilings on requests, bytes, blob attempts, retries, and waits. Running out skips the deck being filled and every later deck (`BUDGET_EXHAUSTED_*`). |
 | Journal | `ops/poc/stack/tmp/journal/run.jsonl` | Every response and worker output a run accepted, for `--resume` and `--offline`. Gitignored, because it holds provider bodies. |

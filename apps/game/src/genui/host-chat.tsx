@@ -1,12 +1,15 @@
 "use client";
 
+// First, so zod runs without eval (`z.config` there) before the chat libraries below build their schemas (#97).
+import "./composer-spec";
+
 import * as React from "react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, type UIMessage } from "ai";
 
 import type { GenuiEvent } from "../experiment/events";
 import { CatalogView, type HintOffer } from "./catalog-view";
-import { renderViews, type GenuiPanelProps } from "./genui-panel";
+import { renderViews, wasLimited, type GenuiPanelProps } from "./genui-panel";
 import { isSafeText, type RoundPhase } from "./render-catalog";
 
 export interface HostChatProps {
@@ -88,7 +91,7 @@ export default function HostChat({ roundId, phase, panes, optionLabels, sessionT
   // A refused paste would ride along in every later request and be refused again; it leaves the history instead.
   React.useEffect(() => {
     if (error === undefined) return;
-    if (refusalOf(error) !== "PASTED_CODE") { onEvent?.({ type: "genui_fallback", reason: "failed" }); return; }
+    if (refusalOf(error) !== "PASTED_CODE") { onEvent?.({ type: "genui_fallback", reason: wasLimited(error) ? "limited" : "failed" }); return; }
     onEvent?.({ type: "genui_fallback", reason: "refused" });
     setMessages((current) => current.at(-1)?.role === "user" ? current.slice(0, -1) : current);
     clearError();

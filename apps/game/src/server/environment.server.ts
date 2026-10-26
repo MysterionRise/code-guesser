@@ -23,6 +23,7 @@ export const ENVIRONMENT_CODES = Object.freeze([
   "EXPERIMENT_EVENTS_DIR_RELATIVE",
   "CODEGUESSR_CLIENT_IP_HEADER_MISSING",
   "CODEGUESSR_CLIENT_IP_HEADER_INVALID",
+  "CODEGUESSR_RATE_LIMITS_INVALID",
   "OPENROUTER_API_KEY_MISSING",
   "OPENROUTER_BASE_URL_REJECTED",
   "EXPERIMENT_LAB_REJECTED",
@@ -41,6 +42,16 @@ const HEADER_NAME = /^[A-Za-z][A-Za-z0-9-]*$/u;
 
 /** Public mode: `CODEGUESSR_PUBLIC=1`. */
 export const publicMode = (env: Environment = process.env): boolean => env.CODEGUESSR_PUBLIC === "1";
+
+/**
+ * `CODEGUESSR_RATE_LIMITS` (#98) as a multiplier of every rate limit: `on` is 1, and a positive decimal is itself, so a
+ * test can tighten the limits and an owner loosen them. Anything else is null.
+ */
+export const rateLimitMultiplier = (value: string): number | null => {
+  if (value === "on") return 1;
+  const multiplier = /^\d{1,6}(?:\.\d{1,6})?$/u.test(value) ? Number(value) : 0;
+  return multiplier > 0 ? multiplier : null;
+};
 
 const present = (value: string | undefined): value is string => value !== undefined && value.length > 0;
 
@@ -78,6 +89,8 @@ export const checkEnvironment = (env: Environment): readonly EnvironmentCode[] =
   const header = env.CODEGUESSR_CLIENT_IP_HEADER;
   if (!present(header)) codes.push("CODEGUESSR_CLIENT_IP_HEADER_MISSING");
   else if (!HEADER_NAME.test(header)) codes.push("CODEGUESSR_CLIENT_IP_HEADER_INVALID");
+  const limits = env.CODEGUESSR_RATE_LIMITS;
+  if (limits !== undefined && limits !== "" && rateLimitMultiplier(limits) === null) codes.push("CODEGUESSR_RATE_LIMITS_INVALID");
   if (env.GENUI_ENABLED === "1" && !present(env.OPENROUTER_API_KEY)) codes.push("OPENROUTER_API_KEY_MISSING");
   const real = eventSource(env) === "real";
   if (real && env.OPENROUTER_BASE_URL !== undefined && env.OPENROUTER_BASE_URL !== OPENROUTER_BASE_URL) codes.push("OPENROUTER_BASE_URL_REJECTED");

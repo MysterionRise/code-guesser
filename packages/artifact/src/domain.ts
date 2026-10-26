@@ -17,8 +17,8 @@ export const MODE_KINDS: Readonly<Record<FixtureKind, DeckId>> = Object.freeze({
 });
 /**
  * The crawl profiles an artifact may come from, oldest first, each with its artifact schema. v6 is the v1.0 data run
- * (#129), which made the committed artifact; v7 grows the pools from the same sources (#167). A version's rules apply
- * to its own artifacts and later ones only, so an earlier profile still rebuilds its artifact byte for byte.
+ * (#129); v7 grows the pools from the same sources (#167), and its data run made the committed artifact. A version's
+ * rules apply to its own artifacts and later ones only, so an earlier profile still rebuilds its artifact byte for byte.
  */
 export const PROFILE_VERSIONS = Object.freeze(["local-real-rounds.v5", "local-real-rounds.v6", "local-real-rounds.v7"] as const);
 export type ProfileVersion = typeof PROFILE_VERSIONS[number];
@@ -31,8 +31,8 @@ export type ArtifactSchemaVersion = typeof ARTIFACT_SCHEMA_VERSIONS[ProfileVersi
 /** Whether a profile or snapshot version is `minimum` or later: a rule added for a run holds for that run's profile on. */
 export const profileAtLeast = (version: ProfileVersion, minimum: ProfileVersion): boolean =>
   PROFILE_VERSIONS.indexOf(version) >= PROFILE_VERSIONS.indexOf(minimum);
-/** The profile the preparer runs, and its artifact's schema; the v7 data run (#167) moves both on. */
-export const PROFILE_VERSION: ProfileVersion = "local-real-rounds.v6";
+/** The profile the preparer runs, and its artifact's schema, since the v7 data run (#167). */
+export const PROFILE_VERSION: ProfileVersion = "local-real-rounds.v7";
 export const ARTIFACT_SCHEMA_VERSION: ArtifactSchemaVersion = ARTIFACT_SCHEMA_VERSIONS[PROFILE_VERSION];
 export const CONTENT_CLASS = "LOCAL_UNREVIEWED_EXPERIMENT";
 /** A session deals this many rounds from a deck's pool. */
