@@ -1,7 +1,7 @@
 import { canonicalHash } from "./canonical";
-import { PROTECTED_SOURCE_KEYS, containsProtected } from "./compose";
+import { PROTECTED_SOURCE_KEYS } from "./compose";
 import { noteRejection, PreparationError, rejectCandidate, type DiagnosticStage, type RunState } from "./diagnostics";
-import { AUTHORSHIP_CLAIM } from "../../../packages/artifact/src/index";
+import { AUTHORSHIP_CLAIM, containsProtected, protectedIndex, wordRuns } from "../../../packages/artifact/src/index";
 import { CROSS_DECK_KEYS } from "./model";
 import { isReportableSourceIdentity } from "./model-run";
 import type { CrawlProfile } from "./profile";
@@ -46,22 +46,60 @@ const excerptOf = (candidate: unknown): string => {
   return [lineage.beforeExcerpt, lineage.afterExcerpt ?? lineage.excerpt, subject].map((part) => String(part ?? "")).join("\n");
 };
 
+/** A candidate's protected values; a whole-file excerpt makes its raw content hash the excerpt's, a hash of public text. */
+const protectedOf = (candidate: unknown): readonly string[] => {
+  const source = sourceOf(candidate);
+  return PROTECTED_SOURCE_KEYS.flatMap((key) => {
+    const value = source[key];
+    return typeof value === "string" && value.length > 0 && !(key === "rawContentHash" && value === source.excerptHash) ? [value] : [];
+  });
+};
+
 /**
  * FR-009 applied per candidate: the public text the five rounds would expose (fixed templates plus every
  * selected excerpt) may not contain any selected source's protected values as a whole token. Checking at
  * selection time lets the run move to the next candidate instead of failing at composition.
  */
-export const revealsProtected = (profile: CrawlProfile, candidate: unknown, selected: readonly unknown[]): boolean => {
-  const all = [...selected, candidate];
-  const publicText = `${JSON.stringify(profile.templates)}\n${all.map(excerptOf).join("\n")}`;
-  return all.some((item) => {
-    const source = sourceOf(item);
-    return PROTECTED_SOURCE_KEYS.some((key) => {
-      const value = source[key];
-      return typeof value === "string" && value.length > 0
-        && !(key === "rawContentHash" && value === source.excerptHash) && containsProtected(publicText, value);
-    });
-  });
+export const revealsProtected = (profile: CrawlProfile, candidate: unknown, selected: readonly unknown[]): boolean =>
+  protectedScreen(profile, selected)(candidate);
+
+/**
+ * `revealsProtected` against one selection, for every pane a file could show. The public text is the selection's text
+ * and the candidate's excerpt joined by a line break. A value without a line break cannot cross it, and the break stands
+ * between words as a text's ends do, so such a value shows in the whole text exactly when it shows in one of the two.
+ * The selection's text is indexed once (#166): a selected value it shows reveals every candidate, and a candidate's
+ * value is looked up there once. Each candidate indexes only its excerpt, where a selected value is looked for only
+ * when the excerpt has the value's longest word run. A value with a line break takes the whole text.
+ */
+export const protectedScreen = (profile: CrawlProfile, selected: readonly unknown[]): ((candidate: unknown) => boolean) => {
+  const head = [JSON.stringify(profile.templates), ...selected.map(excerptOf)].join("\n");
+  const inHead = protectedIndex(head);
+  const values = [...new Set(selected.flatMap(protectedOf))];
+  if (values.some(inHead)) return () => true;
+  const spanning = values.filter((value) => value.includes("\n"));
+  // A value with no word run is keyed by "", which every excerpt is searched for.
+  const byWord = new Map<string, string[]>();
+  for (const value of values.filter((value) => !value.includes("\n"))) {
+    const word = wordRuns(value).reduce((longest, run) => run.length > longest.length ? run : longest, "");
+    const keyed = byWord.get(word);
+    if (keyed) keyed.push(value);
+    else byWord.set(word, [value]);
+  }
+  const headShows = new Map<string, boolean>();
+  return (candidate) => {
+    const tail = excerptOf(candidate);
+    const inTail = protectedIndex(tail);
+    let whole: string | undefined;
+    const inWhole = (value: string): boolean => containsProtected(whole ??= `${head}\n${tail}`, value);
+    const shows = (value: string): boolean => {
+      if (value.includes("\n")) return inWhole(value);
+      let shown = headShows.get(value);
+      if (shown === undefined) headShows.set(value, shown = inHead(value));
+      return shown || inTail(value);
+    };
+    return protectedOf(candidate).some(shows) || spanning.some(inWhole)
+      || ["", ...new Set(wordRuns(tail))].some((word) => byWord.get(word)?.some(inTail) ?? false);
+  };
 };
 
 const sameIdentity = (keys: readonly string[], candidate: unknown, selected: readonly unknown[]): boolean => {
@@ -118,6 +156,8 @@ export const protectedValuesOf = (candidates: readonly unknown[]): readonly stri
 }))];
 
 /** A description is shown only when it names no protected value of any selected source and claims nothing about authorship. */
-export const safeDescription = (description: string | null, protectedValues: readonly string[]): string | null =>
-  description !== null && (protectedValues.some((value) => containsProtected(description, value)) || AUTHORSHIP_CLAIM.test(description))
-    ? null : description;
+export const safeDescription = (description: string | null, protectedValues: readonly string[]): string | null => {
+  if (description === null) return null;
+  const shows = protectedIndex(description);
+  return protectedValues.some((value) => shows(value)) || AUTHORSHIP_CLAIM.test(description) ? null : description;
+};
