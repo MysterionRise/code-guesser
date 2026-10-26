@@ -13,13 +13,19 @@ import {
   type LocalRealExperiment,
 } from "./local-real-experiment.server";
 
-/** The permanent notice's bold lead. */
-export const LOCAL_REAL_EXPERIMENT_NOTICE_LEAD = "Local unreviewed experiment.";
-/** The rest of the notice: every source a deck's rounds come from, localhost only, and not beta content. */
-export const LOCAL_REAL_EXPERIMENT_NOTICE_BODY = "Rounds from The Stack v2, GitHub, TheAlgorithms, Defects4J, BugsInPy, TodoMVC, "
-  + "and Exercism, for localhost only. Not approved beta content.";
-/** Permanent notice shown above the experiment; short enough to wrap to five lines on a 320 px screen. */
-export const LOCAL_REAL_EXPERIMENT_NOTICE = `${LOCAL_REAL_EXPERIMENT_NOTICE_LEAD} ${LOCAL_REAL_EXPERIMENT_NOTICE_BODY}`;
+/**
+ * The permanent notice (#168): every source a deck's rounds come from, that no one reviewed them by hand, and that each
+ * game draws its theme and its explainer at random (#106).
+ */
+export const LOCAL_REAL_EXPERIMENT_NOTICE_BODY = "From The Stack v2, GitHub, TheAlgorithms, Defects4J, BugsInPy, TodoMVC, Exercism: "
+  + "chosen and checked automatically, not reviewed by hand. Each game tries a random look and explainer.";
+/** The notice's last word, a link to the About page that says the rest. */
+export const LOCAL_REAL_EXPERIMENT_NOTICE_LINK = "About";
+/**
+ * The notice as it reads, shown above every page; short enough to wrap to five lines on a 320 px screen, even in the
+ * DejaVu Sans a Linux browser draws it in, which is wider than macOS's system font.
+ */
+export const LOCAL_REAL_EXPERIMENT_NOTICE = `${LOCAL_REAL_EXPERIMENT_NOTICE_BODY} ${LOCAL_REAL_EXPERIMENT_NOTICE_LINK}`;
 
 /** Resolved against the game package directory, which every documented start command uses as its cwd. */
 export const ARTIFACT_RELATIVE_PATH = "src/demo/generated/local-real-rounds.json";

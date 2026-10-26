@@ -149,6 +149,15 @@ test("browser and gameplay dependency surfaces exclude acquisition capabilities"
   assert.match(frameRoute, /return new Response\(SHELL, \{/u);
   assert.doesNotMatch(frameRoute, roundData);
   assert.doesNotMatch(frameRoute, /\brequest\b|headers\(|process\.env|\bfetch\b|experiment|console\./u);
+  // About (#168) lists the decks through the same list the preview reads, and reads nothing else of the experiment;
+  // robots.txt is a constant that reads no request, setting, or round.
+  const about = code(join(game, "src", "app", "about", "page.tsx"));
+  assert.deepEqual([...about.matchAll(/\bloaded\.(\w+)/gu)].map(([, key]) => key), ["ok", "experiment"]);
+  assert.match(about, /gameSources\(loaded\.experiment\)/u);
+  assert.doesNotMatch(about, /\bexperiment\.\w+|headers\(|\bfetch\b/u);
+  const robots = code(join(game, "src", "app", "robots.ts"));
+  assert.deepEqual(importsOf(robots), ["next"]);
+  assert.doesNotMatch(robots, /process\.env|headers\(|experiment|\bfetch\b/u);
   // The credits page (#99) reads the experiment only through its credits, and they read only each round's source's
   // public provenance: no round id, deck, order, or hash ties a credit to its round. The privacy page reads no
   // experiment and no request.
