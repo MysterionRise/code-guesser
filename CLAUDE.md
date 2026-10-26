@@ -192,7 +192,7 @@ gate: changing queries, retries, ceilings, deck rules, or running
     and the server exits 78. `pnpm test:deploy` (`tests/deploy/`) boots the production build to check that.
   - In public mode `secret()` throws rather than make a secret up, and `labMode()` is off for real games.
     `app/error.tsx` and `app/global-error.tsx` say nothing internal. The `dev` and `start` scripts still bind
-    127.0.0.1; only the container (#170) will bind 0.0.0.0.
+    127.0.0.1; only the container (#170) binds 0.0.0.0, which `workspace.test.mjs` checks.
 - **Security headers and the nonce CSP (#97, L5):** `src/middleware.ts` makes a nonce per request and sets the page's
   policy on the request (Next.js tags its scripts from it) and the response: `script-src 'self' 'nonce-…'
   'strict-dynamic'`, `style-src 'self' 'unsafe-inline'` (panes and the visualizer frame size themselves with `style=`),
@@ -256,6 +256,24 @@ gate: changing queries, retries, ceilings, deck rules, or running
     `EVENT_BASE_KEYS` and `EVENT_FIELDS` and checks that the credits page shows no round id, pane line, or option label.
   - The containment test reads both pages' code, and `tests/e2e/credits-privacy.spec.ts` runs axe on both in every
     theme at 320 px.
+- **Container and deploy (#170, L12):** the root `Dockerfile` builds Next's standalone server
+  (`CODEGUESSR_STANDALONE=1` in `next.config.mjs`, traced from the workspace root, TypeScript and sharp left out) on
+  `node:24.22.0-bookworm-slim` by digest, and runs it as `node` on port 3000. The runbook is `docs/deploy.md`: Dokploy,
+  one replica, update order stop-first, Traefik's access log off, `X-Forwarded-For` (or `CF-Connecting-IP` behind
+  Cloudflare, with the origin locked to it).
+  - `.dockerignore` lets in only the game, `packages/artifact/src`, the workspace manifests, and the entrypoint, then
+    leaves out every secret-shaped path again; `tests/deploy/docker-context.test.mjs` reads it with Docker's rules.
+  - `ops/deploy/entrypoint.sh` makes `/data/state` and `/data/events`, hands them to `node`, and drops privileges with
+    `setpriv`. In public mode it exits 78 with `GAME_ENVIRONMENT_REJECTED DATA_VOLUME_MISSING` when they aren't on a
+    mounted volume. `images.unoptimized` makes `/_next/image` a 404, and `.next/cache` is `node`'s, since that route
+    makes it first.
+  - Each build salts its server-action ids with a fresh key, so a page from before a deploy calls an action the new
+    server lacks; `unstable_isUnrecognizedActionError` turns that into "CodeGuessr was updated. Reload the page to keep
+    playing." (`UPDATED_MESSAGE`), with a Reload button (`arcade-shell.spec.ts`).
+  - `ops/deploy/smoke.mjs <base-url>` checks health, headers and nonce, the pages, a deal, and one game in Chromium
+    (with `Sec-GPC: 1` unless `--record`); `--rate-limits` and `--events=<dir>` are opt-in. `ops/deploy/pull-events.sh
+    <ssh-host> <container-or-volume>` copies only the event files. `pnpm test:container` (CI's container job) runs the
+    image in public mode and both scripts against it.
 - **Duels (#173: X1 the server, X2 the UI, X3 events v2 and the report):** a finished game of a seeded deal or of today's five
   becomes a challenge link, and a friend's finished game of it a result link.
   - Tokens (`demo/local-real-experiment-duel-token.server.ts`): AES-256-GCM under `deriveKey(context)`, a random
@@ -1034,6 +1052,7 @@ pnpm test:e2e
 pnpm exec node --test tests/containment/acquisition-boundary.test.mjs
 pnpm --filter @codeguessr/game build
 pnpm test:deploy
+pnpm test:container
 pnpm audit --audit-level=high
 ```
 
