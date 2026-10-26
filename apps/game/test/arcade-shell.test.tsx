@@ -400,7 +400,7 @@ describe("static arcade shell", () => {
     expect(contract.rounds[0]!.mode.candidates[0]!.candidateId).toBe("candidate-a");
   });
 
-  it("keeps excluded country attribution out and exposes demo errors and a fresh deal, never a replay", () => {
+  it("keeps excluded country attribution out and exposes demo errors and a fresh deal, never a replay in place", () => {
     const page = readFileSync(new URL("../src/app/page.tsx", import.meta.url), "utf8");
     const layout = readFileSync(new URL("../src/app/layout.tsx", import.meta.url), "utf8");
     const shell = ["arcade-shell.tsx", "round-reveal.tsx"]
@@ -408,7 +408,11 @@ describe("static arcade shell", () => {
     expect(`${page}\n${layout}`).not.toMatch(/country|code-location|where did this code come from|finland|brazil|japan|germany|india/iu);
     expect(existsSync(new URL("../src/app/actions.ts", import.meta.url))).toBe(true);
     expect(shell).toContain('role="alert"');
-    expect(shell).not.toContain("Play again");
+    // No game restarts on its revealed rounds (#39). Only today's five plays again, as a new deal of its date that
+    // records nothing (#172).
+    expect(shell.match(/Play again/gu)).toHaveLength(1);
+    expect(shell).toMatch(/<a className="deck-link" href=\{replayHref\}.*?>Play again<\/a>/u);
+    expect(page).toContain("&replay=1");
     expect(shell).not.toMatch(/type: "restart"/u);
     expect(shell).toMatch(/<a className="primary-action" href=\{newGameHref\}.*?>Deal new rounds<\/a>/u);
     expect(shell).toContain("Choose another deck");

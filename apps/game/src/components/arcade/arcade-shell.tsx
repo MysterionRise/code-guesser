@@ -40,6 +40,8 @@ interface ArcadeShellProps {
   chooseAnotherDeckHref?: string;
   /** When set, completion links to a freshly dealt game from the same deck. */
   newGameHref?: string;
+  /** When set, as for today's five (#172), completion links to this game again, which records nothing. */
+  replayHref?: string;
   /** When set, the share line links to this game: its absolute address, with no lab picks (#171). */
   shareHref?: string;
   /** When set, the share line names the deck. */
@@ -52,7 +54,7 @@ interface ArcadeShellProps {
   duel?: GameDuel;
 }
 
-export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealHintAction, chooseAnotherDeckHref, newGameHref, shareHref, deckTitle, roundDecks, genuiDesign, duel }: ArcadeShellProps) {
+export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealHintAction, chooseAnotherDeckHref, newGameHref, replayHref, shareHref, deckTitle, roundDecks, genuiDesign, duel }: ArcadeShellProps) {
   const [session, setSession] = React.useState(() => createArcadeSession(mode));
   // A challenge link names its challenger in its fragment, which only the browser reads (#173).
   const opponentName = useFragmentNames().from;
@@ -251,7 +253,7 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
           {session.reveal && (
             <RoundReveal round={round} reveal={session.reveal} hintsUsed={session.visibleHintCount}
               pickLabel={labelOf(session.lockedCandidateId)} complete={session.status === "complete"}
-              correctRounds={session.correctRounds} history={session.history} deckTitle={deckTitle} shareHref={shareHref} newGameHref={newGameHref}
+              correctRounds={session.correctRounds} history={session.history} deckTitle={deckTitle} shareHref={shareHref} newGameHref={newGameHref} replayHref={replayHref}
               chooseAnotherDeckHref={chooseAnotherDeckHref} genuiDesign={genuiDesign} duel={duel} opponentName={opponentName} sessionToken={currentToken}
               onNext={next} headingRef={revealHeading} track={track} trackGenui={trackGenui} />
           )}

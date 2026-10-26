@@ -5,12 +5,13 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { authorizeLocalExperimentReveal, createDuelChallenge, revealLocalExperimentHint } from "./actions";
+import { DailyCard, DailyRedirect } from "../components/daily-link";
 import { ArtifactUnavailable } from "../demo/artifact-unavailable";
 import { DemoArcade } from "../demo/demo-arcade";
 import { DAILY_DESCRIPTION, DAILY_TITLE, gameSources, type GameSource } from "../demo/game-sources.server";
 import { activeLocalRealExperiment } from "../demo/local-real-experiment-loader.server";
-import { DEAL_SEED, MAXIMUM_GAME, localDate, type DealSeries } from "../demo/local-real-experiment-deal.server";
-import type { LocalRealDeck, LocalRealMix } from "../demo/local-real-experiment.server";
+import { DEAL_SEED, MAXIMUM_GAME, dailyDateOf, type DealSeries } from "../demo/local-real-experiment-deal.server";
+import type { DailyDeal, LocalRealDeck, LocalRealMix } from "../demo/local-real-experiment.server";
 import { DAILY_DECK, MIXED_DECK, type SessionDeckId } from "../demo/local-real-experiment-domain.server";
 import { PageFrame } from "../demo/page-frame";
 import { DuelPage, duelMetadata, duelRequest } from "../duel/duel-page";
@@ -90,13 +91,7 @@ function DeckChooser({ decks, mixed, query }: { readonly decks: readonly LocalRe
         <section className="deck-group" aria-labelledby="deck-group-mixed">
           <h2 id="deck-group-mixed" className="deck-group-title">Mixed<span className="deck-group-note">A taste of every kind.</span></h2>
           <ul className="deck-list">
-            <li>
-              <a className="deck-card" href={`/?deck=${DAILY_DECK}${query}`}>
-                <span className="deck-title">{DAILY_TITLE}</span>{" "}
-                <span className="deck-description">{DAILY_DESCRIPTION}</span>{" "}
-                <span className="deck-size">{localDate(new Date())}</span>
-              </a>
-            </li>
+            <li><DailyCard title={DAILY_TITLE} description={DAILY_DESCRIPTION} query={query} /></li>
             <li>
               <a className="deck-card" href={`/?deck=${MIXED_DECK}${query}`}>
                 <span className="deck-title">{mixed.title}</span>{" "}
@@ -145,14 +140,14 @@ const THEME_LABELS: Readonly<Record<Level<"theme">, string>> = Object.freeze({
  * Lab mode's bar: switchers for the design (#114), with generative UI on, and the theme (#125). Players outside lab
  * mode never see it; their game's arms are the draw's.
  */
-function LabBar({ deck, series, arms, overrides, genuiEnabled }: {
+function LabBar({ deck, deal, arms, overrides, genuiEnabled }: {
   readonly deck: GameSource;
-  readonly series: DealSeries | undefined;
+  readonly deal: DealSeries | DailyDeal;
   readonly arms: Arms;
   readonly overrides: Partial<Arms>;
   readonly genuiEnabled: boolean;
 }) {
-  const href = (change: Partial<Arms>) => `${gameHref(deck.id, series)}${labQuery({ ...overrides, ...change })}`;
+  const href = (change: Partial<Arms>) => `${gameHref(deck.id, deal)}${labQuery({ ...overrides, ...change })}`;
   const design: Design | null = arms.design === "off" ? null : arms.design;
   return (
     <div className="lab-bar">
@@ -186,12 +181,22 @@ function DealLimited({ href }: { readonly href: string }) {
 }
 
 /**
- * A fresh five-round game from the deck's pool, dealt on every visit. The server holds its progress, the arms it
- * drew (#106), and whether it records events (#107); a browser that sends `Sec-GPC: 1` gets a game that records none.
+ * Today's five on a date this server won't deal (#172): a day already over everywhere, or one not yet begun anywhere.
+ * Nothing is dealt or recorded.
  */
-/** A game's address: a seeded deal's game carries its seed and number (#40); today's five needs neither. */
-const gameHref = (deck: SessionDeckId, series: DealSeries | undefined): string =>
-  series ? `/?deck=${deck}&deal=${series.seed}&game=${series.game}` : `/?deck=${deck}`;
+function DailyClosed({ query }: { readonly query: string }) {
+  return (
+    <main className="empty-state" aria-labelledby="daily-closed-title">
+      <h1 id="daily-closed-title">That day’s five isn’t open</h1>
+      <p>Today’s five deals only on today’s date, wherever you are. <a href={`/?deck=${DAILY_DECK}${query}`}>Play today’s five</a>{" "}
+        or <a href="/">choose another deck</a>.</p>
+    </main>
+  );
+}
+
+/** A game's address: a seeded deal's game carries its seed and number (#40), and today's five its date (#172). */
+const gameHref = (deck: SessionDeckId, deal: DealSeries | DailyDeal): string =>
+  "date" in deal ? `/?deck=${deck}&date=${deal.date}` : `/?deck=${deck}&deal=${deal.seed}&game=${deal.game}`;
 
 /** The deal and game a page's address names, when both are well formed. */
 const seriesOf = (query: Readonly<Record<string, string | string[] | undefined>>): DealSeries | undefined => {
@@ -199,25 +204,30 @@ const seriesOf = (query: Readonly<Record<string, string | string[] | undefined>>
   return typeof query.deal === "string" && DEAL_SEED.test(query.deal) && game <= MAXIMUM_GAME ? { seed: query.deal, game } : undefined;
 };
 
-function DealtSession({ deck, series, arms, record, overrides, origin }: {
-  readonly deck: GameSource; readonly series: DealSeries | undefined; readonly arms: Arms; readonly record: boolean; readonly overrides: Partial<Arms>;
-  readonly origin: string | null;
+/**
+ * A five-round game from the deck's pool: a seeded deal's game, or today's five on the player's date. The server holds
+ * its progress, the arms it drew (#106), and whether it records events (#107); a browser that sends `Sec-GPC: 1` gets a
+ * game that records none.
+ */
+function DealtSession({ deck, deal, arms, record, overrides, origin }: {
+  readonly deck: GameSource; readonly deal: DealSeries | DailyDeal; readonly arms: Arms; readonly record: boolean;
+  readonly overrides: Partial<Arms>; readonly origin: string | null;
 }) {
   const loaded = activeLocalRealExperiment();
   if (!loaded.ok) return null;
-  // Today's five deals from the local date, so a reload or a new game that day deals the same five (#74). The game
-  // seals its date, as a seeded deal's game seals its seed, so it can become a challenge (#173).
-  const now = Date.now();
-  const deal = deck.id === DAILY_DECK ? { date: localDate(new Date(now)) } : series;
-  const { mode, sessionToken, wrapped } = loaded.experiment.dealGame(deck.id, Math.random, now, { arms, record }, deal);
-  // The next game of a seeded deal shares no round with this one until the pool is spent; today's five moves to a mix.
-  const next = series ? gameHref(deck.id, { ...series, game: Math.min(series.game + 1, MAXIMUM_GAME) }) : `/?deck=${MIXED_DECK}`;
+  // Today's five deals from its date, so a reload or a new game that day deals the same five (#74). The game seals its
+  // date, as a seeded deal's game seals its seed, so it can become a challenge (#173).
+  const { mode, sessionToken, wrapped } = loaded.experiment.dealGame(deck.id, Math.random, Date.now(), { arms, record }, deal);
+  // The next game of a seeded deal shares no round with this one until the pool is spent. Today's five moves to a mix,
+  // and can be played again, recording nothing (#172).
+  const next = "seed" in deal ? gameHref(deck.id, { ...deal, game: Math.min(deal.game + 1, MAXIMUM_GAME) }) : `/?deck=${MIXED_DECK}`;
+  const replay = "date" in deal ? { replayHref: `${gameHref(deck.id, deal)}&replay=1${labQuery(overrides)}` } : {};
   // A mixed game names each round's deck; a deck's own game needs no reminder.
   const roundDecks = deck.id === MIXED_DECK || deck.id === DAILY_DECK
     ? Object.fromEntries(loaded.experiment.decks.map(({ id, title }) => [id, title])) : undefined;
-  // A shared link deals a friend this very game (#171), so it carries the deal and never a tester's lab picks. Today's
-  // five links to its plain address until that carries the date (#172).
-  const share = origin === null ? {} : { shareHref: `${origin}${gameHref(deck.id, series)}` };
+  // A shared link deals a friend this very game (#171), so it carries the deal or the date, and never a replay or a
+  // tester's lab picks.
+  const share = origin === null ? {} : { shareHref: `${origin}${gameHref(deck.id, deal)}` };
   // A finished game can also challenge a friend (#173), with a link of its own.
   const challenge = origin === null ? {} : { duel: { role: "challenger", origin, createChallenge: createDuelChallenge } as const };
   return (
@@ -225,7 +235,7 @@ function DealtSession({ deck, series, arms, record, overrides, origin }: {
       {wrapped && <p className="deal-note">You’ve now seen every round in this deck, so this game starts it over.</p>}
       <DemoArcade key={sessionToken} mode={mode} sessionToken={sessionToken} deckTitle={deck.title} {...(roundDecks ? { roundDecks } : {})}
         authorizeRevealAction={authorizeLocalExperimentReveal} revealHintAction={revealLocalExperimentHint}
-        chooseAnotherDeckHref="/" newGameHref={`${next}${labQuery(overrides)}`} {...share} {...challenge}
+        chooseAnotherDeckHref="/" newGameHref={`${next}${labQuery(overrides)}`} {...replay} {...share} {...challenge}
         {...(arms.design === "off" ? {} : { genuiDesign: arms.design })} />
     </>
   );
@@ -250,16 +260,33 @@ export default async function Page({ searchParams }: PageProps) {
     return <DuelPage request={duel} experiment={loaded.experiment} record={record} origin={publicOrigin(requestHeaders)} labTheme={overrides.theme}
       rateLimited={rateLimited} />;
   }
-  const series = seriesOf(query);
   const source = requestedSource(requested);
+  // Today's five is dealt on the player's own date (#172), which only their browser knows: an address without one has
+  // the browser add it, and one with a date this server won't deal is refused; neither deals, spends, or records a game.
+  const date = source?.id === DAILY_DECK ? dailyDateOf(query, Date.now()) : null;
+  if (source?.id === DAILY_DECK && date === null) {
+    return (
+      <PageFrame theme={overrides.theme ?? CONTROL.theme}>
+        {query.date === undefined ? <DailyRedirect query={labQuery(overrides)} /> : (
+          <>
+            <nav className="deck-nav" aria-label="Decks"><a href="/">All decks</a></nav>
+            <DailyClosed query={labQuery(overrides)} />
+          </>
+        )}
+      </PageFrame>
+    );
+  }
+  const deal = date === null ? seriesOf(query) : { date };
   // Today's five names its date, so its share line carries it.
-  const deck = source?.id === DAILY_DECK ? { ...source, title: `${source.title}, ${localDate(new Date())}` } : source;
+  const deck = source && date !== null ? { ...source, title: `${source.title}, ${date}` } : source;
+  // Today's five played again once it's done (`&replay=1`, #172) records nothing: its player has seen its answers.
+  const replayed = date !== null && query.replay === "1";
   // A deck's game spends the player's deal allowance (#98); the redirect to a fresh deal's first game spends nothing, so
   // a game from the chooser costs one deal, as "Deal new rounds" does. Past it the page says so, before any deal or event.
-  const dealLimited = deck !== undefined && (deck.id === DAILY_DECK || series !== undefined) && limited("deal", clientKey(requestHeaders));
+  const dealLimited = deck !== undefined && deal !== undefined && limited("deal", clientKey(requestHeaders));
   // A deck's game is a game of a seeded deal (#40): an address without one starts a fresh deal at its first game, so a
   // reload shows the same game and "Deal new rounds" the next. Today's five is seeded by its date instead.
-  if (deck && deck.id !== DAILY_DECK && series === undefined) {
+  if (deck && deal === undefined) {
     redirect(`${gameHref(deck.id, { seed: randomBytes(4).toString("hex"), game: 0 })}${labQuery(overrides)}`);
   }
   // A game shows the theme it drew (#125); the chooser, outside any game, keeps the original unless a tester picks one.
@@ -268,17 +295,17 @@ export default async function Page({ searchParams }: PageProps) {
     <PageFrame theme={theme}>
       {!loaded.ok
         ? <ArtifactUnavailable reason={loaded.reason} />
-        : deck
+        : deck && deal
           ? (
             <>
               <nav className="deck-nav" aria-label="Decks"><a href="/">All decks</a></nav>
               {dealLimited
-                ? <DealLimited href={`${gameHref(deck.id, deck.id === DAILY_DECK ? undefined : series)}${labQuery(overrides)}`} />
+                ? <DealLimited href={`${gameHref(deck.id, deal)}${replayed ? "&replay=1" : ""}${labQuery(overrides)}`} />
                 : (
                   <>
-                    {lab && <LabBar deck={deck} series={series} arms={arms} overrides={overrides} genuiEnabled={genuiEnabled} />}
-                    <DealtSession deck={deck} series={deck.id === DAILY_DECK ? undefined : series} arms={arms} record={record}
-                      overrides={overrides} origin={publicOrigin(requestHeaders)} />
+                    {lab && <LabBar deck={deck} deal={deal} arms={arms} overrides={overrides} genuiEnabled={genuiEnabled} />}
+                    <DealtSession deck={deck} deal={deal} arms={arms} record={record && !replayed} overrides={overrides}
+                      origin={publicOrigin(requestHeaders)} />
                   </>
                 )}
             </>

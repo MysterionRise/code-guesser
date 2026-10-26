@@ -104,7 +104,7 @@ describe("server-only local real experiment authority v3", () => {
 
   it("deals today's five the same on every load of a date, and differently the next day (#74)", async () => {
     const experiment = create(curatedArtifact());
-    const { dailyRandom: daily, localDate } = await import("../src/demo/local-real-experiment-deal.server");
+    const { dailyRandom: daily } = await import("../src/demo/local-real-experiment-deal.server");
     const dealt = (date: string) => experiment.dealGame("daily", daily(experiment.artifactHash, date), NOW).mode.rounds
       .map((round: any) => `${round.roundId}:${round.mode.candidates.map(({ candidateId }: any) => candidateId).join(",")}`);
     expect(dealt("2026-10-19")).toEqual(dealt("2026-10-19"));
@@ -112,7 +112,6 @@ describe("server-only local real experiment authority v3", () => {
     expect(new Set(experiment.dealSession("daily", daily(experiment.artifactHash, "2026-10-19")).rounds.map((round: any) => round.mode.kind)).size).toBe(5);
     expect(payloadOf(experiment.dealGame("daily", daily(experiment.artifactHash, "2026-10-19"), NOW).sessionToken).deck).toBe("daily");
     expect(() => daily(experiment.artifactHash, "19 October")).toThrow();
-    expect(localDate(new Date(2026, 0, 5, 23, 59))).toBe("2026-01-05");
   });
 
   it("deals a mixed game of five rounds from five different decks, scored to its own rounds' best (#56)", () => {
