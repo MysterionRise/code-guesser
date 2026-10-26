@@ -152,6 +152,25 @@ gate: changing queries, retries, ceilings, deck rules, or running
     - fix's bug lists run out at 36; missing-line balances at 40, not 48.
   - Its journal, with discovery complete, is `ops/poc/stack/tmp/journal/dry-v7-2026-10-21.jsonl` (ignored); the
     data run resumed on a copy of it and published the dry run's artifact byte for byte (below).
+  - v7 rules (#200), from reading the first v7 artifact; each holds in the selector, the generator, the parser, and
+    the leakage test:
+    - **Project words read whole:** `wordStems(text, whole)` also counts a word split at a case change whole, on
+      both sides, so the pane's `GITHUB_TOKEN` meets cli/cli's "GitHub" (`githu`). A script other than Latin that
+      the pane and an option's description both show counts as a shared word (`script:Han`, `scriptsShown`), so a
+      pane in Chinese never sits beside an option described in Chinese. Both run through `sharedOptionWords(…,
+      version)`.
+    - **Output ideas by synonym and inverse:** `sameIdea(left, right, version)` reads `bin`, `oct`, `hex`, `dec`,
+      `int`, and `base_2`-style words as their names, and two conversions (`a_to_b`, `b_from_a`) are one idea when
+      they join the same two sides either way round: `decimal_to_negative_base_2`, `decimal_to_negative_binary`, and
+      `negative_binary_to_int` are one. A conversion's words alone tie it to nothing new (`bin_to_decimal` beside
+      `binary_coded_decimal`), and `sameFile` keeps the v6 reading.
+    - **One answer per name:** no name answers two name-the-function rounds (`answerName`, case and underscores
+      aside). The balance search takes keys (`balancedChoice(…, keys)`): of the interchangeable choices, a round takes
+      the first whose key no other round holds, so no file is read again.
+    - **Hints that leave two:** the second hint of a missing-line or name-the-function round pairs the answer with an
+      option the first hint leaves open, a line of the same kind or a name of as many words (`pairedDecoys`). Before,
+      18 of 40 and 14 of 48 rounds were decided once both hints were bought (`a_star.py`).
+    - Run and replacements: `docs/review/evidence/2026-10-26-v7-round-fixes.md`.
 - **Mixed and daily play (#56, #74):** `/?deck=mixed` deals one round from each of five decks drawn at random
   (`MIXED_DECK`, offered when the artifact holds five decks or more); `/?deck=daily` deals the same mix seeded by
   the artifact's hash and the date (`dailyRandom` in `local-real-experiment-deal.server.ts`). Both are
@@ -520,27 +539,32 @@ gate: changing queries, retries, ceilings, deck rules, or running
     `boughtHints` are the game's own hints.
   - Evidence: `docs/review/evidence/2026-10-15-question-layers-first-build.md`; the v6 artifact's layers (67 of
     76 rounds kept) are in `docs/review/evidence/2026-10-19-v6-data-run.md`, the v7 artifact's (74 of 100) in
-    `docs/review/evidence/2026-10-21-v7-data-run.md`.
+    `docs/review/evidence/2026-10-21-v7-data-run.md`; the #200 rebuild replayed the same 74 with no model call
+    (`docs/review/evidence/2026-10-26-v7-round-fixes.md`).
   - **Review refusals:** a layer a reader found wrong is listed in `ops/poc/questions/reviewed.ts` and never written
     (`REVIEW_<code>` in the `QUESTIONS_DECK` line), since nothing runs a round's code to check a step-through. Agent
     playtest run 2 refused the counting-sort trace; the v7 data run read every algorithm trace against its code and
     refused six more (four new in v7, two published since v6), so 74 layers are published: 50 Marker hunt, 24 Trace it.
 - The committed artifact `apps/game/src/demo/generated/local-real-rounds.json`
-  came from the 2026-10-21 v7 data run (#167, D4): one `--resume` on the dry
-  run's journal (6,151 requests, 5 live), which published the dry run's
-  artifact byte for byte, then two `--offline` replays.
+  came from the 2026-10-26 rebuild under the v7 rules of #200: one `--resume`
+  on the v7 data run's journal (6,245 requests, 114 live), then two
+  `--offline` replays. The v7 data run (2026-10-21, #167, D4) made the one
+  before it.
   - Its canonical SHA-256
-    `81f310573a94ed9c7fa43b29442453b78d378647c3a35e7031b1b73b7d8bcce7` is
+    `847e7512d5374450656b2147b4c7478e6bcc28045a372f33683ae63996e38a5e` is
     pinned in `apps/game/src/demo/local-real-experiment.pin.server.ts`; the
-    preparer writes the pin. The v1.0 artifact it replaced was `1abc21f8…`.
-  - Evidence: `docs/review/evidence/2026-10-21-v7-data-run.md`; the v6
+    preparer writes the pin. It replaced the v7 data run's `81f31057…`, which
+    replaced v1.0's `1abc21f8…`.
+  - Evidence: `docs/review/evidence/2026-10-26-v7-round-fixes.md` and
+    `docs/review/evidence/2026-10-21-v7-data-run.md`; the v6
     artifact's is `docs/review/evidence/2026-10-19-v6-data-run.md`, the v5
     artifact's `docs/review/evidence/2026-10-13-v5-six-decks-run.md` and the
     offline rebuilds after it.
-  - The run's journal is in `ops/poc/stack/tmp/journal/run.jsonl` on this
-    machine (a copy as `run.jsonl.v7-2026-10-21`), so
+  - The run's journal is `ops/poc/stack/tmp/journal/run.jsonl.v7-200-2026-10-26`
+    on this machine; copied to `run.jsonl`, it lets
     `STACK_V2_ACKNOWLEDGED_USABLE_REVISION=… pnpm prepare:poc --offline`
-    rebuilds it byte for byte with no network. The v6 journal is
+    rebuild the artifact byte for byte with no network. The v7 data run's
+    journal is `run.jsonl.v7-2026-10-21`, the v6 journal
     `run.jsonl.v6-resume-2026-10-19`, the v5 journal `run.jsonl.v5-2026-10-15`.
   - The journal holds provider bodies, so it is gitignored and never
     committed; a fresh clone has none, and `--offline` or `--resume` fails
