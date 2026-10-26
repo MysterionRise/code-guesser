@@ -143,7 +143,7 @@ Run fresh on the branch with Node 24.22.0:
 
 The journals hold provider bodies, so they stay on this machine and out of git:
 
-- The resumed journal is `ops/poc/stack/tmp/journal/run.jsonl.v7-200-2026-10-26` in the main checkout. Copied to
-  `run.jsonl` (or named with `--journal=`), it rebuilds this artifact with `--offline`. The v7 data run's journal
-  stays `run.jsonl` and `run.jsonl.v7-2026-10-21`.
+- The resumed journal is `ops/poc/stack/tmp/journal/run.jsonl` in the main checkout, with a copy as
+  `run.jsonl.v7-200-2026-10-26`; it rebuilds this artifact with `--offline`. The v7 data run's journal stays
+  `run.jsonl.v7-2026-10-21`.
 - The questions journal took no new entry.

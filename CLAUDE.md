@@ -560,10 +560,10 @@ gate: changing queries, retries, ceilings, deck rules, or running
     artifact's is `docs/review/evidence/2026-10-19-v6-data-run.md`, the v5
     artifact's `docs/review/evidence/2026-10-13-v5-six-decks-run.md` and the
     offline rebuilds after it.
-  - The run's journal is `ops/poc/stack/tmp/journal/run.jsonl.v7-200-2026-10-26`
-    on this machine; copied to `run.jsonl`, it lets
+  - The run's journal is in `ops/poc/stack/tmp/journal/run.jsonl` on this
+    machine (a copy as `run.jsonl.v7-200-2026-10-26`), so
     `STACK_V2_ACKNOWLEDGED_USABLE_REVISION=… pnpm prepare:poc --offline`
-    rebuild the artifact byte for byte with no network. The v7 data run's
+    rebuilds it byte for byte with no network. The v7 data run's
     journal is `run.jsonl.v7-2026-10-21`, the v6 journal
     `run.jsonl.v6-resume-2026-10-19`, the v5 journal `run.jsonl.v5-2026-10-15`.
   - The journal holds provider bodies, so it is gitignored and never
