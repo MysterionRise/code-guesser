@@ -51,7 +51,9 @@ gate: changing queries, retries, ceilings, deck rules, or running
   - Lab mode (`EXPERIMENT_LAB`) is never on in production, except for a smoke run tagged with a non-real
     `EXPERIMENT_SOURCE`.
   - After launch day, every player-visible change (UI, artifact, or arms) gets a dated entry in the experiment change log
-    (#169), so the report can split its periods.
+    (#169), so the report can split its periods: a release or PR that changes anything a player sees adds one to
+    `ops/experiment/changes.json` (`date` the UTC day it goes live, a one-line `change`, the `factors` it may move, and
+    its `pr`), in date order. Before launch day the log stays empty.
 - Public open-source code only, with licence and recorded-author data.
 - Bounded, selective reads only. Never download a whole dataset, a whole
   language shard, or a repository archive. The Stack v2 stays pinned to
@@ -446,7 +448,14 @@ gate: changing queries, retries, ceilings, deck rules, or running
     parser and prints Markdown (`--json=` writes JSON).
     - Each factor's levels are compared on the deal-again rate of completed games: seeded Beta draws
       (`statistics.ts`), 95% intervals, P(best) among levels with data, and the difference from control.
-    - The secondaries come beside it, and the accuracy guardrail flags a level clearly above control.
+    - The secondaries come beside it, and the accuracy guardrail flags a level clearly above control. Completion counts
+      viewed games (`game_viewed`) only, so a crawler's or a link preview's deal never lowers it (#169, report v3).
+    - The change log (#169, `changes.ts`): `changes.json` parses strictly (exact keys, a real day, one line of text,
+      factors `design`/`theme`/`layer` or `all` alone, a positive `pr`, dates in order), or the command fails with
+      `EXPERIMENT_REPORT_CHANGES`. The report lists the changes inside its window and the periods between them, and
+      `--period=<from>..<to>` (in place of `--from`/`--to`) reads one; a change dated inside it after its first day
+      refuses it (`EXPERIMENT_REPORT_PERIOD_SPANS_CHANGE`, or `_PERIOD_MALFORMED`). A change's own day starts its
+      period, since events record only the day.
     - Pre-registered targets (`PLAN`, `targetFor`): 10 points over 30%, power 0.8, Bonferroni over each factor's
       comparisons, so 506 games per design, 475 per theme, and 356 per layer level. The read waits for every target or
       day 56.
