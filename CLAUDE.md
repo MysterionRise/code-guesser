@@ -853,18 +853,20 @@ when the preparer throws a code this section does not name.
     `PUBLIC_CONTAINMENT_CANDIDATE_IN_<FIELD>`): names the protected value and
     the public field that collided.
   - A round generator's own check: `*_ROUNDS_REJECTED`, `PROJECT_WORDS_SHOWN`
-    (v6: a project pane shares a word with an option), `BEFORE_AFTER_SIZE_UNBALANCED` (v6: the
+    (v6: a project pane shares a word with an option; v7: a word read whole across a case change, or a
+    script other than Latin, too, #200), `BEFORE_AFTER_SIZE_UNBALANCED` (v6: the
     later pane is the bigger one in more than half the pool and one, #75), `OUTPUT_IDEA_REPEATED` and
-    `FIX_FILE_REPEATED` (v6: two rounds repeat one idea or one file, #84),
+    `FIX_FILE_REPEATED` (v6: two rounds repeat one idea or one file, #84; v7: output names tied by synonyms or as
+    inverse conversions too, #200), `NAME_FUNCTION_ANSWER_REPEATED` (v7: a name answers two rounds, #200),
     `ALGORITHM_NAME_SHOWN`, `ALGORITHM_FAMILY_UNBALANCED`,
     `OUTPUT_ANSWER_ECHOED`, `OUTPUT_ANSWER_TRANSFORMED` (v6: the answer alone reads
     off its call's arguments), `OUTPUT_TRANSFORM_UNBALANCED` (v6: picking such an
     option beats chance and a tenth), `OUTPUT_RANK_UNBALANCED`, `FIX_RANK_UNBALANCED`,
     `FIX_REPOSITORY_REPEATED`, `MISSING_LINE_RANK_UNBALANCED`,
     `MISSING_LINE_HINT_DECIDES` (no other option does what the answer
-    does, so the first hint would pick it), `NAME_FUNCTION_RANK_UNBALANCED`,
-    `NAME_FUNCTION_HINT_DECIDES` (no other name joins as many words as the
-    answer), `LANGUAGE_PAIRING_CONFLICT` (no cycle of second pairs keeps resembling
+    does, so the first hint would pick it; from v7 the second hint pairs the answer with such an option, #200),
+    `NAME_FUNCTION_RANK_UNBALANCED`, `NAME_FUNCTION_HINT_DECIDES` (no other name joins as many words as the
+    answer; from v7 the second hint pairs the answer with such a name), `LANGUAGE_PAIRING_CONFLICT` (no cycle of second pairs keeps resembling
     pairs out of the same round), `FRAMEWORK_FAMILY_UNBALANCED` (a family's frameworks are
     not answered equally often), `FRAMEWORK_NAME_SHOWN` (a pane, prompt, or hint still
     names a framework), `EXERCISE_FAMILY_UNBALANCED` (a family's exercises are not each
@@ -950,7 +952,9 @@ add up.
   a distinctive part of a name, such as `graphql` for graphql-ruby.
   `PROJECT_WORDS_IN_EXCERPT` (v6, #77): code that shares a distinctive word
   with an option's name or description, such as `Aws::SQS` beside "AWS Code
-  Examples"; an answer's file is refused, and a decoy is skipped.
+  Examples"; an answer's file is refused, and a decoy is skipped. From v7 (#200)
+  a word split at a case change counts whole too (`GITHUB_TOKEN` beside "GitHub"),
+  and so does a script other than Latin that the code and a description both show.
   `PROJECT_NAMED_BY_TEMPLATE`: the deck's own wording names the repository.
 - `LANGUAGE_PAIR_AMBIGUOUS`: the code does not tell its language from the
   look-alike. `LANGUAGE_ROUNDS_REJECTED`: another language-round check.
@@ -963,7 +967,9 @@ add up.
   `OUTPUT_PANE_SIZE`: a pane over the byte limit.
   `OUTPUT_FILE_CHANGED`: the file bound differs from the file read.
   `OUTPUT_IDEA_REPEATED` (v6, #84): a function named for a chosen round's idea,
-  or agreeing with a chosen function on two documented calls.
+  or agreeing with a chosen function on two documented calls; from v7 (#200), also
+  one whose conversion joins a chosen one's two sides by synonyms or the other way
+  round (`decimal_to_negative_base_2`, `negative_binary_to_int`).
   `OUTPUT_RANKS_UNBALANCED`: no choice of answers fills every rank in both
   orders (and, from v6, keeps the transform solver in bounds), so the output
   deck is skipped.
@@ -980,7 +986,8 @@ add up.
   no other identifier, and three other authored names the pane never spells.
   `NAME_FUNCTION_FILE_CHANGED`: the file bound differs from the file read.
   `NAME_FUNCTION_RANKS_UNBALANCED`: no choice balances the deck in text and
-  length order within the extreme solvers' limits, so the deck is skipped.
+  length order within the extreme solvers' limits (from v7, answering each name
+  once, #200), so the deck is skipped.
   `NAME_FUNCTION_LANGUAGE`: a source's language has no source-file rule.
 - `FRAMEWORK_LICENSE_OWN` (#62): an example that states a licence of its own, by a licence
   file on the file's path or its `package.json`; `FRAMEWORK_LICENSE_UNREADABLE`: a manifest
