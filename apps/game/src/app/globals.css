@@ -451,10 +451,11 @@ noscript { display: block; padding: 12px; margin-bottom: 16px; background: var(-
 .game-summary tfoot th, .game-summary tfoot td { font-weight: 800; }
 .game-summary tfoot td { text-align: right; }
 .game-summary .summary-missed .summary-pick { color: var(--miss); }
-/* A mixed game's summary has a deck column too (#161); on a phone its cells break wherever they must to fit. */
+/* On a phone a summary's cells break wherever they must to fit: a mixed game's deck column (#161), and picks that are
+   one long word, such as a function's name or a line of code (#45). */
 @media (max-width: 480px) {
-  .game-summary .with-decks th, .game-summary .with-decks td { padding: 6px 5px; overflow-wrap: anywhere; }
-  .game-summary .with-decks td:last-child { white-space: normal; }
+  .game-summary th, .game-summary td { padding: 6px 5px; overflow-wrap: anywhere; }
+  .game-summary td:last-child { white-space: normal; }
 }
 .game-summary .summary-hints { color: var(--muted); }
 .game-summary a { color: var(--accent); }
