@@ -423,7 +423,7 @@ export const createLocalRealExperiment = (
         return contextFor(round, deckTitles.get(request.roundId!)!, state, index, emit, layers);
       },
       recordClientEvent: (value: unknown, now = Date.now()): ClientEventOutcome => recordClientEvent(value, expectedArtifactHash, now, emit),
-      ...duelAuthority({ artifactHash: expectedArtifactHash, decks: listed, mixed, rounds, start, digestOf, maximumOf,
+      ...duelAuthority({ artifactHash: expectedArtifactHash, decks: listed, mixed, rounds, start, digestOf, maximumOf, emit,
         deal: (deckId, descriptor) => deal(deckId, Math.random, descriptor) }),
     });
   } catch {

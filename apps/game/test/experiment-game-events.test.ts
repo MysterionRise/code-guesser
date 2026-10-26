@@ -28,19 +28,24 @@ const seeded = (seed: number) => () => { seed = (seed * 1103515245 + 12345) % 21
 const ARMS = { design: "catalog", theme: "terminal", layer: "off" } as const;
 const T0 = Date.parse("2026-10-15T12:00:00Z");
 
-/** Plays a whole game: a hint in round one, round two answered wrong, the rest right. */
-const playGame = (record: boolean, t0 = T0) => {
-  captured.length = 0;
-  const dealt = experiment.dealGame("fix", seeded(3), t0, { arms: ARMS, record });
+/** Plays a dealt game through: a hint in round one, round two answered wrong unless `allRight`, the rest right. */
+const playDealt = (dealt: { mode: { rounds: readonly { roundId: string }[] }; sessionToken: string }, t0: number, allRight = false) => {
   let token = dealt.sessionToken;
   dealt.mode.rounds.forEach((round, index) => {
     const at = t0 + (index + 1) * 60_000;
     if (index === 0) token = (experiment.revealHint({ sessionToken: token, roundId: round.roundId }, at - 30_000) as { sessionToken: string }).sessionToken;
     const fixture = fixtures.get(round.roundId)!;
-    const candidateId = index === 1 ? fixture.candidates.find(({ id }) => id !== fixture.correctCandidateId)!.id : fixture.correctCandidateId;
+    const candidateId = index === 1 && !allRight ? fixture.candidates.find(({ id }) => id !== fixture.correctCandidateId)!.id : fixture.correctCandidateId;
     token = (experiment.answer({ sessionToken: token, roundId: round.roundId, candidateId }, at) as { sessionToken: string }).sessionToken;
   });
-  return { dealt, token };
+  return token;
+};
+
+/** Plays a whole game: a hint in round one, round two answered wrong, the rest right. */
+const playGame = (record: boolean, t0 = T0) => {
+  captured.length = 0;
+  const dealt = experiment.dealGame("fix", seeded(3), t0, { arms: ARMS, record });
+  return { dealt, token: playDealt(dealt, t0) };
 };
 
 const beacon = (body: unknown) => POST(new Request("http://127.0.0.1/api/events", { method: "POST", body: typeof body === "string" ? body : JSON.stringify(body) }));
@@ -53,7 +58,9 @@ describe("game events (#107)", () => {
       "game_dealt", "hint_revealed", "round_revealed", "round_revealed", "round_revealed", "round_revealed", "round_revealed", "game_completed",
     ]);
     const game = captured[0]!.event.game;
-    for (const { event } of captured) expect({ game: event.game, deck: event.deck, arms: event.arms }).toEqual({ game, deck: "fix", arms: ARMS });
+    for (const { event } of captured) {
+      expect({ game: event.game, origin: event.origin, deck: event.deck, arms: event.arms }).toEqual({ game, origin: "deal", deck: "fix", arms: ARMS });
+    }
     expect(captured[1]!.event.fields).toEqual({ round: 1, hint: 1, ms: 30_000 });
     expect(captured[2]!.event.fields).toEqual({ round: 1, correct: true, hints: 1, ms: 60_000 });
     expect(captured[3]!.event.fields).toEqual({ round: 2, correct: false, hints: 0, ms: 60_000 });
@@ -83,6 +90,71 @@ describe("game events (#107)", () => {
     expect(context.arms).toEqual(ARMS);
     context.recordCall({ ok: false, status: 402, calls: 0, tokensIn: 0, tokensOut: 0, ms: 800 }, T0 + 2_000);
     expect(captured.at(-1)!.event).toMatchObject({ type: "genui_call", fields: { round: 1, phase: "before-lock", ok: false, status: 402, ms: 800 } });
+  });
+});
+
+describe("duel events (#173)", () => {
+  const SWITCHES = { genuiEnabled: true, disabled: new Set<string>() };
+  /** A challenger's finished game of a seeded deal, and its challenge link. */
+  const challenge = (seed: string, record = true) => {
+    const dealt = experiment.dealGame("fix", seeded(9), T0, { arms: ARMS, record }, { seed, game: 0 });
+    const token = playDealt(dealt, T0);
+    const created = experiment.createChallenge(token, T0 + 400_000);
+    if (!created.ok) throw new Error(`challenge refused: ${created.reason}`);
+    return { token, game: captured.find(({ event }) => event.type === "game_dealt")!.event.game, challengeToken: created.challengeToken };
+  };
+
+  it("records a challenge once, on the challenger's game, with only whether it was the deal's first try", () => {
+    captured.length = 0;
+    const { token, game } = challenge("d0e1f2a3");
+    expect(experiment.createChallenge(token, T0 + 500_000).ok).toBe(true);
+    const created = captured.filter(({ event }) => event.type === "duel_created");
+    expect(created.map(({ event }) => event)).toEqual([{ type: "duel_created", game, origin: "deal", deck: "fix", arms: ARMS, fields: { firstPlay: "yes" } }]);
+  });
+
+  it("records a friend's game as a duel's, under the friend's own Sec-GPC, and its result once, from the friend's side", () => {
+    captured.length = 0;
+    const { challengeToken, game: challenger } = challenge("d0e1f2a4");
+    captured.length = 0;
+    const friend = experiment.dealChallenge(challengeToken, T0 + 600_000, true, SWITCHES);
+    if (!friend.ok) throw new Error(`friend refused: ${friend.reason}`);
+    // The friend answers every round right where the challenger missed one, so the friend wins on score.
+    const token = playDealt(friend.game, T0 + 600_000, true);
+    for (const at of [T0 + 1_000_000, T0 + 1_100_000]) expect(experiment.issueResult(token, challengeToken, at).ok).toBe(true);
+    const game = captured[0]!.event.game;
+    expect(game).not.toBe(challenger);
+    expect(captured.map(({ event }) => event.type)).toEqual([
+      "game_dealt", "hint_revealed", ...Array(5).fill("round_revealed"), "game_completed", "duel_completed",
+    ]);
+    for (const { event } of captured) expect({ game: event.game, origin: event.origin, arms: event.arms }).toEqual({ game, origin: "duel", arms: ARMS });
+    expect(captured.at(-1)!.event.fields).toEqual({ outcome: "won", decidedBy: "score" });
+    // Nothing in the friend's events names the challenge, its link, or the challenger's game or score.
+    const claims = JSON.stringify(captured);
+    for (const value of [challengeToken, challenger, ...challengeToken.match(/.{12}/gu)!]) expect(claims).not.toContain(value);
+
+    captured.length = 0;
+    const quiet = experiment.dealChallenge(challengeToken, T0 + 700_000, false, SWITCHES);
+    if (!quiet.ok) throw new Error(`friend refused: ${quiet.reason}`);
+    expect(experiment.issueResult(playDealt(quiet.game, T0 + 700_000), challengeToken, T0 + 1_200_000).ok).toBe(true);
+    expect(captured).toEqual([]);
+  });
+
+  it("takes a friend's link copies and rematch through the beacon, on the friend's game", async () => {
+    const seed = "d0e1f2a5";
+    const dealt = experiment.dealGame("fix", seeded(9), Date.now() - 900_000, { arms: ARMS, record: true }, { seed, game: 0 });
+    const created = experiment.createChallenge(playDealt(dealt, Date.now() - 900_000), Date.now() - 400_000);
+    if (!created.ok) throw new Error(`challenge refused: ${created.reason}`);
+    const friend = experiment.dealChallenge(created.challengeToken, Date.now() - 350_000, true, SWITCHES);
+    if (!friend.ok) throw new Error(`friend refused: ${friend.reason}`);
+    const token = playDealt(friend.game, Date.now() - 350_000);
+    captured.length = 0;
+    expect((await beacon({ sessionToken: token, event: { type: "duel_link_copied", link: "result", via: "share" } })).status).toBe(204);
+    expect((await beacon({ sessionToken: token, event: { type: "deal_again", to: "rematch" } })).status).toBe(204);
+    expect((await beacon({ sessionToken: token, event: { type: "duel_link_copied", link: "result", via: "share", vs: "Ben" } })).status).toBe(400);
+    expect((await beacon({ sessionToken: token, event: { type: "duel_created", firstPlay: "yes" } })).status).toBe(400);
+    expect(captured.map(({ event }) => [event.type, event.origin, event.fields])).toEqual([
+      ["duel_link_copied", "duel", { link: "result", via: "share" }], ["deal_again", "duel", { to: "rematch" }],
+    ]);
   });
 });
 

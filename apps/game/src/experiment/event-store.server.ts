@@ -4,12 +4,27 @@ import { appendFileSync, mkdirSync, readFileSync, readdirSync, rmSync } from "no
 import { join } from "node:path";
 
 import { FACTORS, type Arms } from "./arms";
-import { CLIENT_EVENT_TYPES, EVENT_SCHEMA_VERSION, EVENT_TYPES, RETIRED_EVENT_TYPES, SOURCES, dayOf, isDay, parseEvent, parsePayload, type EventSource, type EventType, type ExperimentEvent } from "./events";
+import {
+  CLIENT_EVENT_TYPES,
+  EVENT_SCHEMA_VERSION,
+  EVENT_TYPES,
+  RETIRED_EVENT_TYPES,
+  SOURCES,
+  dayOf,
+  isDay,
+  parseEvent,
+  parsePayload,
+  type EventOrigin,
+  type EventSource,
+  type EventType,
+  type EventVersion,
+  type ExperimentEvent,
+} from "./events";
 
 /**
  * Where events go (#107): a small store interface, so a host can put Postgres behind it later. The local store is
- * one append-only JSON-lines file per UTC day. Raw events are kept for 90 days, then rolled up into daily totals per
- * deck and arms, and the raw day is deleted.
+ * one append-only JSON-lines file per UTC day, written only under the current schema. Raw events are kept for 90
+ * days, then rolled up into daily totals per deck, origin, and arms, and the raw day is deleted.
  */
 export interface EventStore {
   append(event: ExperimentEvent): void;
@@ -22,11 +37,13 @@ export interface EventStore {
   totals(): readonly DailyTotal[];
 }
 
-/** One day's events for one deck, source, and set of arms, counted by type, with the sums a report needs. */
+/** One day's events for one deck, source, origin, and set of arms, counted by type, with the sums a report needs. */
 export interface DailyTotal extends Arms {
-  readonly v: typeof EVENT_SCHEMA_VERSION;
+  /** The schema it was rolled up under. */
+  readonly v: EventVersion;
   readonly day: string;
   readonly source: EventSource;
+  readonly origin: EventOrigin;
   readonly deck: string;
   readonly counts: Readonly<Record<EventType, number>>;
   /** Right answers, hints bought, and model tokens, summed over the day's events. */
@@ -44,11 +61,13 @@ const daysBefore = (day: string, days: number): string => dayOf(Date.parse(`${da
 
 /** The game's own totals key: everything a daily total groups by. */
 const groupKey = (event: ExperimentEvent): string =>
-  JSON.stringify([event.day, event.source, event.deck, ...Object.keys(FACTORS).map((factor) => event[factor as keyof Arms])]);
+  JSON.stringify([event.day, event.source, event.origin, event.deck, ...Object.keys(FACTORS).map((factor) => event[factor as keyof Arms])]);
+
+const noCounts = (): Record<EventType, number> => Object.fromEntries(EVENT_TYPES.map((type) => [type, 0])) as Record<EventType, number>;
 
 const totalFor = (events: readonly ExperimentEvent[]): DailyTotal => {
   const first = events[0]!;
-  const counts = Object.fromEntries(EVENT_TYPES.map((type) => [type, 0])) as Record<EventType, number>;
+  const counts = noCounts();
   let correct = 0, hints = 0, tokensIn = 0, tokensOut = 0;
   for (const event of events) {
     counts[event.type] += 1;
@@ -56,13 +75,25 @@ const totalFor = (events: readonly ExperimentEvent[]): DailyTotal => {
     if (event.type === "genui_call") { tokensIn += event.tokensIn as number; tokensOut += event.tokensOut as number; }
   }
   return Object.freeze({
-    v: EVENT_SCHEMA_VERSION, day: first.day, source: first.source, deck: first.deck,
+    v: EVENT_SCHEMA_VERSION, day: first.day, source: first.source, origin: first.origin, deck: first.deck,
     ...Object.fromEntries(Object.keys(FACTORS).map((factor) => [factor, first[factor as keyof Arms]])) as unknown as Arms,
     counts: Object.freeze(counts), correct, hints, tokensIn, tokensOut,
   });
 };
 
-/** A store of JSON-lines files in one directory; it refuses any event the schema refuses. */
+/**
+ * A stored total. One rolled up under version 1 has no origin: no duel game recorded events then, so it was a deal's,
+ * and it counts none of the events version 2 added.
+ */
+const readTotal = (line: unknown): DailyTotal => {
+  const total = line as DailyTotal;
+  return total.v === 1 ? Object.freeze({ ...total, origin: "deal", counts: Object.freeze({ ...noCounts(), ...total.counts }) }) : total;
+};
+
+/**
+ * A store of JSON-lines files in one directory. It refuses any event the schema refuses and writes only the current
+ * version, though it reads every version's lines.
+ */
 export const fileEventStore = (directory: string, decks: readonly string[]): EventStore => {
   const dayPath = (day: string): string => join(directory, `events-${day}.jsonl`);
   const readLines = (path: string): unknown[] => {
@@ -89,7 +120,7 @@ export const fileEventStore = (directory: string, decks: readonly string[]): Eve
   return Object.freeze({
     append: (event: ExperimentEvent) => {
       const checked = parseEvent(event, decks);
-      if (checked === null) throw new Error("EXPERIMENT_EVENT_REJECTED");
+      if (checked === null || checked.v !== EVENT_SCHEMA_VERSION) throw new Error("EXPERIMENT_EVENT_REJECTED");
       mkdirSync(directory, { recursive: true });
       appendFileSync(dayPath(checked.day), `${JSON.stringify(checked)}\n`, "utf8");
     },
@@ -111,7 +142,7 @@ export const fileEventStore = (directory: string, decks: readonly string[]): Eve
       for (const day of old) rmSync(dayPath(day));
       return Object.freeze(old);
     },
-    totals: () => Object.freeze(readLines(join(directory, TOTALS_FILE)) as DailyTotal[]),
+    totals: () => Object.freeze(readLines(join(directory, TOTALS_FILE)).map(readTotal)),
   });
 };
 
@@ -119,8 +150,10 @@ export const fileEventStore = (directory: string, decks: readonly string[]): Eve
 export const eventSource = (env: Readonly<Record<string, string | undefined>> = process.env): EventSource =>
   (SOURCES as readonly string[]).includes(env.EXPERIMENT_SOURCE ?? "") ? env.EXPERIMENT_SOURCE as EventSource : "real";
 
-/** What the game reports about one game: its type, its own fields, and the game's id, deck, and arms. */
-export type GameEvent = Readonly<{ type: EventType; game: string; deck: string; arms: Arms; fields: Readonly<Record<string, string | number | boolean>> }>;
+/** What the game reports about one game: its type, its own fields, and the game's id, origin, deck, and arms. */
+export type GameEvent = Readonly<{
+  type: EventType; game: string; origin: EventOrigin; deck: string; arms: Arms; fields: Readonly<Record<string, string | number | boolean>>;
+}>;
 export type EventSink = (event: GameEvent, now: number) => void;
 
 /**
@@ -130,11 +163,11 @@ export type EventSink = (event: GameEvent, now: number) => void;
  */
 export const storeSink = (store: EventStore, source: EventSource): EventSink => {
   let rolledOn: string | undefined;
-  return ({ type, game, deck, arms, fields }, now) => {
+  return ({ type, game, origin, deck, arms, fields }, now) => {
     try {
       if (parsePayload(type, fields) === null) throw new Error("EXPERIMENT_EVENT_REJECTED");
       const day = dayOf(now);
-      store.append({ v: EVENT_SCHEMA_VERSION, type, game, day, source, deck, ...arms, ...fields } as ExperimentEvent);
+      store.append({ v: EVENT_SCHEMA_VERSION, type, game, day, source, origin, deck, ...arms, ...fields } as ExperimentEvent);
       if (rolledOn !== day) { rolledOn = day; store.rollUp(day); }
     } catch (error) {
       console.error(`EXPERIMENT_EVENT_FAILED ${error instanceof Error && /^[A-Z_]+$/u.test(error.message) ? error.message : "WRITE"}`);
