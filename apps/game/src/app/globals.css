@@ -437,7 +437,7 @@ noscript { display: block; padding: 12px; margin-bottom: 16px; background: var(-
 .demo-notice { margin-top: 12px; padding: 8px 10px; font-size: .75rem; line-height: 1.4; }
 .demo-notice a { color: inherit; font-weight: 700; }
 .reveal-why { margin: 14px 0; padding: 10px 14px; border: 1px solid var(--border); border-radius: var(--radius-chip); background: var(--panel); }
-.reveal-why summary { cursor: pointer; font-weight: 700; color: var(--text-soft); }
+.reveal-why summary { cursor: pointer; font-weight: 700; color: var(--text-soft); overflow-wrap: anywhere; }
 .reveal-why[open] summary { margin-bottom: 6px; }
 .reveal-why p { margin: 6px 0; }
 .reveal-source { display: block; margin: 14px 0 0; }
