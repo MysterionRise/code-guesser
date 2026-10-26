@@ -78,15 +78,18 @@ export async function generateMetadata({ searchParams }: PageProps): Promise<Met
 /**
  * The chooser (#126): the mix first when the artifact offers one (#56), then decks grouped by what they ask; in lab
  * mode `query` carries the tester's picks onto each link. Each card shows the player's records for it, which only their
- * browser holds (#63), under this round set's `artifact`.
+ * browser holds (#63), under this round set's `artifact`. An address that names a deck this artifact doesn't hold says
+ * so above it (#70), without repeating what it named.
  */
-function DeckChooser({ decks, mixed, query, artifact }: {
+function DeckChooser({ decks, mixed, query, artifact, unknownDeck }: {
   readonly decks: readonly LocalRealDeck[]; readonly mixed: LocalRealMix | null; readonly query: string; readonly artifact: string;
+  readonly unknownDeck: boolean;
 }) {
   const groups = (["Recognise", "Reason"] as const).map((tag) => ({ tag, decks: decks.filter(({ id }) => (DECK_TAGS[id] ?? "Reason") === tag) }))
     .filter(({ decks: grouped }) => grouped.length > 0);
   return (
     <main className="deck-chooser" aria-labelledby="deck-chooser-title">
+      {unknownDeck && <p className="deck-notice">That deck isn’t available. Pick another one below.</p>}
       <h1 id="deck-chooser-title">Pick a deck</h1>
       <p className="deck-intro">
         {deckSummary(decks.length)} Each game deals five real rounds from the deck. Read the code, take up to two hints,
@@ -322,7 +325,7 @@ export default async function Page({ searchParams }: PageProps) {
             </>
           )
           : <DeckChooser decks={loaded.experiment.decks} mixed={loaded.experiment.mixed} query={labQuery(overrides)}
-            artifact={recordsArtifact(loaded.experiment.artifactHash)} />}
+            artifact={recordsArtifact(loaded.experiment.artifactHash)} unknownDeck={requested !== undefined} />}
     </PageFrame>
   );
 }

@@ -31,7 +31,7 @@ test("every page's footer links the credits and the privacy page, and each says 
   for (const address of ["/", "/?deck=fix&design=off"]) {
     await page.goto(address);
     const footer = page.getByRole("contentinfo").getByRole("navigation", { name: "About CodeGuessr" });
-    await expect(footer.getByRole("link")).toHaveText(["Credits", "Privacy"]);
+    await expect(footer.getByRole("link")).toHaveText(["About", "Credits", "Privacy"]);
     expect(await page.evaluate(noHorizontalScroll)).toBe(true);
   }
   await page.getByRole("contentinfo").getByRole("link", { name: "Credits" }).click();

@@ -130,9 +130,11 @@ test("the production build plays every generative design under its nonce policy,
           if (window !== window.top) return;
           document.addEventListener("securitypolicyviolation", (event) => { void window.reportCspViolation(`${event.violatedDirective} ${event.blockedURI}`); });
         });
-        // A page built ahead of time would carry no nonce; the 404 renders per request like every other page.
-        await page.goto(`${base}/no-such-page`);
-        assert.ok(await page.evaluate(() => [...document.scripts].every((script) => script.nonce.length > 0)));
+        // A page built ahead of time would carry no nonce; the 404 and About (#168) render per request like every other page.
+        for (const path of ["/no-such-page", "/about"]) {
+          await page.goto(`${base}${path}`);
+          assert.ok(await page.evaluate(() => [...document.scripts].every((script) => script.nonce.length > 0)), path);
+        }
         for (const design of ["catalog", "composer", "visualizer"]) {
           await page.goto(`${base}/?deck=algorithm&design=${design}`);
           await page.locator("input[type=radio]").first().check();

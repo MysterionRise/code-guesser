@@ -283,7 +283,8 @@ legend { margin-bottom: 10px; font-weight: 700; }
 noscript { display: block; padding: 12px; margin-bottom: 16px; background: var(--noscript-bg); border-radius: var(--radius-small); }
 @media (max-width: 600px) { .candidate-grid { grid-template-columns: 1fr; } .game-card { border-radius: var(--radius-tile); } }
 @media (prefers-reduced-motion: no-preference) { .game-card { animation: arrive .35s ease-out; } @keyframes arrive { from { opacity: 0; transform: translateY(8px); } } }
-.deck-notice { border-color: var(--deck-notice-border); background: var(--deck-notice-bg); color: var(--deck-notice-text); }
+/* A `?deck=` this artifact doesn't hold shows the chooser under this note (#70). */
+.deck-notice { margin: 0 0 18px; padding: 10px 14px; border: 1px solid var(--deck-notice-border); border-radius: var(--radius-control); background: var(--deck-notice-bg); color: var(--deck-notice-text); }
 .deck-nav { width: min(980px, calc(100% - 32px)); margin: 22px auto -16px; }
 .deck-nav a, .deck-link { color: var(--accent); font-weight: 800; }
 .deck-link { display: inline-block; margin-top: 14px; }
@@ -432,7 +433,9 @@ noscript { display: block; padding: 12px; margin-bottom: 16px; background: var(-
 .arcade-header .round-track { flex: 1 1 280px; margin: 0; max-width: 440px; }
 @media (max-width: 600px) { .arcade-header .round-track { order: 3; flex-basis: 100%; max-width: none; } }
 .round-dot.done.missed { color: var(--miss); background: var(--miss-bg); }
-.demo-notice { margin-top: 12px; padding: 8px 12px; font-size: .78rem; line-height: 1.4; }
+/* The public notice (#168) says more, so it is a touch smaller: five lines at 320 px, even in a Linux browser's DejaVu Sans. */
+.demo-notice { margin-top: 12px; padding: 8px 10px; font-size: .75rem; line-height: 1.4; }
+.demo-notice a { color: inherit; font-weight: 700; }
 .reveal-why { margin: 14px 0; padding: 10px 14px; border: 1px solid var(--border); border-radius: var(--radius-chip); background: var(--panel); }
 .reveal-why summary { cursor: pointer; font-weight: 700; color: var(--text-soft); }
 .reveal-why[open] summary { margin-bottom: 6px; }
@@ -472,7 +475,7 @@ noscript { display: block; padding: 12px; margin-bottom: 16px; background: var(-
 @media (max-width: 600px) { .code-detail { white-space: pre-wrap; overflow-wrap: anywhere; } }
 .answer-form { margin: 0; }
 .keys-note { margin: 8px 0 0; color: var(--muted); font-size: .8rem; }
-.keys-note kbd { padding: 0 5px; border: 1px solid var(--border-soft); border-radius: var(--radius-small); font: inherit; font-family: var(--font-mono); }
+.keys-note kbd, .about-page kbd { padding: 0 5px; border: 1px solid var(--border-soft); border-radius: var(--radius-small); font: inherit; font-family: var(--font-mono); }
 @media (hover: none) and (pointer: coarse) { .keys-note { display: none; } }
 /* A phone gives the code more of its width: less padding around the card and the pane (#46). */
 @media (max-width: 600px) { .game-card { padding: 16px 12px; } .code-window { padding: 14px 10px; } .code-window.numbered { padding-left: 4px; } }
@@ -504,6 +507,17 @@ noscript { display: block; padding: 12px; margin-bottom: 16px; background: var(-
 .duel-share input { min-width: 0; padding: 10px 12px; border: 1px solid var(--border-soft); border-radius: var(--radius-small); background: var(--code-bg); color: var(--text); }
 .reveal .duel-share button, .reveal .duel-challenge button { margin: 0; justify-self: start; }
 .reveal .duel-retry { margin: 8px 0 0; }
+/* About (#168): how to play, the keys, the decks, duels, and the experiment, on the page's own background. */
+.about-page { width: min(760px, calc(100% - 32px)); margin: auto; padding: 36px 0 64px; line-height: 1.55; }
+.about-page h1 { margin: 0 0 12px; }
+.about-page h2 { margin: 30px 0 8px; color: var(--accent); font-size: 1.15rem; }
+.about-page a { color: var(--accent); }
+.about-page ol, .about-page ul { padding-left: 1.3em; }
+.about-intro { margin: 0; color: var(--muted-light); }
+.about-note { color: var(--muted); font-size: .9rem; }
+.about-decks { display: grid; gap: 10px; margin: 0; }
+.about-decks dt { font-weight: 800; }
+.about-decks dd { margin: 0; color: var(--muted-light); }
 /* Credits and privacy (#99): reading pages outside any game, on the page's own background, and the footer that links them. */
 .info-page { width: min(980px, calc(100% - 32px)); margin: auto; padding: 36px 0 32px; line-height: 1.5; }
 .info-page h1 { margin: 0 0 12px; }

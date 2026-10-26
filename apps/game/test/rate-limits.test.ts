@@ -258,7 +258,10 @@ describe("where the limits are wired (#98)", () => {
     // A deck's address redirects to a fresh seed's game and spends nothing; each game dealt spends one deal.
     await expect(render({ deck: "fix" })).rejects.toThrow("NEXT_REDIRECT");
     const dealtBefore = stored.filter(({ type }) => type === "game_dealt").length;
-    for (let game = 0; game < SURFACES.deal.burst; game += 1) expect(await render({ deck: "fix", deal: "0badcafe", game: String(game) })).toContain("Round");
+    // The game itself renders in the browser only, so the page shows no round here; the count below says it was dealt.
+    for (let game = 0; game < SURFACES.deal.burst; game += 1) {
+      expect(await render({ deck: "fix", deal: "0badcafe", game: String(game) })).not.toContain("Too many new games");
+    }
     expect(stored.filter(({ type }) => type === "game_dealt").length).toBe(dealtBefore + SURFACES.deal.burst);
     const refused = await render({ deck: "fix", deal: "0badcafe", game: "10" });
     expect(refused).toContain("Too many new games — wait a minute");
