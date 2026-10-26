@@ -100,6 +100,8 @@ export const containsProtected = (haystack: string, needle: string): boolean => 
 };
 
 const WORD_RUN = /[A-Za-z0-9_]+/gu;
+/** A text's runs of ASCII letters, digits, and underscores: the words `protectedIndex` looks up. */
+export const wordRuns = (text: string): readonly string[] => text.match(WORD_RUN) ?? [];
 /**
  * `containsProtected` for many needles against one haystack (#166), which grows with the deck. A needle matches only
  * between non-word characters or the haystack's ends, and each word run inside it stands between non-word characters
@@ -108,8 +110,8 @@ const WORD_RUN = /[A-Za-z0-9_]+/gu;
  * answer is `containsProtected`'s.
  */
 export const protectedIndex = (haystack: string): ((needle: string) => boolean) => {
-  const words = new Set(haystack.match(WORD_RUN) ?? []);
-  return (needle) => (needle.match(WORD_RUN) ?? []).every((word) => words.has(word)) && containsProtected(haystack, needle);
+  const words = new Set(wordRuns(haystack));
+  return (needle) => wordRuns(needle).every((word) => words.has(word)) && containsProtected(haystack, needle);
 };
 
 const UTC_TIMESTAMP = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{6})?Z$/u;

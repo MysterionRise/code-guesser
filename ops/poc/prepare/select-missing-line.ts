@@ -8,7 +8,7 @@ import { GAP_ORDERS, gapChoices, gapSlack, type GapChoice } from "./missing-line
 import type { MissingLineCandidate } from "./missing-line-rounds";
 import type { StackLanguage } from "./profile";
 import { balancedChoice, sha256 } from "./round-helpers";
-import { addHashes, collidesWithSelected, revealsProtected, unreportable } from "./selection";
+import { addHashes, collidesWithSelected, protectedScreen, unreportable } from "./selection";
 import type { Context, PreparationDependencies } from "./types";
 
 /** A missing-line round in waiting: everything but the final snapshot it is bound to. */
@@ -121,7 +121,7 @@ export const selectMissingLine = async (
         state.duplicatesRejected += 1;
         fail("SOURCE_DUPLICATE");
       }
-      if (panes.some((pane) => revealsProtected(profile, pane, [...otherDecks(), ...chosen]))) fail("PUBLIC_CONTAINMENT_REJECTED");
+      if (panes.some(protectedScreen(profile, [...otherDecks(), ...chosen]))) fail("PUBLIC_CONTAINMENT_REJECTED");
       if (unreportable(pending)) fail("SOURCE_IDENTITY_UNREPORTABLE");
       state.screened += 1;
       rounds.push(pending);
