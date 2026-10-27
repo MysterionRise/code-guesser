@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 
@@ -41,6 +42,8 @@ test("defines one CI workflow that pins the toolchain and runs every verificatio
     "pnpm exec node --test tests/containment/acquisition-boundary.test.mjs",
     "pnpm exec playwright install --with-deps chromium",
     "pnpm test:e2e",
+    "docker build --tag codeguessr:ci .",
+    "pnpm test:container",
     "uv sync --locked --project ops/poc/stack",
     "uv run --project ops/poc/stack --locked python -m unittest discover -s ops/poc/stack",
     "permissions:\n  contents: read",
@@ -60,6 +63,22 @@ test("pins one Node version in the manifest, the version files, CI, and the READ
   }
   assert.ok(readWorkspaceFile(".github/workflows/ci.yml").includes(`node-version: ${version}\n`), `ci.yml must pin Node ${version}`);
   assert.ok(readWorkspaceFile("README.md").includes(`Node.js \`${version}\``), `README prerequisites must name Node ${version}`);
+  // The container image (#170) builds and runs on that Node, by digest; Dependabot moves the digest, a person the version.
+  const bases = [...readWorkspaceFile("Dockerfile").matchAll(/^FROM (\S+)/gmu)].map((match) => match[1]);
+  assert.equal(bases.length, 2, "the Dockerfile must have a build and a runtime stage");
+  for (const base of bases) assert.match(base, new RegExp(`^node:${version.replaceAll(".", "\\.")}-bookworm-slim@sha256:[0-9a-f]{64}$`, "u"));
+});
+
+test("only the container image binds every interface", () => {
+  // Spelled in parts, so this file doesn't match its own search.
+  const anyAddress = ["0", "0", "0", "0"].join(".");
+  const listed = spawnSync("git", ["ls-files", "-z"], { cwd: new URL("../../", import.meta.url), encoding: "utf8" });
+  assert.equal(listed.status, 0, listed.stderr);
+  // Prose may name the address; the frozen artifact's panes are third-party code shown to players, never run.
+  const binding = listed.stdout.split("\0").filter((path) => path !== "" && !path.endsWith(".md") && !path.startsWith("apps/game/src/demo/generated/"))
+    .filter((path) => existsSync(workspaceFile(path)) && readWorkspaceFile(path).includes(anyAddress));
+  assert.deepEqual(binding, ["Dockerfile"]);
+  assert.match(readWorkspaceFile("Dockerfile"), new RegExp(`^ +HOSTNAME=${anyAddress.replaceAll(".", "\\.")} \\\\$`, "mu"));
 });
 
 test("binds the game's dev and production servers to 127.0.0.1 only", () => {

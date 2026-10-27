@@ -15,6 +15,10 @@
     "apps/game/src/styles.d.ts",
     "packages/*/test/**/*.ts",
     "tests/e2e/**/*.ts",
-    "playwright.config.ts"
+    "tests/accessibility/**/*.ts",
+    "tests/performance/**/*.ts",
+    "tests/production/**/*.ts",
+    "playwright.config.ts",
+    "playwright.production.config.ts"
   ]
 }

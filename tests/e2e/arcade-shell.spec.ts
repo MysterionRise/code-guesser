@@ -213,6 +213,29 @@ test("a game the server can no longer continue says so and offers a fresh deal",
   await expect(page.getByRole("main").getByRole("alert")).toHaveCount(0);
 });
 
+test("a page from before a deploy says the game was updated and reloads into the new build", async ({ page }) => {
+  await page.goto("/?deck=language");
+  await expect(page.getByText("Round 1 of 5")).toBeVisible();
+  // Each build names its server actions afresh (#170), so an older page asks for an action this server never had.
+  await page.route("**/*", (route) => {
+    const headers = route.request().headers();
+    return headers["next-action"] ? route.continue({ headers: { ...headers, "next-action": `40${"0".repeat(40)}` } }) : route.continue();
+  });
+  await page.getByRole("button", { name: "Reveal hint 1" }).click();
+  const alert = page.getByRole("main").getByRole("alert");
+  await expect(alert).toHaveText("CodeGuessr was updated. Reload the page to keep playing. Reload");
+  await expect(page.locator(".hints .hint")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Lock in answer" })).toBeDisabled();
+  await page.unrouteAll();
+  const reloaded = page.waitForEvent("load");
+  await alert.getByRole("button", { name: "Reload" }).click();
+  await reloaded;
+  await expect(page.getByText("Round 1 of 5")).toBeVisible();
+  await expect(page.getByRole("main").getByRole("alert")).toHaveCount(0);
+  await page.getByRole("button", { name: "Reveal hint 1" }).click();
+  await expect(page.locator(".hints .hint")).toHaveCount(1);
+});
+
 test("each visit deals rounds from the deck's pool", async ({ page }) => {
   const seen = new Set<string>();
   for (let visit = 0; visit < 6; visit += 1) {

@@ -53,21 +53,6 @@ export default defineConfig({
   ],
   projects: [
     {
-      name: "provenance-accessibility",
-      testMatch: /provenance-accessibility\.spec\.ts/,
-      use: { baseURL },
-    },
-    {
-      name: "language-accessibility",
-      testMatch: /language-accessibility\.spec\.ts/,
-      use: { baseURL },
-    },
-    {
-      name: "privacy-accessibility",
-      testMatch: /privacy-accessibility\.spec\.ts/,
-      use: { baseURL },
-    },
-    {
       name: "arcade",
       testMatch: /(?:arcade-shell|accessibility-local|genui|events|themes|layers|share|rate-limits|duel|public-pages|credits-privacy|daily|records|polish)\.spec\.ts/,
       use: { baseURL },

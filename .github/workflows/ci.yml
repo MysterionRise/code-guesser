@@ -64,16 +64,12 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
-      - name: Accessibility checks
-        run: pnpm test:a11y
-
-      - name: Performance checks
-        run: pnpm test:performance
-
+      # Scans the build above, which it reuses rather than building again (#66).
       - name: Acquisition containment
         run: pnpm exec node --test tests/containment/acquisition-boundary.test.mjs
 
-      # The boot checks drive the production build in Chromium too, so the browser is installed before them.
+      # The boot, accessibility, and performance checks drive the production build in Chromium, so the browser is
+      # installed before them.
       - name: Install Playwright Chromium
         run: pnpm exec playwright install --with-deps chromium
 
@@ -82,8 +78,53 @@ jobs:
       - name: Boot checks
         run: pnpm test:deploy
 
+      # `next start` on the same build (#45, #70): axe on every page and game state at 320 and 1280 px, a whole game
+      # from the keyboard, and the pages odd addresses end on.
+      - name: Accessibility checks
+        run: pnpm test:a11y
+
+      # Script and time budgets on the same build, and a whole game that requests nothing from another origin.
+      - name: Performance checks
+        run: pnpm test:performance
+
+      # The browser scenarios run on `next dev`, which replaces the build in `.next`, so they come last.
       - name: Browser scenarios
         run: pnpm test:e2e
+
+  # The container image the owner's server runs (#170), built from this checkout as Dokploy builds it.
+  container:
+    name: Container image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.15.9
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.22.0
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The smoke script plays one game in Chromium against the running container.
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Build the image
+        run: docker build --tag codeguessr:ci .
+
+      # Runs the image in public mode with a throwaway secret and volume: a missing secret or volume exits 78, and a
+      # configured server runs as node, answers its health check, deals a game into its state store, and passes
+      # ops/deploy/smoke.mjs and ops/deploy/pull-events.sh.
+      - name: Container checks
+        run: pnpm test:container
+        env:
+          CODEGUESSR_IMAGE: codeguessr:ci
 
   python:
     name: Stack worker

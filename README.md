@@ -341,6 +341,15 @@ A page that fails shows a plain error page with a link back to the decks; it
 says nothing about the error. The `dev` and `start` scripts still listen on
 127.0.0.1 only.
 
+The container image (`Dockerfile`, #170) is the one place the server listens
+on every interface. It runs Next.js's standalone server as the `node` user,
+with its state and events on a volume at `/data`, and refuses to start in
+public mode with nothing mounted there (`GAME_ENVIRONMENT_REJECTED
+DATA_VOLUME_MISSING`). [`docs/deploy.md`](docs/deploy.md) is the runbook for
+the owner's server, with Dokploy; `ops/deploy/smoke.mjs` checks a running
+server, and `ops/deploy/pull-events.sh` copies its event log off for
+`pnpm experiment:report`.
+
 #### Rate limits
 
 A public server limits each client (#98), and so does any server with
@@ -722,25 +731,65 @@ Ctrl-C ends the process at once.
 ```bash
 pnpm test
 pnpm typecheck
+pnpm --filter @codeguessr/game build
+pnpm exec node --test tests/containment/acquisition-boundary.test.mjs
+pnpm test:deploy
 pnpm test:a11y
 pnpm test:performance
 pnpm test:e2e
-pnpm exec node --test tests/containment/acquisition-boundary.test.mjs
-pnpm --filter @codeguessr/game build
-pnpm test:deploy
+pnpm test:container
 uv run --project ops/poc/stack --locked python -m unittest discover -s ops/poc/stack
 pnpm audit --audit-level=high
 ```
 
-`pnpm audit` asks the npm registry for advisories, so it is the one check
-that needs the network; CI runs it after installing. `pnpm test:deploy`
-starts the production build in public mode; it reuses a build newer than the
-game's sources and builds one otherwise.
+What each one checks:
+
+- `pnpm test`: the workspace and CI layout, then every Vitest suite under
+  `apps/`, `packages/`, and `ops/`, the deck leakage test among them.
+- `pnpm typecheck`: every package, `ops/`, and the test files.
+- The containment test: no acquisition code, provider key, session secret, or
+  preparer reaches the production build or the browser.
+- `pnpm test:deploy`: boots the production build in public mode. A missing
+  setting exits 78 with its code, the health check and state store work, rate
+  limits read the proxy's address, and every page plays under the nonce
+  policy with eval refused.
+- `pnpm test:container`: needs Docker. It builds the image, or takes
+  `CODEGUESSR_IMAGE`, and runs it in public mode with a throwaway secret and
+  volume.
+- `pnpm test:a11y`: Playwright against `next start` on the production build.
+  axe's WCAG 2 A and AA rules read the chooser, About, Credits, Privacy, the
+  404, and a duel's intro, game, comparison, and result. They read every
+  deck, the mix, and today's five at round 1, after a hint, after a reveal,
+  and at the end, in all four themes between them. Each page is read at 320
+  and 1280 px and must not scroll sideways or animate under reduced motion. A
+  whole game is played from the keyboard alone. Odd addresses (a deck the
+  game lacks, a malformed deal, game, or date, a tampered or expired duel
+  link, an unknown path) must end on a page that says what happened and shows
+  nothing internal.
+- `pnpm test:performance`: the same server. A first visit transfers at most
+  125,000 bytes of script on the chooser and 135,000 on a game.
+  "Round 1 of 5" shows within 1 s of opening a deck's address (1.5 s on CI).
+  A whole game, its challenge link, and the footer's pages request nothing
+  from another origin.
+- `pnpm test:e2e`: the browser scenarios, on `next dev` with a stand-in for
+  OpenRouter: every deck played through, themes, question layers, generative
+  UI, duels, records, sharing, events, rate limits, and security headers.
+- The Python tests: the Stack workers.
+- `pnpm audit`: asks the npm registry for advisories, so it is the one check
+  that needs the network; CI runs it after installing.
+
+The containment test, `pnpm test:deploy`, `pnpm test:a11y`, and
+`pnpm test:performance` reuse a production build newer than what it is made
+from (the game's sources, the artifact package, and the lockfile), and build
+one otherwise. `next dev` writes into the same `.next`, so after
+`pnpm test:e2e` the next of them builds again; CI runs the browser scenarios
+last.
 
 If Playwright reports that Chromium is missing on a fresh machine, run
 `pnpm exec playwright install chromium`. `pnpm test:e2e` starts its own dev
-server on port 3000; if another app holds it, run
-`E2E_PORT=3200 pnpm test:e2e`.
+server on port 3000 and the OpenRouter stand-in on 3001; `pnpm test:a11y`
+and `pnpm test:performance` start `next start` on 3010. `E2E_PORT` moves all
+of them: if another app holds port 3000, run `E2E_PORT=3200 pnpm test:e2e`.
 
 ## Repository map
 
@@ -773,11 +822,14 @@ Each path has a status:
 | `ops/experiment` | `experiment:report`: the experiment's report from the event log, with its statistics and pre-registered plan | live |
 | `ops/content` | The `acquire:content` operator command and its policy files. The containment test (`tests/containment/acquisition-boundary.test.mjs`) requires the script to exist | Contract-era |
 | `ops/tsconfig.json` | Type-checks everything under `ops/`; `pnpm typecheck` runs it | PoC support |
-| `tests` | Accessibility, browser, performance, containment, and boot (`tests/deploy`) suites. They run in CI against the live game; the privacy and provenance checks date from the Contract era | PoC support |
+| `Dockerfile`, `.dockerignore` | The container image the owner's server runs (#170), and the build context it may read | live |
+| `ops/deploy` | The image's entrypoint, the deploy smoke test, and `pull-events.sh`; the runbook is `docs/deploy.md` | live |
+| `tests` | The accessibility and performance suites (`tests/accessibility`, `tests/performance`), which `tests/production` runs on the production build; the browser scenarios (`tests/e2e`); containment; boot (`tests/deploy`); and the container image (`tests/container`). CI runs them all | PoC support |
 | `.github/workflows/ci.yml` | CI: a dependency audit that fails on high or critical advisories, then every suite above, with no provider secrets and no live preparation | PoC support |
-| `.github/dependabot.yml` | Monthly version updates for npm and GitHub Actions, minor and patch grouped, npm majors left to hand upgrades, at most five open pull requests per ecosystem; the Stack worker's `uv.lock` gets security updates only, since the worker journal is keyed to it | PoC support |
+| `.github/dependabot.yml` | Monthly version updates for npm and GitHub Actions, minor and patch grouped, npm majors left to hand upgrades, at most five open pull requests per ecosystem; the Stack worker's `uv.lock` gets security updates only, since the worker journal is keyed to it; the image's Node base gets new digests only, its version moving by hand | PoC support |
 | `vitest.config.mts` | Finds `*.test.ts` and `*.test.tsx` under `apps/`, `packages/`, and `ops/`, and compiles JSX with React's automatic runtime, since the tsconfig preserves JSX for Next.js. A test may take 30 s, as the preparer's synchronous composition tests take up to 12 s on CI | PoC support |
-| `playwright.config.ts` | The browser suites; starts a dev server on 127.0.0.1 (`E2E_PORT`, default 3000) | PoC support |
+| `playwright.config.ts` | The browser scenarios; starts a dev server on 127.0.0.1 (`E2E_PORT`, default 3000) | PoC support |
+| `playwright.production.config.ts` | The accessibility and performance suites; starts `next start` on the production build at `E2E_PORT` + 10 | PoC support |
 | `tsconfig.base.json` | Compiler options every package and `ops/` extend | PoC support |
 | `compose.test.yaml` | A Postgres 16 test service. No script, test, or workflow uses it | Contract-era |
 | [`docs/architecture.md`](docs/architecture.md) | The flow from preparation to play, the artifact's shape, and a glossary of field names | live |

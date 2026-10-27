@@ -10,10 +10,11 @@
   },
   "scripts": {
     "test": "node --test packages/test-support/workspace.test.mjs && vitest run --passWithNoTests",
-    "test:a11y": "node tests/accessibility/run-accessibility.mjs",
+    "test:a11y": "node tests/production/run-production.mjs a11y",
     "test:e2e": "node tests/e2e/run-playwright.mjs",
-    "test:performance": "node --test tests/performance/*.test.mjs",
+    "test:performance": "node tests/production/run-production.mjs performance",
     "test:deploy": "node --test tests/deploy/*.test.mjs",
+    "test:container": "node --test tests/container/*.test.mjs",
     "acquire:content": "node --import tsx ops/content/acquire/index.ts",
     "prepare:poc": "node --import tsx ops/poc/prepare/index.ts",
     "prepare:questions": "node --import tsx ops/poc/questions/index.ts",
