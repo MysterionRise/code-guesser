@@ -7,6 +7,10 @@ export type Step =
   // Checks the current round's right answer. The recorder reads it from the artifact on the Node side, as the
   // browser tests do; the page itself never learns it.
   | Readonly<{ kind: "answer" }>
+  // Checks a wrong answer to the current round: the first option the artifact lists that isn't right.
+  | Readonly<{ kind: "miss" }>
+  // Opens the scene's challenge link (`Scene.challenge`), as the friend.
+  | Readonly<{ kind: "openChallenge" }>
   | Readonly<{ kind: "caption"; text: string }>
   | Readonly<{ kind: "click"; name: string }>
   | Readonly<{ kind: "link"; name: string }>
@@ -29,6 +33,11 @@ export interface Scene {
   readonly captionStyle?: CaptionStyle;
   /** The page's motion preference; the game animates unless it is `reduce`. */
   readonly reducedMotion?: "reduce" | "no-preference";
+  /**
+   * A duel's challenger (#173), played off camera before the recording starts, in a browser of their own: `steps`
+   * play a game, which becomes a challenge under `name`. An `openChallenge` step opens its link.
+   */
+  readonly challenge?: Readonly<{ name: string; steps: readonly Step[] }>;
   readonly steps: readonly Step[];
 }
 
@@ -40,6 +49,7 @@ const choose = (index: number): Step => ({ kind: "choose", index });
 const wait = (milliseconds: number): Step => ({ kind: "wait", milliseconds });
 const verdict: Step = { kind: "expectHeading", pattern: "^(?:Nice read\\.|Not this time\\.)$" };
 const answer: Step = { kind: "answer" };
+const roundOf = (round: number): Step => ({ kind: "expectText", pattern: `Round ${round} of 5` });
 
 const jumpTo = (selector: string, block: "start" | "center" = "center"): Step => ({ kind: "jumpTo", selector, block });
 
@@ -51,12 +61,18 @@ type Theme = "terminal" | "paper" | "arcade" | "contrast";
 
 /**
  * Each deck's recorded deal (#40): a fixed seed's first game, so every recording plays the same rounds. Each seed was
- * picked for a first round that reads well at a phone's width.
+ * picked for a first round of the v7 artifact that reads well at a phone's width; the language and algorithm rounds
+ * also carry a question layer.
  */
 export const DEAL_SEEDS: Readonly<Record<Deck, string>> = Object.freeze({
-  project: "0000beef", language: "c0dec0de", algorithm: "c0dec0de", framework: "0000beef", exercise: "c0dec0de",
-  "before-after": "5eed0002", output: "0000beef", fix: "c0dec0de", "missing-line": "5eed0002", "name-function": "c0dec0de",
+  project: "c0de000a", language: "5eed000d", algorithm: "5eed000f", framework: "5eed0018", exercise: "c0de0010",
+  "before-after": "c0de000c", output: "5eed001c", fix: "5eed0009", "missing-line": "5eed001f", "name-function": "c0de0014",
 });
+/**
+ * The duel scene's challenge (#173): a game of the language deck in the paper theme, with its Marker hunt layer, on a
+ * seed no other scene deals, so the server counts it as the challenger's first try.
+ */
+export const DUEL_DEAL = Object.freeze({ deck: "language", seed: "d0e1d0e1" } as const);
 
 /**
  * A deck's recorded game: its fixed deal with the static design and the theme and question layer asked for. The picks
@@ -66,8 +82,8 @@ export const dealtPath = (deck: Deck, look: Readonly<{ theme?: Theme; layer?: "o
   `/?deck=${deck}&deal=${DEAL_SEEDS[deck]}&game=0&design=off&theme=${look.theme ?? "terminal"}&layer=${look.layer ?? "off"}`;
 /** The chooser, with picks its links carry into the game they deal. */
 const CHOOSER = "/?design=off&theme=terminal&layer=off";
-/** The mixed game's card, by its description: the card's title alone also matches "the same mixed five". */
-export const MIXED_CARD = "Five rounds, each from a different deck.";
+/** Today's five's card, by its description; it links to the player's own date once the page hydrates (#172). */
+export const DAILY_CARD = "The same mixed five all day";
 /** Long lines wrap under their own indentation, for panes whose lines run past a phone's width. */
 const wrapLines = click("Wrap lines");
 
@@ -138,14 +154,20 @@ export const DEMO_SCENE: Scene = Object.freeze({
 });
 
 /**
- * Answer index per round in the per-deck and full-run scenes: a fixed choreography rather than known-correct
- * answers, so a wrong pick shows the "Not this time." branch. The vertical demo instead answers every round right
- * (`answer` steps).
+ * How a scene locks in a round: the right answer or a wrong one, which the recorder reads from the artifact, or a radio
+ * index.
  */
-export const DEFAULT_ANSWER_CHOREOGRAPHY: readonly number[] = Object.freeze([0, 0, 0, 1, 0]);
+export type Pick = "right" | "miss" | number;
+const pickStep = (pick: Pick): Step => pick === "right" ? answer : pick === "miss" ? { kind: "miss" } : choose(pick);
 
-/** Parses DEMO_ANSWERS ("0,1,1,0,1"): five radio indexes, one per round; blank means the default. */
-export const parseAnswerChoreography = (value: string | undefined): readonly number[] => {
+/**
+ * How the full run locks in its five rounds: four right and one miss, so it shows the "Not this time." branch too,
+ * whatever rounds today's five deals.
+ */
+export const DEFAULT_ANSWER_CHOREOGRAPHY: readonly Pick[] = Object.freeze(["right", "right", "miss", "right", "right"]);
+
+/** Parses DEMO_ANSWERS ("0,1,1,0,1"): five radio indexes, one per round of the full run; blank means the default. */
+export const parseAnswerChoreography = (value: string | undefined): readonly Pick[] => {
   if (value === undefined || value.trim() === "") return DEFAULT_ANSWER_CHOREOGRAPHY;
   const indexes = value.split(",").map((part) => Number(part.trim()));
   if (indexes.length !== 5 || indexes.some((index) => !Number.isInteger(index) || index < 0 || index > 3)) {
@@ -157,9 +179,9 @@ export const parseAnswerChoreography = (value: string | undefined): readonly num
 const ANSWER_CHOREOGRAPHY = parseAnswerChoreography(process.env.DEMO_ANSWERS);
 
 const playRound = (round: number, hints: number): Step[] => [
-  { kind: "expectText", pattern: `Round ${round} of 5` },
+  roundOf(round),
   ...Array.from({ length: hints }, (_, index) => [click(`Reveal hint ${index + 1}`), wait(700)]).flat(),
-  choose(ANSWER_CHOREOGRAPHY[round - 1] ?? 0),
+  pickStep(ANSWER_CHOREOGRAPHY[round - 1] ?? "right"),
   wait(600),
   click("Lock in answer"),
   verdict,
@@ -168,13 +190,14 @@ const playRound = (round: number, hints: number): Step[] => [
 ];
 
 /**
- * One deck's teaser: open its recorded game, take a hint, and lock in an answer. With a `trace` caption it also buys
- * the second hint, a question layer's step-through, and steps it forward.
+ * One deck's teaser: open its recorded game, take a hint, and lock in the right answer (or, where asked, a wrong one,
+ * for the "Not this time." branch). With a `trace` caption it also buys the second hint, a question layer's
+ * step-through, and steps it forward.
  */
 const deckScene = (
   deck: Deck,
   captions: Readonly<{ opening: string; hint: string; trace?: string; answer: string }>,
-  answerIndex: number,
+  pick: "right" | "miss",
   gif: Partial<GifOptions> = {},
   look: Readonly<{ wrap?: boolean; layer?: "on" | "off" }> = {},
 ): Scene => ({
@@ -201,7 +224,7 @@ const deckScene = (
     caption(captions.answer),
     { kind: "scrollTo", selector: "fieldset" },
     wait(800),
-    choose(answerIndex),
+    pickStep(pick),
     wait(800),
     click("Lock in answer"),
     verdict,
@@ -212,59 +235,134 @@ const deckScene = (
   ],
 });
 
+/** One round of a duel, as its plan plays it: the hints it buys, then the right answer or a miss. */
+type DuelRound = Readonly<{ hints: number; pick: "right" | "miss" }>;
+/** The challenger's game: four right, the first after a hint, and one miss (3,800 of 5,000). */
+export const CHALLENGER_PLAN: readonly DuelRound[] = Object.freeze([
+  { hints: 1, pick: "right" }, { hints: 0, pick: "miss" }, { hints: 0, pick: "right" }, { hints: 0, pick: "right" }, { hints: 0, pick: "right" },
+]);
+/** The friend's game: four right without hints, and one miss (4,000), so the friend wins by 200 points. */
+export const FRIEND_PLAN: readonly DuelRound[] = Object.freeze([
+  { hints: 0, pick: "right" }, { hints: 0, pick: "right" }, { hints: 0, pick: "right" }, { hints: 0, pick: "miss" }, { hints: 0, pick: "right" },
+]);
+
+/** A whole game played off camera by plan, round by round to each verdict. */
+const playGame = (plan: readonly DuelRound[]): Step[] => plan.flatMap(({ hints, pick }, index) => [
+  ...(index > 0 ? [click("Next round")] : []),
+  roundOf(index + 1),
+  ...Array.from({ length: hints }, (_, hint) => click(`Reveal hint ${hint + 1}`)),
+  pickStep(pick),
+  click("Lock in answer"),
+  verdict,
+]);
+
+/**
+ * The friend's round on camera: both round tracks over the round, then the lock, and the reveal that says how the
+ * challenger did on it. The first round's caption explains the strip.
+ */
+const duelRound = (index: number, { pick }: DuelRound): Step[] => [
+  ...(index > 0 ? [click("Next round")] : []),
+  roundOf(index + 1),
+  jumpTo(".arcade-shell", "start"),
+  ...(index === 0 ? [caption("Ana’s rounds stay hidden until you answer."), wait(1600)] : [wait(900)]),
+  jumpTo("fieldset"),
+  wait(300),
+  pickStep(pick),
+  wait(300),
+  click("Lock in answer"),
+  verdict,
+  jumpTo(".reveal h2"),
+  wait(1300),
+];
+
+/**
+ * A duel (#173): a challenger plays the duel's deal off camera and sends a challenge link; the friend opens it, plays
+ * the same five beside the challenger's strip, and ends on the comparison and the result link to send back.
+ */
+export const DUEL_SCENE: Scene = Object.freeze({
+  id: "duel",
+  gif: { width: 340, framesPerSecond: 10, maximumColors: 64 },
+  challenge: Object.freeze({
+    name: "Ana",
+    steps: Object.freeze([
+      goto(`/?deck=${DUEL_DEAL.deck}&deal=${DUEL_DEAL.seed}&game=0&design=off&theme=paper&layer=on`),
+      ...playGame(CHALLENGER_PLAN),
+    ]),
+  }),
+  steps: Object.freeze<Step[]>([
+    { kind: "openChallenge" },
+    { kind: "expectHeading", pattern: "^Ana challenges you$" },
+    wait(400),
+    caption("A friend sent you a challenge."),
+    wait(2200),
+    caption("Same five rounds. Same hints."),
+    wait(1400),
+    link("Play the same five"),
+    ...FRIEND_PLAN.flatMap((round, index) => [...duelRound(index, round), ...(index === 0 ? [caption("")] : [])]),
+    { kind: "expectHeading", pattern: "^You win by 200 points$" },
+    jumpTo(".duel-comparison", "start"),
+    caption("Then send your result back."),
+    wait(2800),
+    caption(""),
+    wait(300),
+  ]),
+});
+
 export const SCENES: readonly Scene[] = Object.freeze([
   DEMO_SCENE,
   deckScene("project", {
     opening: "Which project is this from?",
     hint: "Hints cost points.",
     answer: "Four popular repos. Pick one.",
-  }, ANSWER_CHOREOGRAPHY[0] ?? 0, { width: 340, maximumColors: 64 }),
+  }, "right", { width: 340, maximumColors: 64 }),
   deckScene("language", {
     opening: "Name the language.",
     hint: "The hint marks the lines that decide it.",
     answer: "Lock in your call.",
-  }, ANSWER_CHOREOGRAPHY[1] ?? 0, { width: 360, maximumColors: 96 }, { layer: "on" }),
+  }, "right", { width: 360, maximumColors: 80 }, { layer: "on" }),
   deckScene("algorithm", {
     opening: "Which algorithm is this?",
     hint: "Its own name is hidden.",
     trace: "Hint 2 steps through it.",
     answer: "Four of one family. Pick one.",
-  }, ANSWER_CHOREOGRAPHY[2] ?? 0, { width: 330, framesPerSecond: 10, maximumColors: 72 }, { layer: "on" }),
+  }, "right", { width: 330, framesPerSecond: 10, maximumColors: 72 }, { layer: "on" }),
   deckScene("framework", {
     opening: "One to-do app, many frameworks.",
     hint: "Their names are hidden.",
     answer: "Which framework wrote this?",
-  }, ANSWER_CHOREOGRAPHY[3] ?? 0, { width: 340, maximumColors: 88 }),
+  }, "right", { width: 340, maximumColors: 88 }),
   deckScene("exercise", {
     opening: "Which exercise does this solve?",
     hint: "Real Exercism solutions.",
     answer: "Four exercises. Pick one.",
-  }, ANSWER_CHOREOGRAPHY[4] ?? 0, { width: 360, maximumColors: 96 }, { wrap: true }),
+  }, "right", { width: 360, maximumColors: 80 }, { wrap: true }),
   deckScene("before-after", {
     opening: "Before or after the refactor?",
     hint: "The hint quotes the commit.",
     answer: "Which version is newer?",
-  }, Math.min(ANSWER_CHOREOGRAPHY[3] ?? 1, 1), { width: 340, maximumColors: 80 }),
+  }, "right", { width: 340, maximumColors: 80 }),
+  // The one miss among the deck clips: its round's first wrong option is the edge case the function's code hides.
   deckScene("output", {
     opening: "What does the last line return?",
     hint: "Hints work other calls.",
     answer: "Trace it, then lock it in.",
-  }, ANSWER_CHOREOGRAPHY[4] ?? 0, { width: 360, maximumColors: 96 }, { wrap: true }),
+  }, "miss", { width: 360, maximumColors: 96 }, { wrap: true }),
   deckScene("fix", {
     opening: "A real bug fix changed one line.",
     hint: "The hint names the kind of change.",
     answer: "Which line was it?",
-  }, ANSWER_CHOREOGRAPHY[3] ?? 1, { width: 340, maximumColors: 80 }),
+  }, "right", { width: 340, maximumColors: 80 }),
   deckScene("missing-line", {
     opening: "One line is missing.",
     hint: "Stuck? Take a hint.",
     answer: "Which line fills the gap?",
-  }, ANSWER_CHOREOGRAPHY[0] ?? 0, { width: 360, maximumColors: 96 }, { wrap: true }),
+  }, "right", { width: 360, maximumColors: 80 }, { wrap: true }),
   deckScene("name-function", {
     opening: "Its name is hidden.",
     hint: "Hints cost points.",
     answer: "What did its author call it?",
-  }, ANSWER_CHOREOGRAPHY[1] ?? 0, { width: 360, maximumColors: 96 }, { wrap: true }),
+  }, "right", { width: 360, maximumColors: 80 }, { wrap: true }),
+  DUEL_SCENE,
   {
     id: "full-run",
     gif: { speed: 2, framesPerSecond: 8, width: 340, maximumColors: 48 },
@@ -275,10 +373,10 @@ export const SCENES: readonly Scene[] = Object.freeze([
       wait(500),
       caption("Ten decks of real code. Five rounds a game."),
       wait(1800),
-      caption("Or mix them: one round from each of five decks."),
-      wait(1200),
-      link(MIXED_CARD),
-      { kind: "expectText", pattern: "Round 1 of 5" },
+      caption("Or today’s five: one mix for everyone."),
+      wait(1400),
+      link(DAILY_CARD),
+      roundOf(1),
       caption("Read, guess, score."),
       wait(1000),
       ...playRound(1, 1),
@@ -291,14 +389,19 @@ export const SCENES: readonly Scene[] = Object.freeze([
       click("Next round"),
       ...playRound(5, 0),
       { kind: "expectText", pattern: "Run complete" },
-      caption("Share your score."),
-      { kind: "scrollTo", selector: ".reveal p:last-of-type" },
-      wait(2400),
-      caption("Then try another deck."),
-      wait(900),
+      caption("Each round names its deck."),
+      { kind: "scrollTo", selector: ".game-summary" },
+      wait(2000),
+      caption("Share it, or challenge a friend."),
+      { kind: "scrollTo", selector: ".duel-challenge" },
+      wait(2200),
+      caption(""),
       link("Choose another deck"),
       { kind: "expectHeading", pattern: "^Pick a deck$" },
-      wait(1200),
+      // A caption lives in its page, so the chooser's comes once it has loaded.
+      { kind: "expectText", pattern: "^Day streak 1$" },
+      caption("Your streak stays in this browser."),
+      wait(2400),
       caption(""),
       wait(600),
     ],

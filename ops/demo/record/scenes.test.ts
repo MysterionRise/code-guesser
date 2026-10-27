@@ -1,21 +1,25 @@
-import { DEAL_SEEDS, DECKS, DEFAULT_ANSWER_CHOREOGRAPHY, DEMO_SCENE, MIXED_CARD, SCENES, parseAnswerChoreography } from "./scenes";
+import {
+  CHALLENGER_PLAN, DAILY_CARD, DEAL_SEEDS, DECKS, DEFAULT_ANSWER_CHOREOGRAPHY, DEMO_SCENE, DUEL_DEAL, DUEL_SCENE, FRIEND_PLAN, SCENES,
+  parseAnswerChoreography,
+} from "./scenes";
 
 // The operator typecheck keeps vitest types out of its program, as the other ops suites do.
 const testModuleName: string = "vitest";
 const { describe, expect, it } = await import(testModuleName) as any;
 
 describe("demo recorder scenes", () => {
-  it("defaults the answer choreography and parses a five-index override", () => {
+  it("defaults the full run to four right answers and a miss, and parses a five-index override", () => {
     expect(parseAnswerChoreography(undefined)).toBe(DEFAULT_ANSWER_CHOREOGRAPHY);
     expect(parseAnswerChoreography("  ")).toBe(DEFAULT_ANSWER_CHOREOGRAPHY);
+    expect([...DEFAULT_ANSWER_CHOREOGRAPHY].sort()).toEqual(["miss", "right", "right", "right", "right"]);
     expect(parseAnswerChoreography("0, 1,1,0,1")).toEqual([0, 1, 1, 0, 1]);
     for (const bad of ["0,1", "0,1,1,0,4", "a,b,c,d,e", "0,1,1,0,-1"]) {
       expect(() => parseAnswerChoreography(bad)).toThrow(RangeError);
     }
   });
 
-  it("records one scene per deck, each at its fixed deal with the static design, plus a full run with the MP4", () => {
-    expect(SCENES.map(({ id }) => id)).toEqual(["demo", ...DECKS.map((deck) => `deck-${deck}`), "full-run"]);
+  it("records one scene per deck, each at its fixed deal with the static design, plus a duel and a full run with the MP4", () => {
+    expect(SCENES.map(({ id }) => id)).toEqual(["demo", ...DECKS.map((deck) => `deck-${deck}`), "duel", "full-run"]);
     expect(SCENES.filter(({ mp4 }) => mp4).map(({ id, mp4 }) => `${id}:${mp4}`)).toEqual(["full-run:codeguessr-demo"]);
     for (const deck of DECKS) {
       const scene = SCENES.find(({ id }) => id === `deck-${deck}`)!;
@@ -36,18 +40,43 @@ describe("demo recorder scenes", () => {
     expect(algorithm).toContainEqual({ kind: "scrollTo", selector: ".trace-stepper" });
   });
 
-  it("starts the full run at the chooser, plays a mixed game, and ends it by choosing another deck", () => {
+  it("starts the full run at the chooser, plays today's five, and ends on the chooser with its day streak", () => {
     const steps = SCENES.find(({ id }) => id === "full-run")!.steps;
     expect(steps[0]).toMatchObject({ kind: "goto", path: expect.stringMatching(/^\/\?design=off&/u) });
-    expect(steps).toContainEqual({ kind: "link", name: MIXED_CARD });
+    expect(steps).toContainEqual({ kind: "link", name: DAILY_CARD });
     const last = steps.filter(({ kind }) => kind === "link").at(-1);
     expect(last).toEqual({ kind: "link", name: "Choose another deck" });
     expect(steps.filter((step) => step.kind === "click" && step.name === "Lock in answer")).toHaveLength(5);
+    expect(steps).toContainEqual({ kind: "scrollTo", selector: ".duel-challenge" });
+    expect(steps).toContainEqual({ kind: "expectText", pattern: "^Day streak 1$" });
   });
 
-  it("only picks the first two answers in the two-choice before-or-after deck", () => {
-    const beforeAfter = SCENES.find(({ id }) => id === "deck-before-after")!;
-    for (const step of beforeAfter.steps) if (step.kind === "choose") expect(step.index).toBeLessThan(2);
+  it("locks in the right answer in every deck clip but one, which misses", () => {
+    const picks = DECKS.map((deck) => SCENES.find(({ id }) => id === `deck-${deck}`)!.steps
+      .filter(({ kind }) => kind === "answer" || kind === "miss" || kind === "choose").map(({ kind }) => kind));
+    for (const deckPicks of picks) expect(deckPicks).toHaveLength(1);
+    expect(picks.flat().filter((kind) => kind === "miss")).toHaveLength(1);
+    expect(picks.flat().filter((kind) => kind === "answer")).toHaveLength(DECKS.length - 1);
+  });
+
+  it("plays a duel: the challenger off camera on its own deal, the friend on camera to the comparison", () => {
+    expect(DUEL_SCENE.challenge?.name).toBe("Ana");
+    const [open] = DUEL_SCENE.challenge!.steps;
+    expect(open).toMatchObject({ kind: "goto" });
+    const query = Object.fromEntries(new URLSearchParams((open as { path: string }).path.slice(2)));
+    expect(query).toMatchObject({ deck: DUEL_DEAL.deck, deal: DUEL_DEAL.seed, game: "0", design: "off", layer: "on" });
+    // A seed no deck clip deals, so the challenge is the challenger's first try of it.
+    expect(Object.values(DEAL_SEEDS)).not.toContain(DUEL_DEAL.seed);
+    const locks = (steps: readonly { kind: string; name?: string }[]) => steps.filter((step) => step.kind === "click" && step.name === "Lock in answer");
+    expect(locks(DUEL_SCENE.challenge!.steps)).toHaveLength(5);
+    expect(DUEL_SCENE.steps[0]).toEqual({ kind: "openChallenge" });
+    expect(DUEL_SCENE.steps).toContainEqual({ kind: "link", name: "Play the same five" });
+    expect(locks(DUEL_SCENE.steps)).toHaveLength(5);
+    // Each side's score as the game scores it: 1,000 a round, 800 after one hint, nothing for a miss.
+    const score = (plan: typeof FRIEND_PLAN) => plan.reduce((total, { hints, pick }) => total + (pick === "miss" ? 0 : [1_000, 800, 500][hints]!), 0);
+    expect(score(FRIEND_PLAN) - score(CHALLENGER_PLAN)).toBe(200);
+    expect(DUEL_SCENE.steps).toContainEqual({ kind: "expectHeading", pattern: "^You win by 200 points$" });
+    expect(DUEL_SCENE.steps.filter(({ kind }) => kind === "answer" || kind === "miss")).toHaveLength(5);
   });
 
   it("captions the before-or-after deck with where its answers come from", () => {
@@ -74,6 +103,6 @@ describe("demo recorder scenes", () => {
     expect(DEMO_SCENE.steps.some((step: any) => step.kind === "choose")).toBe(false);
     // No caption may name an answer, only the deck and the points.
     const captions = DEMO_SCENE.steps.flatMap((step: any) => step.kind === "caption" ? [step.text] : []);
-    expect(captions.join(" ")).not.toMatch(/search|svelte|react|python|java|rust|go\b|line \d|collatz|getmin|pop\b/iu);
+    expect(captions.join(" ")).not.toMatch(/search|svelte|react|python|java|rust|go\b|prolog|line \d|order|raindrop|collatz|getmin|pop\b/iu);
   });
 });
