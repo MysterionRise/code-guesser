@@ -416,6 +416,7 @@ test("on a phone no fix option's code is cut off, and wrapped lines keep their i
   await page.getByRole("button", { name: "Wrap lines" }).click();
   await expect(page.getByRole("button", { name: "Wrap lines" })).toHaveAttribute("aria-pressed", "true");
   // Every round of the game, since a deeply indented line in any of them once pushed the pane past its edge.
+  const hanging: { indent: string; hang: number }[] = [];
   for (let round = 1; round <= 5; round += 1) {
     if (round > 1) {
       await page.getByRole("group", { name: "Choose one answer" }).getByRole("radio").first().check();
@@ -424,14 +425,19 @@ test("on a phone no fix option's code is cut off, and wrapped lines keep their i
       await expect(page.getByText(`Round ${round} of 5`)).toBeVisible();
     }
     expect(await pane.evaluate((element) => element.scrollWidth <= element.clientWidth + 1), `round ${round}`).toBe(true);
+    // How far in each wrapped line's later rows start.
+    hanging.push(...await page.locator(".code-line").evaluateAll((lines) => lines.flatMap((line) => {
+      const text = [...line.childNodes].filter((node) => node.nodeType === Node.TEXT_NODE).at(-1);
+      const range = document.createRange();
+      if (text) range.selectNodeContents(text);
+      const rows = text ? [...range.getClientRects()] : [];
+      return rows.length > 1 ? [{ indent: (line as HTMLElement).style.getPropertyValue("--indent"), hang: rows.at(-1)!.left - line.getBoundingClientRect().left }] : [];
+    })));
   }
   // An indented line wraps under its own indentation, past its number.
-  const hanging = await page.locator(".code-line").evaluateAll((lines) => lines.map((line) => ({
-    indent: (line as HTMLElement).style.getPropertyValue("--indent"), padding: parseFloat(getComputedStyle(line).paddingLeft),
-  })));
   const flat = hanging.find(({ indent }) => indent === "0ch")!;
   const indented = hanging.find(({ indent }) => indent !== "0ch")!;
-  expect(indented.padding).toBeGreaterThan(flat.padding);
+  expect(indented.hang).toBeGreaterThan(flat.hang);
   // Every line isolates its own text direction, so a right-to-left string can't reorder the code around it.
   expect(await pane.locator(".code-line").first().evaluate((line) => getComputedStyle(line).unicodeBidi)).toBe("plaintext");
 });

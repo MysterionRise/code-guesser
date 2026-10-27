@@ -136,3 +136,41 @@ test("a layered game says when a round plays without its layer, and a static gam
   await expect(page.getByText("Round 1 of 5")).toBeVisible();
   await expect(page.locator(".layer-note")).toHaveCount(0);
 });
+
+/** Each numbered line's number, and where its text's later rows start once it wraps. */
+const numberedRows = (page: Page) => page.locator(".code-window.numbered .code-line").evaluateAll((lines) => lines.map((line) => {
+  const number = line.querySelector(".line-number")!.getBoundingClientRect();
+  const text = [...line.childNodes].filter((node) => node.nodeType === Node.TEXT_NODE).at(-1);
+  const range = document.createRange();
+  if (text) range.selectNodeContents(text);
+  return { left: number.left, right: number.right, later: text ? [...range.getClientRects()].slice(1).map((row) => row.left) : [] };
+}));
+
+test("with lines wrapped on a phone, a numbered round's numbers keep one column and its code hangs past them (#217)", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 568 });
+  const wrapped = async (round: string) => {
+    await page.getByRole("button", { name: "Wrap lines" }).click();
+    await expect(page.getByRole("button", { name: "Wrap lines" })).toHaveAttribute("aria-pressed", "true");
+    const lines = await numberedRows(page);
+    const lefts = lines.map(({ left }) => left);
+    expect(Math.max(...lefts) - Math.min(...lefts), round).toBeLessThan(1);
+    expect(lines.some(({ later }) => later.length > 0), `${round} wraps a line`).toBe(true);
+    for (const { right, later } of lines) for (const row of later) expect(row, round).toBeGreaterThan(right);
+    expect(await page.locator(".code-window.numbered").evaluate((pane) => pane.scrollWidth <= pane.clientWidth + 1), round).toBe(true);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), round).toBe(true);
+  };
+  // These deals' first rounds hold lines deep enough to meet the 30% cap on the hanging indent, which once pushed
+  // their numbers out of the column.
+  await page.goto("/?deck=fix&deal=774e3772&game=0&design=off");
+  await expect(page.getByText("Round 1 of 5")).toBeVisible();
+  await page.getByRole("group", { name: "Choose one answer" }).getByRole("radio").first().check();
+  await expect(page.locator(".code-line.highlighted")).toHaveCount(1);
+  await wrapped("fix round");
+  for (let game = 0; game < 9; game += 1) {
+    await page.goto(`/?deck=algorithm&deal=44eb068a&game=${game}&design=off&layer=on`);
+    await expect(page.getByText("Round 1 of 5")).toBeVisible();
+    if (await page.getByRole("region", { name: "What to watch" }).count() > 0) break;
+  }
+  await expect(page.getByRole("region", { name: "What to watch" })).toBeVisible();
+  await wrapped("layered round");
+});
