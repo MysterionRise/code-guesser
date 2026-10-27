@@ -25,7 +25,7 @@ import { canonicalBytes, canonicalHash } from "../canonical";
 import type { ComposeOptions } from "../compose";
 import type { GitHubAdmissionCandidate } from "../github-admission";
 import { generateLanguageRounds } from "../language-rounds";
-import { LANGUAGE_SLUGS } from "../../../../packages/artifact/src/index";
+import { LANGUAGE_SLUGS, answerName, profileAtLeast } from "../../../../packages/artifact/src/index";
 import {
   MAINSTREAM_LANGUAGES, STACK_EXTENSIONS, STACK_LANGUAGES, parseCrawlProfile, projectRoundsPerLanguage, type CrawlProfile, type StackLanguage,
 } from "../profile";
@@ -511,13 +511,20 @@ export const nameFunctionFiles = (): ReadonlyMap<string, string> => new Map(Arra
   return [`algos/go:shapes/shape_${k}.go`, text] as const;
 }));
 
-/** Bound name-the-function candidates for the small profile: the first files, each with the function the balance picks. */
+/**
+ * Bound name-the-function candidates for the small profile: the first files, each with the function the balance picks.
+ * From v7 on no name is the answer twice (#200), so each file's names end in a letter of their own (`scalea`), and the
+ * balance answers each name once, as the selector's does.
+ */
 export const nameFunctionCandidates = (profile: CrawlProfile, snapshotId: string): readonly NameFunctionCandidate[] => {
   const deck = profile.curated!["name-function"]!;
-  const files = [...nameFunctionFiles()].slice(0, deck.rounds);
+  const strict = profileAtLeast(profile.profileVersion, "local-real-rounds.v7");
+  const files = [...nameFunctionFiles()].slice(0, deck.rounds)
+    .map(([key, text], index) => [key, strict ? text.replace(/^func ([A-Za-z]+)\(/gmu, `func $1${"abcdefghijkl"[index]}(`) : text] as const);
   const choices = files.map(([key, text]) => nameChoices(text, "Go", key, deck.functionLines).slice(0, 96));
   const picks = balancedChoice(choices.map((options) => options.map(({ ranks }) => ranks)), 4, nameSlack(files.length),
-    { costs: choices.map((options) => options.map(({ extremes }) => extremes)), limits: nameExtremeLimits(files.length) })!;
+    { costs: choices.map((options) => options.map(({ extremes }) => extremes)), limits: nameExtremeLimits(files.length) },
+    strict ? choices.map((options) => options.map(({ answer }) => answerName(answer))) : undefined)!;
   return files.map(([key, text], index) => {
     const choice = choices[index]![picks[index]!]!;
     return Object.freeze({

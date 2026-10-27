@@ -79,9 +79,10 @@ const fixtureFor = (input: ProjectRoundInput, profile: CrawlProfile): Experiment
   const candidates = shuffled(roundId, options, (option) => option.repository).map((option) => Object.freeze({
     id: projectCandidateId(option.repository), label: option.repository, detail: optionDetail(option.description),
   }));
-  // From v6 on, the code shares no distinctive word with any option as shown, its description included (#77).
-  if (profileAtLeast(profile.profileVersion, "local-real-rounds.v6")
-    && candidates.some(({ label, detail }) => sharedOptionWords(candidate.excerpt, label, detail).length > 0)) fail("PROJECT_WORDS_SHOWN");
+  // From v6 on, the code shares no distinctive word with any option as shown, its description included (#77); from v7
+  // on, a word split at a case change counts whole too, and so does a script other than Latin (#200).
+  if (profileAtLeast(profile.profileVersion, "local-real-rounds.v6") && candidates.some(({ label, detail }) =>
+    sharedOptionWords(candidate.excerpt, label, detail, profile.profileVersion).length > 0)) fail("PROJECT_WORDS_SHOWN");
   const panes = Object.freeze([Object.freeze({ label: null, text: candidate.excerpt })]);
   const clues = Object.freeze([
     fill(template.fileClue, { file: fileName(path) }),

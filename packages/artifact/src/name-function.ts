@@ -1,4 +1,4 @@
-import { MASKED_NAME, STACK_LANGUAGES, type CandidateRecord, type Pane } from "./domain";
+import { MASKED_NAME, STACK_LANGUAGES, profileAtLeast, type CandidateRecord, type Pane, type ProfileVersion } from "./domain";
 import { fail } from "./errors";
 import { MISSING_LINE_ORDERS } from "./missing-line";
 import { rawHash, type JsonRecord } from "./validation";
@@ -15,6 +15,8 @@ export const nameFunctionCandidateId = (label: string): string => `local-experim
 export const nameWords = (name: string): readonly string[] => name.match(/[A-Z]+(?![a-z])|[A-Z]?[a-z]+|[0-9]+/gu) ?? [];
 
 const fold = (value: string): string => value.toLocaleLowerCase("en-US").replace(/[^a-z0-9]/gu, "");
+/** A name as two answers may not share it (#200): `Merge` and `merge`, or `addEdge` and `add_edge`, are one name. */
+export const answerName = fold;
 
 /** How many words a name joins, as the first hint names it; a hint narrows the options without picking one. */
 export type NameShape = "ONE" | "TWO" | "MORE";
@@ -66,7 +68,8 @@ const optionLabel = (label: string): string => /^[A-Za-z_][A-Za-z0-9_]{1,63}$/u.
  * The pane is one function whose declaration, on its first line, shows the masked name, always the whole identifier
  * `mystery` in lower case (Go's exported names would otherwise stand apart); the options are four names distinct even
  * ignoring case and underscores, the answer is the name the source records, and the pane spells none of them; the first hint names how many words the answer
- * joins, and at least one other option joins as many; the second names the answer and one other option.
+ * joins, and at least one other option joins as many; the second names the answer and one other option, from v7 on one
+ * that joins as many words (#200), so buying both hints leaves a choice of two.
  */
 export const validateNameFunction = ({ panes, candidates, clues, correctCandidateId, source }: Readonly<{
   panes: readonly Pane[]; candidates: readonly CandidateRecord[]; clues: readonly string[]; correctCandidateId: string; source: JsonRecord;
@@ -90,19 +93,24 @@ export const validateNameFunction = ({ panes, candidates, clues, correctCandidat
   const pair = PAIR_HINT.exec(clues[1] ?? "") ?? fail();
   const named = [pair[1]!, pair[2]!];
   if (named[0]! >= named[1]! || !named.includes(answer) || named.some((label) => !labels.includes(label))) fail();
+  if (profileAtLeast(source.profileVersion as ProfileVersion, "local-real-rounds.v7")
+    && nameShape(named.find((label) => label !== answer)!) !== shape) fail();
 };
 
 /**
  * The deck's balance: in text order and in length order, every rank holds the answer about equally often (within
- * two rounds), so no fixed pick or extreme finds it more often than chance.
+ * two rounds), so no fixed pick or extreme finds it more often than chance. From v7 on (#200), no name is the answer
+ * twice, as `addEdge` was in two graph files: the second round would replay the first's reveal.
  */
-export const nameFunctionDeckRule = (fixtures: readonly Readonly<{ candidates: readonly CandidateRecord[]; correctCandidateId: string }>[]): void => {
+export const nameFunctionDeckRule = (fixtures: readonly Readonly<{
+  candidates: readonly CandidateRecord[]; correctCandidateId: string; source: Readonly<{ profileVersion: ProfileVersion }>;
+}>[]): void => {
+  const answers = fixtures.map((fixture) => fixture.candidates.find(({ id }) => id === fixture.correctCandidateId)!.label);
   for (const order of NAME_FUNCTION_ORDERS) {
     const ranks = [0, 0, 0, 0];
-    for (const fixture of fixtures) {
-      const answer = fixture.candidates.find(({ id }) => id === fixture.correctCandidateId)!.label;
-      ranks[order(fixture.candidates.map(({ label }) => label)).indexOf(answer)]! += 1;
-    }
+    fixtures.forEach((fixture, index) => { ranks[order(fixture.candidates.map(({ label }) => label)).indexOf(answers[index]!)]! += 1; });
     if (Math.max(...ranks) - Math.min(...ranks) > 2) fail();
   }
+  if (profileAtLeast(fixtures[0]!.source.profileVersion, "local-real-rounds.v7")
+    && new Set(answers.map(answerName)).size !== answers.length) fail();
 };

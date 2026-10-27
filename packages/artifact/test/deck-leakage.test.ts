@@ -3,12 +3,13 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import {
-  BEFORE_AFTER_CANDIDATE_IDS, LANGUAGE_PAIRS, parseArtifactDecks, showsLabelStem, spellsFramework, type ParsedDeck, type ParsedFixture,
+  BEFORE_AFTER_CANDIDATE_IDS, LANGUAGE_PAIRS, MISSING_LINE_KIND_HINTS, NAME_SHAPE_HINTS, answerName, lineKind, nameShape, parseArtifactDecks,
+  profileAtLeast, sameIdea, showsLabelStem, spellsFramework, type ParsedDeck, type ParsedFixture,
 } from "../src/index";
 import {
-  LINE_FEATURES, TOLERANCE, accuracy, alphabeticalSolver, answerOf, chance, changedLineSolver, frequencySolver, labelWordSolver, lineFeatureSolver,
-  memoryPlayer, optionKey, pairLengthSolver, paneLines, paneOverlapSolver, paneSizeSolver, proseLines, raritySolver,
-  replayBaseline, sameOptionsSolver, transformsArguments,
+  LINE_FEATURES, TOLERANCE, accuracy, alphabeticalSolver, answerOf, bothHintsSolver, chance, changedLineSolver, frequencySolver, labelWordSolver,
+  lineFeatureSolver, memoryPlayer, optionKey, pairLengthSolver, paneLines, paneOverlapSolver, paneSizeSolver, proseLines, raritySolver,
+  repeatedRounds, replayBaseline, sameOptionsSolver, transformsArguments,
 } from "./solvers";
 
 /** How far a remembering player may beat remembering reveals alone (#81): three points, in game two and three. */
@@ -30,6 +31,9 @@ const committed = (): readonly ParsedDeck[] =>
   parseArtifactDecks(JSON.parse(readFileSync(new URL("../../../apps/game/src/demo/generated/local-real-rounds.json", import.meta.url), "utf8")));
 const decks = committed();
 const deck = (id: ParsedDeck["id"]) => decks.find((candidate) => candidate.id === id);
+/** Whether a deck came from profile `minimum` or later, whose rules a test holds it to. */
+const since = (id: ParsedDeck["id"], minimum: Parameters<typeof profileAtLeast>[1]) =>
+  deck(id) !== undefined && profileAtLeast(deck(id)!.fixtures[0]!.source.profileVersion, minimum);
 
 describe("deck leakage", () => {
   it.runIf(deck("language") !== undefined)("language options do not give the answer away", () => {
@@ -92,10 +96,16 @@ describe("deck leakage", () => {
   });
 
   // #77: v5 panes echoed their own option's name or description (`Aws::SQS`, `Utility`, `React.Component`); from v6
-  // on no pane shares a distinctive word with any option (`sharedOptionWords`).
-  it.runIf(deck("project") !== undefined)("project panes share no telling words with any option (#77)", () => {
+  // on no pane shares a distinctive word with any option (`sharedOptionWords`). #200: v7's first artifact still had
+  // cli/cli's `GITHUB_TOKEN` beside "GitHub's official command line tool", and a pane in Chinese beside the only option
+  // described in Chinese; from v7 on the solver reads words whole across case changes, and scripts, too.
+  it.runIf(deck("project") !== undefined)("project panes share no telling words with any option (#77, #200)", () => {
     const { fixtures } = deck("project")!;
     expect(accuracy(fixtures, paneOverlapSolver)).toBeLessThanOrEqual(chance(fixtures[0]!) + TOLERANCE);
+    if (since("project", "local-real-rounds.v6")) {
+      expect(fixtures.filter((fixture) => fixture.candidates.some(({ label }) => paneOverlapSolver(fixture, label) > 0)).map(({ roundId }) => roundId))
+        .toEqual([]);
+    }
   });
 
   it.runIf(deck("algorithm") !== undefined)("algorithm options are whole families, each member answered equally often", () => {
@@ -159,6 +169,14 @@ describe("deck leakage", () => {
       ...[0, 1, 2, 3].flatMap((index) => [position(index), textRank(index)])]) {
       expect(accuracy(fixtures, solver)).toBeLessThanOrEqual(limit);
     }
+  });
+
+  // #84, #200: one round per idea. v7's first artifact asked about base -2 conversion three times, under two names
+  // (`decimal_to_negative_base_2`, `decimal_to_negative_binary`) and as its inverse (`negative_binary_to_int`).
+  it.runIf(since("output", "local-real-rounds.v6"))("no two output rounds ask about one idea (#84, #200)", () => {
+    const { fixtures } = deck("output")!;
+    expect(repeatedRounds(fixtures, (left, right) =>
+      sameIdea(String(left.source.functionName), String(right.source.functionName), left.source.profileVersion))).toEqual([]);
   });
 
   // #78: the v5 deck held functions (`xor_swap`, `reverse_letters`) that rearrange their input whichever call a round
@@ -234,6 +252,13 @@ describe("deck leakage", () => {
     memoryWithinReplay(fixtures);
   });
 
+  // #200: in v7's first artifact 18 of 40 rounds paired the answer with a line the first hint rules out (`a_star.py`'s
+  // condition beside an assignment), so buying both hints decided them.
+  it.runIf(since("missing-line", "local-real-rounds.v7"))("buying both missing-line hints leaves a coin toss (#200)", () => {
+    const { fixtures } = deck("missing-line")!;
+    expect(accuracy(fixtures, bothHintsSolver((label, hint) => MISSING_LINE_KIND_HINTS[lineKind(label)] === hint))).toBeLessThanOrEqual(0.5 + TOLERANCE);
+  });
+
   it.runIf(deck("name-function") !== undefined)("name-function options give no edge by text, length, word count, or words shared with the pane (#73)", () => {
     const { fixtures } = deck("name-function")!;
     const limit = chance(fixtures[0]!) + TOLERANCE;
@@ -261,6 +286,14 @@ describe("deck leakage", () => {
     };
     expect(accuracy(fixtures, longerOfPair)).toBeLessThanOrEqual(0.5 + TOLERANCE);
     memoryWithinReplay(fixtures);
+  });
+
+  // #200: in v7's first artifact `addEdge` answered two rounds, and 14 of 48 paired the answer with a name of another
+  // count of words, which buying both hints decided.
+  it.runIf(since("name-function", "local-real-rounds.v7"))("name-function answers no name twice, and both hints leave a coin toss (#200)", () => {
+    const { fixtures } = deck("name-function")!;
+    expect(repeatedRounds(fixtures, (left, right) => answerName(answerOf(left)) === answerName(answerOf(right)))).toEqual([]);
+    expect(accuracy(fixtures, bothHintsSolver((label, hint) => NAME_SHAPE_HINTS[nameShape(label)] === hint))).toBeLessThanOrEqual(0.5 + TOLERANCE);
   });
 
   it.runIf(deck("before-after") !== undefined)("the later version is not found by always picking one pane", () => {

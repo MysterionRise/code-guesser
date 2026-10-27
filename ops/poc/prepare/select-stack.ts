@@ -155,14 +155,15 @@ export const selectStack = async (
   };
 
   // From v6 on, no pane shares a distinctive word with any of its round's options as shown (#77). A repository is then
-  // described before its files are tried, so a pane can be held to its own words; each description is read once.
+  // described before its files are tried, so a pane can be held to its own words; each description is read once. From
+  // v7 on, a word split at a case change counts whole too, and so does a script other than Latin (#200).
   const descriptions = new Map<string, Awaited<ReturnType<typeof describe>>>();
   const described = async (repository: string) => {
     if (!descriptions.has(repository)) descriptions.set(repository, await describe(repository));
     return descriptions.get(repository);
   };
   const echoes = (pane: string, option: RepositoryOption): boolean =>
-    sharedOptionWords(pane, option.repository, optionDetail(option.description)).length > 0;
+    sharedOptionWords(pane, option.repository, optionDetail(option.description), profile.profileVersion).length > 0;
 
   // A repository is an option in one group's rounds only: one that recurred across languages (next.js has JavaScript,
   // TypeScript, and Rust files) or across a language's groups would appear more often than the rest and point to a decoy.

@@ -118,8 +118,10 @@ export const selectOutput = async (
       round = roundFrom(doctestFunctions(screened.text, limits), examplesSeen, profile.profileVersion) ?? fail("OUTPUT_NO_DOCTEST");
       // From v6 on, one round per idea (#84): a function named for a chosen round's idea (`count_vowels` beside
       // `count_vowels_and_consonants`), or one that agrees with a chosen function on two calls (two popcounts), repeats it.
+      // From v7 on, so does one named by synonyms (`base_2` for `binary`) or for the inverse conversion (#200).
       const candidate = round.function;
-      if (strict && ideas.some((other) => sameIdea(other.name, candidate.name) || agreeingCalls(other, candidate) >= 2)) fail("OUTPUT_IDEA_REPEATED");
+      if (strict && ideas.some((other) => sameIdea(other.name, candidate.name, profile.profileVersion)
+        || agreeingCalls(other, candidate) >= 2)) fail("OUTPUT_IDEA_REPEATED");
       const longest = Math.max(...round.examples.map(({ call }) => Buffer.byteLength(outputPane(round!.function.code, call))));
       if (longest > profile.screening.excerptBytes) fail("OUTPUT_PANE_SIZE");
     } catch (error) {
