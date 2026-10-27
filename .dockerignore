@@ -1,0 +1,43 @@
+# The image's build context (#170): only what the game's build reads. Everything else is left out, so a run journal
+# (provider bodies), a key, the media, or local state can never reach a build or an image layer.
+# tests/deploy/docker-context.test.mjs holds this file to that.
+*
+!package.json
+!pnpm-lock.yaml
+!pnpm-workspace.yaml
+!tsconfig.base.json
+!apps/game/package.json
+!apps/game/next.config.mjs
+!apps/game/next-env.d.ts
+!apps/game/tsconfig.json
+!apps/game/src
+!packages/*/package.json
+!packages/artifact/src
+!ops/deploy/entrypoint.sh
+
+# Never in the context, even inside a directory let in above: the last rule that matches a path wins.
+**/.git
+**/.claude
+**/node_modules
+**/.next
+**/tmp
+**/.env*
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+**/id_rsa*
+**/id_ed25519*
+**/credentials
+**/.aws
+**/.huggingface
+**/.config
+**/.cache
+**/.venv
+**/*.sqlite*
+**/*.jsonl*
+docs
+**/*.gif
+**/*.mp4
+**/*.webm
+**/*.tsbuildinfo

@@ -328,6 +328,15 @@ A page that fails shows a plain error page with a link back to the decks; it
 says nothing about the error. The `dev` and `start` scripts still listen on
 127.0.0.1 only.
 
+The container image (`Dockerfile`, #170) is the one place the server listens
+on every interface. It runs Next.js's standalone server as the `node` user,
+with its state and events on a volume at `/data`, and refuses to start in
+public mode with nothing mounted there (`GAME_ENVIRONMENT_REJECTED
+DATA_VOLUME_MISSING`). [`docs/deploy.md`](docs/deploy.md) is the runbook for
+the owner's server, with Dokploy; `ops/deploy/smoke.mjs` checks a running
+server, and `ops/deploy/pull-events.sh` copies its event log off for
+`pnpm experiment:report`.
+
 #### Rate limits
 
 A public server limits each client (#98), and so does any server with
@@ -706,6 +715,7 @@ pnpm test:deploy
 pnpm test:a11y
 pnpm test:performance
 pnpm test:e2e
+pnpm test:container
 uv run --project ops/poc/stack --locked python -m unittest discover -s ops/poc/stack
 pnpm audit --audit-level=high
 ```
@@ -721,6 +731,9 @@ What each one checks:
   setting exits 78 with its code, the health check and state store work, rate
   limits read the proxy's address, and every page plays under the nonce
   policy with eval refused.
+- `pnpm test:container`: needs Docker. It builds the image, or takes
+  `CODEGUESSR_IMAGE`, and runs it in public mode with a throwaway secret and
+  volume.
 - `pnpm test:a11y`: Playwright against `next start` on the production build.
   axe's WCAG 2 A and AA rules read the chooser, About, Credits, Privacy, the
   404, and a duel's intro, game, comparison, and result. They read every
@@ -787,9 +800,11 @@ Each path has a status:
 | `ops/experiment` | `experiment:report`: the experiment's report from the event log, with its statistics and pre-registered plan | live |
 | `ops/content` | The `acquire:content` operator command and its policy files. The containment test (`tests/containment/acquisition-boundary.test.mjs`) requires the script to exist | Contract-era |
 | `ops/tsconfig.json` | Type-checks everything under `ops/`; `pnpm typecheck` runs it | PoC support |
-| `tests` | The accessibility and performance suites (`tests/accessibility`, `tests/performance`), which `tests/production` runs on the production build; the browser scenarios (`tests/e2e`); containment; and boot (`tests/deploy`). CI runs them all | PoC support |
+| `Dockerfile`, `.dockerignore` | The container image the owner's server runs (#170), and the build context it may read | live |
+| `ops/deploy` | The image's entrypoint, the deploy smoke test, and `pull-events.sh`; the runbook is `docs/deploy.md` | live |
+| `tests` | The accessibility and performance suites (`tests/accessibility`, `tests/performance`), which `tests/production` runs on the production build; the browser scenarios (`tests/e2e`); containment; boot (`tests/deploy`); and the container image (`tests/container`). CI runs them all | PoC support |
 | `.github/workflows/ci.yml` | CI: a dependency audit that fails on high or critical advisories, then every suite above, with no provider secrets and no live preparation | PoC support |
-| `.github/dependabot.yml` | Monthly version updates for npm and GitHub Actions, minor and patch grouped, npm majors left to hand upgrades, at most five open pull requests per ecosystem; the Stack worker's `uv.lock` gets security updates only, since the worker journal is keyed to it | PoC support |
+| `.github/dependabot.yml` | Monthly version updates for npm and GitHub Actions, minor and patch grouped, npm majors left to hand upgrades, at most five open pull requests per ecosystem; the Stack worker's `uv.lock` gets security updates only, since the worker journal is keyed to it; the image's Node base gets new digests only, its version moving by hand | PoC support |
 | `vitest.config.mts` | Finds `*.test.ts` and `*.test.tsx` under `apps/`, `packages/`, and `ops/`, and compiles JSX with React's automatic runtime, since the tsconfig preserves JSX for Next.js. A test may take 30 s, as the preparer's synchronous composition tests take up to 12 s on CI | PoC support |
 | `playwright.config.ts` | The browser scenarios; starts a dev server on 127.0.0.1 (`E2E_PORT`, default 3000) | PoC support |
 | `playwright.production.config.ts` | The accessibility and performance suites; starts `next start` on the production build at `E2E_PORT` + 10 | PoC support |

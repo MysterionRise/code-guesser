@@ -73,5 +73,12 @@ export const PANE_CAPTIONS: Readonly<Partial<Record<RoundModeKind, string>>> = O
 /** What the player sees when the server can no longer continue this game, for example after it restarts. */
 export const SESSION_ENDED_MESSAGE = "This game can’t continue. Deal new rounds to keep playing.";
 
+/**
+ * What the player sees when the game was redeployed since the page loaded (#170). Each build names its server actions
+ * afresh, so an older page's hint, answer, or link asks for an action the new server doesn't know; a reload fetches the
+ * new page.
+ */
+export const UPDATED_MESSAGE = "CodeGuessr was updated. Reload the page to keep playing.";
+
 /** What the player sees when a hint or an answer came too fast for the server's rate limit (#98); the game goes on. */
 export const RATE_LIMITED_MESSAGE = "That was too many requests at once. Wait a few seconds, then try again.";

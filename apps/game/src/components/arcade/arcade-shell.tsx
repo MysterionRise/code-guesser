@@ -1,5 +1,6 @@
 "use client";
 
+import { unstable_isUnrecognizedActionError as serverUpdated } from "next/navigation";
 import * as React from "react";
 import { sendEvent } from "../../experiment/beacon";
 import { viewportBucket, type ClientEvent, type GenuiEvent } from "../../experiment/events";
@@ -20,7 +21,7 @@ import {
   type RevealRequest,
   type RevealResponse,
 } from "./arcade-session";
-import { RATE_LIMITED_MESSAGE, SESSION_ENDED_MESSAGE, points } from "./arcade-text";
+import { RATE_LIMITED_MESSAGE, SESSION_ENDED_MESSAGE, UPDATED_MESSAGE, points } from "./arcade-text";
 import { CodePanes } from "./code-panes";
 import { HintBar } from "./hint-bar";
 import { keepGame, type GameRecords } from "./local-records";
@@ -69,6 +70,8 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
   const [hintLoading, setHintLoading] = React.useState(false);
   const [hintError, setHintError] = React.useState<string | null>(null);
   const [ended, setEnded] = React.useState(false);
+  // Set with `ended` when the server was redeployed since this page loaded (#170), so its actions are gone.
+  const [updated, setUpdated] = React.useState(false);
   const [selection, setSelection] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -179,8 +182,9 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
       const locked = transitionArcadeSession(mode, session, { type: "lock-answer", candidateId: choice });
       setSession(transitionArcadeSession(mode, locked, { type: "accept-reveal", reveal: result }));
       token.current = response.sessionToken;
-    } catch {
-      setError("Couldn’t check that answer. Try again.");
+    } catch (failure) {
+      if (serverUpdated(failure)) { setUpdated(true); setEnded(true); }
+      else setError("Couldn’t check that answer. Try again.");
     } finally {
       setBusy(false);
     }
@@ -201,8 +205,9 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
       }
       setSession((current) => transitionArcadeSession(mode, current, { type: "reveal-hint", label: response.hint, detail: response.detail ?? null }));
       token.current = response.sessionToken;
-    } catch {
-      setHintError("Couldn’t get that hint. Try again.");
+    } catch (failure) {
+      if (serverUpdated(failure)) { setUpdated(true); setEnded(true); }
+      else setHintError("Couldn’t get that hint. Try again.");
     } finally {
       hintPending.current = false;
       setHintLoading(false);
@@ -265,7 +270,9 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
         {error && <p className="demo-error" role="alert">{error}</p>}
         {ended && (
           <p className="demo-error" role="alert">
-            {SESSION_ENDED_MESSAGE}{newGameHref && <> <a href={newGameHref}>Deal new rounds</a></>}
+            {updated
+              ? <>{UPDATED_MESSAGE} <button className="reload-action" type="button" onClick={() => window.location.reload()}>Reload</button></>
+              : <>{SESSION_ENDED_MESSAGE}{newGameHref && <> <a href={newGameHref}>Deal new rounds</a></>}</>}
           </p>
         )}
 

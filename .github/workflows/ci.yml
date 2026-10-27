@@ -91,6 +91,41 @@ jobs:
       - name: Browser scenarios
         run: pnpm test:e2e
 
+  # The container image the owner's server runs (#170), built from this checkout as Dokploy builds it.
+  container:
+    name: Container image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.15.9
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.22.0
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The smoke script plays one game in Chromium against the running container.
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Build the image
+        run: docker build --tag codeguessr:ci .
+
+      # Runs the image in public mode with a throwaway secret and volume: a missing secret or volume exits 78, and a
+      # configured server runs as node, answers its health check, deals a game into its state store, and passes
+      # ops/deploy/smoke.mjs and ops/deploy/pull-events.sh.
+      - name: Container checks
+        run: pnpm test:container
+        env:
+          CODEGUESSR_IMAGE: codeguessr:ci
+
   python:
     name: Stack worker
     runs-on: ubuntu-24.04
