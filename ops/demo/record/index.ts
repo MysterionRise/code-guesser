@@ -1,7 +1,7 @@
 /**
  * Records the local CodeGuessr game at a phone viewport and encodes the vertical
- * demo, one short captioned GIF per deck, a full-run GIF, and one MP4 into
- * docs/media.
+ * demo, one short captioned GIF per deck, a duel GIF, a full-run GIF, and one
+ * MP4 into docs/media.
  * Run with `pnpm demo:record` after a verified preparation run.
  *
  * Set DEMO_BASE_URL to record an already running server in lab mode
@@ -16,7 +16,7 @@ import { mkdir, rename, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { chromium, type Page } from "@playwright/test";
+import { chromium, type Browser, type Page } from "@playwright/test";
 
 import { DEFAULT_GIF_OPTIONS, gifArguments, mp4Arguments } from "./encode";
 import { hideLocalTooling, setCaption, type CaptionStyle } from "./overlay";
@@ -35,18 +35,23 @@ const FFMPEG = process.env.FFMPEG ?? "ffmpeg";
 const ARTIFACT = join(ROOT, "apps", "game", "src", "demo", "generated", "local-real-rounds.json");
 
 interface ArtifactFixture { roundId: string; candidates: { id: string; label: string }[]; correctCandidateId: string }
-/** Each round's right answer, read on the Node side from the artifact the game plays, as the browser tests do. */
-const loadAnswers = (): ReadonlyMap<string, string> => {
+/** A round's right answer, and the first option the artifact lists that isn't it. */
+interface RoundAnswers { readonly right: string; readonly wrong: string }
+/** Each round's answers, read on the Node side from the artifact the game plays, as the browser tests do. */
+const loadAnswers = (): ReadonlyMap<string, RoundAnswers> => {
   const artifact = JSON.parse(readFileSync(ARTIFACT, "utf8")) as { decks: { fixtures: ArtifactFixture[] }[] };
-  return new Map(artifact.decks.flatMap(({ fixtures }) => fixtures.map((fixture) =>
-    [fixture.roundId, fixture.candidates.find(({ id }) => id === fixture.correctCandidateId)!.label] as const)));
+  return new Map(artifact.decks.flatMap(({ fixtures }) => fixtures.map(({ roundId, candidates, correctCandidateId }) => [roundId, {
+    right: candidates.find(({ id }) => id === correctCandidateId)!.label,
+    wrong: candidates.find(({ id }) => id !== correctCandidateId)!.label,
+  }] as const)));
 };
 
-/** What a step needs besides the page: the server, the scene's caption style, and the answers. */
+/** What a step needs besides the page: the server, the scene's caption style, the answers, and its challenge link. */
 interface StepContext {
   readonly baseUrl: string;
   readonly captionStyle: CaptionStyle;
-  readonly answers: ReadonlyMap<string, string>;
+  readonly answers: ReadonlyMap<string, RoundAnswers>;
+  readonly challengeLink?: string;
 }
 
 const log = (message: string): void => { process.stdout.write(`${message}\n`); };
@@ -112,14 +117,19 @@ const performStep = async (page: Page, context: StepContext, step: Step): Promis
       }
       return;
     }
-    case "answer": {
+    case "answer":
+    case "miss": {
       const roundId = await page.locator(".game-card").getAttribute("data-round-id", { timeout: STEP_TIMEOUT_MILLISECONDS });
-      const label = roundId === null ? undefined : context.answers.get(roundId);
-      if (label === undefined) throw new Error("the current round is not in the artifact");
-      await page.getByRole("group", { name: "Choose one answer" }).getByLabel(label, { exact: true })
+      const answers = roundId === null ? undefined : context.answers.get(roundId);
+      if (answers === undefined) throw new Error("the current round is not in the artifact");
+      await page.getByRole("group", { name: "Choose one answer" }).getByLabel(step.kind === "answer" ? answers.right : answers.wrong, { exact: true })
         .check({ timeout: STEP_TIMEOUT_MILLISECONDS });
       return;
     }
+    case "openChallenge":
+      if (context.challengeLink === undefined) throw new Error("the scene opens a challenge it has none of");
+      await page.goto(context.challengeLink, { waitUntil: "networkidle" });
+      return;
     case "caption":
       await setCaption(page, step.text, context.captionStyle);
       return;
@@ -158,15 +168,44 @@ const performStep = async (page: Page, context: StepContext, step: Step): Promis
   }
 };
 
+/**
+ * A duel's challenger (#173), off camera: plays the scene's challenge game in a browser context of its own, which
+ * records no video, then makes it a challenge under the challenge's name and returns the link it copied. The context
+ * has a clipboard and no share sheet, so the link is copied, as in the browser tests.
+ */
+const playChallenge = async (browser: Browser, context: StepContext, challenge: NonNullable<Scene["challenge"]>): Promise<string> => {
+  const challenger = await browser.newContext({ viewport: VIEWPORT });
+  try {
+    await challenger.grantPermissions(["clipboard-read", "clipboard-write"]);
+    await challenger.addInitScript(() => { delete (Navigator.prototype as { share?: unknown }).share; });
+    const page = await challenger.newPage();
+    for (const step of challenge.steps) await performStep(page, context, step);
+    await page.getByRole("button", { name: "Challenge a friend", exact: true }).click({ timeout: STEP_TIMEOUT_MILLISECONDS });
+    await page.getByLabel("Your name (stays in the link)").fill(challenge.name, { timeout: STEP_TIMEOUT_MILLISECONDS });
+    await page.getByRole("button", { name: "Copy challenge link", exact: true }).click({ timeout: STEP_TIMEOUT_MILLISECONDS });
+    await page.locator(".duel-share .share-status").getByText("Challenge link copied").waitFor({ timeout: STEP_TIMEOUT_MILLISECONDS });
+    // The share line ends with the link.
+    const link = (await page.evaluate(() => navigator.clipboard.readText())).split("\n").at(-1) ?? "";
+    if (!link.startsWith(`${context.baseUrl}/?duel=`)) throw new Error("the challenge copied no link to this server");
+    return link;
+  } finally {
+    await challenger.close();
+  }
+};
+
 const megabytes = async (path: string): Promise<string> => `${((await stat(path)).size / 1_048_576).toFixed(2)} MB`;
 
-const recordScene = async (scene: Scene, baseUrl: string, answers: ReadonlyMap<string, string>): Promise<void> => {
+const recordScene = async (scene: Scene, baseUrl: string, answers: ReadonlyMap<string, RoundAnswers>): Promise<void> => {
   log(`recording ${scene.id}`);
   const browser = await chromium.launch();
   const viewport = scene.viewport ?? VIEWPORT;
-  const stepContext: StepContext = { baseUrl, captionStyle: scene.captionStyle ?? "banner", answers };
+  const sceneContext: StepContext = { baseUrl, captionStyle: scene.captionStyle ?? "banner", answers };
   let videoPath: string | undefined;
   try {
+    // The challenger plays before the recording starts, so the clip opens on the friend's intro.
+    const stepContext: StepContext = scene.challenge === undefined
+      ? sceneContext
+      : { ...sceneContext, challengeLink: await playChallenge(browser, sceneContext, scene.challenge) };
     const context = await browser.newContext({
       viewport,
       deviceScaleFactor: DEVICE_SCALE_FACTOR,
