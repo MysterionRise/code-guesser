@@ -11,8 +11,8 @@
   "dependencies": {
     "@ai-sdk/openai-compatible": "3.0.78",
     "@ai-sdk/react": "4.0.157",
-    "@json-render/core": "0.21.2",
-    "@json-render/react": "0.21.2",
+    "@json-render/core": "0.21.3",
+    "@json-render/react": "0.21.3",
     "ai": "7.0.153",
     "next": "15.5.28",
     "react": "19.3.1",
