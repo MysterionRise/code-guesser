@@ -471,8 +471,10 @@ noscript { display: block; padding: 12px; margin-bottom: 16px; background: var(-
 .code-window { unicode-bidi: plaintext; text-align: left; }
 .code-window .code-line { unicode-bidi: plaintext; }
 .code-panes.wrap .code-window { white-space: pre-wrap; overflow-wrap: anywhere; overflow-x: hidden; }
-/* A hanging indent is capped at 30% of the pane, so a deeply indented line can't push its text past the edge. */
-.code-panes.wrap .code-line { display: block; padding-left: calc(var(--gutter, 0px) + min(var(--indent, 0ch), 30%) + 2ch); text-indent: calc(-1 * (var(--gutter, 0px) + min(var(--indent, 0ch), 30%) + 2ch)); }
+/* A hanging indent is capped at 30% of the pane, so a deeply indented line can't push its text past the edge. It is one
+   `hanging` text-indent, not padding undone by a negative indent: their percentages resolve against different widths,
+   so a capped line's first row, and its number, started right of the column (#217). */
+.code-panes.wrap .code-line { display: block; text-indent: calc(var(--gutter, 0px) + min(var(--indent, 0ch), 30%) + 2ch) hanging; }
 .code-panes.wrap .numbered .code-line { --gutter: calc(3ch + 14px); }
 @media (max-width: 600px) { .code-detail { white-space: pre-wrap; overflow-wrap: anywhere; } }
 .answer-form { margin: 0; }
