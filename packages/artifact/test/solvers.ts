@@ -112,10 +112,25 @@ export const transformsArguments = (fixture: ParsedFixture, label: string): bool
 
 /**
  * Project decks: how many five-letter word stems the pane shares with an option's name and description, common
- * code and English words aside (`sharedOptionWords`, which v6 project rounds hold at none, #77).
+ * code and English words aside (`sharedOptionWords`, which v6 project rounds hold at none, #77). It reads a round as
+ * its own version's rule does: from v7 on, words split at a case change count whole too, and so do scripts (#200).
  */
-export const paneOverlapSolver = (fixture: ParsedFixture, label: string): number =>
-  sharedOptionWords(fixture.panes[0]!.text, label, fixture.candidates.find((candidate) => candidate.label === label)!.detail).length;
+export const paneOverlapSolver = (fixture: ParsedFixture, label: string): number => sharedOptionWords(fixture.panes[0]!.text, label,
+  fixture.candidates.find((candidate) => candidate.label === label)!.detail, fixture.source.profileVersion).length;
+
+/**
+ * Missing-line and name-the-function decks: a player who buys both hints and picks, of the two options the second
+ * names, the one that fits what the first says (a line's kind, a name's count of words), ties split. From v7 on both
+ * options of the pair fit (#200), so this is a coin toss.
+ */
+export const bothHintsSolver = (fits: (label: string, hint: string) => boolean) => (fixture: ParsedFixture, label: string): number => {
+  const pair = /^It is either “(.+)” or “(.+)”\.$/u.exec(fixture.clues[1]!)!.slice(1);
+  return pair.includes(label) ? 1 + (fits(label, fixture.clues[0]!) ? 1 : 0) : 0;
+};
+
+/** Pairs of a deck's rounds that repeat one thing, by round id: one idea, one answer (#84, #200). */
+export const repeatedRounds = (fixtures: readonly ParsedFixture[], same: (left: ParsedFixture, right: ParsedFixture) => boolean): readonly string[] =>
+  fixtures.flatMap((left, index) => fixtures.slice(index + 1).filter((right) => same(left, right)).map((right) => `${left.roundId}~${right.roundId}`));
 
 /** A small deterministic generator, so simulated deals repeat exactly. */
 const seededRandom = (seed: number) => () => {

@@ -1,4 +1,6 @@
-import { GAP_MARKER, lineKind, missingLineCandidateId, parseArtifactDecks, validateMissingLine } from "../../../packages/artifact/src/index";
+import {
+  GAP_MARKER, lineKind, missingLineCandidateId, missingLinePairHint, parseArtifactDecks, validateMissingLine,
+} from "../../../packages/artifact/src/index";
 import { composeExperimentArtifact } from "./compose";
 import { balancedBrackets, gapChoices, statementStarts } from "./missing-line-window";
 import { generateMissingLineRounds } from "./missing-line-rounds";
@@ -75,5 +77,28 @@ describe("missing-line rounds (#57)", () => {
     const lonely = fixture.candidates.map((candidate) => candidate.id === fixture.correctCandidateId ? candidate
       : { ...candidate, label: `${candidate.label} # x`, id: missingLineCandidateId(`${candidate.label} # x`) });
     expect(() => validateMissingLine({ ...semantics, candidates: lonely })).toThrow();
+  });
+
+  it("from profile v7 on, pairs the answer with a line that does what it does, so both hints still leave two (#200)", () => {
+    const v7 = loadCuratedProfile({}, { "missing-line": true }, "local-real-rounds.v7");
+    const answerOf = (fixture: any): string => fixture.candidates.find(({ id }: any) => id === fixture.correctCandidateId).label;
+    const pairedOf = (fixture: any): string => {
+      const [, first, second] = /^It is either “(.+)” or “(.+)”\.$/u.exec(fixture.clues[1])!;
+      return first === answerOf(fixture) ? second! : first!;
+    };
+    const decided = (fixtures: readonly any[]) => fixtures.filter((fixture) => lineKind(pairedOf(fixture)) !== lineKind(answerOf(fixture))).length;
+    // Before v7 the second hint could pair the answer with a line the first hint rules out, as `a_star.py` did.
+    expect(decided(generateMissingLineRounds({ profile, candidates: candidates() }).fixtures)).toBeGreaterThan(0);
+    const { fixtures } = generateMissingLineRounds({ profile: v7, candidates: missingLineCandidates(v7, snapshotIdFor(v7)) });
+    expect(decided(fixtures)).toBe(0);
+    const [deck] = parseArtifactDecks(composeExperimentArtifact(composeInput(v7)).artifact).filter(({ id }) => id === "missing-line");
+    expect(deck!.fixtures).toHaveLength(8);
+    // The parser holds a v7 round to it, and an earlier round to its own rules.
+    const fixture = fixtures.find((round) => round.candidates.some(({ label }) => lineKind(label) !== lineKind(answerOf(round))))!;
+    const other = fixture.candidates.find(({ label }) => lineKind(label) !== lineKind(answerOf(fixture)))!.label;
+    const semantics = { panes: fixture.panes, candidates: fixture.candidates, correctCandidateId: fixture.correctCandidateId, source: fixture.source as any,
+      clues: [fixture.clues[0]!, missingLinePairHint(answerOf(fixture), other)] };
+    expect(() => validateMissingLine(semantics)).toThrow();
+    expect(() => validateMissingLine({ ...semantics, source: { ...semantics.source, profileVersion: "local-real-rounds.v6" } })).not.toThrow();
   });
 });

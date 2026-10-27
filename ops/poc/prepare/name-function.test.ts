@@ -1,5 +1,6 @@
 import {
-  NAME_SHAPE_HINTS, codeSpells, nameFunctionCandidateId, nameShape, parseArtifactDecks, validateNameFunction,
+  NAME_SHAPE_HINTS, codeSpells, nameFunctionCandidateId, nameFunctionDeckRule, nameFunctionPairHint, nameShape, parseArtifactDecks,
+  validateNameFunction,
 } from "../../../packages/artifact/src/index";
 import { composeExperimentArtifact } from "./compose";
 import { declaredFunctions, nameChoices } from "./name-function-window";
@@ -108,5 +109,38 @@ describe("name-the-function rounds (#73)", () => {
       return { ...candidate, label, id: nameFunctionCandidateId(label) };
     });
     expect(() => validateNameFunction({ ...semantics, candidates: alone })).toThrow();
+  });
+
+  it("from profile v7 on, answers each name once and pairs it with a name of as many words (#200)", () => {
+    const v7 = loadCuratedProfile({}, { "name-function": true }, "local-real-rounds.v7");
+    const answerOf = (fixture: any): string => fixture.candidates.find(({ id }: any) => id === fixture.correctCandidateId).label;
+    const pairedOf = (fixture: any): string => {
+      const [, first, second] = /^It is either “(.+)” or “(.+)”\.$/u.exec(fixture.clues[1])!;
+      return first === answerOf(fixture) ? second! : first!;
+    };
+    // The small profile's eight files declare the same six names, so before v7 some name is the answer twice.
+    const v5 = generateNameFunctionRounds({ profile, candidates: candidates() }).fixtures;
+    expect(new Set(v5.map(answerOf)).size).toBeLessThan(8);
+    expect(() => generateNameFunctionRounds({ profile: v7, candidates: candidates() })).toThrow("NAME_FUNCTION_ANSWER_REPEATED");
+    const [deck] = parseArtifactDecks(composeExperimentArtifact(composeInput(v7)).artifact).filter(({ id }) => id === "name-function");
+    expect(new Set(deck!.fixtures.map(answerOf)).size).toBe(8);
+    expect(deck!.fixtures.every((fixture) => nameShape(pairedOf(fixture)) === nameShape(answerOf(fixture)))).toBe(true);
+    // The deck rule refuses a name answered twice from v7 on, ignoring case, and lets an earlier deck keep it.
+    const twice = deck!.fixtures.map((fixture, index) => index !== 1 ? fixture : {
+      ...fixture, correctCandidateId: nameFunctionCandidateId(answerOf(deck!.fixtures[0]!).toUpperCase()),
+      candidates: fixture.candidates.map((candidate) => candidate.id !== fixture.correctCandidateId ? candidate
+        : { ...candidate, label: answerOf(deck!.fixtures[0]!).toUpperCase(), id: nameFunctionCandidateId(answerOf(deck!.fixtures[0]!).toUpperCase()) }),
+    });
+    expect(() => nameFunctionDeckRule(deck!.fixtures)).not.toThrow();
+    expect(() => nameFunctionDeckRule(twice)).toThrow();
+    expect(() => nameFunctionDeckRule(twice.map((fixture) => ({ ...fixture, source: { ...fixture.source, profileVersion: "local-real-rounds.v6" } }))))
+      .not.toThrow();
+    // A v7 round whose second hint pairs the answer with a name of other length in words is refused.
+    const fixture = deck!.fixtures.find((round) => round.candidates.some(({ label }) => nameShape(label) !== nameShape(answerOf(round))))!;
+    const other = fixture.candidates.find(({ label }) => nameShape(label) !== nameShape(answerOf(fixture)))!.label;
+    const semantics = { panes: fixture.panes, candidates: fixture.candidates, correctCandidateId: fixture.correctCandidateId, source: fixture.source as any,
+      clues: [fixture.clues[0]!, nameFunctionPairHint(answerOf(fixture), other)] };
+    expect(() => validateNameFunction(semantics)).toThrow();
+    expect(() => validateNameFunction({ ...semantics, source: { ...semantics.source, profileVersion: "local-real-rounds.v6" } })).not.toThrow();
   });
 });

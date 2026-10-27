@@ -196,17 +196,17 @@ describe("game state v3 (#173)", () => {
  */
 const GOLDEN_DIGESTS: Readonly<Record<string, string>> = {
   mixed: "691ff8d43fdd94d3f9e8ce65ad8f1874",
-  project: "f96202305c8388e965836060add0cba2",
+  project: "a34f0e37de1ab0fa512908d85c123345",
   language: "2e83e51cfe0b147f4256b0503bad70d5",
   "before-after": "ff575f4124e21dc7928a08c39d6a135a",
   algorithm: "31bbd9f9a1db543f78be399aa763a7f5",
   output: "a3f4aae882e765704290946197c89484",
   fix: "7c3854be96c86863c10109030770284e",
   "missing-line": "1f00ab33f78709d5f72f0ba16d328f6c",
-  "name-function": "91f11c953d6468ec896d016d3848ff00",
+  "name-function": "c56e201418eca2e15266512eca86ac03",
   framework: "b9f653b90564baf4f8ad16a2bbbe497b",
   exercise: "9d49c71b817fca9400ce7e56d4141bd8",
-  daily: "d485bd0d812e559684146542988a1c1c",
+  daily: "d3d6d97676c7cf0db8f0b1b9158d3ff2",
   "algorithm+layers": "76de85808d91db04f8879156d7bab227",
   "language+layers": "857757c2205732515a58a2d2d1c346ac",
 };

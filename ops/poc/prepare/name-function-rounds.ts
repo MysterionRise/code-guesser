@@ -1,5 +1,6 @@
 import {
-  NAME_FUNCTION_ORDERS, NAME_FUNCTION_SOURCE_KEYS, NAME_SHAPE_HINTS, codeSpells, nameFunctionCandidateId, nameFunctionPairHint, nameShape,
+  NAME_FUNCTION_ORDERS, NAME_FUNCTION_SOURCE_KEYS, NAME_SHAPE_HINTS, answerName, codeSpells, nameFunctionCandidateId, nameFunctionPairHint,
+  nameShape, profileAtLeast, type ProfileVersion,
 } from "../../../packages/artifact/src/index";
 import { canonicalHash } from "./canonical";
 import type { ExperimentFixture } from "./model";
@@ -60,20 +61,26 @@ const sourceFor = (candidate: NameFunctionCandidate, profile: CrawlProfile): Rea
 
 /**
  * The decoy each round's second hint pairs with its answer: steered so picking the longer name of the pair (a coin
- * when both are as long) scores half the pool, no better than a coin once the hint has narrowed it to two.
+ * when both are as long) scores half the pool, no better than a coin once the hint has narrowed it to two. From v7 on
+ * (#200) the decoy joins as many words as the answer, so the first hint leaves both names of the pair open.
  */
-const pairedDecoys = (candidates: readonly NameFunctionCandidate[], roundIds: readonly string[]): readonly string[] => {
+const pairedDecoys = (candidates: readonly NameFunctionCandidate[], roundIds: readonly string[], version: ProfileVersion): readonly string[] => {
   const won = (answer: string, decoy: string) => answer.length > decoy.length ? 1 : answer.length === decoy.length ? 0.5 : 0;
-  const outcomes = candidates.map(({ answer, decoys }) => new Set(decoys.map((decoy) => won(answer, decoy))).size);
+  const strict = profileAtLeast(version, "local-real-rounds.v7");
+  const open = candidates.map(({ answer, decoys }) => {
+    const left = decoys.filter((decoy) => !strict || nameShape(decoy) === nameShape(answer));
+    return left.length > 0 ? left : fail("NAME_FUNCTION_HINT_DECIDES");
+  });
+  const outcomes = candidates.map(({ answer }, index) => new Set(open[index]!.map((decoy) => won(answer, decoy))).size);
   // Rounds with the fewest outcomes go first, so the rounds left can still even out what they forced.
   const sequence = candidates.map((_, index) => index).sort((left, right) => outcomes[left]! - outcomes[right]! || left - right);
   const picks: string[] = [];
   let score = 0;
   sequence.forEach((index, position) => {
-    const { answer, decoys } = candidates[index]!;
+    const { answer } = candidates[index]!;
     const target = (position + 1) / 2;
     // A stable sort, so among equally good decoys the round's own shuffled order decides.
-    const pick = [...shuffled(roundIds[index]!, decoys, String)]
+    const pick = [...shuffled(roundIds[index]!, open[index]!, String)]
       .sort((left, right) => Math.abs(score + won(answer, left) - target) - Math.abs(score + won(answer, right) - target))[0]!;
     score += won(answer, pick);
     picks[index] = pick;
@@ -137,7 +144,10 @@ export const generateNameFunctionRounds = (options: Readonly<{ profile: CrawlPro
     for (const candidate of candidates) ranks[order([candidate.answer, ...candidate.decoys]).indexOf(candidate.answer)]! += 1;
     if (Math.max(...ranks) - Math.min(...ranks) > 2) fail("NAME_FUNCTION_RANK_UNBALANCED");
   }
+  // From v7 on, no name is the answer twice (#200).
+  if (profileAtLeast(profile.profileVersion, "local-real-rounds.v7")
+    && new Set(candidates.map(({ answer }) => answerName(answer))).size !== candidates.length) fail("NAME_FUNCTION_ANSWER_REPEATED");
   const roundIds = candidates.map((candidate) => roundIdFor("name-function", sourceFor(candidate, profile)));
-  const paired = pairedDecoys(candidates, roundIds);
+  const paired = pairedDecoys(candidates, roundIds, profile.profileVersion);
   return orderedPool(candidates.map((candidate, index) => fixtureFor(candidate, paired[index]!, profile)));
 };

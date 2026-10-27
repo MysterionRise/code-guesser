@@ -346,7 +346,8 @@ type Semantics = Readonly<{
 /**
  * The answer is the recorded repository, and no pre-answer text other than the labels names a candidate. From v6 on
  * (#77), a name counts inside identifiers and by its distinctive parts too, and the pane shares no distinctive word
- * with any option's name or description.
+ * with any option's name or description; from v7 on (#200), nor a word split at a case change read whole, nor a script
+ * other than Latin.
  */
 const validateProject = ({ snapshot, panes, prompt, candidates, clues, correctCandidateId, source }: Semantics): void => {
   if (candidates.some(({ id, label }) => !REPOSITORY.test(label) || id !== projectCandidateId(label))) fail();
@@ -357,7 +358,8 @@ const validateProject = ({ snapshot, panes, prompt, candidates, clues, correctCa
   for (const part of [panes[0]!.text, prompt, ...clues]) {
     if (candidates.some(({ label }) => names(part, label))) fail();
   }
-  if (strict && candidates.some(({ label, detail }) => sharedOptionWords(panes[0]!.text, label, detail).length > 0)) fail();
+  if (strict && candidates.some(({ label, detail }) =>
+    sharedOptionWords(panes[0]!.text, label, detail, snapshot.profileVersion).length > 0)) fail();
 };
 
 /**
@@ -547,8 +549,10 @@ const DECK_RULES: Readonly<Partial<Record<DeckId, (fixtures: readonly ParsedFixt
     const score = worded.reduce((sum, { source, candidates, correctCandidateId }) => sum + transformScore(text(source.call),
       candidates.find(({ id }) => id === correctCandidateId)!.label, candidates.map(({ label }) => label)), 0);
     if (score > transformLimit(worded.length) + SCORE_TOLERANCE) fail();
-    // One round per idea (#84): no two functions are named for one thing.
-    if (pairs(fixtures).some(([left, right]) => sameIdea(text(left.source.functionName), text(right.source.functionName)))) fail();
+    // One round per idea (#84): no two functions are named for one thing, from v7 on by synonyms or as inverse
+    // conversions either (#200).
+    if (pairs(fixtures).some(([left, right]) =>
+      sameIdea(text(left.source.functionName), text(right.source.functionName), left.source.profileVersion))) fail();
   },
   fix: (fixtures: readonly ParsedFixture[]) => {
     fixDeckRule(fixtures);

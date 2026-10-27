@@ -1,5 +1,6 @@
 import {
   GAP_MARKER, MISSING_LINE_KIND_HINTS, MISSING_LINE_ORDERS, MISSING_LINE_SOURCE_KEYS, lineKind, missingLineCandidateId, missingLinePairHint,
+  profileAtLeast, type ProfileVersion,
 } from "../../../packages/artifact/src/index";
 import { canonicalHash } from "./canonical";
 import type { ExperimentFixture } from "./model";
@@ -63,12 +64,16 @@ const NAME = /[A-Za-z_][A-Za-z0-9_]*/gu;
 /**
  * The decoy each round's second hint pairs with its answer: taken in the round's own shuffled order, and steered so
  * the answer is the longer of its pair in about half the pool, which leaves picking the longer line no better than
- * a coin once the hint has narrowed it to two.
+ * a coin once the hint has narrowed it to two. From v7 on (#200) the decoy does what the answer does, so the first
+ * hint leaves both lines of the pair open.
  */
-const pairedDecoys = (candidates: readonly MissingLineCandidate[], roundIds: readonly string[]): readonly string[] => {
+const pairedDecoys = (candidates: readonly MissingLineCandidate[], roundIds: readonly string[], version: ProfileVersion): readonly string[] => {
   let longer = 0;
+  const strict = profileAtLeast(version, "local-real-rounds.v7");
   return candidates.map((candidate, index) => {
-    const decoys = shuffled(roundIds[index]!, candidate.decoys, String);
+    const decoys = shuffled(roundIds[index]!, candidate.decoys, String)
+      .filter((decoy) => !strict || lineKind(decoy) === lineKind(candidate.answer));
+    if (decoys.length === 0) fail("MISSING_LINE_HINT_DECIDES");
     const wantLonger = longer * 2 < index + 1;
     const pick = decoys.find((decoy) => (candidate.answer.length > decoy.length) === wantLonger) ?? decoys[0]!;
     if (candidate.answer.length > pick.length) longer += 1;
@@ -133,6 +138,6 @@ export const generateMissingLineRounds = (options: Readonly<{ profile: CrawlProf
     if (Math.max(...ranks) - Math.min(...ranks) > 2) fail("MISSING_LINE_RANK_UNBALANCED");
   }
   const roundIds = candidates.map((candidate) => roundIdFor("missing-line", sourceFor(candidate, profile)));
-  const paired = pairedDecoys(candidates, roundIds);
+  const paired = pairedDecoys(candidates, roundIds, profile.profileVersion);
   return orderedPool(candidates.map((candidate, index) => fixtureFor(candidate, paired[index]!, profile)));
 };
