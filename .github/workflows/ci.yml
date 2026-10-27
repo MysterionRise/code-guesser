@@ -46,7 +46,7 @@ jobs:
 
       # The Node-to-Python seam test spawns the real locked workers in their offline request-check mode.
       # setup-uv publishes no major tags since v8, only immutable full-version tags.
-      - uses: astral-sh/setup-uv@v10.3.0
+      - uses: astral-sh/setup-uv@v10.3.2
         with:
           version: "0.9.25"
 
@@ -133,7 +133,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: astral-sh/setup-uv@v10.3.0
+      - uses: astral-sh/setup-uv@v10.3.2
         with:
           version: "0.9.25"
 
