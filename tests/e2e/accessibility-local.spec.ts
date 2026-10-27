@@ -11,7 +11,7 @@ test.use({ viewport: { width: 320, height: 568 }, contextOptions: { reducedMotio
 const noHorizontalScroll = () => document.documentElement.scrollWidth <= document.documentElement.clientWidth;
 const prefersReducedMotion = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-test("the deck chooser and every deck fit the minimum viewport", async ({ page }) => {
+test("the deck chooser and every deck fit the minimum viewport, and run no animation when motion is reduced", async ({ page }) => {
   await page.goto("/");
   expect(await page.evaluate(prefersReducedMotion)).toBe(true);
   await expect(page.getByRole("main")).toBeVisible();
@@ -22,6 +22,7 @@ test("the deck chooser and every deck fit the minimum viewport", async ({ page }
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
     await expect(page.getByText("Round 1 of 5")).toBeVisible();
     expect(await page.evaluate(noHorizontalScroll), deck).toBe(true);
+    expect(await page.evaluate(() => document.getAnimations().map((animation) => (animation as CSSAnimation).animationName)), deck).toEqual([]);
   }
 });
 
@@ -65,11 +66,13 @@ test("the deck chooser is keyboard operable with named links", async ({ page }) 
 test("no JavaScript exposes explanation only and no partial game controls", async ({ browser }) => {
   const context = await browser.newContext({ javaScriptEnabled: false, viewport: { width: 320, height: 568 } });
   const page = await context.newPage();
-  for (const path of ["/", "/?deck=project"]) {
+  for (const path of ["/", "/?deck=project", "/?deck=before-after"]) {
     await page.goto(path);
     expect(await page.locator("body").innerText()).toContain("CodeGuessr needs JavaScript to accept answers and reveal progressive evidence.");
-    await expect(page.getByRole("radio")).toHaveCount(0);
-    await expect(page.getByRole("button", { name: /answer/i })).toHaveCount(0);
+    // No control of any kind, and nothing that would announce a result or an error.
+    for (const role of ["radio", "button", "textbox", "checkbox", "status", "alert"] as const) {
+      await expect(page.getByRole(role), `${path} ${role}`).toHaveCount(0);
+    }
   }
   await context.close();
 });
