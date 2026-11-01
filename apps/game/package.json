@@ -9,11 +9,11 @@
     "typecheck": "next typegen && tsc --noEmit"
   },
   "dependencies": {
-    "@ai-sdk/openai-compatible": "3.0.78",
-    "@ai-sdk/react": "4.0.157",
+    "@ai-sdk/openai-compatible": "3.0.80",
+    "@ai-sdk/react": "4.0.160",
     "@json-render/core": "0.21.3",
     "@json-render/react": "0.21.3",
-    "ai": "7.0.153",
+    "ai": "7.0.156",
     "next": "15.5.28",
     "react": "19.3.1",
     "react-dom": "19.3.1",
