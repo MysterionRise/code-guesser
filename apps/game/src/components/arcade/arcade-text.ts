@@ -44,7 +44,7 @@ export function formatCompletionResult(result: EntertainmentResultProjection, co
   if (!Number.isInteger(correctRounds) || correctRounds < 0 || correctRounds > result.completedRounds) {
     throw new ArcadeShellRuleError("correct rounds must be within the completed rounds");
   }
-  return `Run complete — ${points(result.score)} points, ${correctRounds} of ${result.completedRounds} correct.`;
+  return `Run complete: ${points(result.score)} points, ${correctRounds} of ${result.completedRounds} correct.`;
 }
 
 /**
@@ -74,14 +74,33 @@ const fnv1a = (text: string): number => {
   return hash >>> 0;
 };
 
-/** The verdict a round's reveal opens with (`VERDICTS`), by its outcome and, on the last round, the game's. */
-export const verdictText = ({ roundId, correct, hintsUsed, complete, correctRounds, completedRounds }: Readonly<{
+/**
+ * The verdict a round's reveal opens with (`VERDICTS`), by its outcome and, on the last round, the game's. A phrase the
+ * game has shown already (`used`, #234) is passed over for the pool's next, so no verdict reads twice in five rounds
+ * while every pool has words left; the choice still starts from the round id, so every player reads the same words.
+ */
+export const verdictText = ({ roundId, correct, hintsUsed, complete, correctRounds, completedRounds, used }: Readonly<{
   roundId: string; correct: boolean; hintsUsed: number; complete: boolean; correctRounds: number; completedRounds: number;
+  used?: ReadonlySet<string>;
 }>): string => {
   const pool = complete && correctRounds === completedRounds ? VERDICTS.sweep
     : complete && correctRounds === 0 ? VERDICTS.blank
       : !correct ? VERDICTS.missed : hintsUsed === 0 ? VERDICTS.clean : VERDICTS.hinted;
-  return pool[fnv1a(roundId) % pool.length]!;
+  const start = fnv1a(roundId) % pool.length;
+  for (let offset = 0; offset < pool.length; offset += 1) {
+    const text = pool[(start + offset) % pool.length]!;
+    if (used === undefined || !used.has(text)) return text;
+  }
+  return pool[start]!;
+};
+
+/** The verdicts a game's earlier rounds opened with, in order, so the next round's can avoid them. */
+export const priorVerdicts = (rounds: readonly Pick<RoundRecord, "roundId" | "correct" | "hints">[]): ReadonlySet<string> => {
+  const used = new Set<string>();
+  for (const { roundId, correct, hints } of rounds) {
+    used.add(verdictText({ roundId, correct, hintsUsed: hints, complete: false, correctRounds: 0, completedRounds: 0, used }));
+  }
+  return used;
 };
 
 const alternation = (pools: readonly (readonly string[])[]): string =>
@@ -116,19 +135,29 @@ export const recordLine = (delta: RecordDelta): string | null => {
 export const roundStatusText = (round: number, current: boolean, correct: boolean | undefined): string =>
   [`Round ${round}`, ...(current ? ["current"] : []), ...(correct === undefined ? [] : [correct ? "correct" : "missed"])].join(", ");
 
-/** The round's own points after zero, one, and two hints. */
-export const hintCostNote = (values: readonly number[]): string =>
-  `Each hint lowers this round’s points: ${values.map(points).join(" → ")}.`;
+/**
+ * The button that buys the next hint, with what it costs this round (#239): "Reveal hint 1 (−200)". `values` are the
+ * round's points after zero, one, and two hints; `order` is the hint's number, from one.
+ */
+export const hintButtonLabel = (order: number, values: readonly number[]): string => {
+  const before = values[order - 1];
+  const after = values[order];
+  if (before === undefined || after === undefined || after > before) throw new ArcadeShellRuleError("a hint's cost needs the points before and after it");
+  return `Reveal hint ${order} (−${points(before - after)})`;
+};
 
-/** What a single pane shows, where a deck's code needs a word of explanation; comparison panes name their version. */
+/**
+ * What a single pane shows, where a deck's code needs a word the prompt does not say (#239); comparison panes name
+ * their version.
+ */
 export const PANE_CAPTIONS: Readonly<Partial<Record<RoundModeKind, string>>> = Object.freeze({
   algorithm: "Its own names, and any option's name, are hidden as mystery.",
   output: "The last line is a call typed into a Python shell.",
   fix: "Lines are numbered; each option names one.",
-  "missing-line": "One line is hidden; pick the line that fills the gap.",
-  "name-function": "The function's name is hidden as mystery; pick the name its author gave it.",
+  "missing-line": "One line is hidden.",
+  "name-function": "The function's name is hidden as mystery.",
   framework: "Every framework's name is hidden as mystery; the app is the same in each.",
-  exercise: "Every exercise's name is hidden as mystery; pick the exercise this solves.",
+  exercise: "Every exercise's name is hidden as mystery.",
   "vulnerable-line": "Lines are numbered; each option names one.",
 });
 

@@ -77,7 +77,7 @@ for (const deck of artifact.decks) {
     const first = await answerRounds(page, full, true);
     const hinted = full * 0.8 + 4 * full;
     await expect(score(page)).toHaveText(`Score: ${points(hinted)} pts`);
-    await expect(page.getByText(new RegExp(`Run complete — ${points(hinted)} points`, "u"))).toBeVisible();
+    await expect(page.getByText(new RegExp(`Run complete: ${points(hinted)} points`, "u"))).toBeVisible();
 
     // A finished run offers a fresh deal and another deck, never a replay of the rounds it just revealed.
     await expect(page.getByRole("button", { name: "Play again" })).toHaveCount(0);
@@ -91,7 +91,7 @@ for (const deck of artifact.decks) {
     const second = await answerRounds(page, full, false);
     // The deal's next game shares no round with its first, since every pool holds at least ten (#40).
     expect(second.filter((roundId) => first.includes(roundId))).toEqual([]);
-    await expect(page.getByText(new RegExp(`Run complete — ${points(5 * full)} points`, "u"))).toBeVisible();
+    await expect(page.getByText(new RegExp(`Run complete: ${points(5 * full)} points`, "u"))).toBeVisible();
 
     await page.getByRole("link", { name: "Choose another deck" }).click();
     await expect(page.getByRole("heading", { level: 1, name: "Pick a deck" })).toBeVisible();
@@ -120,7 +120,7 @@ test("a mixed game deals one round from each of five decks, names each round's d
   }
   expect(new Set(decks).size).toBe(5);
   await expect(score(page)).toHaveText(`Score: ${points(best)} pts`);
-  await expect(page.getByText(new RegExp(`Run complete — ${points(best)} points`, "u"))).toBeVisible();
+  await expect(page.getByText(new RegExp(`Run complete: ${points(best)} points`, "u"))).toBeVisible();
   await expect(page.getByRole("link", { name: "Deal new rounds" })).toHaveAttribute("href", /^\/\?deck=mixed&deal=[0-9a-f]{8}&game=1$/u);
 });
 

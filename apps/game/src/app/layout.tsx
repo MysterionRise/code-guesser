@@ -5,7 +5,7 @@ import "./globals.css";
 
 import { configuredOrigin } from "../server/public-origin.server";
 
-const TITLE = "CodeGuessr — Read the code. Make your call.";
+const TITLE = "CodeGuessr · Read the code. Make your call.";
 const DESCRIPTION = "A five-round code-reading arcade.";
 const origin = configuredOrigin();
 

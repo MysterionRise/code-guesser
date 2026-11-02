@@ -71,7 +71,7 @@ test("an explainer past its game's limit falls back to the static reveal, and th
     await expect(page.getByText(`Round ${round} of 5`)).toBeVisible();
     await answerRound(page);
   }
-  await expect(page.getByText(/Run complete — /u)).toBeVisible();
+  await expect(page.getByText(/Run complete: /u)).toBeVisible();
 
   // The browser reports the fallback as limited (#98), and the log holds nothing that names the client.
   await expect.poll(() => storedEvents().slice(from).some(({ type, reason }) => type === "genui_fallback" && reason === "limited")).toBe(true);
@@ -91,7 +91,7 @@ test("a player past the deal limit is told to wait, with no game dealt, while ot
   let refused: string | undefined;
   for (let batch = 0; refused === undefined && batch * 25 <= 4 * DEAL_BURST * E2E_RATE_LIMITS; batch += 1) {
     const pages = await Promise.all(Array.from({ length: 25 }, (_, index) => deal((batch * 25 + index) % 1000)));
-    refused = pages.find((html) => html.includes("Too many new games — wait a minute"));
+    refused = pages.find((html) => html.includes("Too many new games. Wait a minute."));
   }
   expect(refused, "a deal past the burst is refused").toBeDefined();
   expect(refused).not.toContain('class="game-card"');

@@ -185,7 +185,7 @@ function LabBar({ deck, deal, arms, overrides, genuiEnabled }: {
 function DealLimited({ href }: { readonly href: string }) {
   return (
     <main className="empty-state" aria-labelledby="deal-limited-title">
-      <h1 id="deal-limited-title">Too many new games — wait a minute</h1>
+      <h1 id="deal-limited-title">Too many new games. Wait a minute.</h1>
       <p>Each player can start only so many games a minute. <a href={href}>Try again</a> once it has passed.</p>
     </main>
   );
