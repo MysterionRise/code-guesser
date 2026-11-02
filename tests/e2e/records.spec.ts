@@ -89,9 +89,9 @@ test("today's five keeps a day streak on its card, and shows it by the score whi
     localStorage.setItem("codeguessr.records", JSON.stringify({ v: 1, artifact: roundSet, decks: {}, daily: { last, days: 2, best: 2 } }));
   }, ROUND_SET);
   await page.goto("/?deck=daily&design=off");
-  // The streak still runs, so the game shows it beside the score (#235); the deck's own streak line needs a deck streak.
+  // The streak still runs, so the game shows it beside the score (#235); with no deck streak the line offers one.
   await expect(page.locator(".arcade-header .day-streak")).toHaveText("Day streak 2");
-  await expect(page.locator(".streak-line")).toHaveCount(0);
+  await expect(page.locator(".streak-line")).toHaveText("3 of 5 right starts a streak");
   const first = await finishGame(page, 3);
   await expect(page.locator(".reveal .record-line")).toHaveText(`First score on this deck: ${points(first)} · Day streak 3`);
   await page.goto("/");

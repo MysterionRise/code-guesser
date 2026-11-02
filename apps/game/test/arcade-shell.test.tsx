@@ -232,7 +232,10 @@ describe("static arcade shell", () => {
     const { ArcadeHeader, StreakLine } = await import("../src/components/arcade/round-header.js");
     const line = (streak: number, correct: number, answered: number) =>
       renderToStaticMarkup(createElement(StreakLine, { streak, correct, answered, total: 5 }));
-    expect(line(0, 0, 0)).toBe("");
+    expect(line(0, 0, 0)).toBe('<p class="streak-line streak-start" data-streak="start">3 of 5 right starts a streak</p>');
+    expect(line(0, 2, 3)).toContain(">1 more right starts a streak<");
+    expect(line(0, 3, 3)).toContain('data-streak="started">Streak started<');
+    expect(line(0, 1, 4)).toBe("");
     expect(line(3, 0, 0)).toBe('<p class="streak-line streak-open" data-streak="open">Streak 3 · 3 of 5 right keeps it</p>');
     expect(line(3, 1, 1)).toContain(">2 more right keeps your streak<");
     expect(line(3, 2, 3)).toContain(">1 more right keeps your streak<");

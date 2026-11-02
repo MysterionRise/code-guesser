@@ -36,8 +36,11 @@ export function StreakLine({ streak, correct, answered, total }: {
   if (outlook.kind === "none") return null;
   const text = outlook.kind === "kept" ? "Streak kept"
     : outlook.kind === "over" ? "Streak over"
-      : answered === 0 ? `Streak ${outlook.streak} · ${outlook.need} of ${total} right keeps it`
-        : `${outlook.need} more right keeps your streak`;
+      : outlook.kind === "started" ? "Streak started"
+        : outlook.kind === "start"
+          ? (answered === 0 ? `${outlook.need} of ${total} right starts a streak` : `${outlook.need} more right starts a streak`)
+          : answered === 0 ? `Streak ${outlook.streak} · ${outlook.need} of ${total} right keeps it`
+            : `${outlook.need} more right keeps your streak`;
   return <p className={`streak-line streak-${outlook.kind}`} data-streak={outlook.kind}>{text}</p>;
 }
 

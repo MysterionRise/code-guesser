@@ -121,10 +121,14 @@ export const dayStreakOf = ({ daily }: LocalRecords, today: string): number =>
 
 /**
  * Where a deck's running streak stands part way through a game (#232): still open, needing `need` more rounds right
- * of those left; kept, once three are right; or over, once three can no longer be reached. None without a streak.
+ * of those left; kept, once three are right; or over, once three can no longer be reached. Without a streak, the
+ * line offers one: start, needing `need` more rounds right; started, once three are right (run 3's recheck: the
+ * player below a streak is the one who most needs a target). None only once three can't be reached.
  */
 export type StreakOutlook = Readonly<
   | { kind: "none" }
+  | { kind: "start"; need: number }
+  | { kind: "started" }
   | { kind: "open"; streak: number; need: number }
   | { kind: "kept"; streak: number }
   | { kind: "over"; streak: number }>;
@@ -132,7 +136,11 @@ export type StreakOutlook = Readonly<
 const NO_STREAK: StreakOutlook = Object.freeze({ kind: "none" });
 
 export const streakOutlook = (streak: number, correct: number, answered: number, total: number): StreakOutlook => {
-  if (streak <= 0) return NO_STREAK;
+  if (streak <= 0) {
+    if (correct >= STREAK_CORRECT) return Object.freeze({ kind: "started" });
+    if (correct + (total - answered) < STREAK_CORRECT) return NO_STREAK;
+    return Object.freeze({ kind: "start", need: STREAK_CORRECT - correct });
+  }
   if (correct >= STREAK_CORRECT) return Object.freeze({ kind: "kept", streak });
   if (correct + (total - answered) < STREAK_CORRECT) return Object.freeze({ kind: "over", streak });
   return Object.freeze({ kind: "open", streak, need: STREAK_CORRECT - correct });

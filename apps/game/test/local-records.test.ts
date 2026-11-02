@@ -96,7 +96,11 @@ describe("local records (#63)", () => {
   });
 
   it("follows a running streak through a game: open with what it still needs, kept at three right, over once three are out of reach (#232)", () => {
-    expect(streakOutlook(0, 0, 0, 5)).toEqual({ kind: "none" });
+    // No streak yet: the line offers one, until three right is out of reach.
+    expect(streakOutlook(0, 0, 0, 5)).toEqual({ kind: "start", need: 3 });
+    expect(streakOutlook(0, 2, 3, 5)).toEqual({ kind: "start", need: 1 });
+    expect(streakOutlook(0, 3, 4, 5)).toEqual({ kind: "started" });
+    expect(streakOutlook(0, 1, 4, 5)).toEqual({ kind: "none" });
     expect(streakOutlook(2, 0, 0, 5)).toEqual({ kind: "open", streak: 2, need: 3 });
     expect(streakOutlook(2, 1, 2, 5)).toEqual({ kind: "open", streak: 2, need: 2 });
     // One right with two rounds left can still make three; one right with one left can't.
