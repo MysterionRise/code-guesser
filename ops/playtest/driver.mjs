@@ -152,6 +152,8 @@ const stateOf = async (page, session = null) => {
     // The note above a game that starts a deck's pool over (#40), and the keys line (hidden on a phone).
     dealNote: await text(page.locator(".deal-note")),
     keysNote: await visibleText(page.locator(".keys-note")),
+    // The end screen's best or streak line (#226): "New best 4,300, up from 3,800 · Streak 3 games".
+    recordLine: await text(page.locator(".record-line")),
     // Every enabled control on the page, so a player can see what it may do next (e.g. "Deal new rounds").
     actions: await page.locator("main button:not([disabled]), main a[href], .completion-actions a, .design-nav a, .deck-nav a")
       .evaluateAll((items) => [...new Set(items.map((item) => item.textContent.trim()).filter(Boolean))]),
