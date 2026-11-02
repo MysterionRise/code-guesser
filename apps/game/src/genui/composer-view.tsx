@@ -94,15 +94,17 @@ const registryFor = (panes: readonly Pane[]) => defineRegistry(catalog, {
       return props.ordered ? <ol className="composer-list">{items}</ol> : <ul className="composer-list">{items}</ul>;
     },
     Table: ({ props }: { props: Props }) => (
-      <table className="genui-comparison">
-        <caption>{props.caption as string}</caption>
-        <thead><tr>{(props.columns as readonly string[]).map((column, index) => <th scope="col" key={index}>{column}</th>)}</tr></thead>
-        <tbody>
-          {(props.rows as readonly (readonly string[])[]).map((row, rowIndex) => (
-            <tr key={rowIndex}>{row.map((cell, index) => index === 0 ? <th scope="row" key={index}>{cell}</th> : <td key={index}>{cell}</td>)}</tr>
-          ))}
-        </tbody>
-      </table>
+      <div className="genui-table-scroll">
+        <table className="genui-comparison">
+          <caption>{props.caption as string}</caption>
+          <thead><tr>{(props.columns as readonly string[]).map((column, index) => <th scope="col" key={index}>{column}</th>)}</tr></thead>
+          <tbody>
+            {(props.rows as readonly (readonly string[])[]).map((row, rowIndex) => (
+              <tr key={rowIndex}>{row.map((cell, index) => index === 0 ? <th scope="row" key={index}>{cell}</th> : <td key={index}>{cell}</td>)}</tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     ),
     Badge: ({ props }: { props: Props }) => <span className={`composer-badge tone-${props.tone as string}`}>{props.text as string}</span>,
     Divider: () => <hr className="composer-divider" />,

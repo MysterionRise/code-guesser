@@ -57,8 +57,8 @@ function GameSummary({ history, result, roundDecks }: {
               </th>
               {roundDecks && <td className="summary-deck">{roundDecks[entry.deck] ?? entry.deck}</td>}
               <td className="summary-pick"><span aria-hidden="true">{entry.correct ? "✓ " : "✗ "}</span>{breakable(entry.picked)}<span className="visually-hidden">{entry.correct ? ", right" : ", missed"}</span></td>
-              <td>{breakable(entry.answer)}</td>
-              <td>{points(entry.points)}{entry.hints > 0 && <span className="summary-hints"> ({entry.hints === 1 ? "1 hint" : `${entry.hints} hints`})</span>}</td>
+              <td className="summary-answer">{breakable(entry.answer)}</td>
+              <td><span className="summary-points">{points(entry.points)}</span>{entry.hints > 0 && <span className="summary-hints"> ({entry.hints === 1 ? "1 hint" : `${entry.hints} hints`})</span>}</td>
             </tr>
           ))}
         </tbody>
