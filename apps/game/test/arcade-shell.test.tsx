@@ -228,6 +228,23 @@ describe("static arcade shell", () => {
     for (const text of Object.values(VERDICTS).flat()) expect(text).toMatch(/^[A-Z][^.]{2,24}\.$/u);
   });
 
+  it("follows a running streak under the header, and shows today's five's day streak by the score (#232)", async () => {
+    const { ArcadeHeader, StreakLine } = await import("../src/components/arcade/round-header.js");
+    const line = (streak: number, correct: number, answered: number) =>
+      renderToStaticMarkup(createElement(StreakLine, { streak, correct, answered, total: 5 }));
+    expect(line(0, 0, 0)).toBe("");
+    expect(line(3, 0, 0)).toBe('<p class="streak-line streak-open" data-streak="open">Streak 3 · 3 of 5 right keeps it</p>');
+    expect(line(3, 1, 1)).toContain(">2 more right keeps your streak<");
+    expect(line(3, 2, 3)).toContain(">1 more right keeps your streak<");
+    expect(line(3, 3, 3)).toContain('data-streak="kept">Streak kept<');
+    expect(line(3, 1, 4)).toContain('data-streak="over">Streak over<');
+    // No live region: the verdict is what a lock announces.
+    expect(line(3, 3, 3)).not.toMatch(/aria-live|role="status"/u);
+    const header = (dayStreak: number) => renderToStaticMarkup(createElement(ArcadeHeader, { score: 1200, dayStreak }));
+    expect(header(0)).not.toContain("Day streak");
+    expect(header(3)).toContain('<span class="day-streak">Day streak 3</span><span class="score">');
+  });
+
   it("says what a finished game did to the records, or nothing (#63)", () => {
     const delta = { newBest: null, streak: 0, bestStreak: false, dayStreak: null, counted: true };
     expect(recordLine(delta)).toBeNull();

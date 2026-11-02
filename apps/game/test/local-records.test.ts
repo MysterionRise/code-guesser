@@ -13,8 +13,10 @@ import {
   parseRecords,
   recordDelta,
   recordGame,
+  recordsAtStart,
   recordsArtifact,
   storedRecords,
+  streakOutlook,
   type FinishedGame,
   type LocalRecords,
   type RecordStore,
@@ -90,6 +92,32 @@ describe("local records (#63)", () => {
     expect(delta([game("daily", 2000, 3, "2026-10-21"), game("daily", 2500, 4, "2026-10-22")], "2026-10-22")).toMatchObject({ newBest: { score: 2500, previous: 2000 }, dayStreak: 2 });
     expect(delta([game("daily", 2000, 3, "2026-10-19")], "2026-10-22")).toMatchObject({ dayStreak: null, counted: true });
     expect(delta([game("daily", 2000, 3, TODAY), game("daily", 5000, 5, TODAY)])).toEqual({ newBest: null, streak: 0, bestStreak: false, dayStreak: null, counted: false });
+  });
+
+  it("follows a running streak through a game: open with what it still needs, kept at three right, over once three are out of reach (#232)", () => {
+    expect(streakOutlook(0, 0, 0, 5)).toEqual({ kind: "none" });
+    expect(streakOutlook(2, 0, 0, 5)).toEqual({ kind: "open", streak: 2, need: 3 });
+    expect(streakOutlook(2, 1, 2, 5)).toEqual({ kind: "open", streak: 2, need: 2 });
+    // One right with two rounds left can still make three; one right with one left can't.
+    expect(streakOutlook(2, 1, 3, 5)).toEqual({ kind: "open", streak: 2, need: 2 });
+    expect(streakOutlook(2, 2, 3, 5)).toEqual({ kind: "open", streak: 2, need: 1 });
+    expect(streakOutlook(2, 1, 4, 5)).toEqual({ kind: "over", streak: 2 });
+    expect(streakOutlook(2, 3, 3, 5)).toEqual({ kind: "kept", streak: 2 });
+    expect(streakOutlook(1, 3, 5, 5)).toEqual({ kind: "kept", streak: 1 });
+    expect(streakOutlook(1, 2, 5, 5)).toEqual({ kind: "over", streak: 1 });
+  });
+
+  it("reads the deck's streak and today's five's day streak as a game starts, and nothing without records (#232)", () => {
+    const store = memoryStore();
+    const kept = played([game("fix", 3250, 4), game("fix", 3000, 3), game("daily", 2000, 3, TODAY)]);
+    store.setItem(RECORDS_KEY, JSON.stringify(kept));
+    expect(recordsAtStart({ artifact: ARTIFACT, deck: "fix", date: null }, TODAY, store)).toEqual({ streak: 2, dayStreak: 0 });
+    expect(recordsAtStart({ artifact: ARTIFACT, deck: "daily", date: TODAY }, TODAY, store)).toEqual({ streak: 1, dayStreak: 1 });
+    expect(recordsAtStart({ artifact: ARTIFACT, deck: "language", date: null }, TODAY, store)).toEqual({ streak: 0, dayStreak: 0 });
+    // Another round set's records, no records, and no game to record all read as none.
+    expect(recordsAtStart({ artifact: OTHER, deck: "fix", date: null }, TODAY, store)).toEqual({ streak: 0, dayStreak: 0 });
+    expect(recordsAtStart({ artifact: ARTIFACT, deck: "fix", date: null }, TODAY, memoryStore())).toEqual({ streak: 0, dayStreak: 0 });
+    expect(recordsAtStart(undefined, TODAY, store)).toEqual({ streak: 0, dayStreak: 0 });
   });
 
   it("counts a duel of another day's five toward the deck, not toward the day streak", () => {

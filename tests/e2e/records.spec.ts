@@ -59,10 +59,20 @@ test("a finished game's score shows on its deck's card, a new best replaces it, 
   await expect(page.locator(".deck-record")).toHaveCount(1);
   expect(await violations(page)).toEqual([]);
   // A second game with three right is a streak of two, the longest so far; a game that beats nothing says only that.
-  const third = await playGame(page, "/?deck=language&design=off", 3);
+  // Through the game the line under the header follows the streak (#232), and it is no live region.
+  await page.goto("/?deck=language&design=off");
+  await expect(page.locator(".streak-line")).toHaveText("Streak 1 · 3 of 5 right keeps it");
+  await expect(page.locator(".streak-line")).not.toHaveAttribute("aria-live", /.*/u);
+  const third = await finishGame(page, 3);
   expect(third).toBeLessThan(second);
+  await expect(page.locator(".streak-line")).toHaveText("Streak kept");
   await expect(page.locator(".reveal .record-line")).toHaveText("Streak 2 games, your longest");
   expect(await violations(page)).toEqual([]);
+  // A game that drops below three right says so as soon as three are out of reach.
+  await page.goto("/?deck=language&design=off");
+  await expect(page.locator(".streak-line")).toHaveText("Streak 2 · 3 of 5 right keeps it");
+  await finishGame(page, 1);
+  await expect(page.locator(".streak-line")).toHaveText("Streak over");
 });
 
 test("today's five keeps a day streak on its card", async ({ page }) => {

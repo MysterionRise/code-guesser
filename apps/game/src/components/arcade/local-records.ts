@@ -119,6 +119,35 @@ export const recordGame = (records: LocalRecords, game: FinishedGame, today: str
 export const dayStreakOf = ({ daily }: LocalRecords, today: string): number =>
   daily !== null && (daily.last === today || daily.last === dayBefore(today)) ? daily.days : 0;
 
+/**
+ * Where a deck's running streak stands part way through a game (#232): still open, needing `need` more rounds right
+ * of those left; kept, once three are right; or over, once three can no longer be reached. None without a streak.
+ */
+export type StreakOutlook = Readonly<
+  | { kind: "none" }
+  | { kind: "open"; streak: number; need: number }
+  | { kind: "kept"; streak: number }
+  | { kind: "over"; streak: number }>;
+
+const NO_STREAK: StreakOutlook = Object.freeze({ kind: "none" });
+
+export const streakOutlook = (streak: number, correct: number, answered: number, total: number): StreakOutlook => {
+  if (streak <= 0) return NO_STREAK;
+  if (correct >= STREAK_CORRECT) return Object.freeze({ kind: "kept", streak });
+  if (correct + (total - answered) < STREAK_CORRECT) return Object.freeze({ kind: "over", streak });
+  return Object.freeze({ kind: "open", streak, need: STREAK_CORRECT - correct });
+};
+
+/**
+ * The records as this game starts, read once in the browser: the deck's running streak, which the round track follows
+ * through the game, and the day streak for today's five. Nothing, where no records are kept or storage refuses.
+ */
+export const recordsAtStart = (game: GameRecords | undefined, today: string, store: RecordStore | null = browserStore()): Readonly<{ streak: number; dayStreak: number }> => {
+  if (game === undefined) return Object.freeze({ streak: 0, dayStreak: 0 });
+  const records = parseRecords(storedRecords(store), game.artifact);
+  return Object.freeze({ streak: records.decks[game.deck]?.streak ?? 0, dayStreak: game.date === null ? 0 : dayStreakOf(records, today) });
+};
+
 /** What a finished game changed in the records, for the end of the game to say. */
 export interface RecordDelta {
   /** The deck's new best, with the best it beats (0 before any game); null when the game didn't beat it. */
