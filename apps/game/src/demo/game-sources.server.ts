@@ -13,6 +13,8 @@ export interface GameSource {
 /** Today's five as the chooser and a link preview name it; its game adds the date. */
 export const DAILY_TITLE = "Today’s five";
 export const DAILY_DESCRIPTION = "The same mixed five all day, new tomorrow.";
+/** How today's five names itself above every round of its game (#235): "Today’s five · 2026-11-02". */
+export const dailyLabel = (date: string): string => `${DAILY_TITLE} · ${date}`;
 
 /**
  * Everything this artifact deals a game from, by the titles and descriptions its decks publish: today's five and the

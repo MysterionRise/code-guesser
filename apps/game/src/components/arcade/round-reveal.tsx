@@ -5,9 +5,9 @@ import { hostInputId, type Design } from "../../genui/designs";
 import type { GenuiPanelProps } from "../../genui/genui-panel";
 import type { ChallengerDuel, GameDuel } from "../duel/duel-contract";
 import { ChallengeFriend, DuelCompletion } from "../duel/duel-game";
-import { DEFAULT_NAME, opponentRoundLine } from "../duel/duel-text";
+import { DEFAULT_NAME, challengerPoints, duelGapLine, opponentRoundLine } from "../duel/duel-text";
 import type { AuthorizedReveal, EntertainmentResultProjection, RoundRecord } from "./arcade-session";
-import { formatCompletionResult, points, projectSpoilerFreeShare, recordLine, roundPointsNote, verdictText } from "./arcade-text";
+import { formatCompletionResult, points, priorVerdicts, projectSpoilerFreeShare, recordLine, roundPointsNote, verdictText } from "./arcade-text";
 import type { RecordDelta } from "./local-records";
 import type { PublicRound } from "./mode-contract";
 import { hasShareSheet, shareOrCopy } from "./share-sheet";
@@ -20,9 +20,9 @@ const linkedAttribution = (attribution: string): React.ReactNode[] => attributio
     ? <a key={index} href={part} rel="noreferrer noopener" target="_blank">{part}</a>
     : part);
 
-/** Which parts of a round's "why" this game has shown already on a round of the same kind, word for word. */
-export type RevealRepeats = Readonly<{ explanation: boolean; misleading: boolean }>;
-export const NO_REPEATS: RevealRepeats = Object.freeze({ explanation: false, misleading: false });
+/** Which parts of a round's "why" this game has shown already on a round of the same kind, word for word (#234). */
+export type RevealRepeats = Readonly<{ explanation: boolean; misleading: boolean; helpful: boolean }>;
+export const NO_REPEATS: RevealRepeats = Object.freeze({ explanation: false, misleading: false, helpful: false });
 
 /** Generative UI's panel, fetched only when the server turns it on, so the static game never loads it. */
 const GenuiPanel = React.lazy(() => import("../../genui/genui-panel")) as React.ComponentType<GenuiPanelProps>;
@@ -162,11 +162,16 @@ export function RoundReveal({ round, reveal, hintsUsed, pickLabel, complete, cor
   return (
     <>
       <h2 ref={headingRef} tabIndex={-1} className={reveal.correct ? "verdict-right" : "verdict-missed"}>
-        {verdictText({ roundId: round.roundId, correct: reveal.correct, hintsUsed, complete, correctRounds, completedRounds: history.length })}
+        {verdictText({ roundId: round.roundId, correct: reveal.correct, hintsUsed, complete, correctRounds, completedRounds: history.length,
+          used: priorVerdicts(history.slice(0, -1)) })}
       </h2>
       <p className="round-points">{roundPointsNote(reveal.score, hintsUsed)}</p>
       {duel?.role === "challenged" && (
-        <p className="duel-line">{opponentRoundLine(opponentName ?? DEFAULT_NAME, duel.challenge.challenger.rounds[history.length - 1]!)}</p>
+        <>
+          <p className="duel-line">{opponentRoundLine(opponentName ?? DEFAULT_NAME, duel.challenge.challenger.rounds[history.length - 1]!)}</p>
+          {/* Where the duel stands over the rounds locked so far (#232), in the reveal's live region. */}
+          <p className="duel-gap">{duelGapLine(opponentName ?? DEFAULT_NAME, reveal.result.score, challengerPoints(duel.challenge.challenger.rounds, history.length))}</p>
+        </>
       )}
       <p className="answer-line">The answer: <strong>{answer}</strong></p>
       {/* The host's chat sits below the round (#161): this moves focus to it, and leaves the address alone, since its
@@ -191,12 +196,12 @@ export function RoundReveal({ round, reveal, hintsUsed, pickLabel, complete, cor
         </>
       )}
       <details className="reveal-why" open={whyOpen} onToggle={(event) => setWhyOpen(event.currentTarget.open)}>
-        <summary>Why it’s {answer}</summary>
-        {/* The round's own evidence and signals first; the deck's method and its misleading signals once a game per deck. */}
+        <summary>Why this is the answer</summary>
+        {/* The round's own evidence first; a sentence a round of this kind has shown this game is left out (#234). */}
         <p>{reveal.evidence}</p>
-        <p>Helpful signals: {reveal.helpfulSignals.join(" · ")}</p>
+        {!repeats.helpful && <p className="reveal-helpful">Helpful signals: {reveal.helpfulSignals.join(" · ")}</p>}
         {!repeats.explanation && <p className="reveal-method">{reveal.explanation}</p>}
-        {!repeats.misleading && <p className="reveal-misleading">Misleading signals: {reveal.misleadingSignals.join(" · ")}</p>}
+        {!repeats.misleading && <p className="reveal-misleading">Easy to confuse: {reveal.misleadingSignals.join(" · ")}</p>}
       </details>
       {genuiDesign && genuiDesign !== "host" && (
         <React.Suspense fallback={null}>

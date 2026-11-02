@@ -137,7 +137,7 @@ test("every deck's address names its deck and its preview, and the chooser keeps
     expect(meta).toMatchObject({ "og:title": `${title} · CodeGuessr`, "og:image": `${baseURL}/og/${id}`, "og:image:width": "1200", "twitter:card": "summary_large_image" });
   }
   const chooser = await head("/");
-  expect(chooser.title).toBe("CodeGuessr — Read the code. Make your call.");
-  expect(chooser.meta["og:title"]).toBe("CodeGuessr — Read the code. Make your call.");
+  expect(chooser.title).toBe("CodeGuessr · Read the code. Make your call.");
+  expect(chooser.meta["og:title"]).toBe("CodeGuessr · Read the code. Make your call.");
   expect(chooser.meta["og:image"]).toBeUndefined();
 });

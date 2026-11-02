@@ -187,6 +187,12 @@ gate: changing queries, retries, ceilings, deck rules, or running
   game 0. Game n takes positions 5n to 5n + 4 of the pool in the seed's order (`seriesRounds` in
   `local-real-experiment-deal.server.ts`, a fresh order each pass), and its options in a seeded order, so a reload
   deals the same game and "Deal new rounds" links to game n + 1. A game that starts a new pass shows a note.
+  - **Each option family once a game (#233, run 3):** a pass's order is arranged (`arrangeForGames`, with the
+    `roundKeys` the server passes: the candidates' ids as the family, the answer's id) so that no game holds two
+    rounds of one option set or one answer where the pool allows: the seeded order stands except where a round would
+    repeat the game's family or answer, and a family with as many rounds left as games that can take one goes first.
+    A four-family deck (framework) still repeats one family a game, with another answer; before-after, one family,
+    is left as dealt. Game 0's first round of every recorded seed (`DEAL_SEEDS`) is unchanged.
 - The server holds each game's progress (#96): `dealGame` seals it in a signed
   token (`local-real-experiment-session.server.ts`), and the hint and answer
   server actions take one step each. A ledger refuses an older token, so a
@@ -457,6 +463,17 @@ gate: changing queries, retries, ceilings, deck rules, or running
         round" on a round without a scaffold in a game whose rounds carry any. Marker hunt questions the pane can't
         answer are a data change for the next questions run.
     - Open: #120 (model per design), #159 (check traces against the code), #160 (the algorithm layer's fairness).
+    - Run 3, the fun run (`docs/review/evidence/2026-11-02-agent-playtest-run-3-fun.md`, 2026-11-02): the protocol
+      is checked in (`ops/playtest/personas/`, `judges/`, `run-3.md`, `aggregate.mjs`); eight personas (regular,
+      commuter on a phone, duel-pair, streaker, learner, a code-blind `blind` instrument, red-team, a11y) and five
+      judges (fun on Opus; copy, difficulty, explanations, UX on Sonnet) against a nine-line release bar. The
+      driver pins deals (`deal: "demo"`), opens links (`goto`), plays at phone width, fakes the clock, reads the
+      clipboard and records, and plays blind; it runs as `node --import tsx`. The bar's fun, copy, and difficulty
+      lines failed (#228–#241): the data-level causes (hints that state the answer, reveal sentences that fit any
+      round) wait for the next preparation run; the code-level ones were fixed in #242–#245 (stakes during play,
+      families once a game, the reveal once a game, the host on Sonnet with one offer a round, the dead-frame
+      fallback, the phone end screen) and rechecked. #120's pilot: keep Haiku for the catalog, composer, and
+      visualizer; the host is the design worth Sonnet (`OPENROUTER_MODEL_HOST`), the owner's setting.
   - Composer and visualizer requests keep only the first panel or page
     (`ONE_ONLY`) and ask for `parallel_tool_calls: false`; live, Haiku
     sometimes wrote several pages at once.

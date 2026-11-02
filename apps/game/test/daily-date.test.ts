@@ -174,6 +174,6 @@ describe("today's five's address (#172)", () => {
     }
     // Each game of the date spends one, as any deal does.
     for (let game = 0; game < SURFACES.deal.burst; game += 1) expect(arcadeOf(await render({ deck: "daily", date: utcDate(Date.now()) }))).not.toBeNull();
-    expect(await render({ deck: "daily", date: utcDate(Date.now()) })).toContain("Too many new games — wait a minute");
+    expect(await render({ deck: "daily", date: utcDate(Date.now()) })).toContain("Too many new games. Wait a minute.");
   });
 });

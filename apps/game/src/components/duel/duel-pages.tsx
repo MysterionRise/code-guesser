@@ -48,16 +48,19 @@ export function ChallengeIntro({ deck, total, firstPlay, playHref, chooseAnother
 
 /**
  * A result link, read-only: both games side by side and the verdict, which the server works out again on every visit.
- * It names no round or answer, so it can show after the rounds it was played on are gone.
+ * It names no round or answer, so it can show after the rounds it was played on are gone. It gives the challenger a
+ * next step (#235): a new game of the deck (a mix, after today's five), whose end offers the challenge form again.
  */
 export function DuelResult({ comparison, dealHref, chooseAnotherDeckHref }: {
   readonly comparison: DuelComparison;
-  /** A fresh deal of the duel's deck, while this round set offers it. */
+  /** A fresh deal of the duel's deck (a mix for today's five), while this round set offers it. */
   readonly dealHref: string | null;
   readonly chooseAnotherDeckHref: string;
 }) {
   const { from, vs } = useFragmentNames();
   const names = { challenger: from ?? RESULT_NAMES.challenger, challenged: vs ?? RESULT_NAMES.challenged };
+  const back = vs === null ? "your friend" : vs;
+  const next = comparison.date === null ? `play a new game of ${comparison.deckTitle}` : "play a mixed game";
   return (
     <main className="duel-page" aria-labelledby="duel-title">
       <section className="game-card">
@@ -66,6 +69,7 @@ export function DuelResult({ comparison, dealHref, chooseAnotherDeckHref }: {
         <p className="duel-deck">{duelDeckTitle(comparison)}</p>
         {comparison.earlierRoundSet && <p className="duel-note">Played on an earlier round set, whose rounds are gone.</p>}
         <DuelComparisonTable comparison={comparison} names={names} level={2} />
+        {dealHref && <p className="duel-note duel-back">Challenge <bdi>{back}</bdi> back: {next} and send the link from its last round.</p>}
         <div className="completion-actions">
           {dealHref && <a className="primary-action" href={dealHref}>Deal new rounds</a>}
           <a className="deck-link" href={chooseAnotherDeckHref}>Choose another deck</a>

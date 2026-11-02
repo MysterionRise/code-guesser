@@ -59,7 +59,7 @@ test("a whole game plays from the keyboard alone, with focus always visible", as
       await page.keyboard.press("Enter");
     }
   }
-  await expect(page.getByText(/Run complete — /u)).toBeVisible();
+  await expect(page.getByText(/Run complete: /u)).toBeVisible();
   await tabTo(page, page.getByRole("link", { name: "Deal new rounds" }));
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(new RegExp(`\\?deck=project&deal=${DEAL}&game=3$`, "u"));

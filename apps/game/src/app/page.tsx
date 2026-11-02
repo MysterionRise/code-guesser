@@ -10,7 +10,7 @@ import { ClearRecords, DayStreak, DeckRecord } from "../components/chooser-recor
 import { DailyCard, DailyRedirect } from "../components/daily-link";
 import { ArtifactUnavailable } from "../demo/artifact-unavailable";
 import { DemoArcade } from "../demo/demo-arcade";
-import { DAILY_DESCRIPTION, DAILY_TITLE, gameSources, type GameSource } from "../demo/game-sources.server";
+import { DAILY_DESCRIPTION, DAILY_TITLE, dailyLabel, gameSources, type GameSource } from "../demo/game-sources.server";
 import { activeLocalRealExperiment } from "../demo/local-real-experiment-loader.server";
 import { DEAL_SEED, MAXIMUM_GAME, dailyDateOf, type DealSeries } from "../demo/local-real-experiment-deal.server";
 import type { DailyDeal, LocalRealDeck, LocalRealMix } from "../demo/local-real-experiment.server";
@@ -185,7 +185,7 @@ function LabBar({ deck, deal, arms, overrides, genuiEnabled }: {
 function DealLimited({ href }: { readonly href: string }) {
   return (
     <main className="empty-state" aria-labelledby="deal-limited-title">
-      <h1 id="deal-limited-title">Too many new games — wait a minute</h1>
+      <h1 id="deal-limited-title">Too many new games. Wait a minute.</h1>
       <p>Each player can start only so many games a minute. <a href={href}>Try again</a> once it has passed.</p>
     </main>
   );
@@ -244,12 +244,14 @@ function DealtSession({ deck, deal, arms, record, replayed, overrides, origin }:
   // A finished game joins the player's records in their browser (#63), under this round set; a replay of today's five
   // doesn't, since its player has seen its answers.
   const records = replayed ? {} : { records: { artifact: recordsArtifact(loaded.experiment.artifactHash), deck: deck.id, date: "date" in deal ? deal.date : null } };
+  // Today's five names itself and its date above every round (#235), and a replay says it records nothing.
+  const label = "date" in deal ? { gameLabel: dailyLabel(deal.date), replay: replayed } : {};
   return (
     <>
       {wrapped && <p className="deal-note">You’ve now seen every round in this deck, so this game starts it over.</p>}
       <DemoArcade key={sessionToken} mode={mode} sessionToken={sessionToken} deckTitle={deck.title} {...(roundDecks ? { roundDecks } : {})}
         authorizeRevealAction={authorizeLocalExperimentReveal} revealHintAction={revealLocalExperimentHint}
-        chooseAnotherDeckHref="/" newGameHref={`${next}${labQuery(overrides)}`} {...replay} {...share} {...challenge} {...records}
+        chooseAnotherDeckHref="/" newGameHref={`${next}${labQuery(overrides)}`} {...replay} {...share} {...challenge} {...records} {...label}
         {...(arms.design === "off" ? {} : { genuiDesign: arms.design })} />
     </>
   );

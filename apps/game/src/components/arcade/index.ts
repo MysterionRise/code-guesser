@@ -18,6 +18,8 @@ export {
   VERDICTS,
   VERDICT_PATTERN,
   formatCompletionResult,
+  hintButtonLabel,
+  priorVerdicts,
   projectSpoilerFreeShare,
   recordLine,
   roundPointsNote,

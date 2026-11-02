@@ -259,7 +259,6 @@ button:focus-visible, input:focus-visible, a:focus-visible { outline: 3px solid 
 .eyebrow { color: var(--accent); margin: 0; font-size: .82rem; text-transform: uppercase; letter-spacing: .15em; font-weight: 800; }
 h1 { font-size: clamp(1.8rem, 5vw, 3.4rem); line-height: 1; margin: 12px 0 28px; max-width: 700px; }
 .code-window { margin: 0 0 12px; padding: 24px; min-height: 150px; max-width: 100%; overflow: auto; white-space: pre; tab-size: 4; background: var(--code-bg); border: 1px solid var(--border); border-radius: var(--radius-panel); color: var(--code-text); font: 500 .95rem/1.7 var(--font-mono); }
-.hint-cost { margin: 0 0 10px; color: var(--muted); font-size: .88rem; }
 h1[tabindex="-1"]:focus, h2[tabindex="-1"]:focus { outline: none; }
 .reveal small a { color: var(--accent); overflow-wrap: anywhere; }
 .empty-state { width: min(980px, calc(100% - 32px)); margin: 36px auto 64px; }
@@ -506,8 +505,17 @@ noscript { display: block; padding: 12px; margin-bottom: 16px; background: var(-
 .duel-intro { margin: 4px 0 0; }
 .duel-note { margin: 4px 0 8px; }
 .duel-line { margin: 0 0 8px; font-weight: 700; }
+/* The stakes during play (#232): the streak's outlook under the header, and today's five's day streak by the score. */
+.score-group { display: inline-flex; align-items: center; gap: 10px; }
+.day-streak { color: var(--muted); font-weight: 800; font-size: .88rem; font-variant-numeric: tabular-nums; }
+.streak-line { margin: -14px 0 18px; color: var(--muted); font-weight: 700; font-size: .95rem; font-variant-numeric: tabular-nums; }
+/* Today's five names itself above every round (#235), and a replay of it says it records nothing. */
+.game-label { margin: 0 0 8px; color: var(--muted); font-size: .82rem; text-transform: uppercase; letter-spacing: .15em; font-weight: 800; }
+.replay-note { margin: -14px 0 18px; color: var(--muted); font-size: .88rem; }
 .duel-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; margin: -12px 0 20px; }
 .duel-strip-name { min-width: 0; color: var(--muted); font-weight: 800; overflow-wrap: anywhere; }
+.duel-gap { font-weight: 700; font-variant-numeric: tabular-nums; }
+.reveal .duel-gap { margin: 0 0 8px; }
 .duel-strip .round-track { flex: 1 1 280px; margin: 0; max-width: 440px; }
 /* The comparison reuses the game summary's table; its cells wrap, so two players' columns fit a phone. */
 .duel-comparison caption { margin-bottom: 6px; text-align: left; color: var(--muted); font-size: .88rem; }

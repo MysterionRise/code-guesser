@@ -11,7 +11,7 @@ export function QuestionScaffold({ scaffold }: { readonly scaffold: RoundScaffol
     <section className="question-scaffold" aria-label="What to watch">
       <h2 className="scaffold-title">What to watch</h2>
       <ul className="scaffold-list">
-        {scaffold.watch.map(({ name, role }) => <li key={name}><code>{name}</code> <span className="scaffold-role">— {role}</span></li>)}
+        {scaffold.watch.map(({ name, role }) => <li key={name}><code>{name}</code><span className="scaffold-role">: {role}</span></li>)}
       </ul>
     </section>
   ) : (

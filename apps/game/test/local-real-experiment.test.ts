@@ -1,4 +1,5 @@
 import { readFileSync, readdirSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
@@ -100,6 +101,52 @@ describe("server-only local real experiment authority v3", () => {
     expect(dealt(4).wrapped).toBe(true);
     expect(dealt(0).wrapped).toBe(false);
     expect(new Set(experiment.dealGame("mixed", Math.random, NOW, undefined, { seed: "0a1b2c3d", game: 0 }).mode.rounds.map((round: any) => round.mode.kind)).size).toBe(5);
+  });
+
+  it("arranges a seeded deal's games so each option family and each answer shows once a game where the pool allows (#233)", async () => {
+    const { seriesRounds } = await import("../src/demo/local-real-experiment-deal.server");
+    // Families of four answers, each answer in two rounds: six families make 48 rounds, like exercise and algorithm.
+    const familyPool = (families: number) => Array.from({ length: families * 8 }, (_, index) =>
+      ({ id: index, family: `f${index % families}`, answer: `f${index % families}-a${Math.floor(index / families) % 4}` }));
+    const keys = (round: { family: string; answer: string }) => ({ family: round.family, answer: round.answer });
+    const six = familyPool(6);
+    const games = Array.from({ length: 12 }, (_, game) => seriesRounds(six, "0a1b2c3d", "exercise", game, keys));
+    for (const [game, { rounds }] of games.entries()) {
+      expect(new Set(rounds.map(({ family }) => family)).size, `game ${game}`).toBe(5);
+      expect(new Set(rounds.map(({ answer }) => answer)).size, `game ${game}`).toBe(5);
+    }
+    // Still a permutation of the pool per pass: nine games spend 45 rounds and share none, and the order is stable.
+    expect(new Set(games.slice(0, 9).flatMap(({ rounds }) => rounds.map(({ id }) => id))).size).toBe(45);
+    expect(seriesRounds(six, "0a1b2c3d", "exercise", 7, keys)).toEqual(games[7]);
+    expect(seriesRounds(six, "ffffffff", "exercise", 0, keys).rounds).not.toEqual(games[0]!.rounds);
+    // A four-family deck repeats one family a game, with another answer.
+    const four = familyPool(4);
+    for (let game = 0; game < 8; game += 1) {
+      const { rounds } = seriesRounds(four, "0a1b2c3d", "framework", game, keys);
+      expect(new Set(rounds.map(({ family }) => family)).size, `game ${game}`).toBe(4);
+      expect(new Set(rounds.map(({ answer }) => answer)).size, `game ${game}`).toBe(5);
+    }
+    // One family (before-after) keeps the seeded order, so its two answers follow no pattern.
+    const one = Array.from({ length: 30 }, (_, index) => ({ id: index, family: "same", answer: index % 2 === 0 ? "A" : "B" }));
+    expect(seriesRounds(one, "0a1b2c3d", "before-after", 1, keys).rounds).toEqual(seriesRounds(one, "0a1b2c3d", "before-after", 1).rounds);
+    // Where no rule bites, the seeded order stands: a pool of singletons deals exactly as before.
+    const singletons = Array.from({ length: 24 }, (_, index) => ({ id: index, family: `s${index}`, answer: `a${index}` }));
+    expect(seriesRounds(singletons, "0a1b2c3d", "project", 3, keys).rounds).toEqual(seriesRounds(singletons, "0a1b2c3d", "project", 3).rounds);
+    // The committed artifact's family decks through the server: no game of a recorded seed repeats an option set, and
+    // game 0 still opens on the round the README media show.
+    const { loadLocalRealExperiment } = await import("../src/demo/local-real-experiment-loader.server");
+    const loaded = loadLocalRealExperiment({ artifactPath: fileURLToPath(new URL("../src/demo/generated/local-real-rounds.json", import.meta.url)) });
+    if (!loaded.ok) throw new Error("committed artifact unavailable");
+    const committed = JSON.parse(readFileSync(fileURLToPath(new URL("../src/demo/generated/local-real-rounds.json", import.meta.url)), "utf8"));
+    for (const [deck, seed, families] of [["exercise", "c0de0010", 5], ["algorithm", "5eed000f", 5], ["framework", "5eed0018", 4]] as const) {
+      const pool = committed.decks.find((entry: any) => entry.id === deck).fixtures.map((fixture: any) => fixture.roundId);
+      for (let game = 0; game < 9; game += 1) {
+        const rounds = loaded.experiment.dealGame(deck, Math.random, NOW, undefined, { seed, game }).mode.rounds;
+        const sets = rounds.map((round: any) => round.mode.candidates.map(({ candidateId }: any) => candidateId).sort().join("|"));
+        expect(new Set(sets).size, `${deck} game ${game}`).toBe(families);
+        if (game === 0) expect(rounds[0]!.roundId).toBe(seriesRounds(pool, seed, deck, 0).rounds[0]);
+      }
+    }
   });
 
   it("deals a seeded mixed deal's games without repeats until a deck's pool is spent, the decks taking turns (#56, #40)", async () => {

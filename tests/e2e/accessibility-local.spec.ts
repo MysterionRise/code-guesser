@@ -36,7 +36,7 @@ test("the permanent notice names every round source, links About, and wraps to a
     await page.goto(path);
     const notice = page.locator(".demo-notice");
     for (const text of ["The Stack v2", "GitHub", "TheAlgorithms", "Defects4J", "BugsInPy", "TodoMVC", "Exercism",
-      "chosen and checked automatically, not reviewed by hand", "Each game tries a random look and explainer."]) {
+      "chosen and checked automatically, not reviewed by hand", "Each game tries a random look and explanation."]) {
       await expect(notice).toContainText(text);
     }
     await expect(notice.getByRole("link", { name: "About" })).toHaveAttribute("href", "/about");
