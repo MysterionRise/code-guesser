@@ -22,6 +22,9 @@ export default defineConfig({
   workers: 1,
   use: {
     headless: true,
+    // Each round's card arrives with a short animation, which Playwright waits out before every click; the scenarios
+    // test behaviour, so they play with motion reduced, and the one that checks the animation asks for it.
+    contextOptions: { reducedMotion: "reduce" },
   },
   webServer: [
     {
