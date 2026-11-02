@@ -137,6 +137,27 @@ test("a layered game says when a round plays without its layer, and a static gam
   await expect(page.locator(".layer-note")).toHaveCount(0);
 });
 
+test.describe("with motion welcome", () => {
+  test.use({ contextOptions: { reducedMotion: "no-preference" } });
+
+  test("each round's card arrives afresh, not only the first", async ({ page }) => {
+    await page.goto("/?deck=fix&design=off");
+    await expect(page.getByText("Round 1 of 5")).toBeVisible();
+    await page.evaluate(() => {
+      (window as unknown as { arrivals: number }).arrivals = 0;
+      document.addEventListener("animationstart", (event) => {
+        if (event.animationName === "arrive" && (event.target as Element).matches(".game-card")) (window as unknown as { arrivals: number }).arrivals += 1;
+      }, true);
+    });
+    await lockRound(page);
+    await page.getByRole("button", { name: "Next round" }).click();
+    await expect(page.getByText("Round 2 of 5")).toBeVisible();
+    await expect.poll(() => page.evaluate(() => (window as unknown as { arrivals: number }).arrivals)).toBe(1);
+    // The new round's title still takes focus on the fresh card.
+    await expect(page.getByRole("heading", { level: 1 })).toBeFocused();
+  });
+});
+
 /** Each numbered line's number, and where its text's later rows start once it wraps. */
 const numberedRows = (page: Page) => page.locator(".code-window.numbered .code-line").evaluateAll((lines) => lines.map((line) => {
   const number = line.querySelector(".line-number")!.getBoundingClientRect();

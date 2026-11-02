@@ -238,7 +238,8 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
         <OpponentStrip name={opponentName ?? DEFAULT_NAME} rounds={duel.challenge.challenger.rounds} answered={session.completedRounds} />
       )}
 
-      <section className="game-card" aria-labelledby="round-title" data-round-id={round.roundId}>
+      {/* Keyed by round, so each round's card arrives afresh (its `arrive` animation, where motion is welcome). */}
+      <section key={round.roundId} className="game-card" aria-labelledby="round-title" data-round-id={round.roundId}>
         <p className="eyebrow">Round {session.roundIndex + 1} of {mode.rounds.length}
           {roundDecks?.[round.mode.kind] !== undefined && <> · <span className="round-deck">{roundDecks[round.mode.kind]}</span></>}</p>
         <h1 id="round-title" ref={roundTitle} tabIndex={-1}>{round.mode.prompt}</h1>
