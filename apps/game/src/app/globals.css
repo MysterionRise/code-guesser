@@ -338,6 +338,7 @@ noscript { display: block; padding: 12px; margin-bottom: 16px; background: var(-
 .share-status { margin: 0; font-weight: 700; }
 .share-status:not(:empty) { margin-top: 12px; }
 .round-points { margin: 0 0 8px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.record-line { margin: 14px 0 0; font-weight: 800; font-variant-numeric: tabular-nums; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
 .genui-panel { margin: 18px 0; padding: 16px 18px; border: 1px solid var(--border); border-radius: var(--radius-panel); background: var(--panel); }
 .genui-panel h3 { margin: 0 0 10px; color: var(--text-soft); font-size: 1rem; }

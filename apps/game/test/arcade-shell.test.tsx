@@ -12,6 +12,7 @@ import {
   formatCompletionResult,
   projectDisplayReveal,
   projectSpoilerFreeShare,
+  recordLine,
   roundPointsNote,
   roundStatusText,
   transitionArcadeSession,
@@ -196,6 +197,26 @@ describe("static arcade shell", () => {
     const wrongAnswer = transitionArcadeSession(mode, createArcadeSession(mode), { type: "lock-answer", candidateId: "candidate-b" });
     expect(() => transitionArcadeSession(mode, wrongAnswer, { type: "accept-reveal", reveal: displayReveal(0, 500, 2500, 1, 500) }))
       .toThrow("reveal does not match the locked answer");
+  });
+
+  it("says what a finished game did to the records, or nothing (#63)", () => {
+    const delta = { newBest: null, streak: 0, bestStreak: false, dayStreak: null, counted: true };
+    expect(recordLine(delta)).toBeNull();
+    expect(recordLine({ ...delta, counted: false, newBest: { score: 5000, previous: 0 } })).toBeNull();
+    expect(recordLine({ ...delta, newBest: { score: 3800, previous: 0 } })).toBe("New best 3,800");
+    expect(recordLine({ ...delta, newBest: { score: 4300, previous: 3800 } })).toBe("New best 4,300, up from 3,800");
+    expect(recordLine({ ...delta, streak: 1 })).toBeNull();
+    expect(recordLine({ ...delta, streak: 3 })).toBe("Streak 3 games");
+    expect(recordLine({ ...delta, streak: 3, bestStreak: true })).toBe("Streak 3 games, your longest");
+    expect(recordLine({ ...delta, dayStreak: 1 })).toBe("Day streak 1");
+    expect(recordLine({ ...delta, newBest: { score: 4300, previous: 3800 }, streak: 2, bestStreak: true, dayStreak: 2 }))
+      .toBe("New best 4,300, up from 3,800 · Streak 2 games, your longest · Day streak 2");
+    // The line is set with the last reveal, in the same render, so the live region announces the reveal once.
+    const shell = readFileSync(new URL("../src/components/arcade/arcade-shell.tsx", import.meta.url), "utf8");
+    expect(shell).toMatch(/setSession\(revealed\);\s*keep\(revealed\);/u);
+    expect(shell).not.toMatch(/useEffect\([^)]*keepGame/u);
+    const reveal = readFileSync(new URL("../src/components/arcade/round-reveal.tsx", import.meta.url), "utf8");
+    expect(reveal.indexOf('className="record-line"')).toBeLessThan(reveal.indexOf("<GameSummary"));
   });
 
   it("states what each round earned and the hints it took, under the verdict in the live reveal", () => {

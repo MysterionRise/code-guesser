@@ -16,6 +16,7 @@ import {
   createArcadeSession,
   projectDisplayReveal,
   transitionArcadeSession,
+  type ArcadeSession,
   type HintRequest,
   type HintResponse,
   type RevealRequest,
@@ -24,7 +25,7 @@ import {
 import { RATE_LIMITED_MESSAGE, SESSION_ENDED_MESSAGE, UPDATED_MESSAGE, points } from "./arcade-text";
 import { CodePanes } from "./code-panes";
 import { HintBar } from "./hint-bar";
-import { keepGame, type GameRecords } from "./local-records";
+import { keepGame, type GameRecords, type RecordDelta } from "./local-records";
 import { LINE_KINDS, optionLine, type PublicModeContract } from "./mode-contract";
 import { ArcadeHeader, RoundTrack } from "./round-header";
 import { QuestionScaffold, markedLines } from "./question-layer";
@@ -113,13 +114,16 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
   const roundNumber = session.roundIndex + 1;
   const trackGenui = React.useCallback((event: GenuiEvent) => track({ ...event, round: roundNumber }), [track, roundNumber]);
 
-  // A finished game joins the player's records (#63), once, in this browser alone: nothing is sent anywhere.
+  // A finished game joins the player's records (#63), once, in this browser alone: nothing is sent anywhere. What it
+  // changed is set with the last reveal, so the live region announces the reveal once, record line included.
   const kept = React.useRef(false);
-  React.useEffect(() => {
-    if (session.status !== "complete" || records === undefined || kept.current) return;
+  const [recordDelta, setRecordDelta] = React.useState<RecordDelta | null>(null);
+  const keep = (completed: ArcadeSession) => {
+    if (completed.status !== "complete" || records === undefined || kept.current) return;
     kept.current = true;
-    keepGame(records.artifact, { deck: records.deck, score: session.score, correct: session.correctRounds, date: records.date }, localDate(new Date()));
-  }, [session.status, session.score, session.correctRounds, records]);
+    const game = { deck: records.deck, score: completed.score, correct: completed.correctRounds, date: records.date };
+    setRecordDelta(keepGame(records.artifact, game, localDate(new Date())).delta);
+  };
 
   // Keyboard and screen-reader users land on the verdict after answering and on the next prompt after
   // moving on; the first render leaves focus alone.
@@ -180,7 +184,9 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
       }
       const result = projectDisplayReveal(response.reveal);
       const locked = transitionArcadeSession(mode, session, { type: "lock-answer", candidateId: choice });
-      setSession(transitionArcadeSession(mode, locked, { type: "accept-reveal", reveal: result }));
+      const revealed = transitionArcadeSession(mode, locked, { type: "accept-reveal", reveal: result });
+      setSession(revealed);
+      keep(revealed);
       token.current = response.sessionToken;
     } catch (failure) {
       if (serverUpdated(failure)) { setUpdated(true); setEnded(true); }
@@ -281,7 +287,7 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
             <RoundReveal round={round} reveal={session.reveal} hintsUsed={session.visibleHintCount}
               pickLabel={labelOf(session.lockedCandidateId)} complete={session.status === "complete"}
               correctRounds={session.correctRounds} history={session.history} deckTitle={deckTitle} roundDecks={roundDecks} shareHref={shareHref} newGameHref={newGameHref} replayHref={replayHref}
-              chooseAnotherDeckHref={chooseAnotherDeckHref} genuiDesign={genuiDesign} duel={duel} opponentName={opponentName} sessionToken={currentToken}
+              chooseAnotherDeckHref={chooseAnotherDeckHref} genuiDesign={genuiDesign} duel={duel} opponentName={opponentName} recordDelta={recordDelta} sessionToken={currentToken}
               onNext={next} headingRef={revealHeading} track={track} trackGenui={trackGenui} />
           )}
         </div>

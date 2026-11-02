@@ -7,7 +7,8 @@ import type { ChallengerDuel, GameDuel } from "../duel/duel-contract";
 import { ChallengeFriend, DuelCompletion } from "../duel/duel-game";
 import { DEFAULT_NAME, opponentRoundLine } from "../duel/duel-text";
 import type { AuthorizedReveal, EntertainmentResultProjection, RoundRecord } from "./arcade-session";
-import { formatCompletionResult, points, projectSpoilerFreeShare, roundPointsNote } from "./arcade-text";
+import { formatCompletionResult, points, projectSpoilerFreeShare, recordLine, roundPointsNote } from "./arcade-text";
+import type { RecordDelta } from "./local-records";
 import type { PublicRound } from "./mode-contract";
 import { hasShareSheet, shareOrCopy } from "./share-sheet";
 
@@ -115,7 +116,7 @@ function CompletionActions({ result, correctRounds, history, deckTitle, shareHre
  * renders it only after the server authorized the reveal. In a friend's game of a challenge (#173), it also says how
  * the challenger did on this round, and the game ends on the duel's comparison instead of the usual way on.
  */
-export function RoundReveal({ round, reveal, hintsUsed, pickLabel, complete, correctRounds, history, deckTitle, roundDecks, shareHref, newGameHref, replayHref, chooseAnotherDeckHref, genuiDesign, duel, opponentName, sessionToken, onNext, headingRef, track, trackGenui }: {
+export function RoundReveal({ round, reveal, hintsUsed, pickLabel, complete, correctRounds, history, deckTitle, roundDecks, shareHref, newGameHref, replayHref, chooseAnotherDeckHref, genuiDesign, duel, opponentName, recordDelta, sessionToken, onNext, headingRef, track, trackGenui }: {
   readonly round: Readonly<PublicRound>;
   readonly reveal: AuthorizedReveal;
   readonly hintsUsed: number;
@@ -138,6 +139,8 @@ export function RoundReveal({ round, reveal, hintsUsed, pickLabel, complete, cor
   readonly duel: GameDuel | undefined;
   /** The challenger's name, from the challenge link, in a friend's game; null when the link names no one. */
   readonly opponentName: string | null;
+  /** What the finished game changed in the player's records (#63); null while the game runs, or where none are kept. */
+  readonly recordDelta: RecordDelta | null;
   readonly sessionToken: () => string;
   readonly onNext: () => void;
   readonly headingRef: React.Ref<HTMLHeadingElement>;
@@ -147,6 +150,7 @@ export function RoundReveal({ round, reveal, hintsUsed, pickLabel, complete, cor
 }) {
   const answer = round.mode.candidates.find(({ candidateId }) => candidateId === reveal.answerCandidateId)?.label;
   const [whyOpen, setWhyOpen] = React.useState(true);
+  const record = complete && recordDelta !== null ? recordLine(recordDelta) : null;
   return (
     <>
       <h2 ref={headingRef} tabIndex={-1} className={reveal.correct ? "verdict-right" : "verdict-missed"}>{reveal.correct ? "Nice read." : "Not this time."}</h2>
@@ -165,6 +169,7 @@ export function RoundReveal({ round, reveal, hintsUsed, pickLabel, complete, cor
       )}
       {complete && (
         <>
+          {record !== null && <p className="record-line">{record}</p>}
           <GameSummary history={history} result={reveal.result} roundDecks={roundDecks} />
           {duel?.role === "challenged"
             ? <DuelCompletion duel={duel} name={opponentName} sessionToken={sessionToken} chooseAnotherDeckHref={chooseAnotherDeckHref} track={track} />

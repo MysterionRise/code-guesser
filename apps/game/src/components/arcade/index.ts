@@ -17,6 +17,7 @@ export {
   SHARE_MARKS,
   formatCompletionResult,
   projectSpoilerFreeShare,
+  recordLine,
   roundPointsNote,
   roundStatusText,
 } from "./arcade-text";

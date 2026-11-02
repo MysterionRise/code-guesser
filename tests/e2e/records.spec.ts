@@ -40,12 +40,15 @@ test("a finished game's score shows on its deck's card, a new best replaces it, 
   await expect(page.locator(".deck-record")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Clear records" })).toHaveCount(0);
   const first = await playGame(page, "/?deck=language&design=off", 2);
+  // The end of the game says what it changed (the first game sets the best), in the reveal's one live region.
+  await expect(page.locator(".reveal .record-line")).toHaveText(`New best ${points(first)}`);
   await page.goto("/");
   const language = card(page, /^Which language\?$/u);
   await expect(language.locator(".deck-record")).toHaveText(`Best ${points(first)}`);
   // Three or more right starts a streak, and a better score is the new best.
   const second = await playGame(page, "/?deck=language&design=off", 5);
   expect(second).toBeGreaterThan(first);
+  await expect(page.locator(".reveal .record-line")).toHaveText(`New best ${points(second)}, up from ${points(first)}`);
   await page.goto("/");
   await expect(language.locator(".deck-record")).toHaveText(`Best ${points(second)} · streak 1`);
   await expect(language).toHaveAccessibleName(new RegExp(`Best ${points(second)} · streak 1$`, "u"));
@@ -54,14 +57,21 @@ test("a finished game's score shows on its deck's card, a new best replaces it, 
   // Only the deck played has a record.
   await expect(page.locator(".deck-record")).toHaveCount(1);
   expect(await violations(page)).toEqual([]);
+  // A second game with three right is a streak of two, the longest so far; a game that beats nothing says only that.
+  const third = await playGame(page, "/?deck=language&design=off", 3);
+  expect(third).toBeLessThan(second);
+  await expect(page.locator(".reveal .record-line")).toHaveText("Streak 2 games, your longest");
+  expect(await violations(page)).toEqual([]);
 });
 
 test("today's five keeps a day streak on its card", async ({ page }) => {
-  await playGame(page, "/?deck=daily&design=off", 3);
+  const first = await playGame(page, "/?deck=daily&design=off", 3);
+  await expect(page.locator(".reveal .record-line")).toHaveText(`New best ${points(first)} · Day streak 1`);
   await page.goto("/");
   await expect(card(page, /^Today’s five$/u).locator(".deck-record")).toHaveText("Day streak 1");
-  // Playing it again the same day counts for nothing.
+  // Playing it again the same day counts for nothing, and the end of the game says nothing of records.
   await playGame(page, "/?deck=daily&design=off", 5);
+  await expect(page.locator(".reveal .record-line")).toHaveCount(0);
   await page.goto("/");
   await expect(card(page, /^Today’s five$/u).locator(".deck-record")).toHaveText("Day streak 1");
 });
