@@ -47,3 +47,35 @@ export const finishGame = async (page: Page): Promise<void> => {
     await lockRound(page);
   }
 };
+
+/** A points cell's number: en-US digits with thousands separators, before any "(1 hint)" note. */
+const pointsIn = (text: string): number => Number(/^\d{1,3}(?:,\d{3})*/u.exec(text.trim())![0].replaceAll(",", ""));
+
+/**
+ * The finished game's summary (#43, #161) as a table: a round column, the deck in a mixed or daily game, the pick, the
+ * answer, and the points; five rows, each saying right or missed in words beside its mark; and a total that adds up
+ * against the most the game could earn.
+ */
+export const expectSummary = async (page: Page, { decks }: { decks: boolean }): Promise<void> => {
+  const summary = page.getByRole("region", { name: "Your game" });
+  await expect(summary.getByRole("heading", { level: 3 })).toHaveText("Your game");
+  const table = summary.locator("table");
+  expect(await table.getAttribute("class")).toBe(decks ? "with-decks" : null);
+  await expect(table.locator("thead th")).toHaveText(decks ? ["#", "Deck", "Your pick", "Answer", "Points"] : ["#", "Your pick", "Answer", "Points"]);
+  const rows = table.locator("tbody tr");
+  await expect(rows).toHaveCount(5);
+  let total = 0;
+  for (const [index, row] of (await rows.all()).entries()) {
+    await expect(row.locator("th[scope=row]")).toHaveText(new RegExp(`^${index + 1}( \\(source\\))?$`, "u"));
+    await expect(row.locator(".summary-deck")).toHaveCount(decks ? 1 : 0);
+    if (decks) await expect(row.locator(".summary-deck")).not.toBeEmpty();
+    await expect(row.locator(".summary-pick .visually-hidden")).toHaveText(/^, (right|missed)$/u);
+    await expect(row.locator("td").last()).toHaveText(/^\d{1,3}(,\d{3})*( \(\d hints?\))?$/u);
+    total += pointsIn((await row.locator("td").last().textContent())!);
+  }
+  await expect(table.locator("tfoot th")).toHaveText("Total");
+  await expect(table.locator("tfoot td")).toHaveText(/^\d{1,3}(,\d{3})* of \d{1,3}(,\d{3})*$/u);
+  const [scored = NaN, attainable = NaN] = (await table.locator("tfoot td").textContent())!.split(" of ").map(pointsIn);
+  expect(scored).toBe(total);
+  expect(attainable).toBeGreaterThanOrEqual(scored);
+};

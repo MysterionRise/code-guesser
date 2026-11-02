@@ -1,4 +1,6 @@
-import { existsSync, readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import { VERDICT_PATTERN } from "../../apps/game/src/components/arcade/arcade-text";
@@ -71,6 +73,18 @@ test("a played game leaves its events under its sealed arms, with nothing that i
   expect(report.refused).toBe(0);
   expect(report.completed).toBeGreaterThan(0);
   expect(report.factors.find(({ factor }) => factor === "design")!.levels[0]!.primary.successes).toBeGreaterThan(0);
+
+  // The command (`pnpm experiment:report`) reads the same store end to end: it prints the Markdown report, writes the
+  // same figures as JSON, and refuses no line a played game wrote.
+  const json = join(tmpdir(), `codeguessr-e2e-report-${process.pid}.json`);
+  const command = spawnSync(process.execPath, ["--import", "tsx", "ops/experiment/index.ts", `--dir=${E2E_EVENTS_DIR}`, "--source=synthetic", `--json=${json}`],
+    { cwd: process.cwd(), encoding: "utf8", timeout: 60_000 });
+  expect(command.status, `${command.stdout}\n${command.stderr}`).toBe(0);
+  expect(command.stdout).toMatch(/^# CodeGuessr experiment report$/mu);
+  const written = JSON.parse(readFileSync(json, "utf8")) as { refused: number; games: number; completed: number };
+  rmSync(json);
+  expect(written).toMatchObject({ refused: 0, completed: report.completed });
+  expect(written.games).toBeGreaterThanOrEqual(1);
 });
 
 test("a duel leaves its challenge on the challenger's game and the friend's game as a duel's, with nothing that links them (#173)", async ({ browser, baseURL }) => {

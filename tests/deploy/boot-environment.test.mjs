@@ -39,10 +39,11 @@ function freePort() {
 
 /**
  * Starts `next start` on the production build with only the given environment, so the shell running the tests can't
- * change the outcome. `ready`, when given, runs once the server answers, and the server is stopped after it.
+ * change the outcome. `ready`, when given, runs once the server answers, and the server is stopped after it. A `port`
+ * is taken when given, so a later server can stand where an earlier one stood; otherwise a free one is picked.
  */
-async function start(env, ready) {
-  const port = await freePort();
+async function start(env, ready, port) {
+  port ??= await freePort();
   const child = spawn(process.execPath, [next, "start", "--hostname", "127.0.0.1", "--port", String(port)], {
     cwd: game,
     env: { PATH: process.env.PATH, HOME: process.env.HOME, NEXT_TELEMETRY_DISABLED: "1", ...env },
@@ -163,6 +164,70 @@ test("a configured public server starts, answers its health check, and keeps eac
   assert.ok(code === 0 || signal === "SIGTERM", `the server stopped badly (${code}, ${signal})\n${stdout}\n${stderr}`);
   assert.doesNotMatch(`${stdout}${stderr}`, /GAME_ENVIRONMENT_REJECTED/u);
   assert.doesNotMatch(`${stdout}${stderr}`, new RegExp(SENTINEL, "u"));
+});
+
+test("a game continues after a restart from the state store, or from its token without one, and ends on a store that doesn't know it (#164)", async () => {
+  const port = await freePort();
+  const stateDir = join(data, "restart-state");
+  const stored = { CODEGUESSR_SESSION_SECRET: PUBLIC.CODEGUESSR_SESSION_SECRET, CODEGUESSR_STATE_DIR: stateDir, EXPERIMENT_LAB: "1", EXPERIMENT_SOURCE: "synthetic" };
+  const { CODEGUESSR_STATE_DIR: _, ...memoryOnly } = stored;
+  const stopped = ({ code, signal, stdout, stderr }) => assert.ok(code === 0 || signal === "SIGTERM", `the server stopped badly (${code}, ${signal})\n${stdout}\n${stderr}`);
+  const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage();
+    /** The shell's error line, which a refused step or an ended game fills; the page's empty live regions aren't it. */
+    const error = page.locator(".demo-error");
+    /** Moves to the next round and buys its first hint, which is the first step the server sees after a restart. */
+    const nextRoundWithHint = async (round) => {
+      await page.getByRole("button", { name: "Next round" }).click();
+      await page.getByText(`Round ${round} of 5`).waitFor();
+      await page.getByRole("button", { name: "Reveal hint 1" }).click();
+    };
+    /** Locks in the first option and waits for the verdict, right or missed. */
+    const lock = async () => {
+      await page.locator("input[type=radio]").first().check();
+      await page.getByRole("button", { name: "Lock in answer" }).click();
+      await page.locator("h2.verdict-right, h2.verdict-missed").waitFor();
+    };
+    // Round 1 is locked in on one server, which then stops.
+    stopped(await start(stored, async () => {
+      await page.goto(`http://127.0.0.1:${port}/?deck=fix&deal=0badcafe&game=0&design=off`);
+      await page.getByText("Round 1 of 5").waitFor();
+      await lock();
+    }, port));
+    // The same page plays on against a second server in its place: it reads the game from the store, so a hint and
+    // round 2's answer both take, and nothing is refused.
+    stopped(await start(stored, async () => {
+      await nextRoundWithHint(2);
+      await page.locator(".hints .hint, .demo-error").first().waitFor();
+      assert.deepEqual(await error.allTextContents(), []);
+      await lock();
+    }, port));
+    // Without a store, a server that has never seen the game continues it from its token, as before #164.
+    stopped(await start(memoryOnly, async () => {
+      await nextRoundWithHint(3);
+      await page.locator(".hints .hint, .demo-error").first().waitFor();
+      assert.deepEqual(await error.allTextContents(), []);
+      await lock();
+    }, port));
+    // A server whose store doesn't know the game ends it rather than let a round whose reveal was seen be replayed.
+    stopped(await start({ ...stored, CODEGUESSR_STATE_DIR: join(data, "another-state") }, async () => {
+      await nextRoundWithHint(4);
+      await error.waitFor();
+      assert.equal(await error.getAttribute("role"), "alert");
+      assert.match(await error.textContent(), /^This game can’t continue\. Deal new rounds to keep playing\./u);
+      assert.equal(await page.locator(".hints .hint").count(), 0);
+    }, port));
+  } finally {
+    await browser.close();
+  }
+  // The first store holds the game at its last step taken through it: the deal, round 1's lock, round 2's hint and lock.
+  const database = new DatabaseSync(join(stateDir, "state.sqlite"), { readOnly: true });
+  try {
+    assert.deepEqual({ ...database.prepare("SELECT count(*) AS games, max(step) AS step FROM ledger").get() }, { games: 1, step: 3 });
+  } finally {
+    database.close();
+  }
 });
 
 test("a public server limits deals by the address its proxy appended, an IPv6 client by its /64, and keeps no address", async () => {
