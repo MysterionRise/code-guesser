@@ -352,3 +352,15 @@ describe("the generative-UI route (#101)", () => {
     expect(logged.mock.calls.map(([line]) => line)).toEqual(["GENUI_RENDER_REJECTED takeaway PROPS_TEXT_UNSAFE", "GENUI_STREAM_FAILED 402"]);
   });
 });
+
+describe("the reasoning setting (#120)", async () => {
+  const { reasoningSetting } = await import("../src/genui/model.server.js");
+  it("is off unless OPENROUTER_REASONING names an effort, and anything else reads as off", () => {
+    expect(reasoningSetting(undefined)).toEqual({ enabled: false });
+    expect(reasoningSetting("off")).toEqual({ enabled: false });
+    expect(reasoningSetting("low")).toEqual({ effort: "low" });
+    expect(reasoningSetting("high")).toEqual({ effort: "high" });
+    expect(reasoningSetting("maximal")).toEqual({ enabled: false });
+    expect(reasoningSetting("")).toEqual({ enabled: false });
+  });
+});
