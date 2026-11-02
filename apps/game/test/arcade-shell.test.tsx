@@ -12,9 +12,14 @@ import {
   formatCompletionResult,
   projectDisplayReveal,
   projectSpoilerFreeShare,
+  recordLine,
   roundPointsNote,
   roundStatusText,
   transitionArcadeSession,
+  verdictText,
+  priorVerdicts,
+  VERDICTS,
+  VERDICT_PATTERN,
   type PublicModeContractInput,
 } from "../src/components/arcade/index.js";
 
@@ -89,10 +94,9 @@ describe("static arcade shell", () => {
     expect(html).toContain("Which language is this?");
     expect(html).toContain('data-round-id="round-1"');
     expect(html).toContain("Option A");
-    expect(html).toContain("Reveal hint 1");
-    // Hint costs are visible up front and announced with the hint button.
-    expect(html).toMatch(/<p class="hint-cost" id="hint-cost-round-1">Each hint lowers this round’s points: 1,000 → 800 → 500\.<\/p>/u);
-    expect(html).toMatch(/<button class="hint-button"[^>]*aria-describedby="hint-cost-round-1"/u);
+    // The hint's cost is on its button (#239), so nothing else need say it.
+    expect(html).toContain(">Reveal hint 1 (−200)</button>");
+    expect(html).not.toContain("hint-cost");
     // A revealed hint is announced politely; focus handling lives in the browser tests.
     expect(html).toMatch(/<div class="hints"[^>]*aria-live="polite"/u);
     // Long lines scroll inside a keyboard-reachable code window instead of wrapping.
@@ -181,7 +185,7 @@ describe("static arcade shell", () => {
     expect(html).toContain('<div class="code-panes compare">');
     expect(html).toContain("<figcaption>Version A</figcaption>");
     expect(html).toMatch(/aria-label="Code, version B"/u);
-    expect(html).toContain("Each hint lowers this round’s points: 500 → 400 → 250.");
+    expect(html).toContain(">Reveal hint 1 (−100)</button>");
     expect(html).toMatch(/aria-label="Option A" aria-describedby="detail-round-1-candidate-a"/u);
     expect(html).toContain('<span class="candidate-detail" id="detail-round-1-candidate-a">A short public note</span>');
   });
@@ -198,6 +202,106 @@ describe("static arcade shell", () => {
       .toThrow("reveal does not match the locked answer");
   });
 
+  it("opens each reveal with a verdict drawn by the round, so five rounds read differently and every player reads the same", () => {
+    const round = (roundId: string, correct: boolean, hintsUsed = 0) => verdictText({ roundId, correct, hintsUsed, complete: false, correctRounds: 0, completedRounds: 1 });
+    const ids = Array.from({ length: 40 }, (_, index) => `round-${index.toString(16)}-${(index * 7919).toString(36)}`);
+    expect(ids.map((id) => round(id, true))).toEqual(ids.map((id) => round(id, true)));
+    for (const [outcome, pool] of [[(id: string) => round(id, true), VERDICTS.clean], [(id: string) => round(id, true, 1), VERDICTS.hinted],
+      [(id: string) => round(id, false, 2), VERDICTS.missed]] as const) {
+      const drawn = new Set(ids.map(outcome));
+      expect([...drawn].every((text) => pool.includes(text))).toBe(true);
+      expect(drawn.size).toBeGreaterThanOrEqual(Math.min(3, pool.length));
+    }
+    expect(round("r", true)).toMatch(VERDICT_PATTERN.right);
+    expect(round("r", true, 2)).toMatch(VERDICT_PATTERN.right);
+    expect(round("r", false)).toMatch(VERDICT_PATTERN.missed);
+    expect(round("r", false)).not.toMatch(VERDICT_PATTERN.right);
+    expect(VERDICT_PATTERN.any.test("Nice read.")).toBe(true);
+    expect(VERDICT_PATTERN.any.test("Nice read")).toBe(false);
+    // The last round of a game speaks for the game when every round was right, or none.
+    expect(verdictText({ roundId: "r", correct: true, hintsUsed: 0, complete: true, correctRounds: 5, completedRounds: 5 })).toBe("Clean sweep.");
+    expect(verdictText({ roundId: "r", correct: false, hintsUsed: 0, complete: true, correctRounds: 0, completedRounds: 5 })).toBe("Rough deal.");
+    expect(VERDICTS.missed).not.toContain(verdictText({ roundId: "r", correct: true, hintsUsed: 0, complete: true, correctRounds: 3, completedRounds: 5 }));
+    // A phrase the game has shown is passed over (#234): five right rounds read five ways, in the same order for everyone.
+    const history = ids.slice(0, 5).map((roundId) => ({ roundId, correct: true, hints: 0 }));
+    const draw = () => history.map((entry, index) =>
+      verdictText({ roundId: entry.roundId, correct: true, hintsUsed: 0, complete: false, correctRounds: 0, completedRounds: 0, used: priorVerdicts(history.slice(0, index)) }));
+    const five = draw();
+    expect(new Set(five).size).toBe(5);
+    expect(five.every((text) => VERDICTS.clean.includes(text))).toBe(true);
+    expect(draw()).toEqual(five);
+    // With every phrase used, the round's own draw returns rather than nothing.
+    expect(VERDICTS.clean).toContain(verdictText({ roundId: "r", correct: true, hintsUsed: 0, complete: false, correctRounds: 0, completedRounds: 0, used: new Set(VERDICTS.clean) }));
+    // The original verdicts stay in their pools, so a stored event that quoted one would still be caught.
+    expect(VERDICTS.clean).toContain("Nice read.");
+    expect(VERDICTS.missed).toContain("Not this time.");
+    for (const text of Object.values(VERDICTS).flat()) expect(text).toMatch(/^[A-Z][^.]{2,24}\.$/u);
+  });
+
+  it("follows a running streak under the header, and shows today's five's day streak by the score (#232)", async () => {
+    const { ArcadeHeader, StreakLine } = await import("../src/components/arcade/round-header.js");
+    const line = (streak: number, correct: number, answered: number) =>
+      renderToStaticMarkup(createElement(StreakLine, { streak, correct, answered, total: 5 }));
+    expect(line(0, 0, 0)).toBe('<p class="streak-line streak-start" data-streak="start">3 of 5 right starts a streak</p>');
+    expect(line(0, 2, 3)).toContain(">1 more right starts a streak<");
+    expect(line(0, 3, 3)).toContain('data-streak="started">Streak started<');
+    expect(line(0, 1, 4)).toBe("");
+    expect(line(3, 0, 0)).toBe('<p class="streak-line streak-open" data-streak="open">Streak 3 · 3 of 5 right keeps it</p>');
+    expect(line(3, 1, 1)).toContain(">2 more right keeps your streak<");
+    expect(line(3, 2, 3)).toContain(">1 more right keeps your streak<");
+    expect(line(3, 3, 3)).toContain('data-streak="kept">Streak kept<');
+    expect(line(3, 1, 4)).toContain('data-streak="over">Streak over<');
+    // No live region: the verdict is what a lock announces.
+    expect(line(3, 3, 3)).not.toMatch(/aria-live|role="status"/u);
+    const header = (dayStreak: number) => renderToStaticMarkup(createElement(ArcadeHeader, { score: 1200, dayStreak }));
+    expect(header(0)).not.toContain("Day streak");
+    expect(header(3)).toContain('<span class="day-streak">Day streak 3</span><span class="score">');
+  });
+
+  it("says what a finished game did to the records, or nothing (#63)", () => {
+    const delta = { first: null, newBest: null, streak: 0, bestStreak: false, ended: 0, dayStreak: null, counted: true };
+    expect(recordLine(delta)).toBeNull();
+    expect(recordLine({ ...delta, counted: false, newBest: { score: 5000, previous: 0 } })).toBeNull();
+    // A deck's first game is its first score, not a best beaten (#235).
+    expect(recordLine({ ...delta, first: 3800, newBest: { score: 3800, previous: 0 } })).toBe("First score on this deck: 3,800");
+    expect(recordLine({ ...delta, first: 0 })).toBe("First score on this deck: 0");
+    expect(recordLine({ ...delta, first: 2000, newBest: { score: 2000, previous: 0 }, dayStreak: 1 })).toBe("First score on this deck: 2,000 · Day streak 1");
+    expect(recordLine({ ...delta, newBest: { score: 3800, previous: 0 } })).toBe("New best 3,800");
+    expect(recordLine({ ...delta, newBest: { score: 4300, previous: 3800 } })).toBe("New best 4,300, up from 3,800");
+    expect(recordLine({ ...delta, streak: 1 })).toBeNull();
+    expect(recordLine({ ...delta, streak: 3 })).toBe("Streak 3 games");
+    expect(recordLine({ ...delta, streak: 3, bestStreak: true })).toBe("Streak 3 games, your longest");
+    // A game that ends a streak says so, beside any best it still set.
+    expect(recordLine({ ...delta, ended: 3 })).toBe("Streak of 3 ends");
+    expect(recordLine({ ...delta, newBest: { score: 1000, previous: 800 }, ended: 2 })).toBe("New best 1,000, up from 800 · Streak of 2 ends");
+    expect(recordLine({ ...delta, dayStreak: 1 })).toBe("Day streak 1");
+    expect(recordLine({ ...delta, newBest: { score: 4300, previous: 3800 }, streak: 2, bestStreak: true, dayStreak: 2 }))
+      .toBe("New best 4,300, up from 3,800 · Streak 2 games, your longest · Day streak 2");
+    // The line is set with the last reveal, in the same render, so the live region announces the reveal once.
+    const shell = readFileSync(new URL("../src/components/arcade/arcade-shell.tsx", import.meta.url), "utf8");
+    expect(shell).toMatch(/setSession\(revealed\);\s*keep\(revealed\);/u);
+    expect(shell).not.toMatch(/useEffect\([^)]*keepGame/u);
+    const reveal = readFileSync(new URL("../src/components/arcade/round-reveal.tsx", import.meta.url), "utf8");
+    expect(reveal.indexOf('className="record-line"')).toBeLessThan(reveal.indexOf("<GameSummary"));
+  });
+
+  it("leads each reveal's why with the round's own evidence, and shows each of a deck's sentences once a game (#234)", () => {
+    const reveal = readFileSync(new URL("../src/components/arcade/round-reveal.tsx", import.meta.url), "utf8");
+    const why = reveal.slice(reveal.indexOf('className="reveal-why"'), reveal.indexOf("</details>"));
+    expect(why).toContain("<summary>Why this is the answer</summary>");
+    expect(why).toContain("Easy to confuse:");
+    expect(why).not.toContain("Misleading signals:");
+    const order = ["{reveal.evidence}", "!repeats.helpful && <p className=\"reveal-helpful\">Helpful signals:",
+      "!repeats.explanation && <p className=\"reveal-method\">", "!repeats.misleading && <p className=\"reveal-misleading\">"]
+      .map((marker) => { expect(why, marker).toContain(marker); return why.indexOf(marker); });
+    expect([...order].sort((left, right) => left - right)).toEqual(order);
+    // The shell keeps every sentence shown, not only the last one, so a sentence that alternates with another still shows once.
+    const shell = readFileSync(new URL("../src/components/arcade/arcade-shell.tsx", import.meta.url), "utf8");
+    expect(shell).toMatch(/shown = React\.useRef\(new Set<string>\(\)\)/u);
+    for (const part of ["explanation", "misleading", "helpful"]) expect(shell).toContain(`${part}: seen(round.mode.kind, "${part}",`);
+    expect(shell).toMatch(/setRepeats\(NO_REPEATS\)/u);
+  });
+
   it("states what each round earned and the hints it took, under the verdict in the live reveal", () => {
     expect(roundPointsNote(1000, 0)).toBe("+1,000 points (no hints)");
     expect(roundPointsNote(800, 1)).toBe("+800 points (1 hint)");
@@ -208,7 +312,7 @@ describe("static arcade shell", () => {
     expect(shell).toMatch(/<div className="reveal" aria-live="polite" aria-atomic="true">\s*\{session\.reveal && \(\s*<RoundReveal [^>]*hintsUsed=\{session\.visibleHintCount\}/u);
     const reveal = readFileSync(new URL("../src/components/arcade/round-reveal.tsx", import.meta.url), "utf8");
     const note = reveal.indexOf("roundPointsNote(reveal.score, hintsUsed)");
-    expect(note).toBeGreaterThan(reveal.indexOf("Nice read."));
+    expect(note).toBeGreaterThan(reveal.indexOf("verdictText("));
     expect(note).toBeLessThan(reveal.indexOf("The answer:"));
   });
 
@@ -329,7 +433,7 @@ describe("static arcade shell", () => {
     expect(() => projectSpoilerFreeShare(session.result!, session.history.slice(1))).toThrow(ArcadeShellRuleError);
     expect(() => projectSpoilerFreeShare(session.result!, session.history, "Which language?", "/?deck=language")).toThrow(ArcadeShellRuleError);
     expect(() => projectSpoilerFreeShare(session.result!, session.history, "Which language?", "javascript:alert(1)")).toThrow(ArcadeShellRuleError);
-    expect(formatCompletionResult(session.result!, session.correctRounds)).toBe("Run complete — 5,000 points, 5 of 5 correct.");
+    expect(formatCompletionResult(session.result!, session.correctRounds)).toBe("Run complete: 5,000 points, 5 of 5 correct.");
     expect(() => formatCompletionResult(session.result!, 6)).toThrow(ArcadeShellRuleError);
   });
 

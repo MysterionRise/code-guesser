@@ -11,9 +11,12 @@ import {
   emptyRecords,
   keepGame,
   parseRecords,
+  recordDelta,
   recordGame,
+  recordsAtStart,
   recordsArtifact,
   storedRecords,
+  streakOutlook,
   type FinishedGame,
   type LocalRecords,
   type RecordStore,
@@ -69,6 +72,59 @@ describe("local records (#63)", () => {
     expect(played([game("daily", 1, 1, "2026-11-01")], "2026-11-01", played([game("daily", 1, 1, "2026-10-31")], "2026-10-31")).daily?.days).toBe(2);
   });
 
+  it("says what a game changed: a new best, a streak of two or more, the day streak, or nothing when it counted for nothing", () => {
+    // Earlier games are played on their own dates, the last on `today`.
+    const delta = (games: readonly FinishedGame[], today = TODAY) => {
+      const before = games.slice(0, -1).reduce((records, finished) => recordGame(records, finished, finished.date ?? today), emptyRecords(ARTIFACT));
+      return recordDelta(before, recordGame(before, games.at(-1)!, today), games.at(-1)!, today);
+    };
+    // A first game is the deck's first score, and sets the best unless it scored nothing.
+    expect(delta([game("fix", 3250, 4)])).toEqual({ first: 3250, newBest: { score: 3250, previous: 0 }, streak: 1, bestStreak: false, ended: 0, dayStreak: null, counted: true });
+    expect(delta([game("fix", 0, 0)])).toEqual({ first: 0, newBest: null, streak: 0, bestStreak: false, ended: 0, dayStreak: null, counted: true });
+    // Equal to the best is no new best; the streak carries, and the first longer one is the longest.
+    expect(delta([game("fix", 3250, 4), game("fix", 3250, 3)])).toEqual({ first: null, newBest: null, streak: 2, bestStreak: true, ended: 0, dayStreak: null, counted: true });
+    expect(delta([game("fix", 3250, 4), game("fix", 3250, 3), game("fix", 4000, 5)])).toEqual({ first: null, newBest: { score: 4000, previous: 3250 }, streak: 3, bestStreak: true, ended: 0, dayStreak: null, counted: true });
+    // A streak equalled is not the longest yet; a miss ends it, and the delta says which streak ended (#235).
+    expect(delta([game("fix", 3250, 4), game("fix", 3250, 3), game("fix", 900, 2), game("fix", 1000, 3), game("fix", 1000, 3)]).bestStreak).toBe(false);
+    expect(delta([game("fix", 3250, 4), game("fix", 3250, 3), game("fix", 900, 2)])).toMatchObject({ streak: 0, bestStreak: false, ended: 2 });
+    expect(delta([game("fix", 900, 2), game("fix", 800, 1)])).toMatchObject({ first: null, streak: 0, ended: 0 });
+    // Today's five on the player's date carries its day streak; another day's five, or the same date again, does not.
+    expect(delta([game("daily", 2000, 3, "2026-10-21")], "2026-10-21")).toMatchObject({ dayStreak: 1, counted: true });
+    expect(delta([game("daily", 2000, 3, "2026-10-21"), game("daily", 2500, 4, "2026-10-22")], "2026-10-22")).toMatchObject({ newBest: { score: 2500, previous: 2000 }, dayStreak: 2 });
+    expect(delta([game("daily", 2000, 3, "2026-10-19")], "2026-10-22")).toMatchObject({ dayStreak: null, counted: true });
+    expect(delta([game("daily", 2000, 3, TODAY), game("daily", 5000, 5, TODAY)])).toEqual({ first: null, newBest: null, streak: 0, bestStreak: false, ended: 0, dayStreak: null, counted: false });
+  });
+
+  it("follows a running streak through a game: open with what it still needs, kept at three right, over once three are out of reach (#232)", () => {
+    // No streak yet: the line offers one, until three right is out of reach.
+    expect(streakOutlook(0, 0, 0, 5)).toEqual({ kind: "start", need: 3 });
+    expect(streakOutlook(0, 2, 3, 5)).toEqual({ kind: "start", need: 1 });
+    expect(streakOutlook(0, 3, 4, 5)).toEqual({ kind: "started" });
+    expect(streakOutlook(0, 1, 4, 5)).toEqual({ kind: "none" });
+    expect(streakOutlook(2, 0, 0, 5)).toEqual({ kind: "open", streak: 2, need: 3 });
+    expect(streakOutlook(2, 1, 2, 5)).toEqual({ kind: "open", streak: 2, need: 2 });
+    // One right with two rounds left can still make three; one right with one left can't.
+    expect(streakOutlook(2, 1, 3, 5)).toEqual({ kind: "open", streak: 2, need: 2 });
+    expect(streakOutlook(2, 2, 3, 5)).toEqual({ kind: "open", streak: 2, need: 1 });
+    expect(streakOutlook(2, 1, 4, 5)).toEqual({ kind: "over", streak: 2 });
+    expect(streakOutlook(2, 3, 3, 5)).toEqual({ kind: "kept", streak: 2 });
+    expect(streakOutlook(1, 3, 5, 5)).toEqual({ kind: "kept", streak: 1 });
+    expect(streakOutlook(1, 2, 5, 5)).toEqual({ kind: "over", streak: 1 });
+  });
+
+  it("reads the deck's streak and today's five's day streak as a game starts, and nothing without records (#232)", () => {
+    const store = memoryStore();
+    const kept = played([game("fix", 3250, 4), game("fix", 3000, 3), game("daily", 2000, 3, TODAY)]);
+    store.setItem(RECORDS_KEY, JSON.stringify(kept));
+    expect(recordsAtStart({ artifact: ARTIFACT, deck: "fix", date: null }, TODAY, store)).toEqual({ streak: 2, dayStreak: 0 });
+    expect(recordsAtStart({ artifact: ARTIFACT, deck: "daily", date: TODAY }, TODAY, store)).toEqual({ streak: 1, dayStreak: 1 });
+    expect(recordsAtStart({ artifact: ARTIFACT, deck: "language", date: null }, TODAY, store)).toEqual({ streak: 0, dayStreak: 0 });
+    // Another round set's records, no records, and no game to record all read as none.
+    expect(recordsAtStart({ artifact: OTHER, deck: "fix", date: null }, TODAY, store)).toEqual({ streak: 0, dayStreak: 0 });
+    expect(recordsAtStart({ artifact: ARTIFACT, deck: "fix", date: null }, TODAY, memoryStore())).toEqual({ streak: 0, dayStreak: 0 });
+    expect(recordsAtStart(undefined, TODAY, store)).toEqual({ streak: 0, dayStreak: 0 });
+  });
+
   it("counts a duel of another day's five toward the deck, not toward the day streak", () => {
     const records = played([game("daily", 3000, 4, "2026-10-19")]);
     expect(records.decks.daily?.played).toBe(1);
@@ -104,12 +160,13 @@ describe("local records (#63)", () => {
     expect([...store.items.keys()]).toEqual([RECORDS_KEY]);
     expect(parseRecords(storedRecords(store), ARTIFACT).decks.fix).toEqual({ best: 3250, played: 2, streak: 0, bestStreak: 1 });
     // A new artifact's first game replaces the old round set's records.
-    const fresh = keepGame(OTHER, game("language", 500, 1), TODAY, store);
+    const { records: fresh, delta } = keepGame(OTHER, game("language", 500, 1), TODAY, store);
+    expect(delta).toEqual({ first: 500, newBest: { score: 500, previous: 0 }, streak: 0, bestStreak: false, ended: 0, dayStreak: null, counted: true });
     expect(fresh).toEqual({ v: RECORDS_VERSION, artifact: OTHER, decks: { language: { best: 500, played: 1, streak: 0, bestStreak: 0 } }, daily: null });
     expect(JSON.parse(store.items.get(RECORDS_KEY)!)).toEqual(fresh);
     // Corrupt records are replaced by the next game's.
     store.items.set(RECORDS_KEY, "{oops");
-    expect(keepGame(OTHER, game("fix", 700, 3), TODAY, store).decks).toEqual({ fix: { best: 700, played: 1, streak: 1, bestStreak: 1 } });
+    expect(keepGame(OTHER, game("fix", 700, 3), TODAY, store).records.decks).toEqual({ fix: { best: 700, played: 1, streak: 1, bestStreak: 1 } });
     clearRecords(store);
     expect(store.items.size).toBe(0);
     expect(parseRecords(storedRecords(store), OTHER)).toEqual(emptyRecords(OTHER));
@@ -123,13 +180,13 @@ describe("local records (#63)", () => {
     });
     for (const store of [refusing("QuotaExceededError"), refusing("SecurityError"), null]) {
       expect(storedRecords(store)).toBeNull();
-      expect(keepGame(ARTIFACT, game("fix", 3250, 4), TODAY, store).decks.fix?.best).toBe(3250);
+      expect(keepGame(ARTIFACT, game("fix", 3250, 4), TODAY, store).records.decks.fix?.best).toBe(3250);
       expect(() => clearRecords(store)).not.toThrow();
     }
     // A full store still reads what it held.
     const full = { ...memoryStore(), setItem: () => { throw new DOMException("full", "QuotaExceededError"); } };
     full.items.set(RECORDS_KEY, JSON.stringify(played([game("fix", 100, 1)])));
-    expect(keepGame(ARTIFACT, game("fix", 3250, 4), TODAY, full).decks.fix?.best).toBe(3250);
+    expect(keepGame(ARTIFACT, game("fix", 3250, 4), TODAY, full).records.decks.fix?.best).toBe(3250);
     expect(parseRecords(storedRecords(full), ARTIFACT).decks.fix?.best).toBe(100);
     // A browser whose storage throws on access (blocked site data) plays on with none.
     const events: string[] = [];
@@ -137,7 +194,7 @@ describe("local records (#63)", () => {
       localStorage: { get: () => { throw new DOMException("blocked", "SecurityError"); } },
     }));
     expect(storedRecords()).toBeNull();
-    expect(keepGame(ARTIFACT, game("fix", 3250, 4), TODAY).decks.fix?.best).toBe(3250);
+    expect(keepGame(ARTIFACT, game("fix", 3250, 4), TODAY).records.decks.fix?.best).toBe(3250);
     expect(() => clearRecords()).not.toThrow();
     expect(events).toEqual(["codeguessr-records", "codeguessr-records"]);
   });

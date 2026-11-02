@@ -8,7 +8,7 @@ export default function GlobalError() {
   return (
     <html lang="en">
       <body>
-        <title>CodeGuessr — Something went wrong</title>
+        <title>CodeGuessr · Something went wrong</title>
         <ErrorNotice />
       </body>
     </html>

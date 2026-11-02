@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
+import { VERDICT_PATTERN } from "../../apps/game/src/components/arcade/arcade-text";
 
 import { E2E_EVENTS_DIR } from "../../playwright.config";
 
@@ -33,7 +34,7 @@ const playGame = async (page: Page): Promise<{ score: number; best: number }> =>
     const pick = fixture.candidates.find(({ id }) => round === 2 ? id !== fixture.correctCandidateId : id === fixture.correctCandidateId)!;
     await page.getByLabel(pick.label, { exact: true }).check();
     await page.getByRole("button", { name: "Lock in answer" }).click();
-    await expect(page.getByRole("heading", { name: round === 2 ? "Not this time." : "Nice read." })).toBeVisible();
+    await expect(page.getByRole("heading", { name: round === 2 ? VERDICT_PATTERN.missed : VERDICT_PATTERN.right })).toBeVisible();
     score += round === 2 ? 0 : round === 1 ? full * 0.8 : full;
   }
   return { score, best };
@@ -136,7 +137,7 @@ test("every deck's address names its deck and its preview, and the chooser keeps
     expect(meta).toMatchObject({ "og:title": `${title} · CodeGuessr`, "og:image": `${baseURL}/og/${id}`, "og:image:width": "1200", "twitter:card": "summary_large_image" });
   }
   const chooser = await head("/");
-  expect(chooser.title).toBe("CodeGuessr — Read the code. Make your call.");
-  expect(chooser.meta["og:title"]).toBe("CodeGuessr — Read the code. Make your call.");
+  expect(chooser.title).toBe("CodeGuessr · Read the code. Make your call.");
+  expect(chooser.meta["og:title"]).toBe("CodeGuessr · Read the code. Make your call.");
   expect(chooser.meta["og:image"]).toBeUndefined();
 });

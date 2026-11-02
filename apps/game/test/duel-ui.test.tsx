@@ -10,8 +10,8 @@ vi.mock("server-only", () => ({}));
 // rounds beside the friend's game, and the comparison. The share lines are checked against real games too.
 const { duelSide, duelVerdict } = await import("../src/components/duel/duel-contract");
 const {
-  DEFAULT_NAME, challengeShare, firstPlayNote, fragmentNames, nameFragment, opponentRoundLine, ordinal, playNote, resultShare, sanitizeName,
-  sideLine, verdictWords,
+  DEFAULT_NAME, challengeShare, challengerPoints, duelGapLine, firstPlayNote, fragmentNames, nameFragment, opponentRoundLine, ordinal, playNote,
+  resultShare, sanitizeName, sideLine, verdictWords,
 } = await import("../src/components/duel/duel-text");
 const { DuelComparisonTable } = await import("../src/components/duel/duel-comparison");
 const { OpponentStrip } = await import("../src/components/duel/duel-game");
@@ -82,9 +82,17 @@ describe("a duel's words (#173)", () => {
     expect(sideLine(duelSide(ANA), 5000)).toBe("4/5 right · 3,300 of 5,000");
   });
 
+  it("states where the duel stands over the rounds the friend has locked (#232)", () => {
+    expect(challengerPoints(ANA, 0)).toBe(0);
+    expect(challengerPoints(ANA, 2)).toBe(800);
+    expect(challengerPoints(ANA, 5)).toBe(3300);
+    expect(duelGapLine("Ana", 2800, 1800)).toBe("You 2,800 · Ana 1,800");
+    expect(duelGapLine(DEFAULT_NAME, 0, 0)).toBe("You 0 · A friend 0");
+  });
+
   it("says whose first try it was, and which play of the link", () => {
-    expect(firstPlayNote("yes", "Ana")).toBe("First try");
-    expect(firstPlayNote("yes", "Ana", true)).toBe("First try for Ana");
+    expect(firstPlayNote("yes", "Ana")).toBe("First time on these rounds");
+    expect(firstPlayNote("yes", "Ana", true)).toBe("First time for Ana");
     expect(firstPlayNote("no", "Ana")).toBe("Ana had played these rounds before");
     expect(firstPlayNote("shared", "Ana")).toBeNull();
     expect([1, 2, 3, 4, 11, 12, 13, 21, 22, 23, 101, 111, 112].map(ordinal))
@@ -130,7 +138,10 @@ describe("a duel's share lines (#173)", () => {
     });
     expect(share.text).not.toMatch(GRID);
     expect(challengeShare({ ...challenge, deckTitle: "Today’s five", date: "2026-10-21" }, null, URL_OF).message)
-      .toBe("CodeGuessr duel · Today’s five of 2026-10-21 · I scored 3,300/5,000. Can you beat it?");
+      .toBe("CodeGuessr duel · Today’s five, 2026-10-21 · I scored 3,300/5,000. Can you beat it?");
+    // A perfect score can only be matched (#239).
+    expect(challengeShare({ ...challenge, challenger: { ...challenge.challenger, score: challenge.max } }, "Ana", URL_OF).message)
+      .toBe("CodeGuessr duel · Which language? · Ana scored 5,000/5,000. Can you match it?");
     expect(() => challengeShare(challenge, "Ana", "/?duel=AbC")).toThrow(/absolute web address/u);
   });
 
@@ -151,6 +162,10 @@ describe("a duel's views (#173)", () => {
       .toEqual([["1 ✓", "Round 1: right, 1 hint, +800 points"], ["2 ✗", "Round 2: missed, no hints, 0 points"],
         ["?", "Round 3, shown after you answer"], ["?", "Round 4, shown after you answer"], ["?", "Round 5, shown after you answer"]]);
     expect(html).not.toContain("1,000");
+    // With the friend's score, the strip shows both sides' points over the locked rounds; before any lock, nothing.
+    expect(renderToStaticMarkup(createElement(OpponentStrip, { name: "Ana", rounds: ANA, answered: 2, score: 2000 })))
+      .toContain('<span class="duel-gap">You 2,000 · Ana 800</span>');
+    expect(renderToStaticMarkup(createElement(OpponentStrip, { name: "Ana", rounds: ANA, answered: 0, score: 0 }))).not.toContain("duel-gap");
   });
 
   it("compares both games in a captioned table with row headers and each mark in words", () => {
@@ -162,7 +177,7 @@ describe("a duel's views (#173)", () => {
     expect(html).toContain('<td class="duel-missed"><span aria-hidden="true">✗ </span>0<span class="visually-hidden">, missed</span></td>');
     expect(html).toContain('<td><span aria-hidden="true">✓ </span>800<span class="visually-hidden">, right</span><span class="summary-hints"> (1 hint)</span></td>');
     expect(html).toContain("<td>3,800<span class=\"summary-hints\"> (4 right, 3 hints)</span></td>");
-    expect(html).toContain("First try for Ana");
+    expect(html).toContain("First time for Ana");
     expect(html).toContain("Your 2nd play of this link");
   });
 
@@ -177,6 +192,18 @@ describe("a duel's views (#173)", () => {
     expect(result).toContain("<bdi>Friend</bdi> vs <bdi>Challenger</bdi>");
     expect(result).toContain("Friend wins by 500 points");
     expect(result).not.toContain("Deal new rounds");
+    expect(result).not.toContain("duel-back");
+  });
+
+  it("gives the challenger a way to challenge back from the result page (#235)", () => {
+    const dealt = renderToStaticMarkup(createElement(DuelResult, { comparison: comparisonOf(ANA, BEN), dealHref: "/?deck=language", chooseAnotherDeckHref: "/" }));
+    // The server renders the fallback name; the browser puts the friend's in from the fragment.
+    expect(dealt).toContain('<p class="duel-note duel-back">Challenge <bdi>your friend</bdi> back: play a new game of Which language? and send the link from its last round.</p>');
+    expect(dealt).toContain('<a class="primary-action" href="/?deck=language">Deal new rounds</a>');
+    const daily = renderToStaticMarkup(createElement(DuelResult, {
+      comparison: { ...comparisonOf(ANA, BEN), deck: "daily", deckTitle: "Today’s five", date: "2026-11-02" }, dealHref: "/?deck=mixed", chooseAnotherDeckHref: "/",
+    }));
+    expect(daily).toContain("back: play a mixed game and send the link from its last round.");
   });
 });
 
@@ -217,7 +244,7 @@ describe("real duels' share lines (#173)", () => {
       // Each line is its fixed words, the deck's title, the names, totals, and marks: there is no room for an option.
       const title = created.challenge.deckTitle.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
       const link = URL_OF.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
-      expect(texts[0], deck).toMatch(new RegExp(`^CodeGuessr duel · ${title} · Ana scored [\\d,]+/[\\d,]+\\. Can you beat it\\?\\n${link}$`, "u"));
+      expect(texts[0], deck).toMatch(new RegExp(`^CodeGuessr duel · ${title} · Ana scored [\\d,]+/[\\d,]+\\. Can you (?:beat|match) it\\?\\n${link}$`, "u"));
       expect(texts[1], deck).toMatch(new RegExp(`^CodeGuessr duel · ${title} · (?:(?:Ana|Ben) wins(?: by [\\d,]+ points)?|A draw)\\n`
         + `Ben [🟩🟨⬛]{5} [\\d,]+/[\\d,]+\\nAna [🟩🟨⬛]{5} [\\d,]+/[\\d,]+\\n${link}$`, "u"));
       for (const { roundId } of dealt.mode.rounds) {

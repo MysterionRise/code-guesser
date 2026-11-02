@@ -60,16 +60,23 @@ export const roundWords = ([correct, hints, scored]: DuelRound): string =>
 /** The challenger's round, as the friend's reveal states it once they have locked theirs: "Ana: right, 1 hint, +800 points." */
 export const opponentRoundLine = (name: string, round: DuelRound): string => `${name}: ${roundWords(round)}.`;
 
+/** Both sides' points over the rounds the friend has locked so far (#232): "You 2,800 · Ana 1,800". */
+export const duelGapLine = (name: string, you: number, challenger: number): string => `You ${points(you)} · ${name} ${points(challenger)}`;
+
+/** The challenger's points over the first `answered` rounds, which the friend has locked. */
+export const challengerPoints = (rounds: readonly DuelRound[], answered: number): number =>
+  rounds.slice(0, answered).reduce((total, [, , scored]) => total + scored, 0);
+
 /** How a side did in all, over a game's five rounds: "3/5 right · 3,300 of 5,000". */
 export const sideLine = ({ correct, score }: Pick<DuelSide, "correct" | "score">, max: number): string =>
   `${correct}/5 right · ${points(score)} of ${points(max)}`;
 
 /**
- * Whether the challenger had played the deal before: "First try" ("First try for Ana" where both players show), "Ana
- * had played these rounds before", or nothing for today's five, which everyone plays.
+ * Whether the challenger had played the deal before: "First time on these rounds" ("First time for Ana" where both
+ * players show), "Ana had played these rounds before", or nothing for today's five, which everyone plays.
  */
 export const firstPlayNote = (firstPlay: FirstPlay, name: string, whose = false): string | null =>
-  firstPlay === "shared" ? null : firstPlay === "no" ? `${name} had played these rounds before` : whose ? `First try for ${name}` : "First try";
+  firstPlay === "shared" ? null : firstPlay === "no" ? `${name} had played these rounds before` : whose ? `First time for ${name}` : "First time on these rounds";
 
 /** 1st, 2nd, 3rd, 4th, … 11th, 12th, 13th, … 21st. */
 export const ordinal = (value: number): string => {
@@ -81,9 +88,9 @@ export const ordinal = (value: number): string => {
 export const playNote = (play: number, name: string | null): string | null =>
   play <= 1 ? null : `${name === null ? "Your" : `${name}’s`} ${ordinal(play)} play of this link`;
 
-/** A duel's deck as its link names it; today's five names its date: "Today’s five of 2026-10-21". */
+/** A duel's deck as its link names it; today's five names its date the way its game does: "Today’s five, 2026-10-21". */
 export const duelDeckTitle = ({ deckTitle, date }: Pick<ChallengeView, "deckTitle" | "date">): string =>
-  date === null ? deckTitle : `${deckTitle} of ${date}`;
+  date === null ? deckTitle : `${deckTitle}, ${date}`;
 
 /** Who a comparison names: the challenger, and the friend, who is "you" in their own game (null). */
 export interface DuelNames {
@@ -132,13 +139,14 @@ const shared = (message: string, url: string): DuelShare => {
 };
 
 /**
- * A challenge's share line: the deck and the challenger's total, so a friend knows what to beat, and the link. It has
- * no grid: the challenger's rounds stay hidden until the friend has answered each one.
+ * A challenge's share line: the deck and the challenger's total, so a friend knows what to beat (or, when it is the
+ * most a game can score, to match), and the link. It has no grid: the challenger's rounds stay hidden until the friend
+ * has answered each one.
  */
 export const challengeShare = (challenge: Pick<ChallengeView, "deckTitle" | "date" | "max" | "challenger">, name: string | null,
   url: string): DuelShare =>
   shared(`CodeGuessr duel · ${duelDeckTitle(challenge)} · ${name ?? "I"} scored ${points(challenge.challenger.score)}/${points(challenge.max)}. `
-    + "Can you beat it?", url);
+    + (challenge.challenger.score >= challenge.max ? "Can you match it?" : "Can you beat it?"), url);
 
 /**
  * A result's share line: the deck and the verdict, then each side's grid and total, the friend's first, and the link.

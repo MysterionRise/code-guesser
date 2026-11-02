@@ -30,7 +30,7 @@ for (const [index, source] of SOURCES.entries()) {
     await scan(page, "after a reveal");
 
     await finishGame(page);
-    await expect(page.getByText(/Run complete — /u)).toBeVisible();
+    await expect(page.getByText(/Run complete: /u)).toBeVisible();
     // The summary's structure in every theme, with the deck column in a mix's and today's five's (#161).
     await expectSummary(page, { decks: source === "mixed" || source === "daily" });
     await scan(page, "the finished game");

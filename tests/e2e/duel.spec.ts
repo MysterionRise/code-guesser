@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Browser, type Locator, type Page } from "@playwright/test";
+import { VERDICT_PATTERN } from "../../apps/game/src/components/arcade/arcade-text";
 
 // Duel challenge links (#173), played by two people in two browser contexts: the challenger's game and its link, the
 // friend's intro and game of it with the challenger's rounds shown one lock at a time, the comparison, the result link,
@@ -47,7 +48,7 @@ const playRound = async (page: Page, { hints, right }: Plan): Promise<Seen> => {
   const answer = fixture.candidates.find(({ id }) => id === fixture.correctCandidateId)!.label;
   await page.getByLabel(right ? answer : fixture.candidates.find(({ id }) => id !== fixture.correctCandidateId)!.label, { exact: true }).check();
   await page.getByRole("button", { name: "Lock in answer" }).click();
-  await expect(page.getByRole("heading", { name: right ? "Nice read." : "Not this time." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: right ? VERDICT_PATTERN.right : VERDICT_PATTERN.missed })).toBeVisible();
   return { roundId, options, scaffold, answer };
 };
 
@@ -111,7 +112,7 @@ test("a friend plays the challenger's very game, sees each of their rounds only 
   await expect(ben.page.getByRole("heading", { level: 1 })).toHaveText("Ana challenges you");
   await expect(ben.page.locator(".duel-deck")).toHaveText("Which language?");
   await expect(ben.page.locator(".duel-total")).toHaveText("4/5 right · 3,800 of 5,000");
-  await expect(ben.page.locator(".duel-badge")).toHaveText("First try");
+  await expect(ben.page.locator(".duel-badge")).toHaveText("First time on these rounds");
   expect(await ben.page.getByRole("main").innerText()).not.toMatch(GRID);
   expect(await background(ben.page)).toBe(THEMES.paper);
   const head = (await (await ben.page.request.get(link.split("#")[0]!, { headers: { "user-agent": "Slackbot-LinkExpanding 1.0" } })).text()).split("</head>")[0]!;
@@ -131,12 +132,17 @@ test("a friend plays the challenger's very game, sees each of their rounds only 
 
   const lines = ["Ana: right, 1 hint, +800 points.", "Ana: missed, no hints, 0 points.", ...Array(3).fill("Ana: right, no hints, +1,000 points.")];
   const marks = ["1 ✓", "2 ✗", "3 ✓", "4 ✓", "5 ✓"];
+  // Ana's points so far after each round, against Ben's 1,000 a round: the gap the strip and each reveal show (#232).
+  const anaSoFar = [800, 800, 1800, 2800, 3800];
+  const gap = (round: number) => `You ${((round + 1) * 1000).toLocaleString("en-US")} · Ana ${anaSoFar[round]!.toLocaleString("en-US")}`;
   const answered: Seen[] = [];
   for (let round = 0; round < 5; round += 1) {
     if (round > 0) await ben.page.getByRole("button", { name: "Next round" }).click();
     await expect(ben.page.getByText(`Round ${round + 1} of 5`)).toBeVisible();
     // Only the rounds already locked show the challenger's result, and the page holds no answer.
     expect(await stripMarks(ben.page)).toEqual([...marks.slice(0, round), ...Array(5 - round).fill("?")]);
+    await expect(ben.page.locator(".duel-strip .duel-gap")).toHaveCount(round === 0 ? 0 : 1);
+    if (round > 0) await expect(ben.page.locator(".duel-strip .duel-gap")).toHaveText(gap(round - 1));
     await expect(ben.page.locator(".duel-strip li").nth(round)).toContainText(`Round ${round + 1}, shown after you answer`);
     expect(await ben.page.content()).not.toMatch(ANSWER_DATA);
     const seen = await playRound(ben.page, RIGHT);
@@ -146,6 +152,7 @@ test("a friend plays the challenger's very game, sees each of their rounds only 
     // Once locked, the round shows the challenger's result, and the reveal's live region says it.
     expect(await stripMarks(ben.page)).toEqual([...marks.slice(0, round + 1), ...Array(4 - round).fill("?")]);
     await expect(ben.page.locator(".reveal .duel-line")).toHaveText(lines[round]!);
+    await expect(ben.page.locator(".reveal .duel-gap")).toHaveText(gap(round));
   }
   expect(played.some(({ scaffold }) => scaffold)).toBe(true);
 
@@ -158,7 +165,7 @@ test("a friend plays the challenger's very game, sees each of their rounds only 
   await expect(comparison.locator("tbody tr").first().locator("td")).toHaveText(["✓ 1,000, right", "✓ 800, right (1 hint)"]);
   await expect(comparison.locator("tbody tr").nth(1).locator("td")).toHaveText(["✓ 1,000, right", "✗ 0, missed"]);
   await expect(comparison.locator("tfoot td")).toHaveText(["5,000 (5 right, no hints)", "3,800 (4 right, 1 hint)"]);
-  await expect(comparison.getByText("First try for Ana")).toBeVisible();
+  await expect(comparison.getByText("First time for Ana")).toBeVisible();
 
   const result = await resultLink(ben.page, "Ben");
   expect(result.text).toBe(`CodeGuessr duel · Which language? · Ben wins by 1,200 points\nBen 🟩🟩🟩🟩🟩 5,000/5,000\nAna 🟨⬛🟩🟩🟩 3,800/5,000\n${result.link}`);
@@ -169,6 +176,9 @@ test("a friend plays the challenger's very game, sees each of their rounds only 
   await expect(ana.page.getByRole("heading", { level: 1 })).toHaveText("Ben vs Ana");
   await expect(ana.page.getByRole("heading", { level: 2 })).toHaveText("Ben wins by 1,200 points");
   await expect(ana.page.locator(".duel-comparison thead th")).toHaveText(["#", "Ben", "Ana"]);
+  // The result page gives Ana a next step: a new game of the deck, whose end offers the challenge form (#235).
+  await expect(ana.page.locator(".duel-back")).toHaveText("Challenge Ben back: play a new game of Which language? and send the link from its last round.");
+  await expect(ana.page.getByRole("link", { name: "Deal new rounds" })).toHaveAttribute("href", "/?deck=language");
   await expect(ana.page.getByRole("radio")).toHaveCount(0);
   const words = await wordsOf(ana.page.getByRole("main"));
   for (const { answer } of answered) expect(words.has(answer), answer).toBe(false);
@@ -178,8 +188,8 @@ test("a friend plays the challenger's very game, sees each of their rounds only 
     for (const { id } of fixtures.get(roundId)!.candidates) expect(html).not.toContain(id);
   }
 
-  // A rematch is a fresh deal of the deck, not the challenger's next game.
-  await ben.page.getByRole("link", { name: "Rematch" }).click();
+  // A rematch is a fresh deal of the deck, not the challenger's next game, and its label says so (#235).
+  await ben.page.getByRole("link", { name: "Rematch: a fresh deal of this deck", exact: true }).click();
   await expect(ben.page).toHaveURL(/\?deck=language&deal=[0-9a-f]{8}&game=0$/u);
   expect(new URL(ben.page.url()).searchParams.get("deal")).not.toBe(anaDeal);
 

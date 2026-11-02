@@ -5,9 +5,10 @@ import { hostInputId, type Design } from "../../genui/designs";
 import type { GenuiPanelProps } from "../../genui/genui-panel";
 import type { ChallengerDuel, GameDuel } from "../duel/duel-contract";
 import { ChallengeFriend, DuelCompletion } from "../duel/duel-game";
-import { DEFAULT_NAME, opponentRoundLine } from "../duel/duel-text";
+import { DEFAULT_NAME, challengerPoints, duelGapLine, opponentRoundLine } from "../duel/duel-text";
 import type { AuthorizedReveal, EntertainmentResultProjection, RoundRecord } from "./arcade-session";
-import { formatCompletionResult, points, projectSpoilerFreeShare, roundPointsNote } from "./arcade-text";
+import { formatCompletionResult, points, priorVerdicts, projectSpoilerFreeShare, recordLine, roundPointsNote, verdictText } from "./arcade-text";
+import type { RecordDelta } from "./local-records";
 import type { PublicRound } from "./mode-contract";
 import { hasShareSheet, shareOrCopy } from "./share-sheet";
 
@@ -18,6 +19,10 @@ const linkedAttribution = (attribution: string): React.ReactNode[] => attributio
   .map((part, index) => index % 2 === 1
     ? <a key={index} href={part} rel="noreferrer noopener" target="_blank">{part}</a>
     : part);
+
+/** Which parts of a round's "why" this game has shown already on a round of the same kind, word for word (#234). */
+export type RevealRepeats = Readonly<{ explanation: boolean; misleading: boolean; helpful: boolean }>;
+export const NO_REPEATS: RevealRepeats = Object.freeze({ explanation: false, misleading: false, helpful: false });
 
 /** Generative UI's panel, fetched only when the server turns it on, so the static game never loads it. */
 const GenuiPanel = React.lazy(() => import("../../genui/genui-panel")) as React.ComponentType<GenuiPanelProps>;
@@ -37,6 +42,7 @@ function GameSummary({ history, result, roundDecks }: {
   return (
     <section className="game-summary" aria-labelledby="game-summary-title">
       <h3 id="game-summary-title">Your game</h3>
+      <div className="summary-scroll">
       <table className={roundDecks ? "with-decks" : undefined}>
         <thead>
           <tr>
@@ -52,13 +58,14 @@ function GameSummary({ history, result, roundDecks }: {
               </th>
               {roundDecks && <td className="summary-deck">{roundDecks[entry.deck] ?? entry.deck}</td>}
               <td className="summary-pick"><span aria-hidden="true">{entry.correct ? "✓ " : "✗ "}</span>{breakable(entry.picked)}<span className="visually-hidden">{entry.correct ? ", right" : ", missed"}</span></td>
-              <td>{breakable(entry.answer)}</td>
-              <td>{points(entry.points)}{entry.hints > 0 && <span className="summary-hints"> ({entry.hints === 1 ? "1 hint" : `${entry.hints} hints`})</span>}</td>
+              <td className="summary-answer">{breakable(entry.answer)}</td>
+              <td><span className="summary-points">{points(entry.points)}</span>{entry.hints > 0 && <span className="summary-hints"> ({entry.hints === 1 ? "1 hint" : `${entry.hints} hints`})</span>}</td>
             </tr>
           ))}
         </tbody>
         <tfoot><tr><th scope="row" colSpan={roundDecks ? 3 : 2}>Total</th><td colSpan={2}>{points(result.score)} of {points(result.attainableMaximum)}</td></tr></tfoot>
       </table>
+      </div>
     </section>
   );
 }
@@ -115,7 +122,7 @@ function CompletionActions({ result, correctRounds, history, deckTitle, shareHre
  * renders it only after the server authorized the reveal. In a friend's game of a challenge (#173), it also says how
  * the challenger did on this round, and the game ends on the duel's comparison instead of the usual way on.
  */
-export function RoundReveal({ round, reveal, hintsUsed, pickLabel, complete, correctRounds, history, deckTitle, roundDecks, shareHref, newGameHref, replayHref, chooseAnotherDeckHref, genuiDesign, duel, opponentName, sessionToken, onNext, headingRef, track, trackGenui }: {
+export function RoundReveal({ round, reveal, hintsUsed, pickLabel, complete, correctRounds, history, deckTitle, roundDecks, shareHref, newGameHref, replayHref, chooseAnotherDeckHref, genuiDesign, duel, opponentName, recordDelta, repeats, sessionToken, onNext, headingRef, track, trackGenui }: {
   readonly round: Readonly<PublicRound>;
   readonly reveal: AuthorizedReveal;
   readonly hintsUsed: number;
@@ -138,6 +145,10 @@ export function RoundReveal({ round, reveal, hintsUsed, pickLabel, complete, cor
   readonly duel: GameDuel | undefined;
   /** The challenger's name, from the challenge link, in a friend's game; null when the link names no one. */
   readonly opponentName: string | null;
+  /** What the finished game changed in the player's records (#63); null while the game runs, or where none are kept. */
+  readonly recordDelta: RecordDelta | null;
+  /** The parts of the "why" an earlier round of this kind showed in the same words, which this one leaves out. */
+  readonly repeats: RevealRepeats;
   readonly sessionToken: () => string;
   readonly onNext: () => void;
   readonly headingRef: React.Ref<HTMLHeadingElement>;
@@ -147,12 +158,20 @@ export function RoundReveal({ round, reveal, hintsUsed, pickLabel, complete, cor
 }) {
   const answer = round.mode.candidates.find(({ candidateId }) => candidateId === reveal.answerCandidateId)?.label;
   const [whyOpen, setWhyOpen] = React.useState(true);
+  const record = complete && recordDelta !== null ? recordLine(recordDelta) : null;
   return (
     <>
-      <h2 ref={headingRef} tabIndex={-1} className={reveal.correct ? "verdict-right" : "verdict-missed"}>{reveal.correct ? "Nice read." : "Not this time."}</h2>
+      <h2 ref={headingRef} tabIndex={-1} className={reveal.correct ? "verdict-right" : "verdict-missed"}>
+        {verdictText({ roundId: round.roundId, correct: reveal.correct, hintsUsed, complete, correctRounds, completedRounds: history.length,
+          used: priorVerdicts(history.slice(0, -1)) })}
+      </h2>
       <p className="round-points">{roundPointsNote(reveal.score, hintsUsed)}</p>
       {duel?.role === "challenged" && (
-        <p className="duel-line">{opponentRoundLine(opponentName ?? DEFAULT_NAME, duel.challenge.challenger.rounds[history.length - 1]!)}</p>
+        <>
+          <p className="duel-line">{opponentRoundLine(opponentName ?? DEFAULT_NAME, duel.challenge.challenger.rounds[history.length - 1]!)}</p>
+          {/* Where the duel stands over the rounds locked so far (#232), in the reveal's live region. */}
+          <p className="duel-gap">{duelGapLine(opponentName ?? DEFAULT_NAME, reveal.result.score, challengerPoints(duel.challenge.challenger.rounds, history.length))}</p>
+        </>
       )}
       <p className="answer-line">The answer: <strong>{answer}</strong></p>
       {/* The host's chat sits below the round (#161): this moves focus to it, and leaves the address alone, since its
@@ -165,6 +184,7 @@ export function RoundReveal({ round, reveal, hintsUsed, pickLabel, complete, cor
       )}
       {complete && (
         <>
+          {record !== null && <p className="record-line">{record}</p>}
           <GameSummary history={history} result={reveal.result} roundDecks={roundDecks} />
           {duel?.role === "challenged"
             ? <DuelCompletion duel={duel} name={opponentName} sessionToken={sessionToken} chooseAnotherDeckHref={chooseAnotherDeckHref} track={track} />
@@ -176,11 +196,12 @@ export function RoundReveal({ round, reveal, hintsUsed, pickLabel, complete, cor
         </>
       )}
       <details className="reveal-why" open={whyOpen} onToggle={(event) => setWhyOpen(event.currentTarget.open)}>
-        <summary>Why it’s {answer}</summary>
+        <summary>Why this is the answer</summary>
+        {/* The round's own evidence first; a sentence a round of this kind has shown this game is left out (#234). */}
         <p>{reveal.evidence}</p>
-        <p>{reveal.explanation}</p>
-        <p>Helpful signals: {reveal.helpfulSignals.join(" · ")}</p>
-        <p>Misleading signals: {reveal.misleadingSignals.join(" · ")}</p>
+        {!repeats.helpful && <p className="reveal-helpful">Helpful signals: {reveal.helpfulSignals.join(" · ")}</p>}
+        {!repeats.explanation && <p className="reveal-method">{reveal.explanation}</p>}
+        {!repeats.misleading && <p className="reveal-misleading">Easy to confuse: {reveal.misleadingSignals.join(" · ")}</p>}
       </details>
       {genuiDesign && genuiDesign !== "host" && (
         <React.Suspense fallback={null}>

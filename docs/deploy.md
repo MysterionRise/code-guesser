@@ -117,6 +117,8 @@ container exits with status 78.
 | `GENUI_ENABLED` | off | `1` turns on generative UI (#101); needs `OPENROUTER_API_KEY` |
 | `OPENROUTER_API_KEY` | none | The production key from [section 2](#2-secrets) |
 | `OPENROUTER_MODEL` | `anthropic/claude-haiku-5.5` | The model generative UI asks |
+| `OPENROUTER_REASONING` | `off` | `low`, `medium`, or `high` asks the model to think at that effort; needed by a model whose endpoint requires reasoning (Claude Sonnet 5.5) |
+| `OPENROUTER_MODEL_HOST`, `OPENROUTER_REASONING_HOST` | the shared setting | The host's own model and reasoning (likewise `_CATALOG`, `_COMPOSER`, `_VISUALIZER`); playtest run 3 recommends `anthropic/claude-sonnet-5.5` with `low` for the host alone (#237) |
 | `OPENROUTER_BASE_URL` | OpenRouter's | Leave unset; a public server refuses any other address for real games |
 | `EXPERIMENT_DISABLED` | none | `factor:level` pairs to switch off, such as `design:host,theme:arcade`; their weight goes to control |
 | `CODEGUESSR_RATE_LIMITS` | `on` in public mode | A multiplier of every rate limit, such as `2` to loosen or `0.5` to tighten |

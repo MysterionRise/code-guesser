@@ -1,6 +1,6 @@
 import { activeLocalRealExperiment } from "../../../demo/local-real-experiment-loader.server";
 import { readyDesign } from "../../../genui/designs";
-import { playerTurns, streamRound } from "../../../genui/model.server";
+import { hintOffered, playerTurns, streamRound } from "../../../genui/model.server";
 import { clientKey } from "../../../server/client-key.server";
 import { capped, limited, tooMany } from "../../../server/rate-limit.server";
 
@@ -56,7 +56,9 @@ export async function POST(request: Request): Promise<Response> {
   const spent = design === "host" ? capped("host", `${round.game.id}:${roundId}`, round.game.expiresAt)
     : capped("explainer", round.game.id, round.game.expiresAt);
   if (spent) return refuse(429, "GAME_CAP");
-  const streamed = streamRound({ design, context: round.context, limits: round.limits, codeLines: round.codeLines, turns, signal: request.signal,
+  // The host offers the round's next hint once (#237): after an offer in this round's chat, the tool is withheld.
+  const streamed = streamRound({ design, context: round.context, limits: round.limits, codeLines: round.codeLines, turns,
+    offered: design === "host" && hintOffered(messages), signal: request.signal,
     onOutcome: (outcome) => round.recordCall({ ...outcome, tokensIn: Math.min(outcome.tokensIn, 1_000_000),
       tokensOut: Math.min(outcome.tokensOut, 100_000), ms: Math.min(outcome.ms, 86_400_000) }) });
   if (typeof streamed === "string") return refuse(streamed === "GENUI_UNAVAILABLE" ? 503 : 422, streamed);

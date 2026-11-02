@@ -16,6 +16,7 @@ import {
   createArcadeSession,
   projectDisplayReveal,
   transitionArcadeSession,
+  type ArcadeSession,
   type HintRequest,
   type HintResponse,
   type RevealRequest,
@@ -24,11 +25,11 @@ import {
 import { RATE_LIMITED_MESSAGE, SESSION_ENDED_MESSAGE, UPDATED_MESSAGE, points } from "./arcade-text";
 import { CodePanes } from "./code-panes";
 import { HintBar } from "./hint-bar";
-import { keepGame, type GameRecords } from "./local-records";
-import { LINE_KINDS, optionLine, type PublicModeContract } from "./mode-contract";
-import { ArcadeHeader, RoundTrack } from "./round-header";
+import { keepGame, recordsAtStart, type GameRecords, type RecordDelta } from "./local-records";
+import { LINE_KINDS, optionLine, type PublicModeContract, type RoundModeKind } from "./mode-contract";
+import { ArcadeHeader, RoundTrack, StreakLine } from "./round-header";
 import { QuestionScaffold, markedLines } from "./question-layer";
-import { RoundReveal } from "./round-reveal";
+import { NO_REPEATS, RoundReveal, type RevealRepeats } from "./round-reveal";
 
 /** The host design's chat, fetched only when the server turns it on, so the static game never loads it. */
 const HostChat = React.lazy(() => import("../../genui/host-chat")) as React.ComponentType<HostChatProps>;
@@ -57,9 +58,13 @@ interface ArcadeShellProps {
   duel?: GameDuel;
   /** When set, a finished game joins the player's records in this browser (#63), under this round set and deck. */
   records?: GameRecords;
+  /** When set, as for today's five (#235), the game names itself above every round: "Today’s five · 2026-11-02". */
+  gameLabel?: string;
+  /** When set, the game is today's five played again (#172), and says near the top that it records nothing. */
+  replay?: boolean;
 }
 
-export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealHintAction, chooseAnotherDeckHref, newGameHref, replayHref, shareHref, deckTitle, roundDecks, genuiDesign, duel, records }: ArcadeShellProps) {
+export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealHintAction, chooseAnotherDeckHref, newGameHref, replayHref, shareHref, deckTitle, roundDecks, genuiDesign, duel, records, gameLabel, replay = false }: ArcadeShellProps) {
   const [session, setSession] = React.useState(() => createArcadeSession(mode));
   // A challenge link names its challenger in its fragment, which only the browser reads (#173).
   const opponentName = useFragmentNames().from;
@@ -76,8 +81,12 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [focusedCandidate, setFocusedCandidate] = React.useState<string | null>(null);
-  // Long lines scroll by default; a player can wrap them, and the choice holds across rounds (#46).
-  const [wrap, setWrap] = React.useState(false);
+  // Long lines scroll by default on a wide screen and wrap on a narrow one (#236: a phone cut the first line of every
+  // round with wrapping off); a player can switch either way, and the choice holds across rounds (#46).
+  const [wrap, setWrap] = React.useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 600px)").matches);
+  // A touch screen has no keys to describe. The style sheet hides the line on one too, but a screenshot can catch the
+  // page while its media features are re-read, so a touch device never renders it (#236).
+  const [touch] = React.useState(() => typeof navigator !== "undefined" && navigator.maxTouchPoints > 0);
   const round = mode.rounds[session.roundIndex]!;
   // A fix or vulnerable-line round's options point at pane lines: the pane numbers its lines, each option shows its
   // line's code, and the line under the focused or chosen option (or, once revealed, the answer) is highlighted.
@@ -113,13 +122,31 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
   const roundNumber = session.roundIndex + 1;
   const trackGenui = React.useCallback((event: GenuiEvent) => track({ ...event, round: roundNumber }), [track, roundNumber]);
 
-  // A finished game joins the player's records (#63), once, in this browser alone: nothing is sent anywhere.
+  // A finished game joins the player's records (#63), once, in this browser alone: nothing is sent anywhere. What it
+  // changed is set with the last reveal, so the live region announces the reveal once, record line included.
   const kept = React.useRef(false);
-  React.useEffect(() => {
-    if (session.status !== "complete" || records === undefined || kept.current) return;
+  const [recordDelta, setRecordDelta] = React.useState<RecordDelta | null>(null);
+  // The records as the game starts (#232): the deck's running streak, which the line under the header follows round by
+  // round, and today's five's day streak beside the score. Read once, in the browser, before the game can change them.
+  const [atStart] = React.useState(() => recordsAtStart(records, localDate(new Date())));
+
+  // A deck's reveals share their method (the explanation) and often their signals, so a game shows each sentence
+  // once per deck (#234): every sentence a round of a kind has shown is kept, and a later round of that kind whose
+  // sentence is among them leaves it out, so the round's own evidence leads.
+  const shown = React.useRef(new Set<string>());
+  const seen = (kind: RoundModeKind, part: string, text: string): boolean => {
+    const key = `${kind}\u0000${part}\u0000${text}`;
+    const repeat = shown.current.has(key);
+    shown.current.add(key);
+    return repeat;
+  };
+  const [repeats, setRepeats] = React.useState<RevealRepeats>(NO_REPEATS);
+  const keep = (completed: ArcadeSession) => {
+    if (completed.status !== "complete" || records === undefined || kept.current) return;
     kept.current = true;
-    keepGame(records.artifact, { deck: records.deck, score: session.score, correct: session.correctRounds, date: records.date }, localDate(new Date()));
-  }, [session.status, session.score, session.correctRounds, records]);
+    const game = { deck: records.deck, score: completed.score, correct: completed.correctRounds, date: records.date };
+    setRecordDelta(keepGame(records.artifact, game, localDate(new Date())).delta);
+  };
 
   // Keyboard and screen-reader users land on the verdict after answering and on the next prompt after
   // moving on; the first render leaves focus alone.
@@ -180,7 +207,14 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
       }
       const result = projectDisplayReveal(response.reveal);
       const locked = transitionArcadeSession(mode, session, { type: "lock-answer", candidateId: choice });
-      setSession(transitionArcadeSession(mode, locked, { type: "accept-reveal", reveal: result }));
+      const revealed = transitionArcadeSession(mode, locked, { type: "accept-reveal", reveal: result });
+      setRepeats({
+        explanation: seen(round.mode.kind, "explanation", result.explanation),
+        misleading: seen(round.mode.kind, "misleading", result.misleadingSignals.join("\n")),
+        helpful: seen(round.mode.kind, "helpful", result.helpfulSignals.join("\n")),
+      });
+      setSession(revealed);
+      keep(revealed);
       token.current = response.sessionToken;
     } catch (failure) {
       if (serverUpdated(failure)) { setUpdated(true); setEnded(true); }
@@ -220,19 +254,24 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
     setFocusedCandidate(null);
     setError(null);
     setHintError(null);
+    setRepeats(NO_REPEATS);
   };
 
   return (
     <main className="arcade-shell" data-round-count={mode.rounds.length}>
       <noscript>This game needs JavaScript for answers and progressive evidence.</noscript>
-      <ArcadeHeader score={session.score}>
+      <ArcadeHeader score={session.score} dayStreak={atStart.dayStreak}>
         <RoundTrack rounds={mode.rounds} roundIndex={session.roundIndex} outcomes={session.outcomes} />
       </ArcadeHeader>
+      {replay && <p className="replay-note">This replay isn’t recorded.</p>}
+      <StreakLine streak={atStart.streak} correct={session.correctRounds} answered={session.completedRounds} total={mode.rounds.length} />
       {duel?.role === "challenged" && (
-        <OpponentStrip name={opponentName ?? DEFAULT_NAME} rounds={duel.challenge.challenger.rounds} answered={session.completedRounds} />
+        <OpponentStrip name={opponentName ?? DEFAULT_NAME} rounds={duel.challenge.challenger.rounds} answered={session.completedRounds} score={session.score} />
       )}
 
-      <section className="game-card" aria-labelledby="round-title" data-round-id={round.roundId}>
+      {/* Keyed by round, so each round's card arrives afresh (its `arrive` animation, where motion is welcome). */}
+      <section key={round.roundId} className="game-card" aria-labelledby="round-title" data-round-id={round.roundId}>
+        {gameLabel && <p className="game-label">{gameLabel}</p>}
         <p className="eyebrow">Round {session.roundIndex + 1} of {mode.rounds.length}
           {roundDecks?.[round.mode.kind] !== undefined && <> · <span className="round-deck">{roundDecks[round.mode.kind]}</span></>}</p>
         <h1 id="round-title" ref={roundTitle} tabIndex={-1}>{round.mode.prompt}</h1>
@@ -264,7 +303,7 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
             </button>
           )}
         </form>
-        {session.reveal === null && (
+        {session.reveal === null && !touch && (
           <p className="keys-note">Keys: <kbd>1</kbd>–<kbd>{round.mode.candidates.length}</kbd> pick, <kbd>Enter</kbd> locks in, <kbd>H</kbd> buys a hint, <kbd>N</kbd> moves on.</p>
         )}
         {error && <p className="demo-error" role="alert">{error}</p>}
@@ -281,7 +320,7 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
             <RoundReveal round={round} reveal={session.reveal} hintsUsed={session.visibleHintCount}
               pickLabel={labelOf(session.lockedCandidateId)} complete={session.status === "complete"}
               correctRounds={session.correctRounds} history={session.history} deckTitle={deckTitle} roundDecks={roundDecks} shareHref={shareHref} newGameHref={newGameHref} replayHref={replayHref}
-              chooseAnotherDeckHref={chooseAnotherDeckHref} genuiDesign={genuiDesign} duel={duel} opponentName={opponentName} sessionToken={currentToken}
+              chooseAnotherDeckHref={chooseAnotherDeckHref} genuiDesign={genuiDesign} duel={duel} opponentName={opponentName} recordDelta={recordDelta} repeats={repeats} sessionToken={currentToken}
               onNext={next} headingRef={revealHeading} track={track} trackGenui={trackGenui} />
           )}
         </div>

@@ -22,7 +22,7 @@ describe("error pages (#97)", () => {
   it("gives the global error page its own document, title, and theme tokens", () => {
     const html = renderToStaticMarkup(createElement(GlobalError));
     expect(html).toMatch(/^<html lang="en">/u);
-    expect(html).toContain("<title>CodeGuessr — Something went wrong</title>");
+    expect(html).toContain("<title>CodeGuessr · Something went wrong</title>");
     expect(readFileSync(new URL("../src/app/global-error.tsx", import.meta.url), "utf8")).toContain('import "./globals.css";');
   });
 });

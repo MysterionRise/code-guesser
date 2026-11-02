@@ -264,7 +264,7 @@ describe("where the limits are wired (#98)", () => {
     }
     expect(stored.filter(({ type }) => type === "game_dealt").length).toBe(dealtBefore + SURFACES.deal.burst);
     const refused = await render({ deck: "fix", deal: "0badcafe", game: "10" });
-    expect(refused).toContain("Too many new games — wait a minute");
+    expect(refused).toContain("Too many new games. Wait a minute.");
     expect(refused).toContain('href="/?deck=fix&amp;deal=0badcafe&amp;game=10"');
     // Past the limit a deck's address still redirects; the game it leads to is the one refused.
     await expect(render({ deck: "fix" })).rejects.toThrow("NEXT_REDIRECT");

@@ -94,7 +94,7 @@ describe("server-only local real experiment loader", () => {
       expect(LOCAL_REAL_EXPERIMENT_NOTICE).toContain(source);
     }
     expect(LOCAL_REAL_EXPERIMENT_NOTICE).toContain("chosen and checked automatically, not reviewed by hand");
-    expect(LOCAL_REAL_EXPERIMENT_NOTICE).toContain("Each game tries a random look and explainer.");
+    expect(LOCAL_REAL_EXPERIMENT_NOTICE).toContain("Each game tries a random look and explanation.");
     expect(LOCAL_REAL_EXPERIMENT_NOTICE).not.toMatch(/localhost|unreviewed experiment|beta/iu);
     expect(LOCAL_REAL_EXPERIMENT_NOTICE).toBe(`${LOCAL_REAL_EXPERIMENT_NOTICE_BODY} ${LOCAL_REAL_EXPERIMENT_NOTICE_LINK}`);
     expect(LOCAL_REAL_EXPERIMENT_NOTICE_LINK).toBe("About");

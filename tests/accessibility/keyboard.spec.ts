@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
+import { VERDICT_PATTERN } from "../../apps/game/src/components/arcade/arcade-text";
 
 import { DEAL, optionLabel } from "../production/game";
 
@@ -52,13 +53,13 @@ test("a whole game plays from the keyboard alone, with focus always visible", as
     await chooseByKeys(page, await optionLabel(page, round !== 2));
     await tabTo(page, page.getByRole("button", { name: "Lock in answer" }));
     await page.keyboard.press(round % 2 === 1 ? "Space" : "Enter");
-    await expect(page.getByRole("heading", { name: round === 2 ? "Not this time." : "Nice read." })).toBeFocused();
+    await expect(page.getByRole("heading", { name: round === 2 ? VERDICT_PATTERN.missed : VERDICT_PATTERN.right })).toBeFocused();
     if (round < 5) {
       await tabTo(page, page.getByRole("button", { name: "Next round" }));
       await page.keyboard.press("Enter");
     }
   }
-  await expect(page.getByText(/Run complete — /u)).toBeVisible();
+  await expect(page.getByText(/Run complete: /u)).toBeVisible();
   await tabTo(page, page.getByRole("link", { name: "Deal new rounds" }));
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(new RegExp(`\\?deck=project&deal=${DEAL}&game=3$`, "u"));

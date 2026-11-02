@@ -1,3 +1,4 @@
+import { VERDICT_PATTERN } from "../../../apps/game/src/components/arcade/arcade-text";
 import {
   CHALLENGER_PLAN, DAILY_CARD, DEAL_SEEDS, DECKS, DEFAULT_ANSWER_CHOREOGRAPHY, DEMO_SCENE, DUEL_DEAL, DUEL_SCENE, FRIEND_PLAN, SCENES,
   parseAnswerChoreography,
@@ -97,7 +98,7 @@ describe("demo recorder scenes", () => {
     expect(new Set(games.map(({ theme }) => theme)).size).toBeGreaterThanOrEqual(3);
     for (const game of games) expect(game).toMatchObject({ deal: DEAL_SEEDS[game.deck as keyof typeof DEAL_SEEDS], design: "off" });
     const answers = DEMO_SCENE.steps.filter((step: any) => step.kind === "answer");
-    const verdicts = DEMO_SCENE.steps.filter((step: any) => step.kind === "expectHeading" && step.pattern === "^Nice read\\.$");
+    const verdicts = DEMO_SCENE.steps.filter((step: any) => step.kind === "expectHeading" && step.pattern === VERDICT_PATTERN.right.source);
     expect(answers).toHaveLength(7);
     expect(verdicts).toHaveLength(7);
     expect(DEMO_SCENE.steps.some((step: any) => step.kind === "choose")).toBe(false);

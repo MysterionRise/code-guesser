@@ -17,6 +17,33 @@ import { modelInput, type RoundContext } from "./round-context.server";
 
 export const DEFAULT_MODEL = "anthropic/claude-haiku-5.5";
 export const DEFAULT_BASE_URL = "https://openrouter.ai/api/v1";
+/**
+ * How much the model may think before it renders (`OPENROUTER_REASONING`). Off by default: Claude Haiku 5.5 thinks
+ * by default and, on the first live check, spent the whole output budget on it. An effort (`low`, `medium`, `high`)
+ * is for a model whose endpoint refuses `enabled: false` (OpenRouter's Claude Sonnet 5.5: "Reasoning is mandatory",
+ * the #120 pilot). Thinking counts against the output budget, so `low` is the setting to try first. Anything else
+ * reads as off.
+ */
+const REASONING_EFFORTS: ReadonlySet<string> = new Set(["low", "medium", "high"]);
+export type ReasoningSetting = Readonly<{ enabled: false } | { effort: "low" | "medium" | "high" }>;
+export const reasoningSetting = (value: string | undefined = process.env.OPENROUTER_REASONING): ReasoningSetting =>
+  value !== undefined && REASONING_EFFORTS.has(value) ? { effort: value as "low" | "medium" | "high" } : { enabled: false };
+/** A setting's value, an empty string reading as unset. */
+const setting = (name: string, env: NodeJS.ProcessEnv): string | undefined => {
+  const value = env[name];
+  return value === undefined || value.length === 0 ? undefined : value;
+};
+/**
+ * The model a design asks (#120, #237): its own `OPENROUTER_MODEL_<DESIGN>` when set, else `OPENROUTER_MODEL`, else
+ * the default. Playtest run 3 compared the two on the same rounds: the explainers were level on accuracy at 14 to 18
+ * times the cost, while the Haiku host answered nothing on 3 of 7 after-lock turns where the Sonnet host answered
+ * every one, so the host is the design to set apart. The owner sets it.
+ */
+export const modelFor = (design: Design, env: NodeJS.ProcessEnv = process.env): string =>
+  setting(`OPENROUTER_MODEL_${design.toUpperCase()}`, env) ?? setting("OPENROUTER_MODEL", env) ?? DEFAULT_MODEL;
+/** The reasoning a design runs with: `OPENROUTER_REASONING_<DESIGN>` when set, else `OPENROUTER_REASONING`. */
+export const reasoningFor = (design: Design, env: NodeJS.ProcessEnv = process.env): ReasoningSetting =>
+  reasoningSetting(setting(`OPENROUTER_REASONING_${design.toUpperCase()}`, env) ?? setting("OPENROUTER_REASONING", env));
 /** Room for a few render calls or one composed panel; reasoning is off, so none of it goes to thinking. */
 const MAX_OUTPUT_TOKENS = 2_500;
 const TIMEOUT_MS = 20_000;
@@ -70,6 +97,14 @@ export const playerTurns = (messages: unknown): readonly PlayerTurn[] | null => 
   if (turns.at(-1)?.role !== "user") return null;
   return Object.freeze(turns.slice(-MAX_TURNS));
 };
+
+/**
+ * Whether the host already offered a hint in this chat: an assistant turn carrying an `offer_hint` call. The host
+ * offers once a round (#237): in run 3 every pre-lock reply opened with the same offer.
+ */
+export const hintOffered = (messages: unknown): boolean => Array.isArray(messages) && messages.some((message) =>
+  isRecord(message) && message.role === "assistant" && Array.isArray(message.parts)
+  && message.parts.some((part) => isRecord(part) && part.type === "tool-offer_hint"));
 
 const collapse = (text: string): string => text.replace(/\s+/gu, " ").trim();
 
@@ -186,7 +221,7 @@ const DESIGN_RULES: Readonly<Partial<Record<Design, string>>> = Object.freeze({
   host: [
     "You are chatting with the player during the round, as the game's host.",
     "Always reply with one or two short host_message calls, never plain text; be warm, brief, and a little playful.",
-    "Before the lock, when the player asks for help, tips, or the answer, also call offer_hint once in that reply (only while a hint is left), so they can buy the next hint with one press.",
+    "Before the lock, when the player asks for help, tips, or the answer, also call offer_hint once in that reply (only while a hint is left, and only once a round: the game withholds the tool after an offer), so they can buy the next hint with one press. Later replies in the round answer without offering again.",
     "After the lock, answer questions about the code and the answer in a few short host_message lines, quoting at most one line of code, and use takeaway or signal_list when they help.",
   ].join(" "),
   visualizer: [
@@ -200,11 +235,12 @@ const DESIGN_RULES: Readonly<Partial<Record<Design, string>>> = Object.freeze({
 /** What the host may render in its chat: its own lines, a hint offer before the lock, and short takeaways after it. */
 const HOST_COMPONENTS: ReadonlySet<string> = new Set(["host_message", "offer_hint", "takeaway", "signal_list"]);
 
-const toolsFor = (design: Design, context: RoundContext, limits: RenderLimits): ToolSet => {
+const toolsFor = (design: Design, context: RoundContext, limits: RenderLimits, offered: boolean): ToolSet => {
   if (design === "composer") return composerTools(limits);
   if (design === "visualizer") return visualizerTools();
   const tools = renderTools(context, limits);
-  return design === "host" ? Object.fromEntries(Object.entries(tools).filter(([name]) => HOST_COMPONENTS.has(name))) : tools;
+  // The host offers a hint once a round: after an offer, the tool is gone from its later turns.
+  return design === "host" ? Object.fromEntries(Object.entries(tools).filter(([name]) => HOST_COMPONENTS.has(name) && !(offered && name === "offer_hint"))) : tools;
 };
 
 /** How one model call ended, in counts only, for the event log (#107). */
@@ -224,6 +260,8 @@ export interface RoundRequest {
   readonly limits: RenderLimits;
   readonly codeLines: readonly string[];
   readonly turns: readonly PlayerTurn[];
+  /** Whether the host already offered a hint in this round's chat (`hintOffered`), so it offers no second one. */
+  readonly offered?: boolean;
   readonly signal?: AbortSignal;
   /** Told once how the call ended. */
   readonly onOutcome?: (outcome: CallOutcome) => void;
@@ -234,7 +272,7 @@ export interface RoundRequest {
  * is not configured or the player pasted the round's code before the lock. Provider errors never reach the
  * browser or the log beyond a code.
  */
-export const streamRound = ({ design, context, limits, codeLines, turns, signal, onOutcome }: RoundRequest): Response | GenuiRefusal => {
+export const streamRound = ({ design, context, limits, codeLines, turns, offered = false, signal, onOutcome }: RoundRequest): Response | GenuiRefusal => {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (apiKey === undefined || apiKey.length === 0) return "GENUI_UNAVAILABLE";
   if (context.phase === "before-lock" && mentionsCode(turns, codeLines)) return "PASTED_CODE";
@@ -247,9 +285,9 @@ export const streamRound = ({ design, context, limits, codeLines, turns, signal,
       ...body,
       // Route only to providers that neither store nor train on prompts.
       provider: { data_collection: "deny" },
-      // Rendering a few short components needs no thinking. With it on (Claude Haiku 5.5 thinks by default), the
-      // first live check spent the whole output budget on reasoning and returned nothing.
-      reasoning: { enabled: false },
+      // Rendering a few short components needs no thinking, so reasoning is off unless the design's model requires
+      // it (`OPENROUTER_REASONING`, `OPENROUTER_REASONING_<DESIGN>`, above).
+      reasoning: reasoningFor(design),
       ...(SINGLE_CALL.has(design) ? { parallel_tool_calls: false } : {}),
     }),
   });
@@ -262,10 +300,10 @@ export const streamRound = ({ design, context, limits, codeLines, turns, signal,
   const started = Date.now();
   const tokens = (value: number | undefined): number => Number.isSafeInteger(value) && value! >= 0 ? value! : 0;
   const result = streamText({
-    model: provider.chatModel(process.env.OPENROUTER_MODEL ?? DEFAULT_MODEL),
+    model: provider.chatModel(modelFor(design)),
     system,
     messages,
-    tools: toolsFor(design, context, limits),
+    tools: toolsFor(design, context, limits, offered),
     stopWhen: stopFor(design),
     maxOutputTokens: LONG_OUTPUT_TOKENS[design] ?? MAX_OUTPUT_TOKENS,
     maxRetries: 1,

@@ -238,7 +238,7 @@ test("a public server limits deals by the address its proxy appended, an IPv6 cl
     const dealUntilRefused = async (forwarded) => {
       const started = Date.now();
       for (let game = 0; game < 40; game += 1) {
-        if (/Too many new games — wait a minute/u.test(await deal(forwarded(game), game))) {
+        if (/Too many new games\. Wait a minute\./u.test(await deal(forwarded(game), game))) {
           return { dealt: game, allowed: 10 + Math.floor((Date.now() - started) / 3_000) };
         }
       }

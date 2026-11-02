@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
+import { VERDICT_PATTERN } from "../../apps/game/src/components/arcade/arcade-text";
 
 // Polish from agent playtest run 2 (#161): a deck column in mixed summaries, controls gone once the answer is locked,
 // a cue from the verdict to the host's chat, and a note on a layered game's rounds that play without a layer.
@@ -22,7 +23,7 @@ const lockRound = async (page: Page, right = true): Promise<string> => {
   const fixture = fixtures.get(id)!;
   await page.getByLabel(fixture.candidates.find(({ id: candidate }) => (candidate === fixture.correctCandidateId) === right)!.label, { exact: true }).check();
   await page.getByRole("button", { name: "Lock in answer" }).click();
-  await expect(page.getByRole("heading", { name: right ? "Nice read." : "Not this time." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: right ? VERDICT_PATTERN.right : VERDICT_PATTERN.missed })).toBeVisible();
   return id;
 };
 
@@ -35,7 +36,7 @@ test("once the answer is locked, the lock button, the hint button, and the keys 
   await page.getByRole("button", { name: "Reveal hint 1" }).click();
   await expect(page.locator(".hints .hint")).toHaveCount(1);
   await lockRound(page);
-  await expect(page.getByRole("heading", { name: "Nice read." })).toBeFocused();
+  await expect(page.getByRole("heading", { name: VERDICT_PATTERN.right })).toBeFocused();
   await expect(page.getByRole("button", { name: "Lock in answer" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /^Reveal hint/u })).toHaveCount(0);
   await expect(page.locator(".keys-note")).toHaveCount(0);
@@ -62,6 +63,8 @@ test("a mixed game's summary names each round's deck", async ({ page }) => {
     if (round > 1) await page.getByRole("button", { name: "Next round" }).click();
     await expect(page.getByText(`Round ${round} of 5`)).toBeVisible();
     decks.push(deckOf.get(await lockRound(page, round !== 2))!.title);
+    // Each round is the first of its deck in the game, so each shows its deck's method.
+    await expect(page.locator(".reveal-why .reveal-method")).toHaveCount(1);
   }
   const summary = page.getByRole("region", { name: "Your game" });
   await expect(summary.locator("thead th")).toHaveText(["#", "Deck", "Your pick", "Answer", "Points"]);
@@ -74,12 +77,18 @@ test("a mixed game's summary names each round's deck", async ({ page }) => {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
 });
 
-test("a deck's own summary needs no deck column", async ({ page }) => {
+test("a deck's own summary needs no deck column, and its reveals give the deck's method once", async ({ page }) => {
   await page.goto("/?deck=fix&design=off");
   for (let round = 1; round <= 5; round += 1) {
     if (round > 1) await page.getByRole("button", { name: "Next round" }).click();
     await expect(page.getByText(`Round ${round} of 5`)).toBeVisible();
     await lockRound(page);
+    // The round's own evidence leads; the deck's one explanation, and its one misleading signal, show on round 1 only.
+    const why = page.locator(".reveal-why");
+    await expect(why.locator("p").first()).not.toHaveText(/^(?:Helpful|Misleading) signals:/u);
+    await expect(why.locator(".reveal-method")).toHaveCount(round === 1 ? 1 : 0);
+    await expect(why.locator(".reveal-misleading")).toHaveCount(round === 1 ? 1 : 0);
+    await expect(why.getByText(/^Helpful signals:/u)).toBeVisible();
   }
   await expect(page.getByRole("region", { name: "Your game" }).locator("thead th")).toHaveText(["#", "Your pick", "Answer", "Points"]);
 });
@@ -137,6 +146,27 @@ test("a layered game says when a round plays without its layer, and a static gam
   await expect(page.locator(".layer-note")).toHaveCount(0);
 });
 
+test.describe("with motion welcome", () => {
+  test.use({ contextOptions: { reducedMotion: "no-preference" } });
+
+  test("each round's card arrives afresh, not only the first", async ({ page }) => {
+    await page.goto("/?deck=fix&design=off");
+    await expect(page.getByText("Round 1 of 5")).toBeVisible();
+    await page.evaluate(() => {
+      (window as unknown as { arrivals: number }).arrivals = 0;
+      document.addEventListener("animationstart", (event) => {
+        if (event.animationName === "arrive" && (event.target as Element).matches(".game-card")) (window as unknown as { arrivals: number }).arrivals += 1;
+      }, true);
+    });
+    await lockRound(page);
+    await page.getByRole("button", { name: "Next round" }).click();
+    await expect(page.getByText("Round 2 of 5")).toBeVisible();
+    await expect.poll(() => page.evaluate(() => (window as unknown as { arrivals: number }).arrivals)).toBe(1);
+    // The new round's title still takes focus on the fresh card.
+    await expect(page.getByRole("heading", { level: 1 })).toBeFocused();
+  });
+});
+
 /** Each numbered line's number, and where its text's later rows start once it wraps. */
 const numberedRows = (page: Page) => page.locator(".code-window.numbered .code-line").evaluateAll((lines) => lines.map((line) => {
   const number = line.querySelector(".line-number")!.getBoundingClientRect();
@@ -149,8 +179,13 @@ const numberedRows = (page: Page) => page.locator(".code-window.numbered .code-l
 test("with lines wrapped on a phone, a numbered round's numbers keep one column and its code hangs past them (#217)", async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 568 });
   const wrapped = async (round: string) => {
-    await page.getByRole("button", { name: "Wrap lines" }).click();
-    await expect(page.getByRole("button", { name: "Wrap lines" })).toHaveAttribute("aria-pressed", "true");
+    // Narrow screens wrap by default (#236); the toggle still turns it off and on.
+    const toggle = page.getByRole("button", { name: "Wrap lines" });
+    await expect(toggle).toHaveAttribute("aria-pressed", "true");
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-pressed", "false");
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-pressed", "true");
     const lines = await numberedRows(page);
     const lefts = lines.map(({ left }) => left);
     expect(Math.max(...lefts) - Math.min(...lefts), round).toBeLessThan(1);

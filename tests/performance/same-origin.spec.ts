@@ -20,7 +20,7 @@ test("a whole game, its challenge, and the footer's pages request nothing from a
   await expect(page.locator(".hints .hint")).toHaveCount(1);
   await lockRound(page);
   await finishGame(page);
-  await expect(page.getByText(/Run complete — /u)).toBeVisible();
+  await expect(page.getByText(/Run complete: /u)).toBeVisible();
   await page.getByRole("button", { name: "Challenge a friend" }).click();
   await page.getByRole("button", { name: "Copy challenge link" }).click();
   await expect(page.locator(".duel-share .share-status")).toHaveText("Challenge link copied");

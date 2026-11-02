@@ -18,7 +18,7 @@ import {
  * game draws its theme and its explainer at random (#106).
  */
 export const LOCAL_REAL_EXPERIMENT_NOTICE_BODY = "From The Stack v2, GitHub, TheAlgorithms, Defects4J, BugsInPy, TodoMVC, Exercism: "
-  + "chosen and checked automatically, not reviewed by hand. Each game tries a random look and explainer.";
+  + "chosen and checked automatically, not reviewed by hand. Each game tries a random look and explanation.";
 /** The notice's last word, a link to the About page that says the rest. */
 export const LOCAL_REAL_EXPERIMENT_NOTICE_LINK = "About";
 /**

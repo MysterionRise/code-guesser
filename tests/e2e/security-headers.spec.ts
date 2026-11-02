@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { expect, test, type APIResponse, type Page } from "@playwright/test";
+import { VERDICT_PATTERN } from "../../apps/game/src/components/arcade/arcade-text";
 
 import { VISUALIZER_CSP } from "../../apps/game/src/genui/visualizer-spec";
 
@@ -58,7 +59,7 @@ const answerRound = async (page: Page): Promise<void> => {
   const fixture = fixtures.get((await page.locator(".game-card").getAttribute("data-round-id"))!)!;
   await page.getByLabel(fixture.candidates.find(({ id }) => id === fixture.correctCandidateId)!.label, { exact: true }).check();
   await page.getByRole("button", { name: "Lock in answer" }).click();
-  await expect(page.getByRole("heading", { name: "Nice read." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: VERDICT_PATTERN.right })).toBeVisible();
 };
 
 test.beforeEach(async ({ request }) => {
@@ -118,7 +119,7 @@ test("a game in every deck plays under the policy without a single violation", a
         await expect(page.getByText(`Round ${round + 1} of 5`)).toBeVisible();
       }
     }
-    await expect(page.getByText(/Run complete — /u)).toBeVisible();
+    await expect(page.getByText(/Run complete: /u)).toBeVisible();
     expect(violations, deck).toEqual([]);
   }
   // The watch itself works: an image from elsewhere is refused and reported.

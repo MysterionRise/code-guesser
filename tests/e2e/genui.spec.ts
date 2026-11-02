@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
+import { VERDICT_PATTERN } from "../../apps/game/src/components/arcade/arcade-text";
 
 // Generative UI (#101) against the local stand-in for OpenRouter that playwright.config.ts starts on the next port.
 const fake = `http://127.0.0.1:${Number(process.env.E2E_PORT ?? 3000) + 1}`;
@@ -13,7 +14,7 @@ const answerRound = async (page: Page): Promise<Fixture> => {
   const fixture = fixtures.get((await page.locator(".game-card").getAttribute("data-round-id"))!)!;
   await page.getByLabel(fixture.candidates.find(({ id }) => id === fixture.correctCandidateId)!.label, { exact: true }).check();
   await page.getByRole("button", { name: "Lock in answer" }).click();
-  await expect(page.getByRole("heading", { name: "Nice read." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: VERDICT_PATTERN.right })).toBeVisible();
   return fixture;
 };
 
@@ -108,7 +109,8 @@ test("the visualizer runs the model's page in a sandbox that can't reach the gam
   await panel.getByRole("button", { name: "Visualize this round" }).click();
   const frame = panel.locator("iframe.visualizer-frame");
   await expect(frame).toHaveAttribute("sandbox", "allow-scripts");
-  await expect(frame).toHaveAttribute("title", "Stepping through the round");
+  await expect(frame).toHaveAttribute("title", "Visualization of this round's code");
+  await expect(panel.locator("figcaption")).toHaveText("Stepping through the round");
   await expect(panel.locator(".visualizer-summary")).toHaveText("A counter that advances one step per press.");
   // The page spelled its escapes in pieces to pass the server's checks; only the sandbox and its CSP stop them.
   const inside = page.frameLocator("iframe.visualizer-frame");
@@ -125,6 +127,94 @@ test("the visualizer runs the model's page in a sandbox that can't reach the gam
   await page.waitForTimeout(500);
   expect(await (await request.get(`${fake}/leaks`)).text()).toBe("0");
   await expect(page.getByRole("button", { name: "Next round" })).toBeEnabled();
+});
+
+test("a visualizer page that dies on load gives way to the static reveal, and Try again asks once more (#238)", async ({ page, request }) => {
+  // A page whose script throws while it loads, as one model-written page did in playtest run 3.
+  const dying = [{ name: "render_visualizer", args: { title: "A page that breaks", summary: "Nothing to see here.",
+    html: "<p id=\"status\">Loading</p><script>void undefined.length;</script>" } }];
+  await request.post(`${fake}/control`, { data: { sequence: [dying] } });
+  await page.goto("/?deck=algorithm&design=visualizer");
+  await expect(page.getByText("Round 1 of 5")).toBeVisible();
+  await answerRound(page);
+  const panel = page.getByRole("region", { name: "Visualizer" });
+  await panel.getByRole("button", { name: "Visualize this round" }).click();
+  await expect(panel.getByText("The explainer isn’t available right now. The reveal above has the full answer.")).toBeVisible();
+  await expect(panel.locator("iframe.visualizer-frame")).toHaveCount(0);
+  await expect(panel).toHaveAttribute("data-genui-status", "fallback");
+  // The second request gets the fake's sound page.
+  await panel.getByRole("button", { name: "Try again" }).click();
+  await expect(panel.locator("figcaption")).toHaveText("Stepping through the round");
+  await expect(page.frameLocator("iframe.visualizer-frame").locator("#status")).toHaveText("Step 0");
+  await expect(panel.getByRole("button", { name: "Try again" })).toHaveCount(0);
+  await expect(panel).toHaveAttribute("data-genui-status", "ready");
+});
+
+test("an empty host reply is asked for once more, and the host offers a hint once a round (#237)", async ({ page, request }) => {
+  // The first reply has no component and no text, as the Haiku host's had on 3 of 7 after-lock turns in run 3.
+  await request.post(`${fake}/control`, { data: { sequence: [[]] } });
+  await page.goto("/?deck=project&design=host");
+  await expect(page.getByText("Round 1 of 5")).toBeVisible();
+  const host = page.getByRole("complementary", { name: "Host" });
+  await host.getByLabel("Ask the host").fill("Any tips?");
+  await host.getByRole("button", { name: "Send" }).click();
+  await expect(host.locator(".genui-host")).toHaveText("I can't see the code yet, but I can cheer you on.");
+  await expect(host).not.toContainText("The host had nothing to add.");
+  const retried = await (await request.get(`${fake}/requests`)).json() as { body: { tools: { function: { name: string } }[] } }[];
+  expect(retried).toHaveLength(2);
+  // An offer was made, so the host's next turn this round has no offer_hint to call.
+  await expect(host.getByRole("button", { name: "Buy hint 1 (−200 pts)" })).toBeVisible();
+  await host.getByLabel("Ask the host").fill("Anything else?");
+  await host.getByRole("button", { name: "Send" }).click();
+  await expect(host.locator(".genui-host")).toHaveCount(2);
+  await expect.poll(async () => ((await (await request.get(`${fake}/requests`)).json()) as unknown[]).length).toBe(3);
+  const again = await (await request.get(`${fake}/requests`)).json() as { body: { tools: { function: { name: string } }[] } }[];
+  expect(again.at(-1)!.body.tools.map(({ function: { name } }) => name)).toEqual(["host_message"]);
+  expect(retried[0]!.body.tools.map(({ function: { name } }) => name)).toEqual(["host_message", "offer_hint"]);
+  // Two empty replies in a row: the chat says so once, after the one retry.
+  await request.post(`${fake}/control`, { data: { sequence: [[], []] } });
+  await host.getByLabel("Ask the host").fill("Still there?");
+  await host.getByRole("button", { name: "Send" }).click();
+  await expect(host.getByText("The host had nothing to add.")).toHaveCount(1);
+  expect(await (await request.get(`${fake}/requests`)).json()).toHaveLength(2);
+});
+
+test("on a phone the catalog explainer's table scrolls inside its card and the end screen's table fits (#236)", async ({ page, request }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/?deck=mixed&design=catalog");
+  await expect(page.getByText("Round 1 of 5")).toBeVisible();
+  const fitsAcross = () => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
+  const fixture = fixtures.get((await page.locator(".game-card").getAttribute("data-round-id"))!)!;
+  const long = "A long sentence about this option that runs on and on past the width of any phone, with no break in sight.";
+  await request.post(`${fake}/control`, { data: { calls: [
+    { name: "takeaway", args: { text: "Read the keywords before the punctuation." } },
+    { name: "comparison", args: { rows: fixture.candidates.slice(0, 4).map(({ label }) => ({ option: label, for: long, against: long })) } },
+  ] } });
+  await answerRound(page);
+  const panel = page.getByRole("region", { name: "Explainer" });
+  await panel.getByRole("button", { name: "Explain this round" }).click();
+  await expect(panel.locator(".genui-comparison")).toBeVisible();
+  expect(await fitsAcross(), "the explainer's table scrolls inside its card, not the page").toBe(true);
+  expect(await panel.locator(".genui-table-scroll").evaluate((box) => getComputedStyle(box).overflowX)).toBe("auto");
+  // And at phone width the table fits its card outright, with its cells wrapping, so nothing is clipped or hidden behind a scroll.
+  expect(await panel.locator(".genui-table-scroll").evaluate((box) => box.scrollWidth <= box.clientWidth), "the explainer's table fits its card at 390 px").toBe(true);
+  await request.post(`${fake}/control`, { data: {} });
+  for (let round = 2; round <= 5; round += 1) {
+    await page.getByRole("button", { name: "Next round" }).click();
+    await expect(page.getByText(`Round ${round} of 5`)).toBeVisible();
+    await answerRound(page);
+  }
+  const summary = page.getByRole("region", { name: "Your game" });
+  await expect(summary).toBeVisible();
+  expect(await fitsAcross(), "the end screen fits a phone").toBe(true);
+  // No header, deck name, or score is split mid-word: each sits on one line, or breaks only at a space.
+  const split = await summary.locator("thead th, .summary-deck, .summary-points").evaluateAll((cells) => cells.filter((cell) => {
+    const range = document.createRange();
+    range.selectNodeContents(cell);
+    const lines = new Set([...range.getClientRects()].map((box) => Math.round(box.top)));
+    return lines.size > 1 && !(cell.textContent ?? "").includes(" ");
+  }).map((cell) => cell.textContent));
+  expect(split).toEqual([]);
 });
 
 test("the host chats during the round without the code, sells the next hint on request, and talks code after the lock", async ({ page, request }) => {

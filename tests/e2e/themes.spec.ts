@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
+import { VERDICT_PATTERN } from "../../apps/game/src/components/arcade/arcade-text";
 
 // Visual themes (#125), each scanned by axe on real pages (#45): a round, a revealed round, and the chooser.
 interface Fixture { roundId: string; candidates: { id: string; label: string }[]; correctCandidateId: string }
@@ -28,7 +29,7 @@ for (const [theme, background] of Object.entries(THEMES)) {
     const fixture = fixtures.get((await page.locator(".game-card").getAttribute("data-round-id"))!)!;
     await page.getByLabel(fixture.candidates.find(({ id }) => id !== fixture.correctCandidateId)!.label, { exact: true }).check();
     await page.getByRole("button", { name: "Lock in answer" }).click();
-    await expect(page.getByRole("heading", { name: "Not this time." })).toBeVisible();
+    await expect(page.getByRole("heading", { name: VERDICT_PATTERN.missed })).toBeVisible();
     expect(await violations(page)).toEqual([]);
   });
 }

@@ -11,6 +11,8 @@ import {
   NAME_LIMIT,
   RESULT_NAMES,
   challengeShare,
+  challengerPoints,
+  duelGapLine,
   firstPlayNote,
   nameFragment,
   resultShare,
@@ -25,19 +27,23 @@ import {
  */
 
 /**
- * The challenger's rounds beside the friend's game, each shown once the friend has locked that round. The page holds
- * them all from the deal; they say nothing of any round's answer, so holding each back until the lock keeps the duel
- * fair to play and is presentation, not secrecy. It is no live region: the reveal says how the challenger did.
+ * The challenger's rounds beside the friend's game, each shown once the friend has locked that round, and both sides'
+ * points so far (#232), so the friend sees the gap move. The page holds the rounds from the deal; they say nothing of
+ * any round's answer, so holding each back until the lock keeps the duel fair to play and is presentation, not
+ * secrecy. It is no live region: the reveal says how the challenger did and where the gap stands.
  */
-export function OpponentStrip({ name, rounds, answered }: {
+export function OpponentStrip({ name, rounds, answered, score }: {
   readonly name: string;
   readonly rounds: readonly DuelRound[];
   /** How many rounds the friend has locked. */
   readonly answered: number;
+  /** The friend's points so far; with it, the strip shows both sides' points once a round is locked. */
+  readonly score?: number;
 }) {
   return (
     <div className="duel-strip">
       <span className="duel-strip-name" aria-hidden="true"><bdi>{name}</bdi></span>
+      {score !== undefined && answered > 0 && <span className="duel-gap">{duelGapLine(name, score, challengerPoints(rounds, answered))}</span>}
       <ol className="round-track" aria-label={`${name}’s rounds`}>
         {rounds.map((round, index) => {
           const shown = index < answered;
@@ -236,7 +242,10 @@ export function DuelCompletion({ duel, name, sessionToken, chooseAnotherDeckHref
         <SendResult comparison={issued.comparison} resultToken={issued.resultToken} origin={duel.origin} challenger={name} track={track} />
       )}
       <div className="completion-actions">
-        <a className="primary-action" href={duel.rematchHref} onClick={() => track({ type: "deal_again", to: "rematch" })}>Rematch</a>
+        {/* A rematch is a fresh deal, never the challenger's next game, and says so (#235); today's five rematches on a mix. */}
+        <a className="primary-action" href={duel.rematchHref} onClick={() => track({ type: "deal_again", to: "rematch" })}>
+          {duel.challenge.date === null ? "Rematch: a fresh deal of this deck" : "Rematch: a fresh mixed game"}
+        </a>
         {chooseAnotherDeckHref && <a className="deck-link" href={chooseAnotherDeckHref} onClick={() => track({ type: "deal_again", to: "chooser" })}>Choose another deck</a>}
       </div>
     </>

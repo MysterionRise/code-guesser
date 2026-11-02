@@ -36,12 +36,14 @@ import {
   dailyRandom,
   dealDigest,
   mixedRounds,
+  mixedSeriesRounds,
   parseDeal,
   seededRandom,
   seriesRounds,
   shuffle,
   type DealDescriptor,
   type DealSeries,
+  type RoundKeys,
 } from "./local-real-experiment-deal.server";
 import { creditsOf, type Credit } from "./local-real-experiment-credits.server";
 import { duelAuthority, type DuelAuthority } from "./local-real-experiment-duel.server";
@@ -296,6 +298,15 @@ const pinnedHash = (artifactInput: unknown, trustedArtifactHash: string): string
   return fail("HASH_MISMATCH");
 };
 
+/**
+ * A round's company keys for a seeded series (#233): its option set, by the candidates' ids (an algorithm's or
+ * exercise's family, a project group's four repositories), and its answer's id.
+ */
+const roundKeys = ({ publicRound, privateReveal }: DerivedRound): RoundKeys => ({
+  family: publicRound.mode.candidates.map(({ candidateId }) => candidateId).sort().join("|"),
+  answer: privateReveal.correctCandidateId,
+});
+
 export const createLocalRealExperiment = (
   artifactInput: unknown,
   trustedArtifactHash: string,
@@ -316,19 +327,23 @@ export const createLocalRealExperiment = (
     const deckTitles = new Map(decks.flatMap(({ deck, rounds: deckRounds }) => deckRounds.map(({ publicRound }) => [publicRound.roundId, deck.title] as const)));
     // Each layer's hash, which a game that shows layers puts in its digest (#173).
     const layerHashes = new Map([...layers].map(([roundId, layer]) => [roundId, canonicalHash(layer)] as const));
-    // A seeded deal's game takes its rounds from the seed's order of the pool, and its option order from the seed too;
-    // today's five takes both from its date.
+    // A seeded deal's game takes its rounds from the seed's order of the pool (a mixed deal's from each deck's own
+    // order, the decks taking turns), and its option order from the seed too; today's five takes both from its date.
     const deal = (deckId: SessionDeckId, random: () => number, descriptor: DealDescriptor) => {
       const series = descriptor.kind === "series" ? { seed: descriptor.seed, game: descriptor.game } : undefined;
       if (descriptor.kind === "daily" && deckId !== DAILY_DECK) fail();
       if (deckId === MIXED_DECK || deckId === DAILY_DECK) {
-        const draw = series ? seededRandom({ ...series, deck: deckId })
-          : descriptor.kind === "daily" ? dailyRandom(expectedArtifactHash, descriptor.date) : random;
-        return { mode: decks.length < ROUNDS_PER_SESSION ? fail() : dealFrom(deckId, mixedRounds(decks, draw), artifact, draw), wrapped: false };
+        if (decks.length < ROUNDS_PER_SESSION) fail();
+        if (series) {
+          const { rounds: order, wrapped } = mixedSeriesRounds(decks.map(({ deck, rounds: pool }) => ({ id: deck.id, rounds: pool })), series.seed, series.game);
+          return { mode: dealFrom(deckId, order, artifact, seededRandom({ ...series, deck: deckId, options: true })), wrapped };
+        }
+        const draw = descriptor.kind === "daily" ? dailyRandom(expectedArtifactHash, descriptor.date) : random;
+        return { mode: dealFrom(deckId, mixedRounds(decks, draw), artifact, draw), wrapped: false };
       }
       const derived = decks.find(({ deck }) => deck.id === deckId) ?? fail();
       if (!series) return { mode: dealFrom(deckId, shuffle(derived.rounds, random), artifact, random), wrapped: false };
-      const { rounds: order, wrapped } = seriesRounds(derived.rounds, series.seed, deckId, series.game);
+      const { rounds: order, wrapped } = seriesRounds(derived.rounds, series.seed, deckId, series.game, roundKeys);
       return { mode: dealFrom(deckId, order, artifact, seededRandom({ ...series, deck: deckId, options: true })), wrapped };
     };
     const dealSession = (deckId: SessionDeckId, random: () => number = Math.random, series?: DealSeries) =>

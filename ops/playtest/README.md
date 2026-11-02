@@ -34,7 +34,7 @@ their accuracy and "fun" are not a real player's; the real experiment is #106–
    git.
 
    ```bash
-   node ops/playtest/driver.mjs --game http://127.0.0.1:3300 --port 4100 --out ops/playtest/tmp/<run>
+   node --import tsx ops/playtest/driver.mjs --game http://127.0.0.1:3300 --port 4100 --out ops/playtest/tmp/<run>
    ```
 
 3. **Spawn the players**, Claude Haiku subagents, one per persona. Each opens its
@@ -49,6 +49,35 @@ their accuracy and "fun" are not a real player's; the real experiment is #106–
    `driver.mjs` lists every endpoint in its header. A deck may be any deck id,
    `mixed`, or `daily`; `trace-step` steps a bought step-through, and `click`
    presses a button or link by its name ("Deal new rounds").
+
+   Run the driver under Node 24 (`nvm use`) with `--import tsx` (the scenes file
+   imports the game's code; without the loader the driver logs
+   `PLAYTEST_SEEDS_UNAVAILABLE` and refuses `"demo"`): `deal: "demo"` reads the demo
+   scenes' seeds from `ops/demo/record/scenes.ts`, which Node 20 can't load.
+   Beyond the game's own actions (`hint`, `answer`, `next`, `explain`, `chat`,
+   `quiz`, `trace-step`, `visualizer-step`, `buy-offered-hint`, `keys`,
+   `screenshot`, `aria`), a session can:
+   - **be a phone or blind:** `POST /sessions {name, viewport, reducedMotion,
+     blind}`; `viewport: "phone"` is an iPhone 13 (390 px, touch, no keys
+     line), and `blind: true` hides the code panes from every state, and
+     refuses snapshots and screenshots, until the reveal (the scaffold, marked
+     line numbers, and step-through stay, so a blind guess measures what the
+     layer alone gives away);
+   - **pin a game:** `start` takes `deal` (8 hex digits, or `"demo"` for the
+     deck's recorded seed) with `game` (0–999), or for `daily` a `date`
+     (`YYYY-MM-DD`) with `replay: true`; a page that deals nothing ("That
+     day's five isn't open", "Too many new games") is a 400 with its heading;
+   - **open a link:** `POST …/goto {url}` opens a path or an address on the
+     game's origin (a duel or share link, `/`, `/about`), nothing else;
+   - **set the date:** `POST …/clock {date}` fixes the browser's clock at noon
+     that day, so today's five on two dates builds a day streak;
+   - **read its browser:** `GET …/records` (the local records, #63) and
+     `GET …/clipboard` (what the page last copied: a result, a challenge or a
+     result link; every session has a clipboard and no share sheet).
+
+   `state` names the page (`title`), the round (`roundId`), the deal note and
+   the keys line, and every `state`, `aria` (also written to
+   `<out>/<name>-aria-<n>.txt`), and `keys` read is logged with the rest.
 
 4. **Spawn the judges**, Claude Sonnet subagents, once the players finish. They
    read each player's findings and the driver's `<persona>.events.json` and
@@ -66,6 +95,20 @@ their accuracy and "fun" are not a real player's; the real experiment is #106–
 | `skimmer` | never reads code closely; clicks through | confusing UI, dead ends, slow or broken states |
 | `a11y` | keyboard and screen-reader user: `keys`, `aria`, no mouse-only reasoning | labels, focus order, announcements, colour-only meaning |
 | `red-team` | tries to get the answer before locking in | any leak: host jailbreaks, pasted code, prompt injection, anything the panel shows early, and the question layers, guessed code-blind from the scaffold and each hint |
+
+Run 3 (below) replaces the first three with a set written for fun, keeps `a11y` and `red-team` at regression
+scope, and adds a calibration instrument. Each has a prompt in `personas/`:
+
+| Persona | Plays as | Looks for |
+| --- | --- | --- |
+| `regular` | returns most evenings; the same deck three games in a row, today's five on two days | repeats, the shared "why" sentence, the day streak, the chooser's records, replay pull |
+| `commuter` | one hand on a phone, eight minutes; stops when a page needs two scrolls | sideways scroll, tap targets, the reveal's length, the chat and explainer at 390 px |
+| `duel-pair` | two friends, Ana and Ben, in two sessions: challenge, play, result, rematch, on a seeded deal and on today's five | tension from the opponent's round, the verdict and tie-break copy, what the result page gives the challenger |
+| `streaker` | chases a streak and a best, fast and hint-free when possible | the 50/50 hint as a decision, the end screen's record line, the streak on a card |
+| `learner` | teaches an intro course; buys both hints and uses the design every round, on Haiku and Sonnet explainers | what reveals, hints, layers, and panels teach; claims to doubt; the #120 comparison |
+| `blind` | not a person: a code-blind solver with `blind: true`, guessing at stage 0, after hint 1, and after hint 2 | nothing; it records a tally per round for the difficulty judge |
+| `red-team` (run 3) | the host before the lock, disguised code, tampered duel links and odd addresses | leaks and pages that error instead of refusing |
+| `a11y` (run 3) | keyboard and screen reader, on a desktop and a phone; the chooser's records and the duel pages | focus order, announcements, colour-only meaning, run 2's fixes |
 
 ## What a player does
 
@@ -105,3 +148,39 @@ Each judge scores the four designs from 1 to 5 on:
 - cost in time.
 
 They list concrete, reproducible defects with the evidence for each.
+
+## Run 3: the fun run
+
+Runs 1 and 2 judged explanations, UX, accessibility, and the guard, not fun. Run 3 puts fun first, before public
+play, and changes the protocol in these ways:
+
+- **The prompts are checked in.** `personas/_common.md` (the driver cheat-sheet, the rules, the findings template)
+  is prepended to each `personas/<persona>.md`; each `judges/<judge>.md` stands alone. The lead fills the
+  placeholders (`{{RUN}}`, `{{DRIVER}}`, `{{DRIVER_SONNET}}`, `{{D}}`, `{{D_MINUS_1}}`, `{{CHALLENGE_LINK}}`,
+  `{{RESULT_LINK}}`) and spawns each as a subagent. The run sheet, with the matrix, the seeds, the serve
+  commands, the spawn order, the release bar, and the issue template, is `run-3.md`.
+- **Fun is in scope.** Every player marks each round K, R, or G (knew, read, guessed) and rates each game `fun`
+  and `fun-if-blind`, since agents know most answers. A `judge-fun` scores every deck, the mix, today's five, and
+  a duel on eight dimensions (variety, tension, payoff, reveals, hints, copy, replay, identity) with an evidence
+  pointer in every cell; `judge-copy` classes every string a player sees; `judge-difficulty` reads the blind
+  tallies. `judge-explanations` and `judge-ux` stay, at regression scope.
+- **A blind calibration.** The `blind` persona plays every deck on its pinned deal with the code hidden and
+  guesses before the hints, after hint 1, and after hint 2, so the difficulty judge can say which decks are too
+  easy without the code and which hints give the answer away.
+- **Duels and phones.** `duel-pair` plays both sides of two duels across two sessions; `commuter` and one `a11y`
+  game play at 390 by 844 with touch.
+- **The explainer-model pilot (#120).** A second game server runs with `OPENROUTER_MODEL=anthropic/claude-sonnet-5.5`
+  behind a second driver; `learner` plays its four generative games on both, and `judge-explanations` compares
+  the claims.
+- **The model rule.** Haiku plays the personas whose evidence is in the logs (commuter, streaker, blind, red-team,
+  a11y); Sonnet plays the ones whose product is a judgement (regular, learner, duel-pair); Opus judges fun and
+  Sonnet the rest.
+- **The aggregator.** `node ops/playtest/aggregate.mjs --run ops/playtest/tmp/<run>` joins the findings tables,
+  the judges' tables, and the experiment reports into `aggregate.md`, with the release bar filled from the
+  judges' verdicts.
+
+The run depends on three driver abilities beyond run 2's: a faked browser clock (`POST /sessions/:id/clock`), so
+today's five on two days builds a day streak; the clipboard (`GET /sessions/:id/clipboard`), so a duel link can
+pass from one session to another; and blind sessions (`blind: true` on `POST /sessions`), which strip the code
+from the state until the reveal. Pinned deals come from `ops/demo/record/scenes.ts` through `"deal": "demo"`,
+which the driver imports under Node 24 (`nvm use`) with `--import tsx`.

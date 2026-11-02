@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { expect, type Page } from "@playwright/test";
+import { VERDICT_PATTERN } from "../../apps/game/src/components/arcade/arcade-text";
 
 // What the production checks share: the committed rounds, read on the Node side since the browser never learns an
 // answer, and how a test plays a round.
@@ -35,7 +36,7 @@ export const optionLabel = async (page: Page, right: boolean): Promise<string> =
 export const lockRound = async (page: Page, right = true): Promise<void> => {
   await page.getByLabel(await optionLabel(page, right), { exact: true }).check();
   await page.getByRole("button", { name: "Lock in answer" }).click();
-  await expect(page.getByRole("heading", { name: right ? "Nice read." : "Not this time." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: right ? VERDICT_PATTERN.right : VERDICT_PATTERN.missed })).toBeVisible();
 };
 
 /** From the first round's verdict, plays rounds two to five right, to the last verdict. */
