@@ -397,6 +397,9 @@ GENUI_ENABLED=1 OPENROUTER_API_KEY=… pnpm --filter @codeguessr/game dev
     After you answer, it talks about the code;
   - `off` plays the static game.
 - `OPENROUTER_MODEL` picks the model (default `anthropic/claude-haiku-5.5`).
+  `OPENROUTER_REASONING` is `off` by default (the model renders without
+  thinking); `low`, `medium`, or `high` asks for that effort, for a model whose
+  endpoint requires reasoning, such as Claude Sonnet 5.5 on OpenRouter.
 - Set spend limits on the OpenRouter key itself. When the key is refused, the
   explainer steps aside and the game plays on. A panel that fails offers
   "Try again" once.

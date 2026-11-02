@@ -17,6 +17,17 @@ import { modelInput, type RoundContext } from "./round-context.server";
 
 export const DEFAULT_MODEL = "anthropic/claude-haiku-5.5";
 export const DEFAULT_BASE_URL = "https://openrouter.ai/api/v1";
+/**
+ * How much the model may think before it renders (`OPENROUTER_REASONING`). Off by default: Claude Haiku 5.5 thinks
+ * by default and, on the first live check, spent the whole output budget on it. An effort (`low`, `medium`, `high`)
+ * is for a model whose endpoint refuses `enabled: false` (OpenRouter's Claude Sonnet 5.5: "Reasoning is mandatory",
+ * the #120 pilot). Thinking counts against the output budget, so `low` is the setting to try first. Anything else
+ * reads as off.
+ */
+const REASONING_EFFORTS: ReadonlySet<string> = new Set(["low", "medium", "high"]);
+export type ReasoningSetting = Readonly<{ enabled: false } | { effort: "low" | "medium" | "high" }>;
+export const reasoningSetting = (value: string | undefined = process.env.OPENROUTER_REASONING): ReasoningSetting =>
+  value !== undefined && REASONING_EFFORTS.has(value) ? { effort: value as "low" | "medium" | "high" } : { enabled: false };
 /** Room for a few render calls or one composed panel; reasoning is off, so none of it goes to thinking. */
 const MAX_OUTPUT_TOKENS = 2_500;
 const TIMEOUT_MS = 20_000;
@@ -247,9 +258,9 @@ export const streamRound = ({ design, context, limits, codeLines, turns, signal,
       ...body,
       // Route only to providers that neither store nor train on prompts.
       provider: { data_collection: "deny" },
-      // Rendering a few short components needs no thinking. With it on (Claude Haiku 5.5 thinks by default), the
-      // first live check spent the whole output budget on reasoning and returned nothing.
-      reasoning: { enabled: false },
+      // Rendering a few short components needs no thinking, so reasoning is off unless the model's endpoint
+      // requires it (`OPENROUTER_REASONING`, above).
+      reasoning: reasoningSetting(),
       ...(SINGLE_CALL.has(design) ? { parallel_tool_calls: false } : {}),
     }),
   });
