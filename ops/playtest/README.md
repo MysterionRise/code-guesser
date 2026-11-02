@@ -57,8 +57,10 @@ their accuracy and "fun" are not a real player's; the real experiment is #106–
    `screenshot`, `aria`), a session can:
    - **be a phone or blind:** `POST /sessions {name, viewport, reducedMotion,
      blind}`; `viewport: "phone"` is an iPhone 13 (390 px, touch, no keys
-     line), and `blind: true` hides the code, scaffold, marked lines, and
-     step-through from every state, snapshot, and screenshot until the reveal;
+     line), and `blind: true` hides the code panes from every state, and
+     refuses snapshots and screenshots, until the reveal (the scaffold, marked
+     line numbers, and step-through stay, so a blind guess measures what the
+     layer alone gives away);
    - **pin a game:** `start` takes `deal` (8 hex digits, or `"demo"` for the
      deck's recorded seed) with `game` (0–999), or for `daily` a `date`
      (`YYYY-MM-DD`) with `replay: true`; a page that deals nothing ("That

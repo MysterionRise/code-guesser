@@ -9,8 +9,9 @@
  * Endpoints (all JSON; POST bodies are JSON):
  *   POST /sessions                      {name, viewport, reducedMotion, blind} -> {id, name, viewport, blind}
  *     (viewport: "desktop" (1100×1400, the default) or "phone" (an iPhone 13: 390×844, touch, so the keys line is
- *     hidden); reducedMotion: "reduce" or "no-preference"; blind: true hides the code, scaffold, marked lines, and
- *     step-through from every state, snapshot, and screenshot until the round's reveal, for code-blind calibration)
+ *     hidden); reducedMotion: "reduce" or "no-preference"; blind: true hides the code panes from every state, and
+ *     refuses snapshots and screenshots, until the round's reveal, for code-blind calibration. The scaffold, the
+ *     marked line numbers, and a step-through stay, since the layer-leak check measures what they alone give away)
  *   POST /sessions/:id/start            {deck, design, theme, layer, deal, game, date, replay} -> state
  *     (deck: a deck id, "mixed", or "daily"; design, theme, and layer are lab picks, so the game needs EXPERIMENT_LAB=1;
  *     deal: 8 hex digits or "demo" for the deck's recorded seed, with game 0–999 (default 0), pins a seeded deal (#40);
@@ -154,7 +155,8 @@ const stateOf = async (page, session = null) => {
       .evaluateAll((items) => [...new Set(items.map((item) => item.textContent.trim()).filter(Boolean))]),
   };
   if (session?.blind && !revealed) {
-    return { ...state, blind: true, panes: null, scaffold: null, markedLines: null, trace: null };
+    // Only the code goes: the layer-leak check (run 2's 70% from the scaffold alone) needs the layer's own parts seen.
+    return { ...state, blind: true, panes: null };
   }
   return state;
 };
