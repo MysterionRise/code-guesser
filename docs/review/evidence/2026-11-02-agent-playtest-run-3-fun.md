@@ -220,6 +220,49 @@ design, host retries, the dead-frame fallback, and the phone layout (#236, #237,
 once per game on the family decks (#233). The sprint's PR numbers and the recheck are recorded in
 `ops/playtest/run-3.md`'s results block.
 
+## The recheck
+
+Four players replayed the changed surfaces on the sprint's build (the integration branch with #242–#245 merged,
+the host on Claude Sonnet at effort `low`): the regular (exercise three times, today's five and a replay), the
+streaker (three fix games, where a Haiku player never starts a streak, then three name-function games where it
+does), the duel pair (one framework duel, the result page, the rematch link), and the commuter (missing-line with
+the catalog explainer and a mixed game with the host, on a phone). The fun judge re-scored the morning's failing
+cells from their evidence (`recheck/judge-fun.recheck.md`).
+
+- **Moved to 3 or above (9 cells):** exercise F1, F4, F6, F7; fix F6; daily F8; missing-line F6; name-function
+  F6, F7. Design off and layer off rose to 3 on tension, and the phone viewport to 3 on payoff.
+- **Replayed and still below 3 (11 cells), all data-level:** exercise F2, F5; fix F1; framework F1, F2, F5;
+  missing-line F2, F4; mixed F5; name-function F2, F4. Hints that decide a round at a glance and sentences that
+  fit any round are artifact data (#228–#231).
+- **Not replayed (16 cells):** project, language, before-after, algorithm, and output stand as scored; project F4
+  and F6 and output F6 have code-level causes the once-a-game rule should now cut, unverified.
+- **Line 2:** the verdict repeats, the hint-cost line, name-function's repeated helpful signal, "explainer", and
+  the em-dash are gone. Still shown in more than two rounds of one game: fix's evidence clause ("with a test that
+  fails before the fix"), missing-line's helpful signal ("It works with `X`…"), the pane captions (one a deck, by
+  design), and a host tic ("Nice pick!"); the chooser still says "refactor" and "idioms" (deck descriptions are
+  artifact data) and names its sources (#168 requires it).
+- **Confirmed fixed by play:** each exercise family once a game; the method sentence, "Easy to confuse:", and
+  the helpful signal once a game under "Why this is the answer"; no verdict twice a game; "Reveal hint 1 (−200)"
+  with the cost line gone; "Today's five · 2026-11-02" in the game and "This replay isn't recorded."; "First score
+  on this deck"; the streak line counting down to "Streak kept" and the streak record lines; the running duel gap
+  ("You 3,000 · Ana 2,800"), "First time on these rounds", the rematch label, and the "Challenge back" cue; the
+  Sonnet host's line-level after-lock replies with one hint offer a round and no empty reply in nine turns; the
+  phone end table, wrap by default, and no keys line on touch.
+- **Found by the recheck and fixed after it:** the catalog explainer's comparison table was clipped at a phone's
+  card edge with nothing to say it scrolls (now fixed columns and wrapping cells, #245); the streak line never
+  showed before a streak existed, which is when a player most needs a target (now "3 of 5 right starts a streak",
+  counting down to "Streak started", #244); the finished game's table pushed the page sideways at 320 px in CI's
+  wider font (now scrolls inside its card, #245); the deploy smoke script waited for the old completion wording
+  (#242).
+- **Not reached live, covered by browser tests:** "Streak over", "Streak of N ends", "Can you match it?".
+- **Still open from the recheck:** the exercise families came in a fixed relative order across three games
+  (ciphers last each time), noted on #233; name-function reveals read bare once the shared sentences dropped to
+  once a game, until #230's round-specific signals; the day streak by the score shows only from the second day;
+  "First time for Ana" under the verdict is cryptic and an unnamed friend reads as "Friend".
+
+The bar after the recheck: lines 1, 1b, and 2 still fail, every remaining cause data-level or a wording nit; lines
+3 to 7 as before.
+
 ## Checked and not changed
 
 - Today's five's challenge shows no first-play badge: by design, since everyone plays the same five.

@@ -155,6 +155,12 @@ Body:
   ($0.034 Haiku, $0.356 Sonnet at effort `low`).
 - Bar: 1 fail, 1b fail, 2 fail, 3 fail, 4 pass, 4-leaks pass, 5 pass, 6 pass, 7 pass.
 - Evidence doc: `docs/review/evidence/2026-11-02-agent-playtest-run-3-fun.md`.
-- Issues: #228 to #241 (label `playtest-run-3`); the sprint's PRs are listed in the evidence doc's Fixes section.
+- Issues: #228 to #241 (label `playtest-run-3`).
+- Sprint PRs, stacked on #226: #242 (reveal and copy), #243 (families once a game), #244 (stakes and next steps),
+  #245 (genui and phone); plus the driver's `recordLine`, the sprint's state lines, and a loose `click` on #223.
+- Recheck (`recheck/`, commit `cdaca29` plus the two fixes after it): regular, streaker, duel-pair, commuter on the
+  sprint's build with the host on Sonnet; `judge-fun.recheck.md`. Nine failing cells moved to 3 or above; every
+  replayed cell still below 3 is data-level. Bar after the recheck: 1 fail, 1b fail, 2 fail (data-level and
+  wording), 3 fail (data-level), 4 to 7 pass.
 - Two breaks found by the dry run before play: the driver's seeds import (now `node --import tsx`) and OpenRouter's
   Sonnet 5.5 refusing `reasoning: { enabled: false }` (#227, `OPENROUTER_REASONING=low`).
