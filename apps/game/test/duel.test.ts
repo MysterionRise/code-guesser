@@ -195,7 +195,7 @@ describe("game state v3 (#173)", () => {
  * this test.
  */
 const GOLDEN_DIGESTS: Readonly<Record<string, string>> = {
-  mixed: "691ff8d43fdd94d3f9e8ce65ad8f1874",
+  mixed: "68c40fde070788c71422b5d60b4a577b",
   project: "a34f0e37de1ab0fa512908d85c123345",
   language: "2e83e51cfe0b147f4256b0503bad70d5",
   "before-after": "ff575f4124e21dc7928a08c39d6a135a",

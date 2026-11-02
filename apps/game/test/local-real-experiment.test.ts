@@ -102,6 +102,35 @@ describe("server-only local real experiment authority v3", () => {
     expect(new Set(experiment.dealGame("mixed", Math.random, NOW, undefined, { seed: "0a1b2c3d", game: 0 }).mode.rounds.map((round: any) => round.mode.kind)).size).toBe(5);
   });
 
+  it("deals a seeded mixed deal's games without repeats until a deck's pool is spent, the decks taking turns (#56, #40)", async () => {
+    const { mixedSeriesRounds } = await import("../src/demo/local-real-experiment-deal.server");
+    const decks = Array.from({ length: 7 }, (_, deck) => ({ id: `deck-${deck}`, rounds: Array.from({ length: 4 }, (_, round) => `${deck}:${round}`) }));
+    // Seven decks of four rounds: 28 rounds, so five games (25 rounds) share none, and the sixth wraps a deck.
+    const games = Array.from({ length: 7 }, (_, game) => mixedSeriesRounds(decks, "0a1b2c3d", game));
+    for (const { rounds } of games) expect(new Set(rounds.map((round) => round.split(":")[0])).size).toBe(5);
+    expect(new Set(games.slice(0, 5).flatMap(({ rounds }) => rounds)).size).toBe(25);
+    expect(games.map(({ wrapped }) => wrapped)).toEqual([false, false, false, false, false, true, true]);
+    // Decks take turns: no deck is dealt three times before every deck has been dealt twice.
+    const dealtBy = (count: number) => games.slice(0, count).flatMap(({ rounds }) => rounds.map((round) => round.split(":")[0]!));
+    expect(new Set(dealtBy(2)).size).toBe(7);
+    expect(mixedSeriesRounds(decks, "0a1b2c3d", 3)).toEqual(games[3]);
+    expect(mixedSeriesRounds(decks, "ffffffff", 0).rounds).not.toEqual(games[0]!.rounds);
+    for (const [seed, game] of [["0A1B2C3D", 0], ["0a1b2c3d", -1], ["0a1b2c3d", 1000]] as const) {
+      expect(() => mixedSeriesRounds(decks, seed, game), `${seed} ${game}`).toThrow();
+    }
+    expect(() => mixedSeriesRounds(decks.slice(0, 4), "0a1b2c3d", 0)).toThrow();
+    expect(() => mixedSeriesRounds([...decks, { id: "deck-0", rounds: ["x"] }], "0a1b2c3d", 0)).toThrow();
+    // The server deals a seeded mixed game the same, options included, and its next games share no round with it.
+    const experiment = create(curatedArtifact());
+    const dealt = (game: number) => experiment.dealGame("mixed", Math.random, NOW, undefined, { seed: "0a1b2c3d", game });
+    const shown = (game: number) => dealt(game).mode.rounds.map((round: any) => `${round.roundId}:${round.mode.candidates.map(({ candidateId }: any) => candidateId).join(",")}`);
+    expect(shown(0)).toEqual(shown(0));
+    const ids = Array.from({ length: 4 }, (_, game) => dealt(game).mode.rounds.map(({ roundId }: any) => roundId));
+    expect(new Set(ids.flat()).size).toBe(20);
+    for (const game of [0, 1, 2, 3]) expect(new Set(dealt(game).mode.rounds.map((round: any) => round.mode.kind)).size).toBe(5);
+    expect(dealt(0).wrapped).toBe(false);
+  });
+
   it("deals today's five the same on every load of a date, and differently the next day (#74)", async () => {
     const experiment = create(curatedArtifact());
     const { dailyRandom: daily } = await import("../src/demo/local-real-experiment-deal.server");
