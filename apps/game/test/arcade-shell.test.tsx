@@ -547,7 +547,7 @@ const displayReveal = (index: number, score: number, attainableMaximum: number, 
 });
 
 describe("the finished game's summary (#43, #161)", async () => {
-  const { RoundReveal } = await import("../src/components/arcade/round-reveal.js");
+  const { RoundReveal, NO_REPEATS } = await import("../src/components/arcade/round-reveal.js");
   const mode = createPublicModeContract(modeInput());
   const history = [800, 0, 1000, 1000, 500].map((points, index) => ({
     roundId: `round-${index + 1}`, deck: "language" as const, picked: index === 1 ? "Option B" : "Option A", answer: "Option A",
@@ -557,8 +557,8 @@ describe("the finished game's summary (#43, #161)", async () => {
   const render = (roundDecks: Readonly<Record<string, string>> | undefined) => renderToStaticMarkup(createElement(RoundReveal, {
     round: mode.rounds[4]!, reveal: { ...displayReveal(4, 3_300, 5_000, 5, 500) }, hintsUsed: 2, pickLabel: "Option A", complete: true, correctRounds: 4,
     history, deckTitle: "Which language?", roundDecks, shareHref: undefined, newGameHref: "/?deck=language&deal=0a11ce55&game=1", replayHref: undefined,
-    chooseAnotherDeckHref: "/", genuiDesign: undefined, duel: undefined, opponentName: null, sessionToken: () => "signed-session-token",
-    onNext: () => undefined, headingRef: null, track: () => undefined, trackGenui: () => undefined,
+    chooseAnotherDeckHref: "/", genuiDesign: undefined, duel: undefined, opponentName: null, recordDelta: null, repeats: NO_REPEATS,
+    sessionToken: () => "signed-session-token", onNext: () => undefined, headingRef: null, track: () => undefined, trackGenui: () => undefined,
   }));
   const cells = (html: string, selector: string) => [...html.matchAll(new RegExp(`<${selector}[^>]*>(.*?)</${selector.split(" ")[0]}>`, "gu"))].map(([, inner]) => inner!.replace(/<[^>]+>/gu, ""));
   const headers = (html: string) => cells(html.slice(html.indexOf("<thead>"), html.indexOf("</thead>")), "th");
