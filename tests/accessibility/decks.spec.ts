@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { SOURCES, finishGame, gameAddress, lockRound } from "../production/game";
+import { SOURCES, expectSummary, finishGame, gameAddress, lockRound } from "../production/game";
 import { scan } from "./scan";
 
 // Every deck, the mix, and today's five on the production build (#45), each at round 1, after a hint, after a reveal,
@@ -31,6 +31,8 @@ for (const [index, source] of SOURCES.entries()) {
 
     await finishGame(page);
     await expect(page.getByText(/Run complete — /u)).toBeVisible();
+    // The summary's structure in every theme, with the deck column in a mix's and today's five's (#161).
+    await expectSummary(page, { decks: source === "mixed" || source === "daily" });
     await scan(page, "the finished game");
 
     // Back at the chooser, the deck's card shows the score just kept in this browser (#63).
@@ -42,3 +44,4 @@ for (const [index, source] of SOURCES.entries()) {
     }
   });
 }
+

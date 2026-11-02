@@ -442,6 +442,48 @@ const displayReveal = (index: number, score: number, attainableMaximum: number, 
   result: { score, attainableMaximum, completedRounds, resultVersionId: `result-${completedRounds}` },
 });
 
+describe("the finished game's summary (#43, #161)", async () => {
+  const { RoundReveal } = await import("../src/components/arcade/round-reveal.js");
+  const mode = createPublicModeContract(modeInput());
+  const history = [800, 0, 1000, 1000, 500].map((points, index) => ({
+    roundId: `round-${index + 1}`, deck: "language" as const, picked: index === 1 ? "Option B" : "Option A", answer: "Option A",
+    correct: index !== 1, points, hints: index === 0 ? 1 : index === 4 ? 2 : 0,
+    source: index === 2 ? "https://github.com/acme/repo/blob/abc/file-2.py" : null,
+  }));
+  const render = (roundDecks: Readonly<Record<string, string>> | undefined) => renderToStaticMarkup(createElement(RoundReveal, {
+    round: mode.rounds[4]!, reveal: { ...displayReveal(4, 3_300, 5_000, 5, 500) }, hintsUsed: 2, pickLabel: "Option A", complete: true, correctRounds: 4,
+    history, deckTitle: "Which language?", roundDecks, shareHref: undefined, newGameHref: "/?deck=language&deal=0a11ce55&game=1", replayHref: undefined,
+    chooseAnotherDeckHref: "/", genuiDesign: undefined, duel: undefined, opponentName: null, sessionToken: () => "signed-session-token",
+    onNext: () => undefined, headingRef: null, track: () => undefined, trackGenui: () => undefined,
+  }));
+  const cells = (html: string, selector: string) => [...html.matchAll(new RegExp(`<${selector}[^>]*>(.*?)</${selector.split(" ")[0]}>`, "gu"))].map(([, inner]) => inner!.replace(/<[^>]+>/gu, ""));
+  const headers = (html: string) => cells(html.slice(html.indexOf("<thead>"), html.indexOf("</thead>")), "th");
+
+  it("lists the five rounds with pick, answer, points, and hints, says right or missed in words, and totals the game", () => {
+    const html = render(undefined);
+    expect(html).toContain('<section class="game-summary" aria-labelledby="game-summary-title"><h3 id="game-summary-title">Your game</h3><table>');
+    expect(headers(html)).toEqual(["#", "Your pick", "Answer", "Points"]);
+    expect([...html.matchAll(/<tr class="(summary-right|summary-missed)">/gu)].map(([, kind]) => kind))
+      .toEqual(["summary-right", "summary-missed", "summary-right", "summary-right", "summary-right"]);
+    expect(cells(html, "span class=\"visually-hidden\"")).toEqual([", right", ", missed", " (source)", ", right", ", right", ", right"]);
+    expect(html).toContain('<a href="https://github.com/acme/repo/blob/abc/file-2.py" rel="noreferrer noopener" target="_blank">3<span class="visually-hidden"> (source)</span></a>');
+    expect(cells(html, "td")).toEqual(["✓ Option A, right", "Option A", "800 (1 hint)", "✗ Option B, missed", "Option A", "0", "✓ Option A, right", "Option A", "1,000",
+      "✓ Option A, right", "Option A", "1,000", "✓ Option A, right", "Option A", "500 (2 hints)", "3,300 of 5,000"]);
+    expect(html).toContain('<tfoot><tr><th scope="row" colSpan="2">Total</th><td colSpan="2">3,300 of 5,000</td></tr></tfoot>');
+    expect(html).not.toContain("summary-deck");
+  });
+
+  it("names each round's deck in a mixed game's summary, by title where the game knows it", () => {
+    const html = render({ language: "Which language?" });
+    expect(html).toContain('<table class="with-decks">');
+    expect(headers(html)).toEqual(["#", "Deck", "Your pick", "Answer", "Points"]);
+    expect(cells(html, "td class=\"summary-deck\"")).toEqual(Array(5).fill("Which language?"));
+    expect(html).toContain('<th scope="row" colSpan="3">Total</th>');
+    // A kind the game has no title for is named by its kind.
+    expect(cells(render({ fix: "Spot the fix" }), "td class=\"summary-deck\"")).toEqual(Array(5).fill("language"));
+  });
+});
+
 describe("code pane layout (#46, #85)", async () => {
   const { commonIndent, indentWidth } = await import("../src/components/arcade/code-panes.js");
   it("finds the indent every non-blank line shares, and each line's own width", () => {
