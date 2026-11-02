@@ -189,6 +189,18 @@ describe("a duel's views (#173)", () => {
     expect(result).toContain("<bdi>Friend</bdi> vs <bdi>Challenger</bdi>");
     expect(result).toContain("Friend wins by 500 points");
     expect(result).not.toContain("Deal new rounds");
+    expect(result).not.toContain("duel-back");
+  });
+
+  it("gives the challenger a way to challenge back from the result page (#235)", () => {
+    const dealt = renderToStaticMarkup(createElement(DuelResult, { comparison: comparisonOf(ANA, BEN), dealHref: "/?deck=language", chooseAnotherDeckHref: "/" }));
+    // The server renders the fallback name; the browser puts the friend's in from the fragment.
+    expect(dealt).toContain('<p class="duel-note duel-back">Challenge <bdi>your friend</bdi> back: play a new game of Which language? and send the link from its last round.</p>');
+    expect(dealt).toContain('<a class="primary-action" href="/?deck=language">Deal new rounds</a>');
+    const daily = renderToStaticMarkup(createElement(DuelResult, {
+      comparison: { ...comparisonOf(ANA, BEN), deck: "daily", deckTitle: "Today’s five", date: "2026-11-02" }, dealHref: "/?deck=mixed", chooseAnotherDeckHref: "/",
+    }));
+    expect(daily).toContain("back: play a mixed game and send the link from its last round.");
   });
 });
 

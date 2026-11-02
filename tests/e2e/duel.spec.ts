@@ -176,6 +176,9 @@ test("a friend plays the challenger's very game, sees each of their rounds only 
   await expect(ana.page.getByRole("heading", { level: 1 })).toHaveText("Ben vs Ana");
   await expect(ana.page.getByRole("heading", { level: 2 })).toHaveText("Ben wins by 1,200 points");
   await expect(ana.page.locator(".duel-comparison thead th")).toHaveText(["#", "Ben", "Ana"]);
+  // The result page gives Ana a next step: a new game of the deck, whose end offers the challenge form (#235).
+  await expect(ana.page.locator(".duel-back")).toHaveText("Challenge Ben back: play a new game of Which language? and send the link from its last round.");
+  await expect(ana.page.getByRole("link", { name: "Deal new rounds" })).toHaveAttribute("href", "/?deck=language");
   await expect(ana.page.getByRole("radio")).toHaveCount(0);
   const words = await wordsOf(ana.page.getByRole("main"));
   for (const { answer } of answered) expect(words.has(answer), answer).toBe(false);
@@ -185,8 +188,8 @@ test("a friend plays the challenger's very game, sees each of their rounds only 
     for (const { id } of fixtures.get(roundId)!.candidates) expect(html).not.toContain(id);
   }
 
-  // A rematch is a fresh deal of the deck, not the challenger's next game.
-  await ben.page.getByRole("link", { name: "Rematch" }).click();
+  // A rematch is a fresh deal of the deck, not the challenger's next game, and its label says so (#235).
+  await ben.page.getByRole("link", { name: "Rematch: a fresh deal of this deck", exact: true }).click();
   await expect(ben.page).toHaveURL(/\?deck=language&deal=[0-9a-f]{8}&game=0$/u);
   expect(new URL(ben.page.url()).searchParams.get("deal")).not.toBe(anaDeal);
 

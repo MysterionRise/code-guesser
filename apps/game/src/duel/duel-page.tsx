@@ -111,10 +111,12 @@ export function DuelPage({ request, experiment, record, origin, labTheme, rateLi
     const opened = experiment.openResult(request.token);
     if (!opened.ok) return refused(opened.reason === "EXPIRED" ? "This result has expired." : "This result link isn’t valid.");
     const { comparison } = opened;
+    // The challenger's next game of the deck; today's five deals one game a day, so its next is a mix (#235).
+    const next = comparison.deck === DAILY_DECK ? MIXED_DECK : comparison.deck;
     return (
       <PageFrame theme={outside}>
         <DuelNav />
-        <DuelResult comparison={comparison} dealHref={sourceOf(comparison.deck) ? `/?deck=${comparison.deck}` : null} chooseAnotherDeckHref="/" />
+        <DuelResult comparison={comparison} dealHref={sourceOf(next) ? `/?deck=${next}` : null} chooseAnotherDeckHref="/" />
       </PageFrame>
     );
   }

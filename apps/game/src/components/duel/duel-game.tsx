@@ -242,7 +242,10 @@ export function DuelCompletion({ duel, name, sessionToken, chooseAnotherDeckHref
         <SendResult comparison={issued.comparison} resultToken={issued.resultToken} origin={duel.origin} challenger={name} track={track} />
       )}
       <div className="completion-actions">
-        <a className="primary-action" href={duel.rematchHref} onClick={() => track({ type: "deal_again", to: "rematch" })}>Rematch</a>
+        {/* A rematch is a fresh deal, never the challenger's next game, and says so (#235); today's five rematches on a mix. */}
+        <a className="primary-action" href={duel.rematchHref} onClick={() => track({ type: "deal_again", to: "rematch" })}>
+          {duel.challenge.date === null ? "Rematch: a fresh deal of this deck" : "Rematch: a fresh mixed game"}
+        </a>
         {chooseAnotherDeckHref && <a className="deck-link" href={chooseAnotherDeckHref} onClick={() => track({ type: "deal_again", to: "chooser" })}>Choose another deck</a>}
       </div>
     </>
