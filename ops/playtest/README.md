@@ -34,7 +34,7 @@ their accuracy and "fun" are not a real player's; the real experiment is #106–
    git.
 
    ```bash
-   node ops/playtest/driver.mjs --game http://127.0.0.1:3300 --port 4100 --out ops/playtest/tmp/<run>
+   node --import tsx ops/playtest/driver.mjs --game http://127.0.0.1:3300 --port 4100 --out ops/playtest/tmp/<run>
    ```
 
 3. **Spawn the players**, Claude Haiku subagents, one per persona. Each opens its
@@ -50,7 +50,9 @@ their accuracy and "fun" are not a real player's; the real experiment is #106–
    `mixed`, or `daily`; `trace-step` steps a bought step-through, and `click`
    presses a button or link by its name ("Deal new rounds").
 
-   Run the driver under Node 24 (`nvm use`): `deal: "demo"` reads the demo
+   Run the driver under Node 24 (`nvm use`) with `--import tsx` (the scenes file
+   imports the game's code; without the loader the driver logs
+   `PLAYTEST_SEEDS_UNAVAILABLE` and refuses `"demo"`): `deal: "demo"` reads the demo
    scenes' seeds from `ops/demo/record/scenes.ts`, which Node 20 can't load.
    Beyond the game's own actions (`hint`, `answer`, `next`, `explain`, `chat`,
    `quiz`, `trace-step`, `visualizer-step`, `buy-offered-hint`, `keys`,

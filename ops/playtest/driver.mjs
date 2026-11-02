@@ -2,9 +2,10 @@
  * Playtest driver (#116): lets agent players play the real game UI through a tiny local JSON API, so a Claude Code
  * agent team can compare the generative designs with `curl` alone. Each player gets its own browser session.
  *
- *   node ops/playtest/driver.mjs --game http://127.0.0.1:3300 --port 4100 --out ops/playtest/tmp/<run>
+ *   node --import tsx ops/playtest/driver.mjs --game http://127.0.0.1:3300 --port 4100 --out ops/playtest/tmp/<run>
  *
- * Run it under Node 24 (`nvm use`): `deal: "demo"` reads the demo scenes' seeds from `ops/demo/record/scenes.ts`.
+ * Run it under Node 24 (`nvm use`) with `--import tsx`: `deal: "demo"` reads the demo scenes' seeds from
+ * `ops/demo/record/scenes.ts`, which imports the game's own code, so Node's bare type stripping can't load it.
  *
  * Endpoints (all JSON; POST bodies are JSON):
  *   POST /sessions                      {name, viewport, reducedMotion, blind} -> {id, name, viewport, blind}
@@ -64,7 +65,8 @@ mkdirSync(OUT, { recursive: true });
 // The demo scenes' recorded seeds (`DEAL_SEEDS`, one a deck), read under Node 24's type stripping. A driver that
 // can't read them still runs; `deal: "demo"` is then a 400.
 const DEAL_SEEDS = await import(new URL("../demo/record/scenes.ts", import.meta.url).href)
-  .then((scenes) => scenes.DEAL_SEEDS).catch(() => ({}));
+  .then((scenes) => scenes.DEAL_SEEDS)
+  .catch((error) => { console.error(`PLAYTEST_SEEDS_UNAVAILABLE ${error?.code ?? error?.name ?? "import"}`); return {}; });
 // A deal's address, as the game checks it (`seriesOf` in apps/game/src/app/page.tsx and the deal module).
 const DEAL_SEED = /^[0-9a-f]{8}$/u;
 const MAXIMUM_GAME = 999;
