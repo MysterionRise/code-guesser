@@ -74,6 +74,15 @@ describe("visualizer frame height", () => {
     expect(visualizerDocument("<p>x</p>").indexOf("codeguessrVisualizerHeight")).toBeGreaterThan(visualizerDocument("<p>x</p>").indexOf("<p>x</p>"));
   });
 
+  it("reports a script error ahead of the model's markup, which the panel reads as a dead page (#238)", async () => {
+    const { reportedError, FRAME_TITLE } = await import("../src/genui/visualizer-view");
+    const document = visualizerDocument("<p>x</p>");
+    expect(document.indexOf("codeguessrVisualizerError")).toBeLessThan(document.indexOf("<p>x</p>"));
+    expect(reportedError({ codeguessrVisualizerError: true })).toBe(true);
+    for (const junk of [null, "error", { codeguessrVisualizerError: "yes" }, { codeguessrVisualizerHeight: 600 }]) expect(reportedError(junk)).toBe(false);
+    expect(FRAME_TITLE).toBe("Visualization of this round's code");
+  });
+
   it("starts the page in the player's theme, taking only plain colours from the page's tokens (#125)", () => {
     const tokens: Record<string, string> = { "--panel": " #fbf7ee", "--text": "rgba(31, 27, 22, 0.9)", "--border-soft": "red;}</style><script>alert(1)</script>",
       "--chip": "url(https://example.org/x.png)", "--accent": "#a23d16", "--focus": "" };

@@ -381,7 +381,11 @@ gate: changing queries, retries, ceilings, deck rules, or running
     Haiku 5.5 thinks by default and, on the first live check, spent the whole
     output budget on it. `OPENROUTER_REASONING=low|medium|high` sends an effort instead
     (`reasoningSetting`), for a model whose endpoint requires reasoning: OpenRouter's Claude Sonnet 5.5 refuses
-    `enabled: false` with a 400 ("Reasoning is mandatory"), found in run 3's #120 pilot. After-lock code goes to the model as numbered lines,
+    `enabled: false` with a 400 ("Reasoning is mandatory"), found in run 3's #120 pilot. A design may have its own
+    model and reasoning (`OPENROUTER_MODEL_<DESIGN>`, `OPENROUTER_REASONING_<DESIGN>`; `modelFor`, `reasoningFor`,
+    #237): run 3's comparison found the explainers level between Haiku and Sonnet and the host the one design
+    worth Sonnet, which the owner sets. The host offers a hint once a round (`hintOffered` withholds the tool), and
+    the chat asks once more for an empty reply before "The host had nothing to add." After-lock code goes to the model as numbered lines,
     and the panel tells it the player's pick.
   - The server logs codes only: `GENUI_FINISHED <phase> <finishReason>
     calls=<n> in=<tokens> out=<tokens>`, `GENUI_RENDER_REJECTED <component>

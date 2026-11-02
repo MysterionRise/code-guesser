@@ -179,8 +179,13 @@ const numberedRows = (page: Page) => page.locator(".code-window.numbered .code-l
 test("with lines wrapped on a phone, a numbered round's numbers keep one column and its code hangs past them (#217)", async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 568 });
   const wrapped = async (round: string) => {
-    await page.getByRole("button", { name: "Wrap lines" }).click();
-    await expect(page.getByRole("button", { name: "Wrap lines" })).toHaveAttribute("aria-pressed", "true");
+    // Narrow screens wrap by default (#236); the toggle still turns it off and on.
+    const toggle = page.getByRole("button", { name: "Wrap lines" });
+    await expect(toggle).toHaveAttribute("aria-pressed", "true");
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-pressed", "false");
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-pressed", "true");
     const lines = await numberedRows(page);
     const lefts = lines.map(({ left }) => left);
     expect(Math.max(...lefts) - Math.min(...lefts), round).toBeLessThan(1);

@@ -16,7 +16,7 @@ vi.mock("../src/demo/local-real-experiment-loader.server", async (importOriginal
 });
 
 const { POST } = await import("../src/app/api/genui/route");
-const { DEFAULT_MODEL, MAX_TURN_LENGTH, MAX_TURNS, mentionsCode, playerTurns } = await import("../src/genui/model.server");
+const { DEFAULT_MODEL, MAX_TURN_LENGTH, MAX_TURNS, hintOffered, mentionsCode, modelFor, playerTurns, reasoningFor } = await import("../src/genui/model.server");
 const { inputSchemaFor, RENDER_CATALOG } = await import("../src/genui/render-catalog");
 const { explainRequest, fellBack, renderViews, wasLimited } = await import("../src/genui/genui-panel");
 const { HOST_HISTORY, HOST_TURN_LENGTH, withPick } = await import("../src/genui/host-chat");
@@ -253,6 +253,39 @@ describe("the generative-UI route (#101)", () => {
     }
   });
 
+  it("withholds the hint offer once the host has made one this round, and sends the host to its own model when set (#237)", async () => {
+    const { round, token } = game(false, "host");
+    const history = [
+      userMessage("Any tips?"),
+      { id: "a1", role: "assistant", parts: [
+        { type: "tool-host_message", state: "output-available", output: { text: "Hello there!" } },
+        { type: "tool-offer_hint", state: "output-available", output: { reason: "Want a nudge?" } },
+      ] },
+      userMessage("And now?"),
+    ];
+    vi.stubEnv("OPENROUTER_MODEL_HOST", "anthropic/claude-sonnet-5.5");
+    vi.stubEnv("OPENROUTER_REASONING_HOST", "low");
+    try {
+      const response = await post({ sessionToken: token, roundId: round.roundId, design: "host", messages: history });
+      expect(response.status).toBe(200);
+      await response.text();
+      const [request] = fake.requests;
+      expect(request.body.tools.map((entry: any) => entry.function.name)).toEqual(["host_message"]);
+      expect(request.body.model).toBe("anthropic/claude-sonnet-5.5");
+      expect(request.body.reasoning).toEqual({ effort: "low" });
+      // The explainers keep the shared model and setting.
+      const explained = game(true, "catalog");
+      const explainedResponse = await post({ sessionToken: explained.token, roundId: explained.round.roundId, design: "catalog", messages: [userMessage("Explain this round.")] });
+      expect(explainedResponse.status).toBe(200);
+      await explainedResponse.text();
+      expect(fake.requests.at(-1).body.model).toBe(DEFAULT_MODEL);
+      expect(fake.requests.at(-1).body.reasoning).toEqual({ enabled: false });
+    } finally {
+      vi.stubEnv("OPENROUTER_MODEL_HOST", "");
+      vi.stubEnv("OPENROUTER_REASONING_HOST", "");
+    }
+  });
+
   it("after the lock, sends the code and streams checked render calls", async () => {
     const { round, fixture, token } = game(true);
     const response = await post({ sessionToken: token, roundId: round.roundId, design: "catalog", messages: [userMessage("Explain this round.")] });
@@ -362,5 +395,25 @@ describe("the reasoning setting (#120)", async () => {
     expect(reasoningSetting("high")).toEqual({ effort: "high" });
     expect(reasoningSetting("maximal")).toEqual({ enabled: false });
     expect(reasoningSetting("")).toEqual({ enabled: false });
+  });
+
+  it("gives a design its own model and reasoning when set, and the shared ones otherwise (#237)", () => {
+    const env = { OPENROUTER_MODEL: "anthropic/claude-haiku-5.5", OPENROUTER_MODEL_HOST: "anthropic/claude-sonnet-5.5",
+      OPENROUTER_REASONING_HOST: "low", OPENROUTER_MODEL_CATALOG: "", OPENROUTER_REASONING_CATALOG: "" };
+    expect(modelFor("host", env)).toBe("anthropic/claude-sonnet-5.5");
+    expect(reasoningFor("host", env)).toEqual({ effort: "low" });
+    expect(modelFor("catalog", env)).toBe("anthropic/claude-haiku-5.5");
+    expect(reasoningFor("catalog", env)).toEqual({ enabled: false });
+    expect(modelFor("composer", {})).toBe(DEFAULT_MODEL);
+    expect(reasoningFor("visualizer", { OPENROUTER_REASONING: "medium" })).toEqual({ effort: "medium" });
+  });
+
+  it("knows when the host already offered a hint in a chat", () => {
+    const offer = { id: "a1", role: "assistant", parts: [{ type: "tool-offer_hint", state: "output-available", output: { reason: "Want a nudge?" } }] };
+    const plain = { id: "a2", role: "assistant", parts: [{ type: "tool-host_message", state: "output-available", output: { text: "Hello" } }] };
+    expect(hintOffered([userMessage("Hi"), plain, userMessage("Tips?")])).toBe(false);
+    expect(hintOffered([userMessage("Hi"), offer, userMessage("Tips?")])).toBe(true);
+    expect(hintOffered("nonsense")).toBe(false);
+    expect(hintOffered([{ role: "user", parts: [{ type: "tool-offer_hint" }] }])).toBe(false);
   });
 });

@@ -85,20 +85,16 @@ export const dealtPath = (deck: Deck, look: Readonly<{ theme?: Theme; layer?: "o
 const CHOOSER = "/?design=off&theme=terminal&layer=off";
 /** Today's five's card, by its description; it links to the player's own date once the page hydrates (#172). */
 export const DAILY_CARD = "The same mixed five all day";
-/** Long lines wrap under their own indentation, for panes whose lines run past a phone's width. */
-const wrapLines = click("Wrap lines");
-
 /**
  * One hard cut of the vertical demo: open a deck's recorded game under a title sticker, read the question (and its
  * question layer, where asked) and the code, lock in the right answer (after a hint, or with the chosen line
  * highlighted, where asked), and pop the points.
  */
 const demoCut = (deck: Deck, title: string, points: string, extras: Readonly<{
-  hint?: boolean; highlight?: boolean; wrap?: boolean; theme?: Theme; layer?: "on" | "off";
+  hint?: boolean; highlight?: boolean; theme?: Theme; layer?: "on" | "off";
 }> = {}): Step[] => [
   goto(dealtPath(deck, extras)),
   { kind: "expectText", pattern: "Round 1 of 5" },
-  ...(extras.wrap ? [wrapLines] : []),
   caption(title),
   wait(850),
   caption(""),
@@ -141,9 +137,9 @@ export const DEMO_SCENE: Scene = Object.freeze({
     ...demoCut("fix", "2/7 · Spot the bug fix", "With a hint. +800", { hint: true, highlight: true }),
     ...demoCut("language", "3/7 · Which language?", "Nailed it. +1,000", { layer: "on", theme: "paper" }),
     ...demoCut("framework", "4/7 · Which framework?", "Spotted it. +1,000"),
-    ...demoCut("output", "5/7 · Predict the output", "Traced it. +1,000", { wrap: true, theme: "arcade" }),
-    ...demoCut("name-function", "6/7 · Name the function", "Named it. +1,000", { wrap: true }),
-    ...demoCut("exercise", "7/7 · Which exercise?", "Aced it. +1,000", { wrap: true, theme: "contrast" }),
+    ...demoCut("output", "5/7 · Predict the output", "Traced it. +1,000", { theme: "arcade" }),
+    ...demoCut("name-function", "6/7 · Name the function", "Named it. +1,000"),
+    ...demoCut("exercise", "7/7 · Which exercise?", "Aced it. +1,000", { theme: "contrast" }),
     goto(CHOOSER),
     { kind: "expectHeading", pattern: "^Pick a deck$" },
     jumpTo(".deck-list", "start"),
@@ -200,14 +196,13 @@ const deckScene = (
   captions: Readonly<{ opening: string; hint: string; trace?: string; answer: string }>,
   pick: "right" | "miss",
   gif: Partial<GifOptions> = {},
-  look: Readonly<{ wrap?: boolean; layer?: "on" | "off" }> = {},
+  look: Readonly<{ layer?: "on" | "off" }> = {},
 ): Scene => ({
   id: `deck-${deck}`,
   gif,
   steps: [
     goto(dealtPath(deck, look)),
     { kind: "expectText", pattern: "Round 1 of 5" },
-    ...(look.wrap ? [wrapLines] : []),
     wait(500),
     caption(captions.opening),
     wait(2200),
@@ -336,7 +331,7 @@ export const SCENES: readonly Scene[] = Object.freeze([
     opening: "Which exercise does this solve?",
     hint: "Real Exercism solutions.",
     answer: "Four exercises. Pick one.",
-  }, "right", { width: 360, maximumColors: 80 }, { wrap: true }),
+  }, "right", { width: 360, maximumColors: 80 }),
   deckScene("before-after", {
     opening: "Before or after the refactor?",
     hint: "The hint quotes the commit.",
@@ -347,7 +342,7 @@ export const SCENES: readonly Scene[] = Object.freeze([
     opening: "What does the last line return?",
     hint: "Hints work other calls.",
     answer: "Trace it, then lock it in.",
-  }, "miss", { width: 360, maximumColors: 96 }, { wrap: true }),
+  }, "miss", { width: 360, maximumColors: 96 }),
   deckScene("fix", {
     opening: "A real bug fix changed one line.",
     hint: "The hint names the kind of change.",
@@ -357,12 +352,12 @@ export const SCENES: readonly Scene[] = Object.freeze([
     opening: "One line is missing.",
     hint: "Stuck? Take a hint.",
     answer: "Which line fills the gap?",
-  }, "right", { width: 360, maximumColors: 80 }, { wrap: true }),
+  }, "right", { width: 360, maximumColors: 80 }),
   deckScene("name-function", {
     opening: "Its name is hidden.",
     hint: "Hints cost points.",
     answer: "What did its author call it?",
-  }, "right", { width: 360, maximumColors: 80 }, { wrap: true }),
+  }, "right", { width: 360, maximumColors: 80 }),
   DUEL_SCENE,
   {
     id: "full-run",

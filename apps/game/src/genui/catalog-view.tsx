@@ -88,15 +88,17 @@ export function CatalogView({ call, panes, hint }: CatalogViewProps) {
     }
     case "comparison":
       return (
-        <table className="genui-comparison">
-          <caption>The options side by side</caption>
-          <thead><tr><th scope="col">Option</th><th scope="col">For</th><th scope="col">Against</th></tr></thead>
-          <tbody>
-            {(props.rows as readonly Row[]).map((row, index) => (
-              <tr key={index}><th scope="row">{row.option}</th><td>{row.for}</td><td>{row.against}</td></tr>
-            ))}
-          </tbody>
-        </table>
+        <div className="genui-table-scroll">
+          <table className="genui-comparison">
+            <caption>The options side by side</caption>
+            <thead><tr><th scope="col">Option</th><th scope="col">For</th><th scope="col">Against</th></tr></thead>
+            <tbody>
+              {(props.rows as readonly Row[]).map((row, index) => (
+                <tr key={index}><th scope="row">{row.option}</th><td>{row.for}</td><td>{row.against}</td></tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       );
   }
 }

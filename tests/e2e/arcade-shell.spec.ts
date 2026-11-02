@@ -414,7 +414,7 @@ test("on a phone no fix option's code is cut off, and wrapped lines keep their i
   const truncated = await page.locator(".code-detail").evaluateAll((details) => details.filter((detail) => detail.scrollWidth > detail.clientWidth + 1).length);
   expect(truncated).toBe(0);
   const pane = page.locator(".code-window").first();
-  await page.getByRole("button", { name: "Wrap lines" }).click();
+  // A phone wraps by default (#236).
   await expect(page.getByRole("button", { name: "Wrap lines" })).toHaveAttribute("aria-pressed", "true");
   // Every round of the game, since a deeply indented line in any of them once pushed the pane past its edge.
   const hanging: { indent: string; hang: number }[] = [];

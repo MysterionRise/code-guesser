@@ -81,8 +81,12 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [focusedCandidate, setFocusedCandidate] = React.useState<string | null>(null);
-  // Long lines scroll by default; a player can wrap them, and the choice holds across rounds (#46).
-  const [wrap, setWrap] = React.useState(false);
+  // Long lines scroll by default on a wide screen and wrap on a narrow one (#236: a phone cut the first line of every
+  // round with wrapping off); a player can switch either way, and the choice holds across rounds (#46).
+  const [wrap, setWrap] = React.useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 600px)").matches);
+  // A touch screen has no keys to describe. The style sheet hides the line on one too, but a screenshot can catch the
+  // page while its media features are re-read, so a touch device never renders it (#236).
+  const [touch] = React.useState(() => typeof navigator !== "undefined" && navigator.maxTouchPoints > 0);
   const round = mode.rounds[session.roundIndex]!;
   // A fix or vulnerable-line round's options point at pane lines: the pane numbers its lines, each option shows its
   // line's code, and the line under the focused or chosen option (or, once revealed, the answer) is highlighted.
@@ -299,7 +303,7 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
             </button>
           )}
         </form>
-        {session.reveal === null && (
+        {session.reveal === null && !touch && (
           <p className="keys-note">Keys: <kbd>1</kbd>–<kbd>{round.mode.candidates.length}</kbd> pick, <kbd>Enter</kbd> locks in, <kbd>H</kbd> buys a hint, <kbd>N</kbd> moves on.</p>
         )}
         {error && <p className="demo-error" role="alert">{error}</p>}

@@ -349,7 +349,11 @@ noscript { display: block; padding: 12px; margin-bottom: 16px; background: var(-
 .code-line.genui-helpful { background: var(--win-bg); box-shadow: inset 3px 0 0 var(--win); }
 .code-line.genui-misleading { background: var(--warn-bg); box-shadow: inset 3px 0 0 var(--warn); }
 .genui-notes { margin: 0; padding-left: 1.4em; color: var(--text-soft); }
-.genui-comparison { margin-top: 12px; width: 100%; border-collapse: collapse; }
+/* A wide table scrolls inside its card, never the page (#236: the options table ran past a phone's edge). */
+.genui-table-scroll { margin-top: 12px; max-width: 100%; overflow-x: auto; }
+/* Fixed columns and wrapping cells, so the table fits a phone instead of clipping its last column (run 3's recheck). */
+.genui-comparison { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.genui-comparison th, .genui-comparison td { overflow-wrap: anywhere; }
 .genui-comparison caption { text-align: left; color: var(--muted); font-size: .88rem; margin-bottom: 6px; }
 .genui-comparison th, .genui-comparison td { padding: 6px 8px; border-top: 1px solid var(--border); text-align: left; vertical-align: top; }
 /* The deck nav pulls the next element up 16px; this nav clears it rather than covering its link. */
@@ -445,17 +449,23 @@ noscript { display: block; padding: 12px; margin-bottom: 16px; background: var(-
 .game-summary { margin: 16px 0 8px; }
 .game-summary h3 { margin: 0 0 8px; }
 .game-summary table { width: 100%; border-collapse: collapse; font-size: .92rem; }
-.game-summary th, .game-summary td { padding: 6px 8px; border-top: 1px solid var(--border); text-align: left; vertical-align: top; overflow-wrap: break-word; }
+/* Headers, a deck's name, and a score wrap at spaces and never split mid-word or mid-number (#236: a phone showed
+   "Missi ng line" and "1,0 00"); only a pick or an answer that is one long word, such as a function's name or a line
+   of code, may break anywhere (#45). */
+.game-summary th, .game-summary td { padding: 6px 8px; border-top: 1px solid var(--border); text-align: left; vertical-align: top; overflow-wrap: normal; hyphens: none; }
+.game-summary .summary-pick, .game-summary .summary-answer { overflow-wrap: anywhere; }
 .game-summary abbr { text-decoration: none; }
-.game-summary td:last-child { white-space: nowrap; }
+/* The table scrolls inside its card where a wide font (CI's DejaVu Sans at 320 px) would push the page sideways. */
+.game-summary .summary-scroll { max-width: 100%; overflow-x: auto; }
+.game-summary .summary-points { white-space: nowrap; }
 .game-summary thead th { color: var(--muted); font-weight: 700; border-top: 0; }
 .game-summary tfoot th, .game-summary tfoot td { font-weight: 800; }
 .game-summary tfoot td { text-align: right; }
 .game-summary .summary-missed .summary-pick { color: var(--miss); }
-/* On a phone a summary's cells break wherever they must to fit: a mixed game's deck column (#161), and picks that are
-   one long word, such as a function's name or a line of code (#45). */
+/* On a phone the hints note may drop under its score, and the cells sit closer, so a mixed game's deck column (#161)
+   still fits beside the picks. */
 @media (max-width: 480px) {
-  .game-summary th, .game-summary td { padding: 6px 5px; overflow-wrap: anywhere; }
+  .game-summary th, .game-summary td { padding: 6px 5px; }
   .game-summary td:last-child { white-space: normal; }
 }
 .game-summary .summary-hints { color: var(--muted); }
