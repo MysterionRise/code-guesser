@@ -4,13 +4,27 @@
  *
  *   node ops/playtest/driver.mjs --game http://127.0.0.1:3300 --port 4100 --out ops/playtest/tmp/<run>
  *
+ * Run it under Node 24 (`nvm use`): `deal: "demo"` reads the demo scenes' seeds from `ops/demo/record/scenes.ts`.
+ *
  * Endpoints (all JSON; POST bodies are JSON):
- *   POST /sessions                      {name}            -> {id}
- *   POST /sessions/:id/start            {deck, design, theme, layer} -> state
- *     (deck: a deck id, "mixed", or "daily"; design, theme, and layer are lab picks, so the game needs EXPERIMENT_LAB=1)
+ *   POST /sessions                      {name, viewport, reducedMotion, blind} -> {id, name, viewport, blind}
+ *     (viewport: "desktop" (1100×1400, the default) or "phone" (an iPhone 13: 390×844, touch, so the keys line is
+ *     hidden); reducedMotion: "reduce" or "no-preference"; blind: true hides the code, scaffold, marked lines, and
+ *     step-through from every state, snapshot, and screenshot until the round's reveal, for code-blind calibration)
+ *   POST /sessions/:id/start            {deck, design, theme, layer, deal, game, date, replay} -> state
+ *     (deck: a deck id, "mixed", or "daily"; design, theme, and layer are lab picks, so the game needs EXPERIMENT_LAB=1;
+ *     deal: 8 hex digits or "demo" for the deck's recorded seed, with game 0–999 (default 0), pins a seeded deal (#40);
+ *     date: YYYY-MM-DD pins today's five to that date (#172), with replay: true recording nothing; a page that deals
+ *     nothing, such as a refused date or "Too many new games", is a 400 with its heading)
+ *   POST /sessions/:id/goto             {url}             -> state  (opens a path or address on the game's origin: a
+ *                                                                    duel link, a share link, /about; nothing else)
+ *   POST /sessions/:id/clock            {date}            -> state  (fixes the browser's clock at noon on that date, so
+ *                                                                    today's five on two dates builds a day streak)
  *   GET  /sessions/:id/state                              -> state
- *     (state lists the theme, the code, any question layer, options, hints, reveal, any panel, quiz, or host chat, and
- *     the page's enabled actions)
+ *     (state lists the theme, the round id, the code, any question layer, options, hints, reveal, any panel, quiz, or
+ *     host chat, the page's title and notes, and its enabled actions)
+ *   GET  /sessions/:id/records                            -> {raw, records}  (the browser's local records (#63))
+ *   GET  /sessions/:id/clipboard                          -> {text}  (what the page last copied: a result or duel link)
  *   POST /sessions/:id/hint                               -> state  (buys the round's next hint)
  *   POST /sessions/:id/trace-step       {times, back}     -> state  (steps a bought step-through hint on, or back)
  *   POST /sessions/:id/answer           {label}           -> state  (locks in an option by its label)
@@ -21,15 +35,17 @@
  *   POST /sessions/:id/quiz             {choice}          -> state  (composer design: picks a quiz choice)
  *   POST /sessions/:id/next                               -> state  (next round)
  *   POST /sessions/:id/click            {name}            -> state  (presses a button or link by its name, e.g.
- *                                                                    "Deal new rounds")
+ *                                                                    "Deal new rounds", "Copy challenge link")
  *   POST /sessions/:id/keys             {keys: [..]}      -> {focused, state}  (keyboard play, e.g. "Tab", "Enter")
- *   GET  /sessions/:id/aria                               -> {snapshot}  (the page's accessibility tree)
+ *   GET  /sessions/:id/aria                               -> {snapshot, path}  (the page's accessibility tree, also
+ *                                                                              written to <out>/<name>-aria-<n>.txt)
  *   POST /sessions/:id/screenshot       {name}            -> {path}
  *   DELETE /sessions/:id
  *
- * The driver reads only what the page shows; it never reads the artifact, so it can't tell a player the answer.
- * An action the page can't take right now (explain before answering, a hint when none is left) returns 400 with a
- * reason instead of waiting.
+ * Every call but the session's creation is logged to <out>/<name>.events.json with the state it returned. The driver
+ * reads only what the page shows; it never reads the artifact, so it can't tell a player the answer. An action the
+ * page can't take right now (explain before answering, a hint when none is left) returns 400 with a reason instead of
+ * waiting. Each session has a clipboard and no share sheet, so every share button copies.
  */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
@@ -37,12 +53,24 @@ import { join, resolve } from "node:path";
 import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
 
-const { chromium } = createRequire(resolve("package.json"))("@playwright/test");
+const { chromium, devices } = createRequire(resolve("package.json"))("@playwright/test");
 const arg = (name, fallback) => { const index = process.argv.indexOf(`--${name}`); return index > 0 ? process.argv[index + 1] : fallback; };
 const GAME = arg("game", "http://127.0.0.1:3300");
 const PORT = Number(arg("port", "4100"));
 const OUT = resolve(arg("out", `ops/playtest/tmp/${new Date().toISOString().slice(0, 19).replace(/[:T]/gu, "-")}`));
 mkdirSync(OUT, { recursive: true });
+
+// The demo scenes' recorded seeds (`DEAL_SEEDS`, one a deck), read under Node 24's type stripping. A driver that
+// can't read them still runs; `deal: "demo"` is then a 400.
+const DEAL_SEEDS = await import(new URL("../demo/record/scenes.ts", import.meta.url).href)
+  .then((scenes) => scenes.DEAL_SEEDS).catch(() => ({}));
+// A deal's address, as the game checks it (`seriesOf` in apps/game/src/app/page.tsx and the deal module).
+const DEAL_SEED = /^[0-9a-f]{8}$/u;
+const MAXIMUM_GAME = 999;
+const DEAL_DATE = /^\d{4}-\d{2}-\d{2}$/u;
+// A phone: Playwright's iPhone 13 (390×844, touch, mobile), drawn at 2× so full-page screenshots stay small.
+const { defaultBrowserType: _phoneBrowser, ...PHONE } = devices["iPhone 13"];
+const DESKTOP = { viewport: { width: 1100, height: 1400 } };
 
 const browser = await chromium.launch();
 const sessions = new Map();
@@ -53,16 +81,24 @@ const log = (session, action, detail) => {
 };
 
 const text = async (locator) => (await locator.count()) > 0 ? (await locator.first().innerText()).replace(/[ \t]+\n/gu, "\n").trim() : null;
+const attribute = async (locator, name) => (await locator.count()) > 0 ? locator.first().getAttribute(name) : null;
+const visibleText = async (locator) => (await locator.count()) > 0 && await locator.first().isVisible() ? text(locator) : null;
+const revealedOn = async (page) => (await page.locator(".reveal h2").count()) > 0;
+/** A blind session sees no code until the round's reveal (#116 run 3: code-blind calibration). */
+const blindfolded = async (session) => session.blind && !(await revealedOn(session.page));
 
 /** What a player can see: the round, its code and options, hints, the reveal, and any generative panel or chat. */
-const stateOf = async (page) => {
+const stateOf = async (page, session = null) => {
   const reveal = page.locator(".reveal");
-  const revealed = (await page.locator(".reveal h2").count()) > 0;
+  const revealed = await revealedOn(page);
   const frame = page.locator("iframe.visualizer-frame");
-  return {
+  const state = {
     url: page.url().replace(GAME, ""),
+    // The page's heading: the round's prompt, or a page's own ("Ana challenges you", "About CodeGuessr", a refusal).
+    title: await text(page.locator("main h1")),
     theme: await page.locator(".demo-page").getAttribute("data-theme").catch(() => null),
     round: await text(page.locator(".eyebrow")),
+    roundId: await attribute(page.locator(".game-card"), "data-round-id"),
     score: await text(page.locator(".arcade-header .score")),
     prompt: await text(page.locator("#round-title")),
     panes: await page.locator(".code-pane").evaluateAll((panes) => panes.map((pane) => ({
@@ -110,10 +146,17 @@ const stateOf = async (page) => {
       feedback: await text(page.locator(".composer-quiz .composer-feedback")),
     } : null,
     complete: await text(page.getByText(/^Run complete/u)),
+    // The note above a game that starts a deck's pool over (#40), and the keys line (hidden on a phone).
+    dealNote: await text(page.locator(".deal-note")),
+    keysNote: await visibleText(page.locator(".keys-note")),
     // Every enabled control on the page, so a player can see what it may do next (e.g. "Deal new rounds").
     actions: await page.locator("main button:not([disabled]), main a[href], .completion-actions a, .design-nav a, .deck-nav a")
       .evaluateAll((items) => [...new Set(items.map((item) => item.textContent.trim()).filter(Boolean))]),
   };
+  if (session?.blind && !revealed) {
+    return { ...state, blind: true, panes: null, scaffold: null, markedLines: null, trace: null };
+  }
+  return state;
 };
 
 const settle = (page) => page.waitForTimeout(400);
@@ -122,6 +165,14 @@ const settle = (page) => page.waitForTimeout(400);
 class Unavailable extends Error {}
 const need = async (page, selector, what) => {
   if ((await page.locator(selector).count()) === 0) throw new Unavailable(what);
+};
+
+/** Waits for a game's first round, or for the page that refused to deal one, which is the player's 400. */
+const dealt = async (page) => {
+  const round = page.locator(".eyebrow").filter({ hasText: /^Round 1 of 5/u });
+  const refused = page.locator(".empty-state h1, .deck-notice");
+  await round.or(refused).first().waitFor();
+  if ((await round.count()) === 0) throw new Unavailable(`not dealt: ${await text(refused)}`);
 };
 
 /** Waits for a generative panel or the host to finish: it leaves the busy state, then renders or falls back. */
@@ -139,13 +190,48 @@ const awaitGenui = async (page, selector) => {
 };
 
 const actions = {
-  start: async (session, { deck, design, theme, layer }) => {
+  start: async (session, { deck, design, theme, layer, deal, game, date, replay }) => {
+    const id = String(deck ?? "");
     const picks = Object.entries({ design, theme, layer }).filter(([, value]) => value)
       .map(([name, value]) => `&${name}=${encodeURIComponent(String(value))}`).join("");
-    // The deck's address redirects to a fresh seeded deal (#40), and today's five to the browser's date (#172), carrying
-    // the lab picks along.
-    await session.page.goto(`${GAME}/?deck=${encodeURIComponent(deck)}${picks}`);
-    await session.page.locator(".eyebrow").filter({ hasText: /^Round 1 of 5/u }).waitFor();
+    // A pinned deal (#40) or date (#172); otherwise the deck's address redirects to a fresh seeded deal, and today's
+    // five to the browser's date, carrying the lab picks along.
+    let pinned = "";
+    if (deal !== undefined) {
+      if (id === "daily") throw new Unavailable("today's five takes a date, not a deal");
+      const seed = deal === "demo" ? DEAL_SEEDS[id] : String(deal);
+      if (deal === "demo" && !seed) throw new Unavailable(`no recorded seed for deck "${id}"`);
+      if (!DEAL_SEED.test(seed)) throw new Unavailable('deal must be 8 hex digits or "demo"');
+      const number = game === undefined ? 0 : Number(game);
+      if (!Number.isInteger(number) || number < 0 || number > MAXIMUM_GAME) throw new Unavailable(`game must be a whole number from 0 to ${MAXIMUM_GAME}`);
+      pinned = `&deal=${seed}&game=${number}`;
+    } else if (game !== undefined) {
+      throw new Unavailable("game needs a deal");
+    }
+    if (date !== undefined) {
+      if (id !== "daily") throw new Unavailable('date is for deck "daily" only');
+      if (!DEAL_DATE.test(String(date))) throw new Unavailable("date must be YYYY-MM-DD");
+      pinned = `&date=${date}${replay ? "&replay=1" : ""}`;
+    } else if (replay) {
+      throw new Unavailable("replay needs a date");
+    }
+    await session.page.goto(`${GAME}/?deck=${encodeURIComponent(id)}${pinned}${picks}`);
+    await dealt(session.page);
+  },
+  goto: async ({ page }, { url }) => {
+    const origin = new URL(GAME).origin;
+    let target;
+    try { target = new URL(String(url ?? ""), GAME); } catch { throw new Unavailable("url must be a path, or an address on the game's origin"); }
+    if (target.origin !== origin) throw new Unavailable(`same-origin only: ${origin}`);
+    await page.goto(target.href);
+    await page.waitForLoadState("domcontentloaded");
+  },
+  clock: async ({ page }, { date }) => {
+    if (!DEAL_DATE.test(String(date))) throw new Unavailable("date must be YYYY-MM-DD");
+    const noon = new Date(`${date}T12:00:00`);
+    if (Number.isNaN(noon.getTime())) throw new Unavailable(`not a real date: ${date}`);
+    // Noon in the machine's own zone, so the browser's local date is that date whatever the zone; timers keep running.
+    await page.clock.setFixedTime(noon);
   },
   hint: async ({ page }) => {
     await need(page, ".hint-button:not([disabled])", "no hint to buy: none left, or the answer is locked");
@@ -227,19 +313,62 @@ createServer(async (request, response) => {
       let name = asked;
       for (let copy = 2; taken.has(name); copy += 1) name = `${asked}-${copy}`;
       taken.add(name);
-      const context = await browser.newContext({ viewport: { width: 1100, height: 1400 } });
-      const session = { id: randomUUID().slice(0, 8), name, context, page: await context.newPage(), events: [] };
+      const viewport = body.viewport ?? "desktop";
+      if (viewport !== "desktop" && viewport !== "phone") return json(response, 400, { error: 'viewport must be "desktop" or "phone"' });
+      const reducedMotion = body.reducedMotion;
+      if (reducedMotion !== undefined && reducedMotion !== "reduce" && reducedMotion !== "no-preference") {
+        return json(response, 400, { error: 'reducedMotion must be "reduce" or "no-preference"' });
+      }
+      const context = await browser.newContext({
+        ...(viewport === "phone" ? { ...PHONE, deviceScaleFactor: 2 } : DESKTOP),
+        ...(reducedMotion ? { reducedMotion } : {}),
+      });
+      // A clipboard and no share sheet, so "Share result" and the duel links copy, and `clipboard` can read them.
+      await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+      await context.addInitScript(() => { delete Navigator.prototype.share; });
+      const session = {
+        id: randomUUID().slice(0, 8), name, context, page: await context.newPage(), events: [],
+        viewport, blind: body.blind === true, snapshots: 0,
+      };
       session.page.on("pageerror", (error) => log(session, "page-error", { message: String(error).slice(0, 200) }));
       sessions.set(session.id, session);
-      return json(response, 200, { id: session.id, name });
+      log(session, "session", { viewport, reducedMotion: reducedMotion ?? null, blind: session.blind });
+      return json(response, 200, { id: session.id, name, viewport, blind: session.blind });
     }
     const session = sessions.get(id);
     if (!session) return json(response, 404, { error: "unknown session" });
     const body = request.method === "POST" ? await readBody(request) : {};
     if (request.method === "DELETE") { await session.context.close(); sessions.delete(id); return json(response, 200, { closed: true }); }
-    if (request.method === "GET" && action === "state") return json(response, 200, await stateOf(session.page));
-    if (request.method === "GET" && action === "aria") return json(response, 200, { snapshot: await session.page.locator("body").ariaSnapshot() });
+    if (request.method === "GET" && action === "state") {
+      const state = await stateOf(session.page, session);
+      log(session, "state", { state });
+      return json(response, 200, state);
+    }
+    if (request.method === "GET" && action === "aria") {
+      if (await blindfolded(session)) throw new Unavailable("blind session: no snapshot before the round's reveal");
+      const snapshot = await session.page.locator("body").ariaSnapshot();
+      session.snapshots += 1;
+      const path = join(OUT, `${session.name}-aria-${session.snapshots}.txt`);
+      writeFileSync(path, snapshot);
+      log(session, "aria", { path, chars: snapshot.length });
+      return json(response, 200, { snapshot, path });
+    }
+    if (request.method === "GET" && action === "records") {
+      if (!session.page.url().startsWith(GAME)) throw new Unavailable("records live on the game's pages: start or goto one first");
+      const raw = await session.page.evaluate(() => localStorage.getItem("codeguessr.records"));
+      let records = null;
+      try { records = raw === null ? null : JSON.parse(raw); } catch { records = null; }
+      log(session, "records", { raw, records });
+      return json(response, 200, { raw, records });
+    }
+    if (request.method === "GET" && action === "clipboard") {
+      if (!session.page.url().startsWith(GAME)) throw new Unavailable("the clipboard reads on the game's pages: start or goto one first");
+      const copied = await session.page.evaluate(() => navigator.clipboard.readText());
+      log(session, "clipboard", { text: copied });
+      return json(response, 200, { text: copied });
+    }
     if (action === "screenshot") {
+      if (await blindfolded(session)) throw new Unavailable("blind session: no screenshot before the round's reveal");
       const path = join(OUT, `${session.name}-${String(body.name ?? Date.now()).replace(/[^a-z0-9-]/giu, "-")}.png`);
       await session.page.screenshot({ path, fullPage: true });
       log(session, "screenshot", { path });
@@ -252,15 +381,16 @@ createServer(async (request, response) => {
         const element = document.activeElement;
         return element ? { tag: element.tagName.toLowerCase(), role: element.getAttribute("role"), label: element.getAttribute("aria-label") ?? element.textContent?.trim().slice(0, 80) ?? "" } : null;
       });
-      log(session, "keys", { keys: body.keys, focused });
-      return json(response, 200, { focused, state: await stateOf(session.page) });
+      const state = await stateOf(session.page, session);
+      log(session, "keys", { keys: body.keys, focused, state });
+      return json(response, 200, { focused, state });
     }
     const run = actions[action];
     if (!run || request.method !== "POST") return json(response, 404, { error: `unknown action ${action}` });
     const started = Date.now();
     await run(session, body);
     await settle(session.page);
-    const state = await stateOf(session.page);
+    const state = await stateOf(session.page, session);
     log(session, action, { body, ms: Date.now() - started, state });
     return json(response, 200, state);
   } catch (error) {

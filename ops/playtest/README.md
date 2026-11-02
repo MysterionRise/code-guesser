@@ -50,6 +50,31 @@ their accuracy and "fun" are not a real player's; the real experiment is #106–
    `mixed`, or `daily`; `trace-step` steps a bought step-through, and `click`
    presses a button or link by its name ("Deal new rounds").
 
+   Run the driver under Node 24 (`nvm use`): `deal: "demo"` reads the demo
+   scenes' seeds from `ops/demo/record/scenes.ts`, which Node 20 can't load.
+   Beyond the game's own actions (`hint`, `answer`, `next`, `explain`, `chat`,
+   `quiz`, `trace-step`, `visualizer-step`, `buy-offered-hint`, `keys`,
+   `screenshot`, `aria`), a session can:
+   - **be a phone or blind:** `POST /sessions {name, viewport, reducedMotion,
+     blind}`; `viewport: "phone"` is an iPhone 13 (390 px, touch, no keys
+     line), and `blind: true` hides the code, scaffold, marked lines, and
+     step-through from every state, snapshot, and screenshot until the reveal;
+   - **pin a game:** `start` takes `deal` (8 hex digits, or `"demo"` for the
+     deck's recorded seed) with `game` (0–999), or for `daily` a `date`
+     (`YYYY-MM-DD`) with `replay: true`; a page that deals nothing ("That
+     day's five isn't open", "Too many new games") is a 400 with its heading;
+   - **open a link:** `POST …/goto {url}` opens a path or an address on the
+     game's origin (a duel or share link, `/`, `/about`), nothing else;
+   - **set the date:** `POST …/clock {date}` fixes the browser's clock at noon
+     that day, so today's five on two dates builds a day streak;
+   - **read its browser:** `GET …/records` (the local records, #63) and
+     `GET …/clipboard` (what the page last copied: a result, a challenge or a
+     result link; every session has a clipboard and no share sheet).
+
+   `state` names the page (`title`), the round (`roundId`), the deal note and
+   the keys line, and every `state`, `aria` (also written to
+   `<out>/<name>-aria-<n>.txt`), and `keys` read is logged with the rest.
+
 4. **Spawn the judges**, Claude Sonnet subagents, once the players finish. They
    read each player's findings and the driver's `<persona>.events.json` and
    screenshots.
