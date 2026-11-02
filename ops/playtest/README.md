@@ -154,4 +154,4 @@ The run depends on three driver abilities beyond run 2's: a faked browser clock 
 today's five on two days builds a day streak; the clipboard (`GET /sessions/:id/clipboard`), so a duel link can
 pass from one session to another; and blind sessions (`blind: true` on `POST /sessions`), which strip the code
 from the state until the reveal. Pinned deals come from `ops/demo/record/scenes.ts` through `"deal": "demo"`,
-which the driver imports under Node 24 (`nvm use`).
+which the driver imports under Node 24 (`nvm use`) with `--import tsx`.

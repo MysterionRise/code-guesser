@@ -76,11 +76,13 @@ Two drivers, one per server, writing to the same run folder (session names never
 uses the second):
 
 ```bash
-node ops/playtest/driver.mjs --game http://127.0.0.1:3300 --port 4100 --out "$RUN"
-node ops/playtest/driver.mjs --game http://127.0.0.1:3301 --port 4101 --out "$RUN"
+node --import tsx ops/playtest/driver.mjs --game http://127.0.0.1:3300 --port 4100 --out "$RUN"
+node --import tsx ops/playtest/driver.mjs --game http://127.0.0.1:3301 --port 4101 --out "$RUN"
 ```
 
-Both need Node 24 (`nvm use`): the driver imports `ops/demo/record/scenes.ts` for the pinned seeds.
+Both need Node 24 (`nvm use`) and `--import tsx`: the driver imports `ops/demo/record/scenes.ts` for the pinned
+seeds, and that file imports the game's code. Without the loader the driver logs `PLAYTEST_SEEDS_UNAVAILABLE` and
+refuses `"demo"`.
 
 ## The lead, step by step
 
