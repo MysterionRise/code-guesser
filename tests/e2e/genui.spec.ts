@@ -196,6 +196,8 @@ test("on a phone the catalog explainer's table scrolls inside its card and the e
   await expect(panel.locator(".genui-comparison")).toBeVisible();
   expect(await fitsAcross(), "the explainer's table scrolls inside its card, not the page").toBe(true);
   expect(await panel.locator(".genui-table-scroll").evaluate((box) => getComputedStyle(box).overflowX)).toBe("auto");
+  // And at phone width the table fits its card outright, with its cells wrapping, so nothing is clipped or hidden behind a scroll.
+  expect(await panel.locator(".genui-table-scroll").evaluate((box) => box.scrollWidth <= box.clientWidth), "the explainer's table fits its card at 390 px").toBe(true);
   await request.post(`${fake}/control`, { data: {} });
   for (let round = 2; round <= 5; round += 1) {
     await page.getByRole("button", { name: "Next round" }).click();
