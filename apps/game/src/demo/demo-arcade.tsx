@@ -27,6 +27,8 @@ interface DemoArcadeProps {
   readonly genuiDesign?: Design;
   readonly duel?: GameDuel;
   readonly records?: GameRecords;
+  readonly gameLabel?: string;
+  readonly replay?: boolean;
 }
 
 export function DemoArcade(props: DemoArcadeProps) {

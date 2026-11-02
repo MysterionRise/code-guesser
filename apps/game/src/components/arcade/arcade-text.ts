@@ -117,15 +117,18 @@ export const roundPointsNote = (score: number, hintsUsed: number): string =>
   `${score > 0 ? "+" : ""}${points(score)} points (${hintsUsed === 0 ? "no hints" : hintsUsed === 1 ? "1 hint" : `${hintsUsed} hints`})`;
 
 /**
- * What a finished game did to the player's records (#63), under its result: "New best 4,300, up from 3,800 · Streak 3
- * games, your longest · Day streak 2". Null when there is nothing to say: no new best, no streak of two, and no day
- * streak, or a game that counted for nothing.
+ * What a finished game did to the player's records (#63), under its result: "First score on this deck: 2,000" for a
+ * deck's first game, then "New best 4,300, up from 3,800 · Streak 3 games, your longest · Day streak 2", or "Streak of
+ * 3 ends" when a game drops below three right (#235). Null when there is nothing to say: no new best, no streak of two,
+ * none ended, and no day streak, or a game that counted for nothing.
  */
 export const recordLine = (delta: RecordDelta): string | null => {
   if (!delta.counted) return null;
   const parts = [
-    ...(delta.newBest === null ? [] : [`New best ${points(delta.newBest.score)}${delta.newBest.previous > 0 ? `, up from ${points(delta.newBest.previous)}` : ""}`]),
+    ...(delta.first !== null ? [`First score on this deck: ${points(delta.first)}`]
+      : delta.newBest === null ? [] : [`New best ${points(delta.newBest.score)}${delta.newBest.previous > 0 ? `, up from ${points(delta.newBest.previous)}` : ""}`]),
     ...(delta.streak >= 2 ? [`Streak ${delta.streak} games${delta.bestStreak ? ", your longest" : ""}`] : []),
+    ...(delta.ended > 0 ? [`Streak of ${delta.ended} ends`] : []),
     ...(delta.dayStreak === null ? [] : [`Day streak ${delta.dayStreak}`]),
   ];
   return parts.length === 0 ? null : parts.join(" · ");

@@ -8,7 +8,7 @@ import type { DuelRefusalReason } from "../components/duel/duel-contract";
 import { ChallengeIntro, DuelResult } from "../components/duel/duel-pages";
 import { duelDeckTitle, sideLine } from "../components/duel/duel-text";
 import { DemoArcade } from "../demo/demo-arcade";
-import { gameSources } from "../demo/game-sources.server";
+import { dailyLabel, gameSources } from "../demo/game-sources.server";
 import { DAILY_DECK, MIXED_DECK } from "../demo/local-real-experiment-domain.server";
 import type { LocalRealExperiment } from "../demo/local-real-experiment.server";
 import { PageFrame } from "../demo/page-frame";
@@ -111,10 +111,12 @@ export function DuelPage({ request, experiment, record, origin, labTheme, rateLi
     const opened = experiment.openResult(request.token);
     if (!opened.ok) return refused(opened.reason === "EXPIRED" ? "This result has expired." : "This result link isn’t valid.");
     const { comparison } = opened;
+    // The challenger's next game of the deck; today's five deals one game a day, so its next is a mix (#235).
+    const next = comparison.deck === DAILY_DECK ? MIXED_DECK : comparison.deck;
     return (
       <PageFrame theme={outside}>
         <DuelNav />
-        <DuelResult comparison={comparison} dealHref={sourceOf(comparison.deck) ? `/?deck=${comparison.deck}` : null} chooseAnotherDeckHref="/" />
+        <DuelResult comparison={comparison} dealHref={sourceOf(next) ? `/?deck=${next}` : null} chooseAnotherDeckHref="/" />
       </PageFrame>
     );
   }
@@ -144,7 +146,8 @@ export function DuelPage({ request, experiment, record, origin, labTheme, rateLi
     <PageFrame theme={game.arms.theme}>
       <DuelNav />
       <DemoArcade key={game.sessionToken} mode={game.mode} sessionToken={game.sessionToken} deckTitle={duelDeckTitle(challenge)}
-        {...(roundDecks ? { roundDecks } : {})} authorizeRevealAction={authorizeLocalExperimentReveal} revealHintAction={revealLocalExperimentHint}
+        {...(roundDecks ? { roundDecks } : {})} {...(challenge.date === null ? {} : { gameLabel: dailyLabel(challenge.date) })}
+        authorizeRevealAction={authorizeLocalExperimentReveal} revealHintAction={revealLocalExperimentHint}
         chooseAnotherDeckHref="/" newGameHref={rematchHref} records={records}
         duel={{ role: "challenged", origin, challengeToken: request.token, challenge, rematchHref, issueResult: issueDuelResult }}
         {...(game.arms.design === "off" ? {} : { genuiDesign: game.arms.design })} />

@@ -238,15 +238,42 @@ describe("static arcade shell", () => {
     for (const text of Object.values(VERDICTS).flat()) expect(text).toMatch(/^[A-Z][^.]{2,24}\.$/u);
   });
 
+  it("follows a running streak under the header, and shows today's five's day streak by the score (#232)", async () => {
+    const { ArcadeHeader, StreakLine } = await import("../src/components/arcade/round-header.js");
+    const line = (streak: number, correct: number, answered: number) =>
+      renderToStaticMarkup(createElement(StreakLine, { streak, correct, answered, total: 5 }));
+    expect(line(0, 0, 0)).toBe('<p class="streak-line streak-start" data-streak="start">3 of 5 right starts a streak</p>');
+    expect(line(0, 2, 3)).toContain(">1 more right starts a streak<");
+    expect(line(0, 3, 3)).toContain('data-streak="started">Streak started<');
+    expect(line(0, 1, 4)).toBe("");
+    expect(line(3, 0, 0)).toBe('<p class="streak-line streak-open" data-streak="open">Streak 3 · 3 of 5 right keeps it</p>');
+    expect(line(3, 1, 1)).toContain(">2 more right keeps your streak<");
+    expect(line(3, 2, 3)).toContain(">1 more right keeps your streak<");
+    expect(line(3, 3, 3)).toContain('data-streak="kept">Streak kept<');
+    expect(line(3, 1, 4)).toContain('data-streak="over">Streak over<');
+    // No live region: the verdict is what a lock announces.
+    expect(line(3, 3, 3)).not.toMatch(/aria-live|role="status"/u);
+    const header = (dayStreak: number) => renderToStaticMarkup(createElement(ArcadeHeader, { score: 1200, dayStreak }));
+    expect(header(0)).not.toContain("Day streak");
+    expect(header(3)).toContain('<span class="day-streak">Day streak 3</span><span class="score">');
+  });
+
   it("says what a finished game did to the records, or nothing (#63)", () => {
-    const delta = { newBest: null, streak: 0, bestStreak: false, dayStreak: null, counted: true };
+    const delta = { first: null, newBest: null, streak: 0, bestStreak: false, ended: 0, dayStreak: null, counted: true };
     expect(recordLine(delta)).toBeNull();
     expect(recordLine({ ...delta, counted: false, newBest: { score: 5000, previous: 0 } })).toBeNull();
+    // A deck's first game is its first score, not a best beaten (#235).
+    expect(recordLine({ ...delta, first: 3800, newBest: { score: 3800, previous: 0 } })).toBe("First score on this deck: 3,800");
+    expect(recordLine({ ...delta, first: 0 })).toBe("First score on this deck: 0");
+    expect(recordLine({ ...delta, first: 2000, newBest: { score: 2000, previous: 0 }, dayStreak: 1 })).toBe("First score on this deck: 2,000 · Day streak 1");
     expect(recordLine({ ...delta, newBest: { score: 3800, previous: 0 } })).toBe("New best 3,800");
     expect(recordLine({ ...delta, newBest: { score: 4300, previous: 3800 } })).toBe("New best 4,300, up from 3,800");
     expect(recordLine({ ...delta, streak: 1 })).toBeNull();
     expect(recordLine({ ...delta, streak: 3 })).toBe("Streak 3 games");
     expect(recordLine({ ...delta, streak: 3, bestStreak: true })).toBe("Streak 3 games, your longest");
+    // A game that ends a streak says so, beside any best it still set.
+    expect(recordLine({ ...delta, ended: 3 })).toBe("Streak of 3 ends");
+    expect(recordLine({ ...delta, newBest: { score: 1000, previous: 800 }, ended: 2 })).toBe("New best 1,000, up from 800 · Streak of 2 ends");
     expect(recordLine({ ...delta, dayStreak: 1 })).toBe("Day streak 1");
     expect(recordLine({ ...delta, newBest: { score: 4300, previous: 3800 }, streak: 2, bestStreak: true, dayStreak: 2 }))
       .toBe("New best 4,300, up from 3,800 · Streak 2 games, your longest · Day streak 2");
