@@ -187,6 +187,12 @@ gate: changing queries, retries, ceilings, deck rules, or running
   game 0. Game n takes positions 5n to 5n + 4 of the pool in the seed's order (`seriesRounds` in
   `local-real-experiment-deal.server.ts`, a fresh order each pass), and its options in a seeded order, so a reload
   deals the same game and "Deal new rounds" links to game n + 1. A game that starts a new pass shows a note.
+  - **Each option family once a game (#233, run 3):** a pass's order is arranged (`arrangeForGames`, with the
+    `roundKeys` the server passes: the candidates' ids as the family, the answer's id) so that no game holds two
+    rounds of one option set or one answer where the pool allows: the seeded order stands except where a round would
+    repeat the game's family or answer, and a family with as many rounds left as games that can take one goes first.
+    A four-family deck (framework) still repeats one family a game, with another answer; before-after, one family,
+    is left as dealt. Game 0's first round of every recorded seed (`DEAL_SEEDS`) is unchanged.
 - The server holds each game's progress (#96): `dealGame` seals it in a signed
   token (`local-real-experiment-session.server.ts`), and the hint and answer
   server actions take one step each. A ledger refuses an older token, so a

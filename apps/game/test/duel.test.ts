@@ -191,23 +191,24 @@ describe("game state v3 (#173)", () => {
 
 /**
  * Each deck's digest for game 0 of seed `0a1b2c3d` (today's five for 2026-10-21), dealt without layers, and the two
- * layered decks with them. A new artifact or new question layers deal other games: regenerate these from a run of
- * this test.
+ * layered decks with them. A new artifact, new question layers, or a new series order (#233 arranged the family
+ * decks for their games, and keeps a repeated answer out of one fix game) deal other games: regenerate these from a
+ * run of this test.
  */
 const GOLDEN_DIGESTS: Readonly<Record<string, string>> = {
   mixed: "68c40fde070788c71422b5d60b4a577b",
   project: "a34f0e37de1ab0fa512908d85c123345",
   language: "2e83e51cfe0b147f4256b0503bad70d5",
   "before-after": "ff575f4124e21dc7928a08c39d6a135a",
-  algorithm: "31bbd9f9a1db543f78be399aa763a7f5",
+  algorithm: "681f09d64203a9cbe8f212229574b353",
   output: "a3f4aae882e765704290946197c89484",
-  fix: "7c3854be96c86863c10109030770284e",
+  fix: "d4c48e4a97f0e92d0dee8ac0abce56b4",
   "missing-line": "1f00ab33f78709d5f72f0ba16d328f6c",
   "name-function": "c56e201418eca2e15266512eca86ac03",
-  framework: "b9f653b90564baf4f8ad16a2bbbe497b",
-  exercise: "9d49c71b817fca9400ce7e56d4141bd8",
+  framework: "9fc503c4e6d8d187f7beeb1eb333887b",
+  exercise: "d2d7b14abd5658c18dee87a3950850fd",
   daily: "d3d6d97676c7cf0db8f0b1b9158d3ff2",
-  "algorithm+layers": "76de85808d91db04f8879156d7bab227",
+  "algorithm+layers": "629bd35a1692f174dabcdd8297c81ddb",
   "language+layers": "857757c2205732515a58a2d2d1c346ac",
 };
 
