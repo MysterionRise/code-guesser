@@ -565,7 +565,7 @@ describe("the finished game's summary (#43, #161)", async () => {
 
   it("lists the five rounds with pick, answer, points, and hints, says right or missed in words, and totals the game", () => {
     const html = render(undefined);
-    expect(html).toContain('<section class="game-summary" aria-labelledby="game-summary-title"><h3 id="game-summary-title">Your game</h3><table>');
+    expect(html).toContain('<section class="game-summary" aria-labelledby="game-summary-title"><h3 id="game-summary-title">Your game</h3><div class="summary-scroll"><table>');
     expect(headers(html)).toEqual(["#", "Your pick", "Answer", "Points"]);
     expect([...html.matchAll(/<tr class="(summary-right|summary-missed)">/gu)].map(([, kind]) => kind))
       .toEqual(["summary-right", "summary-missed", "summary-right", "summary-right", "summary-right"]);
