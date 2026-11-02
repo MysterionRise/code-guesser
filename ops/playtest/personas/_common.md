@@ -20,8 +20,9 @@ curl -s -X POST {{DRIVER}}/sessions -d '{"name":"<persona>","viewport":"desktop"
 
 - `viewport`: `"desktop"` (1100 by 1400) or `"phone"` (390 by 844, touch, so the keys line is hidden).
 - `reducedMotion`: `"reduce"` or `"no-preference"`, optional.
-- `blind`: `true` strips the code, the scaffold, the marked lines, and the trace frames from every state until the
-  round is revealed. Only the blind persona sets it.
+- `blind`: `true` strips the code panes from every state, and refuses snapshots and screenshots, until the round
+  is revealed; the scaffold, the marked line numbers, and the trace frames stay, since a blind guess measures what
+  the layer alone gives away. Only the blind persona sets it.
 
 With `S` standing for `{{DRIVER}}/sessions/<id>`:
 
