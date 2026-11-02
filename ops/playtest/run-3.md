@@ -148,12 +148,13 @@ Body:
 
 ## Results
 
-(filled by the lead after the run)
-
-- Run folder:
-- Commit:
-- D, D−1:
-- Games played, rounds, generative calls, OpenRouter spend:
-- Bar: 1 –, 1b –, 2 –, 3 –, 4 –, 4-leaks –, 5 –, 6 –, 7 –
-- Evidence doc:
-- Issues:
+- Run folder: `ops/playtest/tmp/2026-11-02-run3/` (ignored), on the integration branch `claude/run3-integration`.
+- Commit: `d13b065` (`main` `74b6f52` plus #223, #224, #225, #226, #227).
+- D, D−1: 2026-11-02, 2026-11-01.
+- Games played, rounds, generative calls, OpenRouter spend: 60 dealt (51 completed), 257 rounds, 72 calls, $0.39
+  ($0.034 Haiku, $0.356 Sonnet at effort `low`).
+- Bar: 1 fail, 1b fail, 2 fail, 3 fail, 4 pass, 4-leaks pass, 5 pass, 6 pass, 7 pass.
+- Evidence doc: `docs/review/evidence/2026-11-02-agent-playtest-run-3-fun.md`.
+- Issues: #228 to #241 (label `playtest-run-3`); the sprint's PRs are listed in the evidence doc's Fixes section.
+- Two breaks found by the dry run before play: the driver's seeds import (now `node --import tsx`) and OpenRouter's
+  Sonnet 5.5 refusing `reasoning: { enabled: false }` (#227, `OPENROUTER_REASONING=low`).
