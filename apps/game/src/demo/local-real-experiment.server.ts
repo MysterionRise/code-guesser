@@ -43,6 +43,7 @@ import {
   shuffle,
   type DealDescriptor,
   type DealSeries,
+  type RoundKeys,
 } from "./local-real-experiment-deal.server";
 import { creditsOf, type Credit } from "./local-real-experiment-credits.server";
 import { duelAuthority, type DuelAuthority } from "./local-real-experiment-duel.server";
@@ -297,6 +298,15 @@ const pinnedHash = (artifactInput: unknown, trustedArtifactHash: string): string
   return fail("HASH_MISMATCH");
 };
 
+/**
+ * A round's company keys for a seeded series (#233): its option set, by the candidates' ids (an algorithm's or
+ * exercise's family, a project group's four repositories), and its answer's id.
+ */
+const roundKeys = ({ publicRound, privateReveal }: DerivedRound): RoundKeys => ({
+  family: publicRound.mode.candidates.map(({ candidateId }) => candidateId).sort().join("|"),
+  answer: privateReveal.correctCandidateId,
+});
+
 export const createLocalRealExperiment = (
   artifactInput: unknown,
   trustedArtifactHash: string,
@@ -333,7 +343,7 @@ export const createLocalRealExperiment = (
       }
       const derived = decks.find(({ deck }) => deck.id === deckId) ?? fail();
       if (!series) return { mode: dealFrom(deckId, shuffle(derived.rounds, random), artifact, random), wrapped: false };
-      const { rounds: order, wrapped } = seriesRounds(derived.rounds, series.seed, deckId, series.game);
+      const { rounds: order, wrapped } = seriesRounds(derived.rounds, series.seed, deckId, series.game, roundKeys);
       return { mode: dealFrom(deckId, order, artifact, seededRandom({ ...series, deck: deckId, options: true })), wrapped };
     };
     const dealSession = (deckId: SessionDeckId, random: () => number = Math.random, series?: DealSeries) =>
