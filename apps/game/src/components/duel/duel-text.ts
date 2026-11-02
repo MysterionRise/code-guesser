@@ -60,6 +60,13 @@ export const roundWords = ([correct, hints, scored]: DuelRound): string =>
 /** The challenger's round, as the friend's reveal states it once they have locked theirs: "Ana: right, 1 hint, +800 points." */
 export const opponentRoundLine = (name: string, round: DuelRound): string => `${name}: ${roundWords(round)}.`;
 
+/** Both sides' points over the rounds the friend has locked so far (#232): "You 2,800 · Ana 1,800". */
+export const duelGapLine = (name: string, you: number, challenger: number): string => `You ${points(you)} · ${name} ${points(challenger)}`;
+
+/** The challenger's points over the first `answered` rounds, which the friend has locked. */
+export const challengerPoints = (rounds: readonly DuelRound[], answered: number): number =>
+  rounds.slice(0, answered).reduce((total, [, , scored]) => total + scored, 0);
+
 /** How a side did in all, over a game's five rounds: "3/5 right · 3,300 of 5,000". */
 export const sideLine = ({ correct, score }: Pick<DuelSide, "correct" | "score">, max: number): string =>
   `${correct}/5 right · ${points(score)} of ${points(max)}`;

@@ -5,7 +5,7 @@ import { hostInputId, type Design } from "../../genui/designs";
 import type { GenuiPanelProps } from "../../genui/genui-panel";
 import type { ChallengerDuel, GameDuel } from "../duel/duel-contract";
 import { ChallengeFriend, DuelCompletion } from "../duel/duel-game";
-import { DEFAULT_NAME, opponentRoundLine } from "../duel/duel-text";
+import { DEFAULT_NAME, challengerPoints, duelGapLine, opponentRoundLine } from "../duel/duel-text";
 import type { AuthorizedReveal, EntertainmentResultProjection, RoundRecord } from "./arcade-session";
 import { formatCompletionResult, points, projectSpoilerFreeShare, recordLine, roundPointsNote, verdictText } from "./arcade-text";
 import type { RecordDelta } from "./local-records";
@@ -164,7 +164,11 @@ export function RoundReveal({ round, reveal, hintsUsed, pickLabel, complete, cor
       </h2>
       <p className="round-points">{roundPointsNote(reveal.score, hintsUsed)}</p>
       {duel?.role === "challenged" && (
-        <p className="duel-line">{opponentRoundLine(opponentName ?? DEFAULT_NAME, duel.challenge.challenger.rounds[history.length - 1]!)}</p>
+        <>
+          <p className="duel-line">{opponentRoundLine(opponentName ?? DEFAULT_NAME, duel.challenge.challenger.rounds[history.length - 1]!)}</p>
+          {/* Where the duel stands over the rounds locked so far (#232), in the reveal's live region. */}
+          <p className="duel-gap">{duelGapLine(opponentName ?? DEFAULT_NAME, reveal.result.score, challengerPoints(duel.challenge.challenger.rounds, history.length))}</p>
+        </>
       )}
       <p className="answer-line">The answer: <strong>{answer}</strong></p>
       {/* The host's chat sits below the round (#161): this moves focus to it, and leaves the address alone, since its

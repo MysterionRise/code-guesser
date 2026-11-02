@@ -250,7 +250,7 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
       </ArcadeHeader>
       <StreakLine streak={atStart.streak} correct={session.correctRounds} answered={session.completedRounds} total={mode.rounds.length} />
       {duel?.role === "challenged" && (
-        <OpponentStrip name={opponentName ?? DEFAULT_NAME} rounds={duel.challenge.challenger.rounds} answered={session.completedRounds} />
+        <OpponentStrip name={opponentName ?? DEFAULT_NAME} rounds={duel.challenge.challenger.rounds} answered={session.completedRounds} score={session.score} />
       )}
 
       {/* Keyed by round, so each round's card arrives afresh (its `arrive` animation, where motion is welcome). */}
