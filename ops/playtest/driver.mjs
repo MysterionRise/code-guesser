@@ -154,6 +154,13 @@ const stateOf = async (page, session = null) => {
     keysNote: await visibleText(page.locator(".keys-note")),
     // The end screen's best or streak line (#226): "New best 4,300, up from 3,800 · Streak 3 games".
     recordLine: await text(page.locator(".record-line")),
+    // Run 3's sprint (#232, #235): the streak outlook under the header, the day streak by the score, a duel's running
+    // gap, today's five's label, and the replay note.
+    streakLine: await text(page.locator(".streak-line")),
+    dayStreak: await text(page.locator(".day-streak")),
+    duelGap: await text(page.locator(".duel-gap").first()),
+    gameLabel: await text(page.locator(".game-label")),
+    replayNote: await text(page.locator(".replay-note")),
     // Every enabled control on the page, so a player can see what it may do next (e.g. "Deal new rounds").
     actions: await page.locator("main button:not([disabled]), main a[href], .completion-actions a, .design-nav a, .deck-nav a")
       .evaluateAll((items) => [...new Set(items.map((item) => item.textContent.trim()).filter(Boolean))]),
@@ -284,8 +291,11 @@ const actions = {
     await page.locator(".composer-quiz").getByLabel(String(choice), { exact: true }).check();
   },
   click: async ({ page }, { name }) => {
-    const target = page.getByRole("button", { name: String(name), exact: true })
+    const exact = page.getByRole("button", { name: String(name), exact: true })
       .or(page.getByRole("link", { name: String(name), exact: true })).first();
+    // A control whose name grew a suffix ("Reveal hint 1 (−200)", #239) still answers to its old name.
+    const loose = page.getByRole("button", { name: String(name) }).or(page.getByRole("link", { name: String(name) })).first();
+    const target = (await exact.count()) > 0 ? exact : loose;
     if ((await target.count()) === 0) throw new Unavailable(`no button or link named "${name}"`);
     await target.click();
     await page.waitForLoadState("domcontentloaded");
