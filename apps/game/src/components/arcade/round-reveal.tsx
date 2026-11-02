@@ -42,6 +42,7 @@ function GameSummary({ history, result, roundDecks }: {
   return (
     <section className="game-summary" aria-labelledby="game-summary-title">
       <h3 id="game-summary-title">Your game</h3>
+      <div className="summary-scroll">
       <table className={roundDecks ? "with-decks" : undefined}>
         <thead>
           <tr>
@@ -64,6 +65,7 @@ function GameSummary({ history, result, roundDecks }: {
         </tbody>
         <tfoot><tr><th scope="row" colSpan={roundDecks ? 3 : 2}>Total</th><td colSpan={2}>{points(result.score)} of {points(result.attainableMaximum)}</td></tr></tfoot>
       </table>
+      </div>
     </section>
   );
 }

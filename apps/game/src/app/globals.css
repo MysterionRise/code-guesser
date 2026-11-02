@@ -454,7 +454,8 @@ noscript { display: block; padding: 12px; margin-bottom: 16px; background: var(-
 .game-summary th, .game-summary td { padding: 6px 8px; border-top: 1px solid var(--border); text-align: left; vertical-align: top; overflow-wrap: normal; hyphens: none; }
 .game-summary .summary-pick, .game-summary .summary-answer { overflow-wrap: anywhere; }
 .game-summary abbr { text-decoration: none; }
-.game-summary td:last-child { white-space: nowrap; }
+/* The table scrolls inside its card where a wide font (CI's DejaVu Sans at 320 px) would push the page sideways. */
+.game-summary .summary-scroll { max-width: 100%; overflow-x: auto; }
 .game-summary .summary-points { white-space: nowrap; }
 .game-summary thead th { color: var(--muted); font-weight: 700; border-top: 0; }
 .game-summary tfoot th, .game-summary tfoot td { font-weight: 800; }
