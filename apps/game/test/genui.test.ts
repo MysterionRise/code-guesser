@@ -429,11 +429,12 @@ describe("the reasoning setting (#120)", async () => {
 describe("the generative-UI route on Anthropic's own API", () => {
   let fake: Awaited<ReturnType<typeof startFakeAnthropic>>;
   // Spied once the OpenRouter block has restored console.error, or its restore would drop this spy too.
-  let logged: ReturnType<typeof vi.spyOn>;
+  const spyOnErrors = () => vi.spyOn(console, "error").mockImplementation(() => undefined);
+  let logged: ReturnType<typeof spyOnErrors>;
   const sent = (request: any): string => JSON.stringify(request.body);
 
   beforeAll(async () => {
-    logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    logged = spyOnErrors();
     fake = await startFakeAnthropic();
     vi.stubEnv("GENUI_ENABLED", "1");
     vi.stubEnv("GENUI_PROVIDER", "anthropic");
