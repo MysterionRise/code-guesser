@@ -175,7 +175,7 @@ if (!flags.has("no-browser")) {
         await page.locator(".reveal .round-points").waitFor();
         if (round < 5) await page.getByRole("button", { name: "Next round" }).click();
       }
-      await page.getByText(/^Run complete — /u).waitFor();
+      await page.getByText(/^Run complete: /u).waitFor();
       expect(problems.length === 0, problems.join("; "));
     } finally {
       await browser.close();
