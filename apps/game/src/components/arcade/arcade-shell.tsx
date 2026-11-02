@@ -16,6 +16,7 @@ import {
   createArcadeSession,
   projectDisplayReveal,
   transitionArcadeSession,
+  type ArcadeSession,
   type HintRequest,
   type HintResponse,
   type RevealRequest,
@@ -24,11 +25,11 @@ import {
 import { RATE_LIMITED_MESSAGE, SESSION_ENDED_MESSAGE, UPDATED_MESSAGE, points } from "./arcade-text";
 import { CodePanes } from "./code-panes";
 import { HintBar } from "./hint-bar";
-import { keepGame, type GameRecords } from "./local-records";
-import { LINE_KINDS, optionLine, type PublicModeContract } from "./mode-contract";
+import { keepGame, type GameRecords, type RecordDelta } from "./local-records";
+import { LINE_KINDS, optionLine, type PublicModeContract, type RoundModeKind } from "./mode-contract";
 import { ArcadeHeader, RoundTrack } from "./round-header";
 import { QuestionScaffold, markedLines } from "./question-layer";
-import { RoundReveal } from "./round-reveal";
+import { NO_REPEATS, RoundReveal, type RevealRepeats } from "./round-reveal";
 
 /** The host design's chat, fetched only when the server turns it on, so the static game never loads it. */
 const HostChat = React.lazy(() => import("../../genui/host-chat")) as React.ComponentType<HostChatProps>;
@@ -113,13 +114,22 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
   const roundNumber = session.roundIndex + 1;
   const trackGenui = React.useCallback((event: GenuiEvent) => track({ ...event, round: roundNumber }), [track, roundNumber]);
 
-  // A finished game joins the player's records (#63), once, in this browser alone: nothing is sent anywhere.
+  // A finished game joins the player's records (#63), once, in this browser alone: nothing is sent anywhere. What it
+  // changed is set with the last reveal, so the live region announces the reveal once, record line included.
   const kept = React.useRef(false);
-  React.useEffect(() => {
-    if (session.status !== "complete" || records === undefined || kept.current) return;
+  const [recordDelta, setRecordDelta] = React.useState<RecordDelta | null>(null);
+
+  // A deck's reveals share their method (the explanation) and often their misleading signals, so a game shows each
+  // once per deck: a later round of the same kind whose text repeats a shown one leaves it out, and the round's own
+  // evidence leads.
+  const shown = React.useRef(new Map<RoundModeKind, Readonly<{ explanation: string; misleading: string }>>());
+  const [repeats, setRepeats] = React.useState<RevealRepeats>(NO_REPEATS);
+  const keep = (completed: ArcadeSession) => {
+    if (completed.status !== "complete" || records === undefined || kept.current) return;
     kept.current = true;
-    keepGame(records.artifact, { deck: records.deck, score: session.score, correct: session.correctRounds, date: records.date }, localDate(new Date()));
-  }, [session.status, session.score, session.correctRounds, records]);
+    const game = { deck: records.deck, score: completed.score, correct: completed.correctRounds, date: records.date };
+    setRecordDelta(keepGame(records.artifact, game, localDate(new Date())).delta);
+  };
 
   // Keyboard and screen-reader users land on the verdict after answering and on the next prompt after
   // moving on; the first render leaves focus alone.
@@ -180,7 +190,13 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
       }
       const result = projectDisplayReveal(response.reveal);
       const locked = transitionArcadeSession(mode, session, { type: "lock-answer", candidateId: choice });
-      setSession(transitionArcadeSession(mode, locked, { type: "accept-reveal", reveal: result }));
+      const revealed = transitionArcadeSession(mode, locked, { type: "accept-reveal", reveal: result });
+      const prior = shown.current.get(round.mode.kind);
+      const misleading = result.misleadingSignals.join("\n");
+      setRepeats({ explanation: prior?.explanation === result.explanation, misleading: prior?.misleading === misleading });
+      shown.current.set(round.mode.kind, { explanation: result.explanation, misleading });
+      setSession(revealed);
+      keep(revealed);
       token.current = response.sessionToken;
     } catch (failure) {
       if (serverUpdated(failure)) { setUpdated(true); setEnded(true); }
@@ -220,6 +236,7 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
     setFocusedCandidate(null);
     setError(null);
     setHintError(null);
+    setRepeats(NO_REPEATS);
   };
 
   return (
@@ -232,7 +249,8 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
         <OpponentStrip name={opponentName ?? DEFAULT_NAME} rounds={duel.challenge.challenger.rounds} answered={session.completedRounds} />
       )}
 
-      <section className="game-card" aria-labelledby="round-title" data-round-id={round.roundId}>
+      {/* Keyed by round, so each round's card arrives afresh (its `arrive` animation, where motion is welcome). */}
+      <section key={round.roundId} className="game-card" aria-labelledby="round-title" data-round-id={round.roundId}>
         <p className="eyebrow">Round {session.roundIndex + 1} of {mode.rounds.length}
           {roundDecks?.[round.mode.kind] !== undefined && <> · <span className="round-deck">{roundDecks[round.mode.kind]}</span></>}</p>
         <h1 id="round-title" ref={roundTitle} tabIndex={-1}>{round.mode.prompt}</h1>
@@ -281,7 +299,7 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
             <RoundReveal round={round} reveal={session.reveal} hintsUsed={session.visibleHintCount}
               pickLabel={labelOf(session.lockedCandidateId)} complete={session.status === "complete"}
               correctRounds={session.correctRounds} history={session.history} deckTitle={deckTitle} roundDecks={roundDecks} shareHref={shareHref} newGameHref={newGameHref} replayHref={replayHref}
-              chooseAnotherDeckHref={chooseAnotherDeckHref} genuiDesign={genuiDesign} duel={duel} opponentName={opponentName} sessionToken={currentToken}
+              chooseAnotherDeckHref={chooseAnotherDeckHref} genuiDesign={genuiDesign} duel={duel} opponentName={opponentName} recordDelta={recordDelta} repeats={repeats} sessionToken={currentToken}
               onNext={next} headingRef={revealHeading} track={track} trackGenui={trackGenui} />
           )}
         </div>

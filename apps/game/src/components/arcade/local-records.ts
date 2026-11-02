@@ -119,6 +119,37 @@ export const recordGame = (records: LocalRecords, game: FinishedGame, today: str
 export const dayStreakOf = ({ daily }: LocalRecords, today: string): number =>
   daily !== null && (daily.last === today || daily.last === dayBefore(today)) ? daily.days : 0;
 
+/** What a finished game changed in the records, for the end of the game to say. */
+export interface RecordDelta {
+  /** The deck's new best, with the best it beats (0 before any game); null when the game didn't beat it. */
+  readonly newBest: Readonly<{ score: number; previous: number }> | null;
+  /** The deck's streak once the game counts: 0 when the game ended it or started none. */
+  readonly streak: number;
+  /** Whether that streak, of two games or more, is the deck's longest yet. */
+  readonly bestStreak: boolean;
+  /** The day streak after today's five on the player's own date; null for any other game. */
+  readonly dayStreak: number | null;
+  /** Whether the game counted at all: a date's five already counted that day counts for nothing. */
+  readonly counted: boolean;
+}
+
+const NO_CHANGE: RecordDelta = Object.freeze({ newBest: null, streak: 0, bestStreak: false, dayStreak: null, counted: false });
+
+/** The difference a finished game made between the records before it and after it. */
+export const recordDelta = (before: LocalRecords, after: LocalRecords, game: FinishedGame, today: string): RecordDelta => {
+  if (after === before) return NO_CHANGE;
+  const was = before.decks[game.deck];
+  const now = after.decks[game.deck] ?? { best: 0, played: 0, streak: 0, bestStreak: 0 };
+  const previous = was?.best ?? 0;
+  return Object.freeze({
+    newBest: game.score > previous && now.best === game.score ? Object.freeze({ score: game.score, previous }) : null,
+    streak: now.streak,
+    bestStreak: now.streak >= 2 && now.streak > (was?.bestStreak ?? 0),
+    dayStreak: game.date === today && after.daily !== null ? after.daily.days : null,
+    counted: true,
+  });
+};
+
 /** What records are kept in: the browser's local storage, or a stand-in in tests. */
 export type RecordStore = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
@@ -146,18 +177,19 @@ export const storedRecords = (store: RecordStore | null = browserStore()): strin
 };
 
 /**
- * Keeps a finished game in the records and returns them. Where storage refuses it, full or in a private window, the
- * game still played; it just isn't kept.
+ * Keeps a finished game in the records and returns them, with what the game changed. Where storage refuses it, full or
+ * in a private window, the game still played; it just isn't kept.
  */
-export const keepGame = (artifact: string, game: FinishedGame, today: string, store: RecordStore | null = browserStore()): LocalRecords => {
-  const records = recordGame(parseRecords(storedRecords(store), artifact), game, today);
+export const keepGame = (artifact: string, game: FinishedGame, today: string, store: RecordStore | null = browserStore()): Readonly<{ records: LocalRecords; delta: RecordDelta }> => {
+  const before = parseRecords(storedRecords(store), artifact);
+  const records = recordGame(before, game, today);
   try {
     store?.setItem(RECORDS_KEY, JSON.stringify(records));
   } catch {
     // Not kept.
   }
   announce();
-  return records;
+  return Object.freeze({ records, delta: recordDelta(before, records, game, today) });
 };
 
 /** Forgets every record. */

@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Browser, type Locator, type Page } from "@playwright/test";
+import { VERDICT_PATTERN } from "../../apps/game/src/components/arcade/arcade-text";
 
 // Duel challenge links (#173), played by two people in two browser contexts: the challenger's game and its link, the
 // friend's intro and game of it with the challenger's rounds shown one lock at a time, the comparison, the result link,
@@ -47,7 +48,7 @@ const playRound = async (page: Page, { hints, right }: Plan): Promise<Seen> => {
   const answer = fixture.candidates.find(({ id }) => id === fixture.correctCandidateId)!.label;
   await page.getByLabel(right ? answer : fixture.candidates.find(({ id }) => id !== fixture.correctCandidateId)!.label, { exact: true }).check();
   await page.getByRole("button", { name: "Lock in answer" }).click();
-  await expect(page.getByRole("heading", { name: right ? "Nice read." : "Not this time." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: right ? VERDICT_PATTERN.right : VERDICT_PATTERN.missed })).toBeVisible();
   return { roundId, options, scaffold, answer };
 };
 

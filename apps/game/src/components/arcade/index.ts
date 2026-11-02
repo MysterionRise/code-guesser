@@ -15,10 +15,14 @@ export {
   RATE_LIMITED_MESSAGE,
   SESSION_ENDED_MESSAGE,
   SHARE_MARKS,
+  VERDICTS,
+  VERDICT_PATTERN,
   formatCompletionResult,
   projectSpoilerFreeShare,
+  recordLine,
   roundPointsNote,
   roundStatusText,
+  verdictText,
 } from "./arcade-text";
 export {
   ArcadeShellRuleError,

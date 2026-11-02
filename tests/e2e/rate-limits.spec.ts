@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
+import { VERDICT_PATTERN } from "../../apps/game/src/components/arcade/arcade-text";
 
 import { E2E_EVENTS_DIR, E2E_RATE_LIMITS } from "../../playwright.config";
 
@@ -28,7 +29,7 @@ const answerRound = async (page: Page): Promise<void> => {
   const fixture = fixtures.get((await page.locator(".game-card").getAttribute("data-round-id"))!)!;
   await page.getByLabel(fixture.candidates.find(({ id }) => id === fixture.correctCandidateId)!.label, { exact: true }).check();
   await page.getByRole("button", { name: "Lock in answer" }).click();
-  await expect(page.getByRole("heading", { name: "Nice read." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: VERDICT_PATTERN.right })).toBeVisible();
 };
 
 test.beforeEach(async ({ request }) => {

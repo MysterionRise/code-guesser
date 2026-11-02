@@ -85,6 +85,46 @@ export const seriesRounds = <Round>(pool: readonly Round[], seed: string, deck: 
   return Object.freeze({ rounds: Object.freeze(rounds), wrapped });
 };
 
+/** A deck as the mix draws from it: its id and its pool. */
+export interface MixedDeck<Round> {
+  readonly id: string;
+  readonly rounds: readonly Round[];
+}
+/**
+ * Game `game` of a seeded mixed deal (#56, #40): five decks in an order the seed fixes, cycling through every deck before
+ * any comes round again, and from each deck its next round in that deck's own seeded order, so a deal's mixed games
+ * share no round until a deck's pool is spent. `wrapped` says a deck's pool ran out just before this game or within
+ * it, so one of its rounds comes round again.
+ */
+export const mixedSeriesRounds = <Round>(decks: readonly MixedDeck<Round>[], seed: string, game: number): Readonly<{ rounds: readonly Round[]; wrapped: boolean }> => {
+  if (!DEAL_SEED.test(seed) || !Number.isSafeInteger(game) || game < 0 || game > MAXIMUM_GAME || decks.length < ROUNDS_PER_SESSION
+    || decks.some(({ rounds }) => rounds.length === 0) || new Set(decks.map(({ id }) => id)).size !== decks.length) fail();
+  const deckPasses = new Map<number, readonly MixedDeck<Round>[]>();
+  const deckPass = (index: number) => deckPasses.get(index) ?? deckPasses.set(index, shuffle(decks, seededRandom({ seed, deck: "mixed", pass: index }))).get(index)!;
+  const orders = new Map<string, readonly Round[]>();
+  const uses = new Map<string, number>();
+  const rounds: Round[] = [];
+  let wrapped = false;
+  for (let index = 0; index <= game; index += 1) {
+    const picks: MixedDeck<Round>[] = [];
+    for (let position = ROUNDS_PER_SESSION * index; picks.length < ROUNDS_PER_SESSION; position += 1) {
+      const deck = deckPass(Math.floor(position / decks.length))[position % decks.length]!;
+      if (!picks.includes(deck)) picks.push(deck);
+    }
+    for (const deck of picks) {
+      const use = uses.get(deck.id) ?? 0;
+      uses.set(deck.id, use + 1);
+      if (index !== game) continue;
+      const pass = Math.floor(use / deck.rounds.length);
+      const key = `${deck.id}#${pass}`;
+      const order = orders.get(key) ?? orders.set(key, shuffle(deck.rounds, seededRandom({ seed, deck: deck.id, mixed: true, pass }))).get(key)!;
+      rounds.push(order[use % deck.rounds.length]!);
+      if (use > 0 && use % deck.rounds.length === 0) wrapped = true;
+    }
+  }
+  return Object.freeze({ rounds: Object.freeze(rounds), wrapped });
+};
+
 /**
  * How a game was dealt (#173), sealed in its token: a game of a seeded deal, today's five on a date, a friend's
  * challenge, or a draw nobody can repeat. A challenge's game names only the challenge; its seed stays sealed in it.
