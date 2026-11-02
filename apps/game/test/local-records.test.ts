@@ -78,20 +78,21 @@ describe("local records (#63)", () => {
       const before = games.slice(0, -1).reduce((records, finished) => recordGame(records, finished, finished.date ?? today), emptyRecords(ARTIFACT));
       return recordDelta(before, recordGame(before, games.at(-1)!, today), games.at(-1)!, today);
     };
-    // A first game sets the best, unless it scored nothing.
-    expect(delta([game("fix", 3250, 4)])).toEqual({ newBest: { score: 3250, previous: 0 }, streak: 1, bestStreak: false, dayStreak: null, counted: true });
-    expect(delta([game("fix", 0, 0)])).toEqual({ newBest: null, streak: 0, bestStreak: false, dayStreak: null, counted: true });
+    // A first game is the deck's first score, and sets the best unless it scored nothing.
+    expect(delta([game("fix", 3250, 4)])).toEqual({ first: 3250, newBest: { score: 3250, previous: 0 }, streak: 1, bestStreak: false, ended: 0, dayStreak: null, counted: true });
+    expect(delta([game("fix", 0, 0)])).toEqual({ first: 0, newBest: null, streak: 0, bestStreak: false, ended: 0, dayStreak: null, counted: true });
     // Equal to the best is no new best; the streak carries, and the first longer one is the longest.
-    expect(delta([game("fix", 3250, 4), game("fix", 3250, 3)])).toEqual({ newBest: null, streak: 2, bestStreak: true, dayStreak: null, counted: true });
-    expect(delta([game("fix", 3250, 4), game("fix", 3250, 3), game("fix", 4000, 5)])).toEqual({ newBest: { score: 4000, previous: 3250 }, streak: 3, bestStreak: true, dayStreak: null, counted: true });
-    // A streak equalled is not the longest yet; a miss ends it.
+    expect(delta([game("fix", 3250, 4), game("fix", 3250, 3)])).toEqual({ first: null, newBest: null, streak: 2, bestStreak: true, ended: 0, dayStreak: null, counted: true });
+    expect(delta([game("fix", 3250, 4), game("fix", 3250, 3), game("fix", 4000, 5)])).toEqual({ first: null, newBest: { score: 4000, previous: 3250 }, streak: 3, bestStreak: true, ended: 0, dayStreak: null, counted: true });
+    // A streak equalled is not the longest yet; a miss ends it, and the delta says which streak ended (#235).
     expect(delta([game("fix", 3250, 4), game("fix", 3250, 3), game("fix", 900, 2), game("fix", 1000, 3), game("fix", 1000, 3)]).bestStreak).toBe(false);
-    expect(delta([game("fix", 3250, 4), game("fix", 3250, 3), game("fix", 900, 2)])).toMatchObject({ streak: 0, bestStreak: false });
+    expect(delta([game("fix", 3250, 4), game("fix", 3250, 3), game("fix", 900, 2)])).toMatchObject({ streak: 0, bestStreak: false, ended: 2 });
+    expect(delta([game("fix", 900, 2), game("fix", 800, 1)])).toMatchObject({ first: null, streak: 0, ended: 0 });
     // Today's five on the player's date carries its day streak; another day's five, or the same date again, does not.
     expect(delta([game("daily", 2000, 3, "2026-10-21")], "2026-10-21")).toMatchObject({ dayStreak: 1, counted: true });
     expect(delta([game("daily", 2000, 3, "2026-10-21"), game("daily", 2500, 4, "2026-10-22")], "2026-10-22")).toMatchObject({ newBest: { score: 2500, previous: 2000 }, dayStreak: 2 });
     expect(delta([game("daily", 2000, 3, "2026-10-19")], "2026-10-22")).toMatchObject({ dayStreak: null, counted: true });
-    expect(delta([game("daily", 2000, 3, TODAY), game("daily", 5000, 5, TODAY)])).toEqual({ newBest: null, streak: 0, bestStreak: false, dayStreak: null, counted: false });
+    expect(delta([game("daily", 2000, 3, TODAY), game("daily", 5000, 5, TODAY)])).toEqual({ first: null, newBest: null, streak: 0, bestStreak: false, ended: 0, dayStreak: null, counted: false });
   });
 
   it("follows a running streak through a game: open with what it still needs, kept at three right, over once three are out of reach (#232)", () => {
@@ -156,7 +157,7 @@ describe("local records (#63)", () => {
     expect(parseRecords(storedRecords(store), ARTIFACT).decks.fix).toEqual({ best: 3250, played: 2, streak: 0, bestStreak: 1 });
     // A new artifact's first game replaces the old round set's records.
     const { records: fresh, delta } = keepGame(OTHER, game("language", 500, 1), TODAY, store);
-    expect(delta).toEqual({ newBest: { score: 500, previous: 0 }, streak: 0, bestStreak: false, dayStreak: null, counted: true });
+    expect(delta).toEqual({ first: 500, newBest: { score: 500, previous: 0 }, streak: 0, bestStreak: false, ended: 0, dayStreak: null, counted: true });
     expect(fresh).toEqual({ v: RECORDS_VERSION, artifact: OTHER, decks: { language: { best: 500, played: 1, streak: 0, bestStreak: 0 } }, daily: null });
     expect(JSON.parse(store.items.get(RECORDS_KEY)!)).toEqual(fresh);
     // Corrupt records are replaced by the next game's.

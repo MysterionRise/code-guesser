@@ -246,14 +246,21 @@ describe("static arcade shell", () => {
   });
 
   it("says what a finished game did to the records, or nothing (#63)", () => {
-    const delta = { newBest: null, streak: 0, bestStreak: false, dayStreak: null, counted: true };
+    const delta = { first: null, newBest: null, streak: 0, bestStreak: false, ended: 0, dayStreak: null, counted: true };
     expect(recordLine(delta)).toBeNull();
     expect(recordLine({ ...delta, counted: false, newBest: { score: 5000, previous: 0 } })).toBeNull();
+    // A deck's first game is its first score, not a best beaten (#235).
+    expect(recordLine({ ...delta, first: 3800, newBest: { score: 3800, previous: 0 } })).toBe("First score on this deck: 3,800");
+    expect(recordLine({ ...delta, first: 0 })).toBe("First score on this deck: 0");
+    expect(recordLine({ ...delta, first: 2000, newBest: { score: 2000, previous: 0 }, dayStreak: 1 })).toBe("First score on this deck: 2,000 · Day streak 1");
     expect(recordLine({ ...delta, newBest: { score: 3800, previous: 0 } })).toBe("New best 3,800");
     expect(recordLine({ ...delta, newBest: { score: 4300, previous: 3800 } })).toBe("New best 4,300, up from 3,800");
     expect(recordLine({ ...delta, streak: 1 })).toBeNull();
     expect(recordLine({ ...delta, streak: 3 })).toBe("Streak 3 games");
     expect(recordLine({ ...delta, streak: 3, bestStreak: true })).toBe("Streak 3 games, your longest");
+    // A game that ends a streak says so, beside any best it still set.
+    expect(recordLine({ ...delta, ended: 3 })).toBe("Streak of 3 ends");
+    expect(recordLine({ ...delta, newBest: { score: 1000, previous: 800 }, ended: 2 })).toBe("New best 1,000, up from 800 · Streak of 2 ends");
     expect(recordLine({ ...delta, dayStreak: 1 })).toBe("Day streak 1");
     expect(recordLine({ ...delta, newBest: { score: 4300, previous: 3800 }, streak: 2, bestStreak: true, dayStreak: 2 }))
       .toBe("New best 4,300, up from 3,800 · Streak 2 games, your longest · Day streak 2");

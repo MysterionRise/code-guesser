@@ -150,19 +150,23 @@ export const recordsAtStart = (game: GameRecords | undefined, today: string, sto
 
 /** What a finished game changed in the records, for the end of the game to say. */
 export interface RecordDelta {
+  /** The game's score when it was the deck's first game in this browser; null after that. */
+  readonly first: number | null;
   /** The deck's new best, with the best it beats (0 before any game); null when the game didn't beat it. */
   readonly newBest: Readonly<{ score: number; previous: number }> | null;
   /** The deck's streak once the game counts: 0 when the game ended it or started none. */
   readonly streak: number;
   /** Whether that streak, of two games or more, is the deck's longest yet. */
   readonly bestStreak: boolean;
+  /** The streak this game ended, with fewer than three right; 0 when there was none to end. */
+  readonly ended: number;
   /** The day streak after today's five on the player's own date; null for any other game. */
   readonly dayStreak: number | null;
   /** Whether the game counted at all: a date's five already counted that day counts for nothing. */
   readonly counted: boolean;
 }
 
-const NO_CHANGE: RecordDelta = Object.freeze({ newBest: null, streak: 0, bestStreak: false, dayStreak: null, counted: false });
+const NO_CHANGE: RecordDelta = Object.freeze({ first: null, newBest: null, streak: 0, bestStreak: false, ended: 0, dayStreak: null, counted: false });
 
 /** The difference a finished game made between the records before it and after it. */
 export const recordDelta = (before: LocalRecords, after: LocalRecords, game: FinishedGame, today: string): RecordDelta => {
@@ -171,9 +175,11 @@ export const recordDelta = (before: LocalRecords, after: LocalRecords, game: Fin
   const now = after.decks[game.deck] ?? { best: 0, played: 0, streak: 0, bestStreak: 0 };
   const previous = was?.best ?? 0;
   return Object.freeze({
+    first: was === undefined ? game.score : null,
     newBest: game.score > previous && now.best === game.score ? Object.freeze({ score: game.score, previous }) : null,
     streak: now.streak,
     bestStreak: now.streak >= 2 && now.streak > (was?.bestStreak ?? 0),
+    ended: now.streak === 0 ? was?.streak ?? 0 : 0,
     dayStreak: game.date === today && after.daily !== null ? after.daily.days : null,
     counted: true,
   });

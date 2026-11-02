@@ -3,7 +3,7 @@
 import * as React from "react";
 
 import { points } from "./arcade/arcade-text";
-import { RECORDS_EVENT, clearRecords, dayStreakOf, parseRecords, storedRecords, type LocalRecords } from "./arcade/local-records";
+import { RECORDS_EVENT, STREAK_CORRECT, clearRecords, dayStreakOf, parseRecords, storedRecords, type LocalRecords } from "./arcade/local-records";
 import { localDate } from "./local-date";
 
 /**
@@ -26,11 +26,14 @@ const useRecords = (artifact: string): LocalRecords | null => {
   return React.useMemo(() => stored === undefined ? null : parseRecords(stored, artifact), [stored, artifact]);
 };
 
-/** A deck card's records, "Best 3,250 · streak 4", once a game of it has finished. */
+/** What a streak counts, said once where it shows (#235). */
+export const STREAK_RULE = `A streak is games in a row with ${STREAK_CORRECT} or more of their five rounds right`;
+
+/** A deck card's records, "Best 3,250 · streak 4", once a game of it has finished; the streak says what it counts. */
 export function DeckRecord({ artifact, deck }: { readonly artifact: string; readonly deck: string }) {
   const record = useRecords(artifact)?.decks[deck];
   if (record === undefined) return null;
-  return <span className="deck-record">Best {points(record.best)}{record.streak > 0 && ` · streak ${record.streak}`}</span>;
+  return <span className="deck-record">Best {points(record.best)}{record.streak > 0 && <> · <span title={STREAK_RULE}>streak {record.streak}</span></>}</span>;
 }
 
 /** Today's five's card: the run of days the player has finished it, while it still runs. */
