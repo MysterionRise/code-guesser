@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
+import { VERDICT_PATTERN } from "../../apps/game/src/components/arcade/arcade-text";
 
 // Personal records (#63): a finished game's best and streak on the chooser, today's five's day streak, clearing them,
 // and play that goes on where the browser refuses storage. Nothing here leaves the browser.
@@ -24,7 +25,7 @@ const finishGame = async (page: Page, right: number): Promise<number> => {
     const pick = fixture.candidates.find(({ id }) => (id === fixture.correctCandidateId) === (round <= right))!;
     await page.getByLabel(pick.label, { exact: true }).check();
     await page.getByRole("button", { name: "Lock in answer" }).click();
-    await expect(page.getByRole("heading", { name: round <= right ? "Nice read." : "Not this time." })).toBeVisible();
+    await expect(page.getByRole("heading", { name: round <= right ? VERDICT_PATTERN.right : VERDICT_PATTERN.missed })).toBeVisible();
   }
   await expect(page.getByRole("heading", { name: "Your game" })).toBeVisible();
   return Number((await page.locator(".arcade-header .score").textContent())!.replace(/\D/gu, ""));

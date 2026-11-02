@@ -47,6 +47,52 @@ export function formatCompletionResult(result: EntertainmentResultProjection, co
   return `Run complete — ${points(result.score)} points, ${correctRounds} of ${result.completedRounds} correct.`;
 }
 
+/**
+ * The verdicts a reveal opens with: one pool per outcome, and one line each for a game that ends with every round right
+ * or none. A round's verdict is chosen by its id, so every player sees the same words on the same round, and a game's
+ * five rounds read differently.
+ */
+export const VERDICTS = Object.freeze({
+  /** Right, with no hint. */
+  clean: Object.freeze(["Nice read.", "Clean read.", "Called it.", "Spot on.", "Straight to it."]),
+  /** Right, after a hint or two. */
+  hinted: Object.freeze(["Nice read.", "Hint well spent.", "Got there.", "Narrowed it down."]),
+  missed: Object.freeze(["Not this time.", "Not that one.", "A fair miss.", "Tricky one.", "Missed it."]),
+  /** The last round of a game with every round right. */
+  sweep: Object.freeze(["Clean sweep."]),
+  /** The last round of a game with none right. */
+  blank: Object.freeze(["Rough deal."]),
+});
+
+/** FNV-1a over the text, 32 bits: a fixed, cheap way to pick by round id, the same in every browser. */
+const fnv1a = (text: string): number => {
+  let hash = 0x811c9dc5;
+  for (const char of text) {
+    hash ^= char.codePointAt(0)!;
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash >>> 0;
+};
+
+/** The verdict a round's reveal opens with (`VERDICTS`), by its outcome and, on the last round, the game's. */
+export const verdictText = ({ roundId, correct, hintsUsed, complete, correctRounds, completedRounds }: Readonly<{
+  roundId: string; correct: boolean; hintsUsed: number; complete: boolean; correctRounds: number; completedRounds: number;
+}>): string => {
+  const pool = complete && correctRounds === completedRounds ? VERDICTS.sweep
+    : complete && correctRounds === 0 ? VERDICTS.blank
+      : !correct ? VERDICTS.missed : hintsUsed === 0 ? VERDICTS.clean : VERDICTS.hinted;
+  return pool[fnv1a(roundId) % pool.length]!;
+};
+
+const alternation = (pools: readonly (readonly string[])[]): string =>
+  [...new Set(pools.flat())].map((text) => text.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")).join("|");
+/** Matches a whole verdict heading, whichever words the round drew: for tests and the demo recorder. */
+export const VERDICT_PATTERN = Object.freeze({
+  right: new RegExp(`^(?:${alternation([VERDICTS.clean, VERDICTS.hinted, VERDICTS.sweep])})$`, "u"),
+  missed: new RegExp(`^(?:${alternation([VERDICTS.missed, VERDICTS.blank])})$`, "u"),
+  any: new RegExp(`^(?:${alternation([VERDICTS.clean, VERDICTS.hinted, VERDICTS.sweep, VERDICTS.missed, VERDICTS.blank])})$`, "u"),
+});
+
 /** What one round earned and the hints it took, as its reveal states it: "+800 points (1 hint)" or "0 points (no hints)". */
 export const roundPointsNote = (score: number, hintsUsed: number): string =>
   `${score > 0 ? "+" : ""}${points(score)} points (${hintsUsed === 0 ? "no hints" : hintsUsed === 1 ? "1 hint" : `${hintsUsed} hints`})`;

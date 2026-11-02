@@ -1,3 +1,4 @@
+import { VERDICT_PATTERN } from "../../../apps/game/src/components/arcade/arcade-text";
 import type { GifOptions } from "./encode";
 import type { CaptionStyle } from "./overlay";
 
@@ -47,7 +48,7 @@ const link = (name: string): Step => ({ kind: "link", name });
 const goto = (path: string): Step => ({ kind: "goto", path });
 const choose = (index: number): Step => ({ kind: "choose", index });
 const wait = (milliseconds: number): Step => ({ kind: "wait", milliseconds });
-const verdict: Step = { kind: "expectHeading", pattern: "^(?:Nice read\\.|Not this time\\.)$" };
+const verdict: Step = { kind: "expectHeading", pattern: VERDICT_PATTERN.any.source };
 const answer: Step = { kind: "answer" };
 const roundOf = (round: number): Step => ({ kind: "expectText", pattern: `Round ${round} of 5` });
 
@@ -110,7 +111,7 @@ const demoCut = (deck: Deck, title: string, points: string, extras: Readonly<{
   wait(400),
   ...(extras.highlight ? [jumpTo(".code-line.highlighted"), wait(950), jumpTo("fieldset"), wait(250)] : []),
   click("Lock in answer"),
-  { kind: "expectHeading", pattern: "^Nice read\\.$" },
+  { kind: "expectHeading", pattern: VERDICT_PATTERN.right.source },
   jumpTo(".reveal h2"),
   caption(points),
   wait(1150),
@@ -161,7 +162,7 @@ export type Pick = "right" | "miss" | number;
 const pickStep = (pick: Pick): Step => pick === "right" ? answer : pick === "miss" ? { kind: "miss" } : choose(pick);
 
 /**
- * How the full run locks in its five rounds: four right and one miss, so it shows the "Not this time." branch too,
+ * How the full run locks in its five rounds: four right and one miss, so it shows the missed verdict too,
  * whatever rounds today's five deals.
  */
 export const DEFAULT_ANSWER_CHOREOGRAPHY: readonly Pick[] = Object.freeze(["right", "right", "miss", "right", "right"]);
@@ -191,7 +192,7 @@ const playRound = (round: number, hints: number): Step[] => [
 
 /**
  * One deck's teaser: open its recorded game, take a hint, and lock in the right answer (or, where asked, a wrong one,
- * for the "Not this time." branch). With a `trace` caption it also buys the second hint, a question layer's
+ * for the missed verdict). With a `trace` caption it also buys the second hint, a question layer's
  * step-through, and steps it forward.
  */
 const deckScene = (

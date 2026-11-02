@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
+import { VERDICT_PATTERN } from "../../apps/game/src/components/arcade/arcade-text";
 
 import { E2E_EVENTS_DIR } from "../../playwright.config";
 
@@ -109,7 +110,7 @@ test("once today's five is done, playing it again deals the same five and record
     await expect(page.getByText(`Round ${round} of 5`)).toBeVisible();
     await page.getByLabel(answers.get((await page.locator(".game-card").getAttribute("data-round-id"))!)!, { exact: true }).check();
     await page.getByRole("button", { name: "Lock in answer" }).click();
-    await expect(page.getByRole("heading", { name: "Nice read." })).toBeVisible();
+    await expect(page.getByRole("heading", { name: VERDICT_PATTERN.right })).toBeVisible();
   }
   await expect(page.getByRole("link", { name: "Deal new rounds" })).toHaveAttribute("href", "/?deck=mixed");
   const again = page.getByRole("link", { name: "Play again" });

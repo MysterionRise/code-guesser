@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
+import { VERDICT_PATTERN } from "../../apps/game/src/components/arcade/arcade-text";
 
 // Generative UI (#101) against the local stand-in for OpenRouter that playwright.config.ts starts on the next port.
 const fake = `http://127.0.0.1:${Number(process.env.E2E_PORT ?? 3000) + 1}`;
@@ -13,7 +14,7 @@ const answerRound = async (page: Page): Promise<Fixture> => {
   const fixture = fixtures.get((await page.locator(".game-card").getAttribute("data-round-id"))!)!;
   await page.getByLabel(fixture.candidates.find(({ id }) => id === fixture.correctCandidateId)!.label, { exact: true }).check();
   await page.getByRole("button", { name: "Lock in answer" }).click();
-  await expect(page.getByRole("heading", { name: "Nice read." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: VERDICT_PATTERN.right })).toBeVisible();
   return fixture;
 };
 

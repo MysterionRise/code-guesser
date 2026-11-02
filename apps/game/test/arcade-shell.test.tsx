@@ -16,6 +16,9 @@ import {
   roundPointsNote,
   roundStatusText,
   transitionArcadeSession,
+  verdictText,
+  VERDICTS,
+  VERDICT_PATTERN,
   type PublicModeContractInput,
 } from "../src/components/arcade/index.js";
 
@@ -199,6 +202,32 @@ describe("static arcade shell", () => {
       .toThrow("reveal does not match the locked answer");
   });
 
+  it("opens each reveal with a verdict drawn by the round, so five rounds read differently and every player reads the same", () => {
+    const round = (roundId: string, correct: boolean, hintsUsed = 0) => verdictText({ roundId, correct, hintsUsed, complete: false, correctRounds: 0, completedRounds: 1 });
+    const ids = Array.from({ length: 40 }, (_, index) => `round-${index.toString(16)}-${(index * 7919).toString(36)}`);
+    expect(ids.map((id) => round(id, true))).toEqual(ids.map((id) => round(id, true)));
+    for (const [outcome, pool] of [[(id: string) => round(id, true), VERDICTS.clean], [(id: string) => round(id, true, 1), VERDICTS.hinted],
+      [(id: string) => round(id, false, 2), VERDICTS.missed]] as const) {
+      const drawn = new Set(ids.map(outcome));
+      expect([...drawn].every((text) => pool.includes(text))).toBe(true);
+      expect(drawn.size).toBeGreaterThanOrEqual(Math.min(3, pool.length));
+    }
+    expect(round("r", true)).toMatch(VERDICT_PATTERN.right);
+    expect(round("r", true, 2)).toMatch(VERDICT_PATTERN.right);
+    expect(round("r", false)).toMatch(VERDICT_PATTERN.missed);
+    expect(round("r", false)).not.toMatch(VERDICT_PATTERN.right);
+    expect(VERDICT_PATTERN.any.test("Nice read.")).toBe(true);
+    expect(VERDICT_PATTERN.any.test("Nice read")).toBe(false);
+    // The last round of a game speaks for the game when every round was right, or none.
+    expect(verdictText({ roundId: "r", correct: true, hintsUsed: 0, complete: true, correctRounds: 5, completedRounds: 5 })).toBe("Clean sweep.");
+    expect(verdictText({ roundId: "r", correct: false, hintsUsed: 0, complete: true, correctRounds: 0, completedRounds: 5 })).toBe("Rough deal.");
+    expect(VERDICTS.missed).not.toContain(verdictText({ roundId: "r", correct: true, hintsUsed: 0, complete: true, correctRounds: 3, completedRounds: 5 }));
+    // The original verdicts stay in their pools, so a stored event that quoted one would still be caught.
+    expect(VERDICTS.clean).toContain("Nice read.");
+    expect(VERDICTS.missed).toContain("Not this time.");
+    for (const text of Object.values(VERDICTS).flat()) expect(text).toMatch(/^[A-Z][^.]{2,24}\.$/u);
+  });
+
   it("says what a finished game did to the records, or nothing (#63)", () => {
     const delta = { newBest: null, streak: 0, bestStreak: false, dayStreak: null, counted: true };
     expect(recordLine(delta)).toBeNull();
@@ -229,7 +258,7 @@ describe("static arcade shell", () => {
     expect(shell).toMatch(/<div className="reveal" aria-live="polite" aria-atomic="true">\s*\{session\.reveal && \(\s*<RoundReveal [^>]*hintsUsed=\{session\.visibleHintCount\}/u);
     const reveal = readFileSync(new URL("../src/components/arcade/round-reveal.tsx", import.meta.url), "utf8");
     const note = reveal.indexOf("roundPointsNote(reveal.score, hintsUsed)");
-    expect(note).toBeGreaterThan(reveal.indexOf("Nice read."));
+    expect(note).toBeGreaterThan(reveal.indexOf("verdictText("));
     expect(note).toBeLessThan(reveal.indexOf("The answer:"));
   });
 

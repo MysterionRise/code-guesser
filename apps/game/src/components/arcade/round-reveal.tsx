@@ -7,7 +7,7 @@ import type { ChallengerDuel, GameDuel } from "../duel/duel-contract";
 import { ChallengeFriend, DuelCompletion } from "../duel/duel-game";
 import { DEFAULT_NAME, opponentRoundLine } from "../duel/duel-text";
 import type { AuthorizedReveal, EntertainmentResultProjection, RoundRecord } from "./arcade-session";
-import { formatCompletionResult, points, projectSpoilerFreeShare, recordLine, roundPointsNote } from "./arcade-text";
+import { formatCompletionResult, points, projectSpoilerFreeShare, recordLine, roundPointsNote, verdictText } from "./arcade-text";
 import type { RecordDelta } from "./local-records";
 import type { PublicRound } from "./mode-contract";
 import { hasShareSheet, shareOrCopy } from "./share-sheet";
@@ -153,7 +153,9 @@ export function RoundReveal({ round, reveal, hintsUsed, pickLabel, complete, cor
   const record = complete && recordDelta !== null ? recordLine(recordDelta) : null;
   return (
     <>
-      <h2 ref={headingRef} tabIndex={-1} className={reveal.correct ? "verdict-right" : "verdict-missed"}>{reveal.correct ? "Nice read." : "Not this time."}</h2>
+      <h2 ref={headingRef} tabIndex={-1} className={reveal.correct ? "verdict-right" : "verdict-missed"}>
+        {verdictText({ roundId: round.roundId, correct: reveal.correct, hintsUsed, complete, correctRounds, completedRounds: history.length })}
+      </h2>
       <p className="round-points">{roundPointsNote(reveal.score, hintsUsed)}</p>
       {duel?.role === "challenged" && (
         <p className="duel-line">{opponentRoundLine(opponentName ?? DEFAULT_NAME, duel.challenge.challenger.rounds[history.length - 1]!)}</p>

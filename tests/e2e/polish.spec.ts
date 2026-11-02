@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
+import { VERDICT_PATTERN } from "../../apps/game/src/components/arcade/arcade-text";
 
 // Polish from agent playtest run 2 (#161): a deck column in mixed summaries, controls gone once the answer is locked,
 // a cue from the verdict to the host's chat, and a note on a layered game's rounds that play without a layer.
@@ -22,7 +23,7 @@ const lockRound = async (page: Page, right = true): Promise<string> => {
   const fixture = fixtures.get(id)!;
   await page.getByLabel(fixture.candidates.find(({ id: candidate }) => (candidate === fixture.correctCandidateId) === right)!.label, { exact: true }).check();
   await page.getByRole("button", { name: "Lock in answer" }).click();
-  await expect(page.getByRole("heading", { name: right ? "Nice read." : "Not this time." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: right ? VERDICT_PATTERN.right : VERDICT_PATTERN.missed })).toBeVisible();
   return id;
 };
 
@@ -35,7 +36,7 @@ test("once the answer is locked, the lock button, the hint button, and the keys 
   await page.getByRole("button", { name: "Reveal hint 1" }).click();
   await expect(page.locator(".hints .hint")).toHaveCount(1);
   await lockRound(page);
-  await expect(page.getByRole("heading", { name: "Nice read." })).toBeFocused();
+  await expect(page.getByRole("heading", { name: VERDICT_PATTERN.right })).toBeFocused();
   await expect(page.getByRole("button", { name: "Lock in answer" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /^Reveal hint/u })).toHaveCount(0);
   await expect(page.locator(".keys-note")).toHaveCount(0);

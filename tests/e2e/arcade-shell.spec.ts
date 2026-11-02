@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
+import { VERDICT_PATTERN } from "../../apps/game/src/components/arcade/arcade-text";
 
 // The browser never learns the answers; the test runner reads the generated artifact on the Node side.
 interface ArtifactFixture {
@@ -36,7 +37,7 @@ const answerRounds = async (page: Page, full: number, firstRoundHint: boolean): 
     const answer = answers.get(roundId)!;
     await page.getByLabel(answer, { exact: true }).check();
     await page.getByRole("button", { name: "Lock in answer" }).click();
-    await expect(page.getByRole("heading", { name: "Nice read." })).toBeVisible();
+    await expect(page.getByRole("heading", { name: VERDICT_PATTERN.right })).toBeVisible();
     await expect(page.locator(".reveal .round-points"))
       .toHaveText(hinted ? `+${points(full * 0.8)} points (1 hint)` : `+${points(full)} points (no hints)`);
     await expect(page.locator(".candidate.correct")).toContainText(answer);
@@ -86,7 +87,7 @@ for (const deck of artifact.decks) {
     await deal.click();
     await expect(page.getByText("Round 1 of 5")).toBeVisible();
     await expect(score(page)).toHaveText("Score: 0 pts");
-    await expect(page.getByRole("heading", { name: /Nice read\.|Not this time\./u })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: VERDICT_PATTERN.any })).toHaveCount(0);
     const second = await answerRounds(page, full, false);
     // The deal's next game shares no round with its first, since every pool holds at least ten (#40).
     expect(second.filter((roundId) => first.includes(roundId))).toEqual([]);
@@ -115,7 +116,7 @@ test("a mixed game deals one round from each of five decks, names each round's d
     await expect(page.locator(".eyebrow .round-deck")).toHaveText(deck.title);
     await page.getByLabel(answers.get(roundId)!, { exact: true }).check();
     await page.getByRole("button", { name: "Lock in answer" }).click();
-    await expect(page.getByRole("heading", { name: "Nice read." })).toBeVisible();
+    await expect(page.getByRole("heading", { name: VERDICT_PATTERN.right })).toBeVisible();
   }
   expect(new Set(decks).size).toBe(5);
   await expect(score(page)).toHaveText(`Score: ${points(best)} pts`);
@@ -161,7 +162,7 @@ test("a deck query parameter preselects the deck, and a wrong answer scores zero
   const round = await currentRound(page);
   await page.getByLabel(wrongAnswers.get(round)!, { exact: true }).check();
   await page.getByRole("button", { name: "Lock in answer" }).click();
-  await expect(page.getByRole("heading", { name: "Not this time." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: VERDICT_PATTERN.missed })).toBeVisible();
   await expect(page.locator(".reveal .round-points")).toHaveText("0 points (no hints)");
   await expect(score(page)).toHaveText("Score: 0 pts");
   await expect(page.locator(".candidate.missed")).toContainText(wrongAnswers.get(round)!);
@@ -287,7 +288,7 @@ test("revealing a hint keeps keyboard focus, and a failed check returns it to Lo
 
   await page.unrouteAll();
   await page.keyboard.press("Enter");
-  await expect(page.getByRole("heading", { name: "Nice read." })).toBeFocused();
+  await expect(page.getByRole("heading", { name: VERDICT_PATTERN.right })).toBeFocused();
   await expect(page.locator(".reveal .round-points")).toHaveText("+500 points (2 hints)");
   await expect(page.getByRole("main").getByRole("alert")).toHaveCount(0);
 });
@@ -346,7 +347,7 @@ test("a finished game lists every round in a summary that adds up, and the dots 
     picks.push(right);
     await page.getByLabel((right ? answers : wrongAnswers).get(roundId)!, { exact: true }).check();
     await page.getByRole("button", { name: "Lock in answer" }).click();
-    await expect(page.getByRole("heading", { name: right ? "Nice read." : "Not this time." })).toBeVisible();
+    await expect(page.getByRole("heading", { name: right ? VERDICT_PATTERN.right : VERDICT_PATTERN.missed })).toBeVisible();
     // Why the answer is right opens by keyboard, and closes again.
     if (index === 0) {
       const why = page.locator(".reveal-why");
@@ -390,7 +391,7 @@ test("a round plays from the keyboard alone: Tab, arrows, Enter, and the N, numb
     await page.keyboard.press("ArrowDown");
   }
   await page.keyboard.press("Enter");
-  await expect(page.getByRole("heading", { name: "Nice read." })).toBeFocused();
+  await expect(page.getByRole("heading", { name: VERDICT_PATTERN.right })).toBeFocused();
   // N moves on; 2 picks the second option; H buys a hint; Enter locks in.
   await page.keyboard.press("n");
   await expect(page.getByText("Round 2 of 5")).toBeVisible();
@@ -401,7 +402,7 @@ test("a round plays from the keyboard alone: Tab, arrows, Enter, and the N, numb
   await expect(page.getByRole("group", { name: "Choose one answer" }).getByRole("radio").nth(1)).toBeFocused();
   await expect(page.locator(".keys-note")).toContainText("Enter locks in");
   await page.keyboard.press("Enter");
-  await expect(page.getByRole("heading", { name: /Nice read\.|Not this time\./u })).toBeFocused();
+  await expect(page.getByRole("heading", { name: VERDICT_PATTERN.any })).toBeFocused();
   // The keys line goes with the controls it names once the answer is locked (#161).
   await expect(page.locator(".keys-note")).toHaveCount(0);
 });
