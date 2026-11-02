@@ -453,6 +453,17 @@ gate: changing queries, retries, ceilings, deck rules, or running
         round" on a round without a scaffold in a game whose rounds carry any. Marker hunt questions the pane can't
         answer are a data change for the next questions run.
     - Open: #120 (model per design), #159 (check traces against the code), #160 (the algorithm layer's fairness).
+    - Run 3, the fun run (`docs/review/evidence/2026-11-02-agent-playtest-run-3-fun.md`, 2026-11-02): the protocol
+      is checked in (`ops/playtest/personas/`, `judges/`, `run-3.md`, `aggregate.mjs`); eight personas (regular,
+      commuter on a phone, duel-pair, streaker, learner, a code-blind `blind` instrument, red-team, a11y) and five
+      judges (fun on Opus; copy, difficulty, explanations, UX on Sonnet) against a nine-line release bar. The
+      driver pins deals (`deal: "demo"`), opens links (`goto`), plays at phone width, fakes the clock, reads the
+      clipboard and records, and plays blind; it runs as `node --import tsx`. The bar's fun, copy, and difficulty
+      lines failed (#228–#241): the data-level causes (hints that state the answer, reveal sentences that fit any
+      round) wait for the next preparation run; the code-level ones were fixed in #242–#245 (stakes during play,
+      families once a game, the reveal once a game, the host on Sonnet with one offer a round, the dead-frame
+      fallback, the phone end screen) and rechecked. #120's pilot: keep Haiku for the catalog, composer, and
+      visualizer; the host is the design worth Sonnet (`OPENROUTER_MODEL_HOST`), the owner's setting.
   - Composer and visualizer requests keep only the first panel or page
     (`ONE_ONLY`) and ask for `parallel_tool_calls: false`; live, Haiku
     sometimes wrote several pages at once.
