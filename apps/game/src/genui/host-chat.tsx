@@ -86,9 +86,29 @@ export default function HostChat({ roundId, phase, panes, optionLabels, sessionT
     prepareSendMessagesRequest: ({ messages }) =>
       ({ body: { sessionToken: sessionToken(), roundId, design: "host", messages: withPick(messages.slice(-HOST_HISTORY), pickNow.current) } }),
   }), [roundId, sessionToken]);
-  const { messages, sendMessage, setMessages, status, error, clearError } = useChat({ id: `host-${roundId}`, transport });
+  const { messages, sendMessage, setMessages, regenerate, status, error, clearError } = useChat({ id: `host-${roundId}`, transport });
   const [notice, setNotice] = React.useState<string | null>(null);
   const input = React.useRef<HTMLInputElement>(null);
+  // Only the latest offer can still be bought; earlier ones read as spent.
+  const lastOffer = messages.reduce((last, message, at) => message.parts.some((part) => part.type === "tool-offer_hint") ? at : last, -1);
+  const limits = React.useMemo(() => ({ paneLineCounts: panes.map(({ text }) => text.split("\n").length), optionLabels }), [panes, optionLabels]);
+  // An empty reply (no component and no text, as the Haiku host gave on 3 of 7 after-lock turns in playtest run 3),
+  // or a step that ended with no reply at all, is asked for once more before the chat says the host had nothing to
+  // add (#237). `regenerate` re-sends the player's last turn either way, and the route counts both turns.
+  const retriedFor = React.useRef<string | null>(null);
+  const emptyReply = (message: UIMessage): boolean =>
+    message.role === "assistant" && renderViews([message], phaseOf(message), limits).length === 0 && replyText(message).length === 0;
+  const last = messages.at(-1);
+  const asked = last?.role === "user" ? last : messages.at(-2);
+  const unanswered = status === "ready" && error === undefined && last !== undefined && asked?.role === "user"
+    && (last.role === "user" || emptyReply(last));
+  React.useEffect(() => {
+    if (!unanswered || asked === undefined || retriedFor.current === asked.id) return;
+    retriedFor.current = asked.id;
+    void regenerate();
+  });
+  // After the one retry, a turn still without a reply says so, once.
+  const silent = unanswered && asked !== undefined && retriedFor.current === asked.id;
   // A refused paste would ride along in every later request and be refused again; it leaves the history instead.
   React.useEffect(() => {
     if (error === undefined) return;
@@ -98,10 +118,7 @@ export default function HostChat({ roundId, phase, panes, optionLabels, sessionT
     clearError();
     setNotice(HOST_PASTE_REFUSED);
   }, [error, setMessages, clearError, onEvent]);
-  // Only the latest offer can still be bought; earlier ones read as spent.
-  const lastOffer = messages.reduce((last, message, at) => message.parts.some((part) => part.type === "tool-offer_hint") ? at : last, -1);
   const [draft, setDraft] = React.useState("");
-  const limits = React.useMemo(() => ({ paneLineCounts: panes.map(({ text }) => text.split("\n").length), optionLabels }), [panes, optionLabels]);
   const busy = status === "submitted" || status === "streaming";
   const headingId = `host-heading-${roundId}`;
   const inputId = hostInputId(roundId);
@@ -138,10 +155,13 @@ export default function HostChat({ roundId, phase, panes, optionLabels, sessionT
               {views.map((view, index) => view.kind === "catalog"
                 ? <CatalogView key={index} call={view.call} panes={panes} {...(phase === "before-lock" && at === lastOffer ? { hint } : {})} />
                 : null)}
-              {status !== "streaming" && texts.length === 0 && views.length === 0 && <p className="genui-host genui-status">{HOST_SILENT}</p>}
+              {silent && at === messages.length - 1 && <p className="genui-host genui-status">{HOST_SILENT}</p>}
             </li>
           );
         })}
+        {silent && last?.role === "user" && (
+          <li className="host-turn host"><span className="visually-hidden">Host: </span><p className="genui-host genui-status">{HOST_SILENT}</p></li>
+        )}
         {busy && <li className="host-turn host genui-status">The host is thinking…</li>}
       </ol>
       {notice && <p className="genui-status" role="alert">{notice}</p>}
