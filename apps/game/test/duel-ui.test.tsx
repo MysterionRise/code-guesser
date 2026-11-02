@@ -83,8 +83,8 @@ describe("a duel's words (#173)", () => {
   });
 
   it("says whose first try it was, and which play of the link", () => {
-    expect(firstPlayNote("yes", "Ana")).toBe("First try");
-    expect(firstPlayNote("yes", "Ana", true)).toBe("First try for Ana");
+    expect(firstPlayNote("yes", "Ana")).toBe("First time on these rounds");
+    expect(firstPlayNote("yes", "Ana", true)).toBe("First time for Ana");
     expect(firstPlayNote("no", "Ana")).toBe("Ana had played these rounds before");
     expect(firstPlayNote("shared", "Ana")).toBeNull();
     expect([1, 2, 3, 4, 11, 12, 13, 21, 22, 23, 101, 111, 112].map(ordinal))
@@ -130,7 +130,10 @@ describe("a duel's share lines (#173)", () => {
     });
     expect(share.text).not.toMatch(GRID);
     expect(challengeShare({ ...challenge, deckTitle: "Today’s five", date: "2026-10-21" }, null, URL_OF).message)
-      .toBe("CodeGuessr duel · Today’s five of 2026-10-21 · I scored 3,300/5,000. Can you beat it?");
+      .toBe("CodeGuessr duel · Today’s five, 2026-10-21 · I scored 3,300/5,000. Can you beat it?");
+    // A perfect score can only be matched (#239).
+    expect(challengeShare({ ...challenge, challenger: { ...challenge.challenger, score: challenge.max } }, "Ana", URL_OF).message)
+      .toBe("CodeGuessr duel · Which language? · Ana scored 5,000/5,000. Can you match it?");
     expect(() => challengeShare(challenge, "Ana", "/?duel=AbC")).toThrow(/absolute web address/u);
   });
 
@@ -162,7 +165,7 @@ describe("a duel's views (#173)", () => {
     expect(html).toContain('<td class="duel-missed"><span aria-hidden="true">✗ </span>0<span class="visually-hidden">, missed</span></td>');
     expect(html).toContain('<td><span aria-hidden="true">✓ </span>800<span class="visually-hidden">, right</span><span class="summary-hints"> (1 hint)</span></td>');
     expect(html).toContain("<td>3,800<span class=\"summary-hints\"> (4 right, 3 hints)</span></td>");
-    expect(html).toContain("First try for Ana");
+    expect(html).toContain("First time for Ana");
     expect(html).toContain("Your 2nd play of this link");
   });
 
@@ -217,7 +220,7 @@ describe("real duels' share lines (#173)", () => {
       // Each line is its fixed words, the deck's title, the names, totals, and marks: there is no room for an option.
       const title = created.challenge.deckTitle.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
       const link = URL_OF.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
-      expect(texts[0], deck).toMatch(new RegExp(`^CodeGuessr duel · ${title} · Ana scored [\\d,]+/[\\d,]+\\. Can you beat it\\?\\n${link}$`, "u"));
+      expect(texts[0], deck).toMatch(new RegExp(`^CodeGuessr duel · ${title} · Ana scored [\\d,]+/[\\d,]+\\. Can you (?:beat|match) it\\?\\n${link}$`, "u"));
       expect(texts[1], deck).toMatch(new RegExp(`^CodeGuessr duel · ${title} · (?:(?:Ana|Ben) wins(?: by [\\d,]+ points)?|A draw)\\n`
         + `Ben [🟩🟨⬛]{5} [\\d,]+/[\\d,]+\\nAna [🟩🟨⬛]{5} [\\d,]+/[\\d,]+\\n${link}$`, "u"));
       for (const { roundId } of dealt.mode.rounds) {

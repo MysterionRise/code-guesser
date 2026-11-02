@@ -112,7 +112,7 @@ test("a friend plays the challenger's very game, sees each of their rounds only 
   await expect(ben.page.getByRole("heading", { level: 1 })).toHaveText("Ana challenges you");
   await expect(ben.page.locator(".duel-deck")).toHaveText("Which language?");
   await expect(ben.page.locator(".duel-total")).toHaveText("4/5 right · 3,800 of 5,000");
-  await expect(ben.page.locator(".duel-badge")).toHaveText("First try");
+  await expect(ben.page.locator(".duel-badge")).toHaveText("First time on these rounds");
   expect(await ben.page.getByRole("main").innerText()).not.toMatch(GRID);
   expect(await background(ben.page)).toBe(THEMES.paper);
   const head = (await (await ben.page.request.get(link.split("#")[0]!, { headers: { "user-agent": "Slackbot-LinkExpanding 1.0" } })).text()).split("</head>")[0]!;
@@ -159,7 +159,7 @@ test("a friend plays the challenger's very game, sees each of their rounds only 
   await expect(comparison.locator("tbody tr").first().locator("td")).toHaveText(["✓ 1,000, right", "✓ 800, right (1 hint)"]);
   await expect(comparison.locator("tbody tr").nth(1).locator("td")).toHaveText(["✓ 1,000, right", "✗ 0, missed"]);
   await expect(comparison.locator("tfoot td")).toHaveText(["5,000 (5 right, no hints)", "3,800 (4 right, 1 hint)"]);
-  await expect(comparison.getByText("First try for Ana")).toBeVisible();
+  await expect(comparison.getByText("First time for Ana")).toBeVisible();
 
   const result = await resultLink(ben.page, "Ben");
   expect(result.text).toBe(`CodeGuessr duel · Which language? · Ben wins by 1,200 points\nBen 🟩🟩🟩🟩🟩 5,000/5,000\nAna 🟨⬛🟩🟩🟩 3,800/5,000\n${result.link}`);

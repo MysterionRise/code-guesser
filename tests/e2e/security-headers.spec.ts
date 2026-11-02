@@ -119,7 +119,7 @@ test("a game in every deck plays under the policy without a single violation", a
         await expect(page.getByText(`Round ${round + 1} of 5`)).toBeVisible();
       }
     }
-    await expect(page.getByText(/Run complete — /u)).toBeVisible();
+    await expect(page.getByText(/Run complete: /u)).toBeVisible();
     expect(violations, deck).toEqual([]);
   }
   // The watch itself works: an image from elsewhere is refused and reported.

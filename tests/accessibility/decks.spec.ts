@@ -30,7 +30,7 @@ for (const [index, source] of SOURCES.entries()) {
     await scan(page, "after a reveal");
 
     await finishGame(page);
-    await expect(page.getByText(/Run complete — /u)).toBeVisible();
+    await expect(page.getByText(/Run complete: /u)).toBeVisible();
     await scan(page, "the finished game");
 
     // Back at the chooser, the deck's card shows the score just kept in this browser (#63).

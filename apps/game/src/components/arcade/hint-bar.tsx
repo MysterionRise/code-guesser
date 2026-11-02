@@ -1,10 +1,10 @@
 import * as React from "react";
 
-import { hintCostNote } from "./arcade-text";
+import { hintButtonLabel } from "./arcade-text";
 import type { HintDetail, PublicRound } from "./mode-contract";
 import { TraceStepper } from "./question-layer";
 
-/** The round's hint costs and its hints: each one bought so far, then, until the answer is locked, the button for the next. */
+/** The round's hints: each one bought so far, then, until the answer is locked, the button for the next, with its cost. */
 export function HintBar({ round, hints, details, disabled, locked, error, onRequest, buttonRef, latestHintRef }: {
   readonly round: Readonly<PublicRound>;
   /** The hints bought for this round, in order. */
@@ -21,7 +21,6 @@ export function HintBar({ round, hints, details, disabled, locked, error, onRequ
 }) {
   return (
     <>
-      <p className="hint-cost" id={`hint-cost-${round.roundId}`}>{hintCostNote(round.points)}</p>
       {/* Keyed by round, so a new round's hints arrive in a fresh live region instead of being announced. */}
       <div className="hints" role="group" aria-label="Hints" aria-live="polite" key={round.roundId}>
         {round.mode.clues.map((clue, index) => index < hints.length
@@ -32,8 +31,8 @@ export function HintBar({ round, hints, details, disabled, locked, error, onRequ
             </React.Fragment>
           )
           : index === hints.length && !locked
-            ? <button className="hint-button" type="button" key={clue.order} ref={buttonRef} aria-describedby={`hint-cost-${round.roundId}`} disabled={disabled} onClick={onRequest}>
-                Reveal hint {clue.order}
+            ? <button className="hint-button" type="button" key={clue.order} ref={buttonRef} disabled={disabled} onClick={onRequest}>
+                {hintButtonLabel(clue.order, round.points)}
               </button>
             : null)}
         {error && <p className="demo-error" role="alert">{error}</p>}

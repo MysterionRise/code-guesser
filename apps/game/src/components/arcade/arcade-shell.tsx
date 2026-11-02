@@ -119,10 +119,16 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
   const kept = React.useRef(false);
   const [recordDelta, setRecordDelta] = React.useState<RecordDelta | null>(null);
 
-  // A deck's reveals share their method (the explanation) and often their misleading signals, so a game shows each
-  // once per deck: a later round of the same kind whose text repeats a shown one leaves it out, and the round's own
-  // evidence leads.
-  const shown = React.useRef(new Map<RoundModeKind, Readonly<{ explanation: string; misleading: string }>>());
+  // A deck's reveals share their method (the explanation) and often their signals, so a game shows each sentence
+  // once per deck (#234): every sentence a round of a kind has shown is kept, and a later round of that kind whose
+  // sentence is among them leaves it out, so the round's own evidence leads.
+  const shown = React.useRef(new Set<string>());
+  const seen = (kind: RoundModeKind, part: string, text: string): boolean => {
+    const key = `${kind}\u0000${part}\u0000${text}`;
+    const repeat = shown.current.has(key);
+    shown.current.add(key);
+    return repeat;
+  };
   const [repeats, setRepeats] = React.useState<RevealRepeats>(NO_REPEATS);
   const keep = (completed: ArcadeSession) => {
     if (completed.status !== "complete" || records === undefined || kept.current) return;
@@ -191,10 +197,11 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
       const result = projectDisplayReveal(response.reveal);
       const locked = transitionArcadeSession(mode, session, { type: "lock-answer", candidateId: choice });
       const revealed = transitionArcadeSession(mode, locked, { type: "accept-reveal", reveal: result });
-      const prior = shown.current.get(round.mode.kind);
-      const misleading = result.misleadingSignals.join("\n");
-      setRepeats({ explanation: prior?.explanation === result.explanation, misleading: prior?.misleading === misleading });
-      shown.current.set(round.mode.kind, { explanation: result.explanation, misleading });
+      setRepeats({
+        explanation: seen(round.mode.kind, "explanation", result.explanation),
+        misleading: seen(round.mode.kind, "misleading", result.misleadingSignals.join("\n")),
+        helpful: seen(round.mode.kind, "helpful", result.helpfulSignals.join("\n")),
+      });
       setSession(revealed);
       keep(revealed);
       token.current = response.sessionToken;

@@ -120,7 +120,7 @@ describe("robots and the layout's metadata (#168)", () => {
     const unset = await layout();
     expect(unset).not.toHaveProperty("metadataBase");
     expect(unset).toMatchObject({
-      title: { default: "CodeGuessr — Read the code. Make your call.", template: "%s · CodeGuessr" },
+      title: { default: "CodeGuessr · Read the code. Make your call.", template: "%s · CodeGuessr" },
       openGraph: { type: "website", siteName: "CodeGuessr" },
       twitter: { card: "summary" },
     });

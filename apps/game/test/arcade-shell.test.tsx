@@ -17,6 +17,7 @@ import {
   roundStatusText,
   transitionArcadeSession,
   verdictText,
+  priorVerdicts,
   VERDICTS,
   VERDICT_PATTERN,
   type PublicModeContractInput,
@@ -93,10 +94,9 @@ describe("static arcade shell", () => {
     expect(html).toContain("Which language is this?");
     expect(html).toContain('data-round-id="round-1"');
     expect(html).toContain("Option A");
-    expect(html).toContain("Reveal hint 1");
-    // Hint costs are visible up front and announced with the hint button.
-    expect(html).toMatch(/<p class="hint-cost" id="hint-cost-round-1">Each hint lowers this round’s points: 1,000 → 800 → 500\.<\/p>/u);
-    expect(html).toMatch(/<button class="hint-button"[^>]*aria-describedby="hint-cost-round-1"/u);
+    // The hint's cost is on its button (#239), so nothing else need say it.
+    expect(html).toContain(">Reveal hint 1 (−200)</button>");
+    expect(html).not.toContain("hint-cost");
     // A revealed hint is announced politely; focus handling lives in the browser tests.
     expect(html).toMatch(/<div class="hints"[^>]*aria-live="polite"/u);
     // Long lines scroll inside a keyboard-reachable code window instead of wrapping.
@@ -185,7 +185,7 @@ describe("static arcade shell", () => {
     expect(html).toContain('<div class="code-panes compare">');
     expect(html).toContain("<figcaption>Version A</figcaption>");
     expect(html).toMatch(/aria-label="Code, version B"/u);
-    expect(html).toContain("Each hint lowers this round’s points: 500 → 400 → 250.");
+    expect(html).toContain(">Reveal hint 1 (−100)</button>");
     expect(html).toMatch(/aria-label="Option A" aria-describedby="detail-round-1-candidate-a"/u);
     expect(html).toContain('<span class="candidate-detail" id="detail-round-1-candidate-a">A short public note</span>');
   });
@@ -222,6 +222,16 @@ describe("static arcade shell", () => {
     expect(verdictText({ roundId: "r", correct: true, hintsUsed: 0, complete: true, correctRounds: 5, completedRounds: 5 })).toBe("Clean sweep.");
     expect(verdictText({ roundId: "r", correct: false, hintsUsed: 0, complete: true, correctRounds: 0, completedRounds: 5 })).toBe("Rough deal.");
     expect(VERDICTS.missed).not.toContain(verdictText({ roundId: "r", correct: true, hintsUsed: 0, complete: true, correctRounds: 3, completedRounds: 5 }));
+    // A phrase the game has shown is passed over (#234): five right rounds read five ways, in the same order for everyone.
+    const history = ids.slice(0, 5).map((roundId) => ({ roundId, correct: true, hints: 0 }));
+    const draw = () => history.map((entry, index) =>
+      verdictText({ roundId: entry.roundId, correct: true, hintsUsed: 0, complete: false, correctRounds: 0, completedRounds: 0, used: priorVerdicts(history.slice(0, index)) }));
+    const five = draw();
+    expect(new Set(five).size).toBe(5);
+    expect(five.every((text) => VERDICTS.clean.includes(text))).toBe(true);
+    expect(draw()).toEqual(five);
+    // With every phrase used, the round's own draw returns rather than nothing.
+    expect(VERDICTS.clean).toContain(verdictText({ roundId: "r", correct: true, hintsUsed: 0, complete: false, correctRounds: 0, completedRounds: 0, used: new Set(VERDICTS.clean) }));
     // The original verdicts stay in their pools, so a stored event that quoted one would still be caught.
     expect(VERDICTS.clean).toContain("Nice read.");
     expect(VERDICTS.missed).toContain("Not this time.");
@@ -248,14 +258,20 @@ describe("static arcade shell", () => {
     expect(reveal.indexOf('className="record-line"')).toBeLessThan(reveal.indexOf("<GameSummary"));
   });
 
-  it("leads each reveal's why with the round's own evidence, and shows a deck's method and misleading signal once a game", () => {
+  it("leads each reveal's why with the round's own evidence, and shows each of a deck's sentences once a game (#234)", () => {
     const reveal = readFileSync(new URL("../src/components/arcade/round-reveal.tsx", import.meta.url), "utf8");
     const why = reveal.slice(reveal.indexOf('className="reveal-why"'), reveal.indexOf("</details>"));
-    const order = ["{reveal.evidence}", "Helpful signals:", "!repeats.explanation && <p className=\"reveal-method\">", "!repeats.misleading && <p className=\"reveal-misleading\">"]
+    expect(why).toContain("<summary>Why this is the answer</summary>");
+    expect(why).toContain("Easy to confuse:");
+    expect(why).not.toContain("Misleading signals:");
+    const order = ["{reveal.evidence}", "!repeats.helpful && <p className=\"reveal-helpful\">Helpful signals:",
+      "!repeats.explanation && <p className=\"reveal-method\">", "!repeats.misleading && <p className=\"reveal-misleading\">"]
       .map((marker) => { expect(why, marker).toContain(marker); return why.indexOf(marker); });
     expect([...order].sort((left, right) => left - right)).toEqual(order);
+    // The shell keeps every sentence shown, not only the last one, so a sentence that alternates with another still shows once.
     const shell = readFileSync(new URL("../src/components/arcade/arcade-shell.tsx", import.meta.url), "utf8");
-    expect(shell).toMatch(/prior\?\.explanation === result\.explanation/u);
+    expect(shell).toMatch(/shown = React\.useRef\(new Set<string>\(\)\)/u);
+    for (const part of ["explanation", "misleading", "helpful"]) expect(shell).toContain(`${part}: seen(round.mode.kind, "${part}",`);
     expect(shell).toMatch(/setRepeats\(NO_REPEATS\)/u);
   });
 
@@ -390,7 +406,7 @@ describe("static arcade shell", () => {
     expect(() => projectSpoilerFreeShare(session.result!, session.history.slice(1))).toThrow(ArcadeShellRuleError);
     expect(() => projectSpoilerFreeShare(session.result!, session.history, "Which language?", "/?deck=language")).toThrow(ArcadeShellRuleError);
     expect(() => projectSpoilerFreeShare(session.result!, session.history, "Which language?", "javascript:alert(1)")).toThrow(ArcadeShellRuleError);
-    expect(formatCompletionResult(session.result!, session.correctRounds)).toBe("Run complete — 5,000 points, 5 of 5 correct.");
+    expect(formatCompletionResult(session.result!, session.correctRounds)).toBe("Run complete: 5,000 points, 5 of 5 correct.");
     expect(() => formatCompletionResult(session.result!, 6)).toThrow(ArcadeShellRuleError);
   });
 
