@@ -88,16 +88,20 @@ export const paletteFrom = (read: (token: string) => string): VisualizerPalette 
 };
 
 /**
- * The document the iframe loads: the CSP first, then a base style, then the model's markup, then a small script
- * of the game's own that reports the body's height (not the document's, which never drops below the frame's own
- * and would grow the frame on every report), so the frame can fit the page without an inner scroll. The model's
- * markup may not post messages itself (`parseVisualizer`); the parent only reads a clamped number.
+ * The document the iframe loads: the CSP first, then a base style, then a line of the game's own that reports a
+ * script error (a page that dies on load showed a blank frame with no way out in playtest run 3, #238), then the
+ * model's markup, then a small script of the game's own that reports the body's height (not the document's, which
+ * never drops below the frame's own and would grow the frame on every report), so the frame can fit the page without
+ * an inner scroll. The model's markup may not post messages itself (`parseVisualizer`); the parent only reads a
+ * clamped number and a flag.
  */
 export const visualizerDocument = (html: string, palette: VisualizerPalette = TERMINAL_PALETTE): string => `<!doctype html>
 <html lang="en"><head><meta http-equiv="Content-Security-Policy" content="${VISUALIZER_CSP}"><meta charset="utf-8">
 <style>body{margin:0;padding:12px;background:${palette.panel};color:${palette.text};font:14px/1.5 ui-sans-serif,system-ui,sans-serif}
 button{font:inherit;padding:6px 12px;border-radius:8px;border:1px solid ${palette.border};background:${palette.chip};color:${palette.accent};cursor:pointer}
 button:focus-visible{outline:3px solid ${palette.focus};outline-offset:2px}code,pre{font-family:ui-monospace,Menlo,monospace}pre{max-width:100%;overflow-x:auto}</style>
+<script>(() => { const failed = () => parent.postMessage({ codeguessrVisualizerError: true }, "*");
+  addEventListener("error", failed); addEventListener("unhandledrejection", failed); })();</script>
 </head><body>${html}<script>
 (() => { const report = () => parent.postMessage({ codeguessrVisualizerHeight: document.body.getBoundingClientRect().height }, "*");
   new ResizeObserver(report).observe(document.body); report(); })();

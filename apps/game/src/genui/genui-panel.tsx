@@ -96,11 +96,13 @@ export default function GenuiPanel({ design, roundId, pick, phase, panes, option
     paneLineCounts: panes.map(({ text }) => text.split("\n").length),
     optionLabels,
   }), [panes, optionLabels]);
-  const views = renderViews(messages, phase, limits);
+  // A visualizer page that died on load (#238): its frame goes, and the panel falls back as for a refused call.
+  const [dead, setDead] = React.useState(false);
+  const views = renderViews(messages, phase, limits).filter((view) => !(dead && view.kind === "visualizer"));
   const busy = status === "submitted" || status === "streaming";
   // A step that ends with no usable call (cut off, or every call refused) adds no assistant message, so the request
   // having been sent is what counts.
-  const failed = fellBack(status, messages.length > 0, views.length, error);
+  const failed = fellBack(status, messages.length > 0, views.length, error) || dead;
   const headingId = `genui-heading-${roundId}`;
   const output = React.useRef<HTMLDivElement>(null);
   // The static reveal folds once, when the first checked view arrives.
@@ -121,6 +123,7 @@ export default function GenuiPanel({ design, roundId, pick, phase, panes, option
   };
   const retry = () => {
     setRetried(true);
+    setDead(false);
     clearError();
     setMessages([]);
     explain();
@@ -128,8 +131,8 @@ export default function GenuiPanel({ design, roundId, pick, phase, panes, option
   React.useEffect(() => {
     if (!failed || reported.current) return;
     reported.current = true;
-    onEvent?.({ type: "genui_fallback", reason: error === undefined ? "rejected" : wasLimited(error) ? "limited" : "failed" });
-  }, [failed, error, onEvent]);
+    onEvent?.({ type: "genui_fallback", reason: error !== undefined ? (wasLimited(error) ? "limited" : "failed") : dead ? "failed" : "rejected" });
+  }, [failed, error, dead, onEvent]);
 
   return (
     <section className="genui-panel" aria-labelledby={headingId} data-genui-status={failed ? "fallback" : status} data-genui-design={design}>
@@ -143,7 +146,7 @@ export default function GenuiPanel({ design, roundId, pick, phase, panes, option
         {busy && <p className="genui-status">{PANEL_TEXT[design].busy}</p>}
         {views.filter((view, index) => view.kind === "catalog" || !views.slice(index + 1).some(({ kind }) => kind === view.kind)).map((view, index) => view.kind === "composer"
           ? <ComposerView key={index} spec={view.spec} panes={panes} />
-          : view.kind === "visualizer" ? <VisualizerView key={index} visualizer={view.visualizer} />
+          : view.kind === "visualizer" ? <VisualizerView key={index} visualizer={view.visualizer} onDead={() => setDead(true)} />
             : <CatalogView key={index} call={view.call} panes={panes} />)}
         {failed && <p className="genui-status">{GENUI_FALLBACK_MESSAGE}</p>}
       </div>
