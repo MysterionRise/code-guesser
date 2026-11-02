@@ -500,6 +500,9 @@ noscript { display: block; padding: 12px; margin-bottom: 16px; background: var(-
 .score-group { display: inline-flex; align-items: center; gap: 10px; }
 .day-streak { color: var(--muted); font-weight: 800; font-size: .88rem; font-variant-numeric: tabular-nums; }
 .streak-line { margin: -14px 0 18px; color: var(--muted); font-weight: 700; font-size: .95rem; font-variant-numeric: tabular-nums; }
+/* Today's five names itself above every round (#235), and a replay of it says it records nothing. */
+.game-label { margin: 0 0 8px; color: var(--muted); font-size: .82rem; text-transform: uppercase; letter-spacing: .15em; font-weight: 800; }
+.replay-note { margin: -14px 0 18px; color: var(--muted); font-size: .88rem; }
 .duel-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; margin: -12px 0 20px; }
 .duel-strip-name { min-width: 0; color: var(--muted); font-weight: 800; overflow-wrap: anywhere; }
 .duel-gap { font-weight: 700; font-variant-numeric: tabular-nums; }

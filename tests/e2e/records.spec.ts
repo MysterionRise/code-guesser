@@ -78,16 +78,29 @@ test("a finished game's score shows on its deck's card, a new best replaces it, 
   await expect(page.locator(".reveal .record-line")).toHaveText("Streak of 2 ends");
 });
 
-test("today's five keeps a day streak on its card", async ({ page }) => {
-  const first = await playGame(page, "/?deck=daily&design=off", 3);
-  await expect(page.locator(".reveal .record-line")).toHaveText(`First score on this deck: ${points(first)} · Day streak 1`);
+test("today's five keeps a day streak on its card, and shows it by the score while it runs", async ({ page }) => {
+  // A day streak of two up to yesterday, by the browser's own date, as the records keep it.
   await page.goto("/");
-  await expect(card(page, /^Today’s five$/u).locator(".deck-record")).toHaveText("Day streak 1");
+  await page.evaluate((roundSet) => {
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const pad = (value: number) => String(value).padStart(2, "0");
+    const last = `${yesterday.getFullYear()}-${pad(yesterday.getMonth() + 1)}-${pad(yesterday.getDate())}`;
+    localStorage.setItem("codeguessr.records", JSON.stringify({ v: 1, artifact: roundSet, decks: {}, daily: { last, days: 2, best: 2 } }));
+  }, ROUND_SET);
+  await page.goto("/?deck=daily&design=off");
+  // The streak still runs, so the game shows it beside the score (#235); the deck's own streak line needs a deck streak.
+  await expect(page.locator(".arcade-header .day-streak")).toHaveText("Day streak 2");
+  await expect(page.locator(".streak-line")).toHaveCount(0);
+  const first = await finishGame(page, 3);
+  await expect(page.locator(".reveal .record-line")).toHaveText(`First score on this deck: ${points(first)} · Day streak 3`);
+  await page.goto("/");
+  await expect(card(page, /^Today’s five$/u).locator(".deck-record")).toHaveText("Day streak 3");
   // Playing it again the same day counts for nothing, and the end of the game says nothing of records.
   await playGame(page, "/?deck=daily&design=off", 5);
   await expect(page.locator(".reveal .record-line")).toHaveCount(0);
   await page.goto("/");
-  await expect(card(page, /^Today’s five$/u).locator(".deck-record")).toHaveText("Day streak 1");
+  await expect(card(page, /^Today’s five$/u).locator(".deck-record")).toHaveText("Day streak 3");
 });
 
 test("Clear records asks first, inline, keeps focus, and forgets every record", async ({ page }) => {

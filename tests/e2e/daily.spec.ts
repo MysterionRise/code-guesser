@@ -104,6 +104,9 @@ test("once today's five is done, playing it again deals the same five and record
   await page.goto("/?deck=daily");
   await expect(page).toHaveURL(/date=\d{4}-\d{2}-\d{2}$/u);
   const date = new URL(page.url()).searchParams.get("date")!;
+  // The game names itself and its date above every round (#235); a replay says it records nothing.
+  await expect(page.locator(".game-label")).toHaveText(`Today’s five · ${date}`);
+  await expect(page.locator(".replay-note")).toHaveCount(0);
   const dealt = await firstRound(page);
   for (let round = 1; round <= 5; round += 1) {
     if (round > 1) await page.getByRole("button", { name: "Next round" }).click();
@@ -120,4 +123,6 @@ test("once today's five is done, playing it again deals the same five and record
   await expect(page).toHaveURL(new RegExp(`\\?deck=daily&date=${date}&replay=1$`, "u"));
   expect(await firstRound(page)).toEqual(dealt);
   expect(dealtGames()).toBe(before);
+  await expect(page.locator(".game-label")).toHaveText(`Today’s five · ${date}`);
+  await expect(page.locator(".replay-note")).toHaveText("This replay isn’t recorded.");
 });

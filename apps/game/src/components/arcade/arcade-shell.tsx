@@ -58,9 +58,13 @@ interface ArcadeShellProps {
   duel?: GameDuel;
   /** When set, a finished game joins the player's records in this browser (#63), under this round set and deck. */
   records?: GameRecords;
+  /** When set, as for today's five (#235), the game names itself above every round: "Today’s five · 2026-11-02". */
+  gameLabel?: string;
+  /** When set, the game is today's five played again (#172), and says near the top that it records nothing. */
+  replay?: boolean;
 }
 
-export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealHintAction, chooseAnotherDeckHref, newGameHref, replayHref, shareHref, deckTitle, roundDecks, genuiDesign, duel, records }: ArcadeShellProps) {
+export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealHintAction, chooseAnotherDeckHref, newGameHref, replayHref, shareHref, deckTitle, roundDecks, genuiDesign, duel, records, gameLabel, replay = false }: ArcadeShellProps) {
   const [session, setSession] = React.useState(() => createArcadeSession(mode));
   // A challenge link names its challenger in its fragment, which only the browser reads (#173).
   const opponentName = useFragmentNames().from;
@@ -248,6 +252,7 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
       <ArcadeHeader score={session.score} dayStreak={atStart.dayStreak}>
         <RoundTrack rounds={mode.rounds} roundIndex={session.roundIndex} outcomes={session.outcomes} />
       </ArcadeHeader>
+      {replay && <p className="replay-note">This replay isn’t recorded.</p>}
       <StreakLine streak={atStart.streak} correct={session.correctRounds} answered={session.completedRounds} total={mode.rounds.length} />
       {duel?.role === "challenged" && (
         <OpponentStrip name={opponentName ?? DEFAULT_NAME} rounds={duel.challenge.challenger.rounds} answered={session.completedRounds} score={session.score} />
@@ -255,6 +260,7 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
 
       {/* Keyed by round, so each round's card arrives afresh (its `arrive` animation, where motion is welcome). */}
       <section key={round.roundId} className="game-card" aria-labelledby="round-title" data-round-id={round.roundId}>
+        {gameLabel && <p className="game-label">{gameLabel}</p>}
         <p className="eyebrow">Round {session.roundIndex + 1} of {mode.rounds.length}
           {roundDecks?.[round.mode.kind] !== undefined && <> · <span className="round-deck">{roundDecks[round.mode.kind]}</span></>}</p>
         <h1 id="round-title" ref={roundTitle} tabIndex={-1}>{round.mode.prompt}</h1>
