@@ -4,6 +4,7 @@ import { isAbsolute } from "node:path";
 
 import { parseDisabled } from "../experiment/arms";
 import { eventSource } from "../experiment/event-store.server";
+import { DEFAULT_BASE_URLS, PREFIX, providerFor } from "../genui/provider.server";
 
 /**
  * The boot check (#97). `CODEGUESSR_PUBLIC=1` marks a public server, which must be configured for anonymous play
@@ -24,8 +25,11 @@ export const ENVIRONMENT_CODES = Object.freeze([
   "CODEGUESSR_CLIENT_IP_HEADER_MISSING",
   "CODEGUESSR_CLIENT_IP_HEADER_INVALID",
   "CODEGUESSR_RATE_LIMITS_INVALID",
+  "GENUI_PROVIDER_INVALID",
   "OPENROUTER_API_KEY_MISSING",
+  "ANTHROPIC_API_KEY_MISSING",
   "OPENROUTER_BASE_URL_REJECTED",
+  "ANTHROPIC_BASE_URL_REJECTED",
   "EXPERIMENT_LAB_REJECTED",
   "EXPERIMENT_DISABLED_UNKNOWN",
 ] as const);
@@ -35,8 +39,9 @@ type Environment = Readonly<Record<string, string | undefined>>;
 
 /** A configured session secret must be at least this long. */
 export const MIN_SECRET_LENGTH = 32;
-/** The one model address a public server's real games may use; `genui/model.server.ts` defaults to it. */
-export const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
+/** The one address each model provider's real games may use; `genui/model.server.ts` defaults to them. */
+export const OPENROUTER_BASE_URL = DEFAULT_BASE_URLS.openrouter;
+export const ANTHROPIC_BASE_URL = DEFAULT_BASE_URLS.anthropic;
 /** A header name as a proxy sets it, such as `X-Forwarded-For`. */
 const HEADER_NAME = /^[A-Za-z][A-Za-z0-9-]*$/u;
 
@@ -71,8 +76,8 @@ const directoryCodes = (value: string | undefined, missing: EnvironmentCode, rel
 
 /**
  * Every reason this environment can't serve, in a fixed order; empty when it can. A smoke run tagged with a non-real
- * `EXPERIMENT_SOURCE` (`agent` or `synthetic`) may also use lab mode and a stand-in model address, since its events
- * never mix with real games.
+ * `EXPERIMENT_SOURCE` (`agent` or `synthetic`) may also use lab mode and a stand-in address for either model provider,
+ * since its events never mix with real games.
  */
 export const checkEnvironment = (env: Environment): readonly EnvironmentCode[] => {
   if (present(env.CODEGUESSR_PUBLIC) && env.CODEGUESSR_PUBLIC !== "1" && env.CODEGUESSR_PUBLIC !== "0") return ["CODEGUESSR_PUBLIC_INVALID"];
@@ -91,9 +96,15 @@ export const checkEnvironment = (env: Environment): readonly EnvironmentCode[] =
   else if (!HEADER_NAME.test(header)) codes.push("CODEGUESSR_CLIENT_IP_HEADER_INVALID");
   const limits = env.CODEGUESSR_RATE_LIMITS;
   if (limits !== undefined && limits !== "" && rateLimitMultiplier(limits) === null) codes.push("CODEGUESSR_RATE_LIMITS_INVALID");
-  if (env.GENUI_ENABLED === "1" && !present(env.OPENROUTER_API_KEY)) codes.push("OPENROUTER_API_KEY_MISSING");
+  // Generative UI's provider (`genui/provider.server.ts`): a name it knows, and that provider's key once the feature is on.
+  const provider = providerFor(env);
+  if (provider === null) codes.push("GENUI_PROVIDER_INVALID");
+  if (env.GENUI_ENABLED === "1" && provider !== null && !present(env[`${PREFIX[provider]}_API_KEY`])) {
+    codes.push(provider === "anthropic" ? "ANTHROPIC_API_KEY_MISSING" : "OPENROUTER_API_KEY_MISSING");
+  }
   const real = eventSource(env) === "real";
   if (real && env.OPENROUTER_BASE_URL !== undefined && env.OPENROUTER_BASE_URL !== OPENROUTER_BASE_URL) codes.push("OPENROUTER_BASE_URL_REJECTED");
+  if (real && env.ANTHROPIC_BASE_URL !== undefined && env.ANTHROPIC_BASE_URL !== ANTHROPIC_BASE_URL) codes.push("ANTHROPIC_BASE_URL_REJECTED");
   if (real && env.EXPERIMENT_LAB === "1") codes.push("EXPERIMENT_LAB_REJECTED");
   const named = (env.EXPERIMENT_DISABLED ?? "").split(",").map((pair) => pair.trim()).filter((pair) => pair.length > 0);
   const known = parseDisabled(env.EXPERIMENT_DISABLED);

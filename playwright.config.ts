@@ -39,6 +39,8 @@ export default defineConfig({
       cwd: "apps/game",
       env: {
         GENUI_ENABLED: "1",
+        // Named, so a developer's own Anthropic key in the shell never picks the other provider (`provider.server.ts`).
+        GENUI_PROVIDER: "openrouter",
         OPENROUTER_API_KEY: "e2e-fake-key",
         OPENROUTER_BASE_URL: `http://127.0.0.1:${FAKE_OPENROUTER_PORT}/api/v1`,
         EXPERIMENT_EVENTS_DIR: E2E_EVENTS_DIR,

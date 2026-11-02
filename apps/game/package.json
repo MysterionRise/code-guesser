@@ -9,6 +9,7 @@
     "typecheck": "next typegen && tsc --noEmit"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "4.0.90",
     "@ai-sdk/openai-compatible": "3.0.80",
     "@ai-sdk/react": "4.0.160",
     "@json-render/core": "0.21.3",

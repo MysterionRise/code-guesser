@@ -1,5 +1,6 @@
 import "server-only";
 
+import { createAnthropic, type AnthropicProviderOptions } from "@ai-sdk/anthropic";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { jsonSchema, stepCountIs, streamText, tool, type ModelMessage, type StopCondition, type ToolSet } from "ai";
 
@@ -7,43 +8,45 @@ import { COMPOSER_TOOL_DESCRIPTION, ComposerRejected, composerInputSchema, parse
 import type { Design } from "./designs";
 import { VISUALIZER_TOOL_DESCRIPTION, VisualizerRejected, parseVisualizer } from "./visualizer-spec";
 import { RENDER_CATALOG, RenderCallRejected, componentsFor, inputSchemaFor, parseRenderCall, type RenderLimits } from "./render-catalog";
+import { DEFAULT_BASE_URLS, DEFAULT_MODELS, PREFIX, apiKeyFor, providerFor, setting, type Provider } from "./provider.server";
 import { modelInput, type RoundContext } from "./round-context.server";
 
 /**
  * The one module that calls a model (#101). Every request is built from the answer-lock guard's context
  * (`round-context.server.ts`), never from anything the browser sends except the player's own short chat turns,
  * and the only tools are the render catalog's components, whose props are checked here before they stream out.
+ * Two providers answer (`provider.server.ts`): OpenRouter's OpenAI-compatible endpoint, the default, and Anthropic's
+ * own Messages API with an Anthropic key. Each reads its own settings under its prefix.
  */
 
-export const DEFAULT_MODEL = "anthropic/claude-haiku-5.5";
-export const DEFAULT_BASE_URL = "https://openrouter.ai/api/v1";
+/** OpenRouter's defaults, which `environment.server.ts` and the tests hold a public server to. */
+export const DEFAULT_MODEL = DEFAULT_MODELS.openrouter;
+export const DEFAULT_BASE_URL = DEFAULT_BASE_URLS.openrouter;
 /**
- * How much the model may think before it renders (`OPENROUTER_REASONING`). Off by default: Claude Haiku 5.5 thinks
- * by default and, on the first live check, spent the whole output budget on it. An effort (`low`, `medium`, `high`)
- * is for a model whose endpoint refuses `enabled: false` (OpenRouter's Claude Sonnet 5.5: "Reasoning is mandatory",
- * the #120 pilot). Thinking counts against the output budget, so `low` is the setting to try first. Anything else
- * reads as off.
+ * How much the model may think before it renders (`OPENROUTER_REASONING`, `ANTHROPIC_REASONING`). Off by default:
+ * Claude Haiku 5.5 thinks by default and, on the first live check, spent the whole output budget on it. An effort
+ * (`low`, `medium`, `high`) is for a model whose endpoint refuses `enabled: false` (OpenRouter's Claude Sonnet 5.5:
+ * "Reasoning is mandatory", the #120 pilot). Thinking counts against the output budget, so `low` is the setting to try
+ * first. Anything else reads as off. Under Anthropic's own API, off sends `thinking: disabled` (`anthropicOptions`).
  */
 const REASONING_EFFORTS: ReadonlySet<string> = new Set(["low", "medium", "high"]);
 export type ReasoningSetting = Readonly<{ enabled: false } | { effort: "low" | "medium" | "high" }>;
 export const reasoningSetting = (value: string | undefined = process.env.OPENROUTER_REASONING): ReasoningSetting =>
   value !== undefined && REASONING_EFFORTS.has(value) ? { effort: value as "low" | "medium" | "high" } : { enabled: false };
-/** A setting's value, an empty string reading as unset. */
-const setting = (name: string, env: NodeJS.ProcessEnv): string | undefined => {
-  const value = env[name];
-  return value === undefined || value.length === 0 ? undefined : value;
-};
+/** The provider the environment names or implies; OpenRouter when it names neither, as before there were two. */
+const configured = (env: NodeJS.ProcessEnv): Provider => providerFor(env) ?? "openrouter";
 /**
- * The model a design asks (#120, #237): its own `OPENROUTER_MODEL_<DESIGN>` when set, else `OPENROUTER_MODEL`, else
- * the default. Playtest run 3 compared the two on the same rounds: the explainers were level on accuracy at 14 to 18
- * times the cost, while the Haiku host answered nothing on 3 of 7 after-lock turns where the Sonnet host answered
- * every one, so the host is the design to set apart. The owner sets it.
+ * The model a design asks (#120, #237): its own `<PREFIX>_MODEL_<DESIGN>` when set, else `<PREFIX>_MODEL`, else the
+ * provider's default, under the provider's prefix (`OPENROUTER_`, `ANTHROPIC_`). Playtest run 3 compared the two on
+ * the same rounds: the explainers were level on accuracy at 14 to 18 times the cost, while the Haiku host answered
+ * nothing on 3 of 7 after-lock turns where the Sonnet host answered every one, so the host is the design to set
+ * apart. The owner sets it.
  */
-export const modelFor = (design: Design, env: NodeJS.ProcessEnv = process.env): string =>
-  setting(`OPENROUTER_MODEL_${design.toUpperCase()}`, env) ?? setting("OPENROUTER_MODEL", env) ?? DEFAULT_MODEL;
-/** The reasoning a design runs with: `OPENROUTER_REASONING_<DESIGN>` when set, else `OPENROUTER_REASONING`. */
-export const reasoningFor = (design: Design, env: NodeJS.ProcessEnv = process.env): ReasoningSetting =>
-  reasoningSetting(setting(`OPENROUTER_REASONING_${design.toUpperCase()}`, env) ?? setting("OPENROUTER_REASONING", env));
+export const modelFor = (design: Design, env: NodeJS.ProcessEnv = process.env, provider: Provider = configured(env)): string =>
+  setting(`${PREFIX[provider]}_MODEL_${design.toUpperCase()}`, env) ?? setting(`${PREFIX[provider]}_MODEL`, env) ?? DEFAULT_MODELS[provider];
+/** The reasoning a design runs with: `<PREFIX>_REASONING_<DESIGN>` when set, else `<PREFIX>_REASONING`. */
+export const reasoningFor = (design: Design, env: NodeJS.ProcessEnv = process.env, provider: Provider = configured(env)): ReasoningSetting =>
+  reasoningSetting(setting(`${PREFIX[provider]}_REASONING_${design.toUpperCase()}`, env) ?? setting(`${PREFIX[provider]}_REASONING`, env));
 /** Room for a few render calls or one composed panel; reasoning is off, so none of it goes to thinking. */
 const MAX_OUTPUT_TOKENS = 2_500;
 const TIMEOUT_MS = 20_000;
@@ -254,6 +257,54 @@ export interface CallOutcome {
   readonly ms: number;
 }
 
+/** OpenRouter's OpenAI-compatible endpoint, the default provider: its body fields carry the reasoning setting. */
+const openRouterModel = (design: Design, apiKey: string) => createOpenAICompatible({
+  name: "openrouter",
+  baseURL: process.env.OPENROUTER_BASE_URL ?? DEFAULT_BASE_URL,
+  apiKey,
+  includeUsage: true,
+  transformRequestBody: (body) => ({
+    ...body,
+    // Route only to providers that neither store nor train on prompts.
+    provider: { data_collection: "deny" },
+    // Rendering a few short components needs no thinking, so reasoning is off unless the design's model requires
+    // it (`OPENROUTER_REASONING`, `OPENROUTER_REASONING_<DESIGN>`, above).
+    reasoning: reasoningFor(design, process.env, "openrouter"),
+    ...(SINGLE_CALL.has(design) ? { parallel_tool_calls: false } : {}),
+  }),
+}).chatModel(modelFor(design, process.env, "openrouter"));
+
+/**
+ * Anthropic's own Messages API with an Anthropic key (`ANTHROPIC_API_KEY`; its standard store is
+ * `~/.config/anthropic/key`). The AI SDK's Anthropic provider speaks it directly, with no router in between, so
+ * there is no routing to ask for: Anthropic's own terms apply (the privacy page says which), and spend limits live
+ * on the key's workspace in the Anthropic Console.
+ */
+const anthropicModel = (design: Design, apiKey: string) => createAnthropic({
+  apiKey,
+  baseURL: process.env.ANTHROPIC_BASE_URL ?? DEFAULT_BASE_URLS.anthropic,
+})(modelFor(design, process.env, "anthropic"));
+
+/**
+ * What the Anthropic request carries in place of OpenRouter's body fields. Reasoning off is `thinking: disabled`;
+ * the provider sends Claude Sonnet 5.5's lowest setting (`between_tools`) instead, since that model can't switch
+ * thinking off, and drops it for a model that always thinks. An effort runs adaptive thinking at that effort. A
+ * single-call design asks for one tool call at a time, as `parallel_tool_calls: false` does on OpenRouter.
+ */
+export type AnthropicOptions = Readonly<{
+  thinking: { type: "adaptive" } | { type: "disabled" };
+  effort?: "low" | "medium" | "high";
+  disableParallelToolUse?: true;
+}>;
+export const anthropicOptions = (design: Design, env: NodeJS.ProcessEnv = process.env): AnthropicOptions => {
+  const reasoning = reasoningFor(design, env, "anthropic");
+  // Plain JSON, as provider options must be; `satisfies` holds each shape to what the provider accepts.
+  const thinking: AnthropicOptions = "effort" in reasoning
+    ? ({ thinking: { type: "adaptive" }, effort: reasoning.effort } satisfies AnthropicProviderOptions)
+    : ({ thinking: { type: "disabled" } } satisfies AnthropicProviderOptions);
+  return SINGLE_CALL.has(design) ? ({ ...thinking, disableParallelToolUse: true } satisfies AnthropicProviderOptions) : thinking;
+};
+
 export interface RoundRequest {
   readonly design: Design;
   readonly context: RoundContext;
@@ -273,24 +324,13 @@ export interface RoundRequest {
  * browser or the log beyond a code.
  */
 export const streamRound = ({ design, context, limits, codeLines, turns, offered = false, signal, onOutcome }: RoundRequest): Response | GenuiRefusal => {
-  const apiKey = process.env.OPENROUTER_API_KEY;
-  if (apiKey === undefined || apiKey.length === 0) return "GENUI_UNAVAILABLE";
+  // No provider, or no key for the one configured, and the game plays its static reveal; a wrong `GENUI_PROVIDER` is
+  // a boot refusal in public mode (`environment.server.ts`).
+  const provider = providerFor();
+  const apiKey = provider === null ? undefined : apiKeyFor(provider);
+  if (provider === null || apiKey === undefined) return "GENUI_UNAVAILABLE";
   if (context.phase === "before-lock" && mentionsCode(turns, codeLines)) return "PASTED_CODE";
-  const provider = createOpenAICompatible({
-    name: "openrouter",
-    baseURL: process.env.OPENROUTER_BASE_URL ?? DEFAULT_BASE_URL,
-    apiKey,
-    includeUsage: true,
-    transformRequestBody: (body) => ({
-      ...body,
-      // Route only to providers that neither store nor train on prompts.
-      provider: { data_collection: "deny" },
-      // Rendering a few short components needs no thinking, so reasoning is off unless the design's model requires
-      // it (`OPENROUTER_REASONING`, `OPENROUTER_REASONING_<DESIGN>`, above).
-      reasoning: reasoningFor(design),
-      ...(SINGLE_CALL.has(design) ? { parallel_tool_calls: false } : {}),
-    }),
-  });
+  const model = provider === "anthropic" ? anthropicModel(design, apiKey) : openRouterModel(design, apiKey);
   const { system: rules, data } = modelInput(context);
   const system = DESIGN_RULES[design] === undefined ? rules : `${rules}\n${DESIGN_RULES[design]}`;
   const messages: ModelMessage[] = [
@@ -300,10 +340,11 @@ export const streamRound = ({ design, context, limits, codeLines, turns, offered
   const started = Date.now();
   const tokens = (value: number | undefined): number => Number.isSafeInteger(value) && value! >= 0 ? value! : 0;
   const result = streamText({
-    model: provider.chatModel(modelFor(design)),
+    model,
     system,
     messages,
     tools: toolsFor(design, context, limits, offered),
+    ...(provider === "anthropic" ? { providerOptions: { anthropic: anthropicOptions(design) } } : {}),
     stopWhen: stopFor(design),
     maxOutputTokens: LONG_OUTPUT_TOKENS[design] ?? MAX_OUTPUT_TOKENS,
     maxRetries: 1,
