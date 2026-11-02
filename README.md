@@ -400,6 +400,10 @@ GENUI_ENABLED=1 OPENROUTER_API_KEY=… pnpm --filter @codeguessr/game dev
   `OPENROUTER_REASONING` is `off` by default (the model renders without
   thinking); `low`, `medium`, or `high` asks for that effort, for a model whose
   endpoint requires reasoning, such as Claude Sonnet 5.5 on OpenRouter.
+  A design may have its own: `OPENROUTER_MODEL_HOST` and
+  `OPENROUTER_REASONING_HOST` (likewise `_CATALOG`, `_COMPOSER`, `_VISUALIZER`)
+  override the shared setting for that design alone. Playtest run 3 found the
+  host the one design worth a stronger model.
 - Set spend limits on the OpenRouter key itself. When the key is refused, the
   explainer steps aside and the game plays on. A panel that fails offers
   "Try again" once.
