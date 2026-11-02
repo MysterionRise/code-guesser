@@ -26,10 +26,10 @@ import { RATE_LIMITED_MESSAGE, SESSION_ENDED_MESSAGE, UPDATED_MESSAGE, points } 
 import { CodePanes } from "./code-panes";
 import { HintBar } from "./hint-bar";
 import { keepGame, type GameRecords, type RecordDelta } from "./local-records";
-import { LINE_KINDS, optionLine, type PublicModeContract } from "./mode-contract";
+import { LINE_KINDS, optionLine, type PublicModeContract, type RoundModeKind } from "./mode-contract";
 import { ArcadeHeader, RoundTrack } from "./round-header";
 import { QuestionScaffold, markedLines } from "./question-layer";
-import { RoundReveal } from "./round-reveal";
+import { NO_REPEATS, RoundReveal, type RevealRepeats } from "./round-reveal";
 
 /** The host design's chat, fetched only when the server turns it on, so the static game never loads it. */
 const HostChat = React.lazy(() => import("../../genui/host-chat")) as React.ComponentType<HostChatProps>;
@@ -118,6 +118,12 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
   // changed is set with the last reveal, so the live region announces the reveal once, record line included.
   const kept = React.useRef(false);
   const [recordDelta, setRecordDelta] = React.useState<RecordDelta | null>(null);
+
+  // A deck's reveals share their method (the explanation) and often their misleading signals, so a game shows each
+  // once per deck: a later round of the same kind whose text repeats a shown one leaves it out, and the round's own
+  // evidence leads.
+  const shown = React.useRef(new Map<RoundModeKind, Readonly<{ explanation: string; misleading: string }>>());
+  const [repeats, setRepeats] = React.useState<RevealRepeats>(NO_REPEATS);
   const keep = (completed: ArcadeSession) => {
     if (completed.status !== "complete" || records === undefined || kept.current) return;
     kept.current = true;
@@ -185,6 +191,10 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
       const result = projectDisplayReveal(response.reveal);
       const locked = transitionArcadeSession(mode, session, { type: "lock-answer", candidateId: choice });
       const revealed = transitionArcadeSession(mode, locked, { type: "accept-reveal", reveal: result });
+      const prior = shown.current.get(round.mode.kind);
+      const misleading = result.misleadingSignals.join("\n");
+      setRepeats({ explanation: prior?.explanation === result.explanation, misleading: prior?.misleading === misleading });
+      shown.current.set(round.mode.kind, { explanation: result.explanation, misleading });
       setSession(revealed);
       keep(revealed);
       token.current = response.sessionToken;
@@ -226,6 +236,7 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
     setFocusedCandidate(null);
     setError(null);
     setHintError(null);
+    setRepeats(NO_REPEATS);
   };
 
   return (
@@ -288,7 +299,7 @@ export function ArcadeShell({ mode, sessionToken, authorizeRevealAction, revealH
             <RoundReveal round={round} reveal={session.reveal} hintsUsed={session.visibleHintCount}
               pickLabel={labelOf(session.lockedCandidateId)} complete={session.status === "complete"}
               correctRounds={session.correctRounds} history={session.history} deckTitle={deckTitle} roundDecks={roundDecks} shareHref={shareHref} newGameHref={newGameHref} replayHref={replayHref}
-              chooseAnotherDeckHref={chooseAnotherDeckHref} genuiDesign={genuiDesign} duel={duel} opponentName={opponentName} recordDelta={recordDelta} sessionToken={currentToken}
+              chooseAnotherDeckHref={chooseAnotherDeckHref} genuiDesign={genuiDesign} duel={duel} opponentName={opponentName} recordDelta={recordDelta} repeats={repeats} sessionToken={currentToken}
               onNext={next} headingRef={revealHeading} track={track} trackGenui={trackGenui} />
           )}
         </div>

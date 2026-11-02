@@ -20,6 +20,10 @@ const linkedAttribution = (attribution: string): React.ReactNode[] => attributio
     ? <a key={index} href={part} rel="noreferrer noopener" target="_blank">{part}</a>
     : part);
 
+/** Which parts of a round's "why" this game has shown already on a round of the same kind, word for word. */
+export type RevealRepeats = Readonly<{ explanation: boolean; misleading: boolean }>;
+export const NO_REPEATS: RevealRepeats = Object.freeze({ explanation: false, misleading: false });
+
 /** Generative UI's panel, fetched only when the server turns it on, so the static game never loads it. */
 const GenuiPanel = React.lazy(() => import("../../genui/genui-panel")) as React.ComponentType<GenuiPanelProps>;
 
@@ -116,7 +120,7 @@ function CompletionActions({ result, correctRounds, history, deckTitle, shareHre
  * renders it only after the server authorized the reveal. In a friend's game of a challenge (#173), it also says how
  * the challenger did on this round, and the game ends on the duel's comparison instead of the usual way on.
  */
-export function RoundReveal({ round, reveal, hintsUsed, pickLabel, complete, correctRounds, history, deckTitle, roundDecks, shareHref, newGameHref, replayHref, chooseAnotherDeckHref, genuiDesign, duel, opponentName, recordDelta, sessionToken, onNext, headingRef, track, trackGenui }: {
+export function RoundReveal({ round, reveal, hintsUsed, pickLabel, complete, correctRounds, history, deckTitle, roundDecks, shareHref, newGameHref, replayHref, chooseAnotherDeckHref, genuiDesign, duel, opponentName, recordDelta, repeats, sessionToken, onNext, headingRef, track, trackGenui }: {
   readonly round: Readonly<PublicRound>;
   readonly reveal: AuthorizedReveal;
   readonly hintsUsed: number;
@@ -141,6 +145,8 @@ export function RoundReveal({ round, reveal, hintsUsed, pickLabel, complete, cor
   readonly opponentName: string | null;
   /** What the finished game changed in the player's records (#63); null while the game runs, or where none are kept. */
   readonly recordDelta: RecordDelta | null;
+  /** The parts of the "why" an earlier round of this kind showed in the same words, which this one leaves out. */
+  readonly repeats: RevealRepeats;
   readonly sessionToken: () => string;
   readonly onNext: () => void;
   readonly headingRef: React.Ref<HTMLHeadingElement>;
@@ -184,10 +190,11 @@ export function RoundReveal({ round, reveal, hintsUsed, pickLabel, complete, cor
       )}
       <details className="reveal-why" open={whyOpen} onToggle={(event) => setWhyOpen(event.currentTarget.open)}>
         <summary>Why it’s {answer}</summary>
+        {/* The round's own evidence and signals first; the deck's method and its misleading signals once a game per deck. */}
         <p>{reveal.evidence}</p>
-        <p>{reveal.explanation}</p>
         <p>Helpful signals: {reveal.helpfulSignals.join(" · ")}</p>
-        <p>Misleading signals: {reveal.misleadingSignals.join(" · ")}</p>
+        {!repeats.explanation && <p className="reveal-method">{reveal.explanation}</p>}
+        {!repeats.misleading && <p className="reveal-misleading">Misleading signals: {reveal.misleadingSignals.join(" · ")}</p>}
       </details>
       {genuiDesign && genuiDesign !== "host" && (
         <React.Suspense fallback={null}>

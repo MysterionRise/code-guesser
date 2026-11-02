@@ -63,6 +63,8 @@ test("a mixed game's summary names each round's deck", async ({ page }) => {
     if (round > 1) await page.getByRole("button", { name: "Next round" }).click();
     await expect(page.getByText(`Round ${round} of 5`)).toBeVisible();
     decks.push(deckOf.get(await lockRound(page, round !== 2))!.title);
+    // Each round is the first of its deck in the game, so each shows its deck's method.
+    await expect(page.locator(".reveal-why .reveal-method")).toHaveCount(1);
   }
   const summary = page.getByRole("region", { name: "Your game" });
   await expect(summary.locator("thead th")).toHaveText(["#", "Deck", "Your pick", "Answer", "Points"]);
@@ -75,12 +77,18 @@ test("a mixed game's summary names each round's deck", async ({ page }) => {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
 });
 
-test("a deck's own summary needs no deck column", async ({ page }) => {
+test("a deck's own summary needs no deck column, and its reveals give the deck's method once", async ({ page }) => {
   await page.goto("/?deck=fix&design=off");
   for (let round = 1; round <= 5; round += 1) {
     if (round > 1) await page.getByRole("button", { name: "Next round" }).click();
     await expect(page.getByText(`Round ${round} of 5`)).toBeVisible();
     await lockRound(page);
+    // The round's own evidence leads; the deck's one explanation, and its one misleading signal, show on round 1 only.
+    const why = page.locator(".reveal-why");
+    await expect(why.locator("p").first()).not.toHaveText(/^(?:Helpful|Misleading) signals:/u);
+    await expect(why.locator(".reveal-method")).toHaveCount(round === 1 ? 1 : 0);
+    await expect(why.locator(".reveal-misleading")).toHaveCount(round === 1 ? 1 : 0);
+    await expect(why.getByText(/^Helpful signals:/u)).toBeVisible();
   }
   await expect(page.getByRole("region", { name: "Your game" }).locator("thead th")).toHaveText(["#", "Your pick", "Answer", "Points"]);
 });

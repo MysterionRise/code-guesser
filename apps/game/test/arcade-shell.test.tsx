@@ -248,6 +248,17 @@ describe("static arcade shell", () => {
     expect(reveal.indexOf('className="record-line"')).toBeLessThan(reveal.indexOf("<GameSummary"));
   });
 
+  it("leads each reveal's why with the round's own evidence, and shows a deck's method and misleading signal once a game", () => {
+    const reveal = readFileSync(new URL("../src/components/arcade/round-reveal.tsx", import.meta.url), "utf8");
+    const why = reveal.slice(reveal.indexOf('className="reveal-why"'), reveal.indexOf("</details>"));
+    const order = ["{reveal.evidence}", "Helpful signals:", "!repeats.explanation && <p className=\"reveal-method\">", "!repeats.misleading && <p className=\"reveal-misleading\">"]
+      .map((marker) => { expect(why, marker).toContain(marker); return why.indexOf(marker); });
+    expect([...order].sort((left, right) => left - right)).toEqual(order);
+    const shell = readFileSync(new URL("../src/components/arcade/arcade-shell.tsx", import.meta.url), "utf8");
+    expect(shell).toMatch(/prior\?\.explanation === result\.explanation/u);
+    expect(shell).toMatch(/setRepeats\(NO_REPEATS\)/u);
+  });
+
   it("states what each round earned and the hints it took, under the verdict in the live reveal", () => {
     expect(roundPointsNote(1000, 0)).toBe("+1,000 points (no hints)");
     expect(roundPointsNote(800, 1)).toBe("+800 points (1 hint)");
