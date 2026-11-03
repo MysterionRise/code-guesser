@@ -128,13 +128,15 @@ export const DISCLOSURES: readonly Disclosure[] = Object.freeze([
     id: "model",
     title: "Explainers and the host",
     summary: [
-      "Some games draw an explainer or a chat host, written by a language model. Those games send the round to OpenRouter and the model provider it routes to: before you answer, the deck, the question, the options' labels, the hints you bought, and your score; after you answer, the code and the reveal too; and whatever you type to the host. Nothing that identifies you goes with it, unless you type it.",
-      "Each request asks OpenRouter to route only to providers that neither store nor train on prompts, and zero data retention is an OpenRouter account setting the server's operator turns on for its key. CodeGuessr stores no chat: the event log records only that a call happened, how it went, how long it took, and its token counts.",
+      "Some games draw an explainer or a chat host, written by a language model. Those games send the round to the model service the server's operator configured, either OpenRouter and the model provider it routes to, or Anthropic directly: before you answer, the deck, the question, the options' labels, the hints you bought, and your score; after you answer, the code and the reveal too; and whatever you type to the host. Nothing that identifies you goes with it, unless you type it.",
+      "Through OpenRouter, each request asks for providers that neither store nor train on prompts, and zero data retention is an OpenRouter account setting the server's operator turns on for its key. Through Anthropic, its commercial terms apply: it does not train on what the game sends, and deletes it within 30 days by default. CodeGuessr stores no chat: the event log records only that a call happened, how it went, how long it took, and its token counts.",
     ],
     items: [],
     links: [
       { href: "https://openrouter.ai/docs/features/privacy-and-logging", label: "OpenRouter: provider logging" },
       { href: "https://openrouter.ai/docs/features/zdr", label: "OpenRouter: zero data retention" },
+      { href: "https://privacy.claude.com/en/articles/7996868-is-my-data-used-for-model-training", label: "Anthropic: is my data used for model training?" },
+      { href: "https://privacy.claude.com/en/articles/7996866-how-long-do-you-store-personal-data", label: "Anthropic: how long is data stored?" },
     ],
   },
   {

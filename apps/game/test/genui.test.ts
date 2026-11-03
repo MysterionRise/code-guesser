@@ -16,12 +16,15 @@ vi.mock("../src/demo/local-real-experiment-loader.server", async (importOriginal
 });
 
 const { POST } = await import("../src/app/api/genui/route");
-const { DEFAULT_MODEL, MAX_TURN_LENGTH, MAX_TURNS, hintOffered, mentionsCode, modelFor, playerTurns, reasoningFor } = await import("../src/genui/model.server");
+const { DEFAULT_MODEL, MAX_TURN_LENGTH, MAX_TURNS, anthropicOptions, hintOffered, mentionsCode, modelFor, playerTurns, reasoningFor } = await import("../src/genui/model.server");
+const { DEFAULT_MODELS, apiKeyFor, providerFor } = await import("../src/genui/provider.server");
 const { inputSchemaFor, RENDER_CATALOG } = await import("../src/genui/render-catalog");
 const { explainRequest, fellBack, renderViews, wasLimited } = await import("../src/genui/genui-panel");
 const { HOST_HISTORY, HOST_TURN_LENGTH, withPick } = await import("../src/genui/host-chat");
-// @ts-expect-error The fake is plain JavaScript shared with the browser tests.
+// @ts-expect-error The fakes are plain JavaScript shared with the browser tests.
 const { startFakeOpenRouter } = await import("../../../tests/e2e/fake-openrouter.mjs");
+// @ts-expect-error As above.
+const { startFakeAnthropic } = await import("../../../tests/e2e/fake-anthropic.mjs");
 
 interface Fixture { roundId: string; correctCandidateId: string; panes: { text: string }[] }
 const fixtures = new Map((JSON.parse(readFileSync(ARTIFACT_PATH, "utf8")) as { decks: { fixtures: Fixture[] }[] })
@@ -32,6 +35,20 @@ const userMessage = (text: string) => ({ id: "m1", role: "user", parts: [{ type:
 const post = (body: unknown) => POST(new Request("http://127.0.0.1/api/genui", { method: "POST", body: typeof body === "string" ? body : JSON.stringify(body) }));
 /** The text a model saw: the system rule and every message, as one string. */
 const seen = (request: any): string => JSON.stringify(request.body.messages);
+/** A dealt language game that drew the given design (#106), with its first round answered when asked. */
+const game = (answered: boolean, design: "catalog" | "composer" | "visualizer" | "host" = "catalog") => {
+  const { mode, sessionToken } = experiment.dealGame("language", seeded(9), Date.now(),
+    { arms: { design, theme: "terminal", layer: "off" }, record: true });
+  const round = mode.rounds[0]!;
+  const fixture = fixtures.get(round.roundId)!;
+  const token = answered
+    ? (experiment.answer({ sessionToken, roundId: round.roundId, candidateId: fixture.correctCandidateId }) as any).sessionToken as string
+    : sessionToken;
+  return { mode, round, fixture, token };
+};
+/** The code lines of a round a model must never see before the lock. */
+const codeLinesOf = (fixture: Fixture): string[] =>
+  fixture.panes.flatMap(({ text }) => text.split("\n")).map((text) => text.trim()).filter((text) => text.length >= 8);
 
 describe("generative UI building blocks (#101)", () => {
   it("describes every component's props as a closed JSON Schema", () => {
@@ -156,21 +173,12 @@ describe("the generative-UI route (#101)", () => {
     vi.stubEnv("GENUI_ENABLED", "1");
     vi.stubEnv("OPENROUTER_API_KEY", "test-key-not-real");
     vi.stubEnv("OPENROUTER_BASE_URL", `http://127.0.0.1:${fake.port}/api/v1`);
+    // The shell running the tests may hold an Anthropic key; it must never pick the other provider here.
+    vi.stubEnv("GENUI_PROVIDER", "");
+    vi.stubEnv("ANTHROPIC_API_KEY", "");
   });
   afterEach(() => { fake.control({}); logged.mockClear(); });
   afterAll(async () => { vi.unstubAllEnvs(); logged.mockRestore(); await fake.close(); });
-
-  /** A dealt language game that drew the given design (#106), with its first round answered when asked. */
-  const game = (answered: boolean, design: "catalog" | "composer" | "visualizer" | "host" = "catalog") => {
-    const { mode, sessionToken } = experiment.dealGame("language", seeded(9), Date.now(),
-      { arms: { design, theme: "terminal", layer: "off" }, record: true });
-    const round = mode.rounds[0]!;
-    const fixture = fixtures.get(round.roundId)!;
-    const token = answered
-      ? (experiment.answer({ sessionToken, roundId: round.roundId, candidateId: fixture.correctCandidateId }) as any).sessionToken as string
-      : sessionToken;
-    return { mode, round, fixture, token };
-  };
 
   it("is off unless enabled, and needs a key before it calls anyone", async () => {
     const { round, token } = game(true);
@@ -415,5 +423,160 @@ describe("the reasoning setting (#120)", async () => {
     expect(hintOffered([userMessage("Hi"), offer, userMessage("Tips?")])).toBe(true);
     expect(hintOffered("nonsense")).toBe(false);
     expect(hintOffered([{ role: "user", parts: [{ type: "tool-offer_hint" }] }])).toBe(false);
+  });
+});
+
+describe("the generative-UI route on Anthropic's own API", () => {
+  let fake: Awaited<ReturnType<typeof startFakeAnthropic>>;
+  // Spied once the OpenRouter block has restored console.error, or its restore would drop this spy too.
+  const spyOnErrors = () => vi.spyOn(console, "error").mockImplementation(() => undefined);
+  let logged: ReturnType<typeof spyOnErrors>;
+  const sent = (request: any): string => JSON.stringify(request.body);
+
+  beforeAll(async () => {
+    logged = spyOnErrors();
+    fake = await startFakeAnthropic();
+    vi.stubEnv("GENUI_ENABLED", "1");
+    vi.stubEnv("GENUI_PROVIDER", "anthropic");
+    vi.stubEnv("ANTHROPIC_API_KEY", "test-key-not-real");
+    vi.stubEnv("ANTHROPIC_BASE_URL", `http://127.0.0.1:${fake.port}/v1`);
+    // An OpenRouter key beside it changes nothing once the provider is named.
+    vi.stubEnv("OPENROUTER_API_KEY", "openrouter-key-that-must-not-be-sent");
+    vi.stubEnv("OPENROUTER_BASE_URL", "http://127.0.0.1:1/api/v1");
+  });
+  afterEach(() => { fake.control({}); logged.mockClear(); });
+  afterAll(async () => { vi.unstubAllEnvs(); logged.mockRestore(); await fake.close(); });
+
+  it("sends the round under the key header with thinking off, and no code before the lock", async () => {
+    const { round, fixture, token } = game(false, "host");
+    const response = await post({ sessionToken: token, roundId: round.roundId, design: "host", messages: [userMessage("Any tips?")] });
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain('"output":{"reason":"Stuck? A hint might point you the right way."}');
+    expect(fake.requests).toHaveLength(1);
+    const [request] = fake.requests;
+    expect(request.apiKey).toBe("test-key-not-real");
+    expect(request.version).toBe("2023-06-01");
+    expect(request.body.model).toBe(DEFAULT_MODELS.anthropic);
+    expect(request.body.stream).toBe(true);
+    expect(request.body.max_tokens).toBe(2500);
+    // Off is `disabled` here, where OpenRouter takes `enabled: false`; no effort, so no output_config.
+    expect(request.body.thinking).toEqual({ type: "disabled" });
+    expect(request.body.output_config).toBeUndefined();
+    expect(request.body.tool_choice).toEqual({ type: "auto" });
+    expect(request.body.tools.map((entry: any) => entry.name)).toEqual(["host_message", "offer_hint"]);
+    expect(JSON.stringify(request.body.system)).toMatch(/You are chatting with the player during the round/u);
+    for (const line of codeLinesOf(fixture)) expect(sent(request).includes(JSON.stringify(line).slice(1, -1)), `code reached the model: ${line}`).toBe(false);
+    expect(sent(request)).not.toContain(fixture.correctCandidateId);
+    expect(sent(request)).not.toContain("openrouter");
+  });
+
+  it("gives the host its own model and effort, and a Sonnet host with reasoning off its lowest thinking setting (#237)", async () => {
+    const { round, token } = game(false, "host");
+    vi.stubEnv("ANTHROPIC_MODEL_HOST", "claude-sonnet-5-5");
+    vi.stubEnv("ANTHROPIC_REASONING_HOST", "low");
+    try {
+      await (await post({ sessionToken: token, roundId: round.roundId, design: "host", messages: [userMessage("Any tips?")] })).text();
+      expect(fake.requests.at(-1).body.model).toBe("claude-sonnet-5-5");
+      expect(fake.requests.at(-1).body.thinking).toEqual({ type: "adaptive" });
+      expect(fake.requests.at(-1).body.output_config).toEqual({ effort: "low" });
+      // Claude Sonnet 5.5 can't switch thinking off: the provider sends `between_tools`, its lowest setting, instead.
+      vi.stubEnv("ANTHROPIC_REASONING_HOST", "");
+      await (await post({ sessionToken: token, roundId: round.roundId, design: "host", messages: [userMessage("Any tips?")] })).text();
+      expect(fake.requests.at(-1).body.model).toBe("claude-sonnet-5-5");
+      expect(fake.requests.at(-1).body.thinking).toEqual({ type: "between_tools" });
+      expect(fake.requests.at(-1).body.output_config).toBeUndefined();
+      // The explainers keep the shared model and setting.
+      const explained = game(true, "catalog");
+      await (await post({ sessionToken: explained.token, roundId: explained.round.roundId, design: "catalog", messages: [userMessage("Explain this round.")] })).text();
+      expect(fake.requests.at(-1).body.model).toBe(DEFAULT_MODELS.anthropic);
+      expect(fake.requests.at(-1).body.thinking).toEqual({ type: "disabled" });
+    } finally {
+      vi.stubEnv("ANTHROPIC_MODEL_HOST", "");
+      vi.stubEnv("ANTHROPIC_REASONING_HOST", "");
+    }
+  });
+
+  it("after the lock, sends the code and streams checked render calls, one call at a time for a single-call design", async () => {
+    const { round, fixture, token } = game(true);
+    const stream = await (await post({ sessionToken: token, roundId: round.roundId, design: "catalog", messages: [userMessage("Explain this round.")] })).text();
+    expect(stream).toContain('"output":{"text":"Read the keywords before the punctuation."}');
+    expect(stream).toContain('"helpful":["The block keywords"]');
+    const [request] = fake.requests;
+    expect(request.body.tools.map((entry: any) => entry.name)).toEqual(["host_message", "takeaway", "signal_list", "code_view", "comparison"]);
+    expect(seen(request)).toContain(JSON.stringify(fixture.panes[0]!.text.split("\n")[0]!.trim()).slice(1, -1).replace(/</gu, "\\\\u003c"));
+
+    const visual = game(true, "visualizer");
+    const page = await (await post({ sessionToken: visual.token, roundId: visual.round.roundId, design: "visualizer", messages: [userMessage("Visualize this round.")] })).text();
+    expect(page).toContain('"type":"tool-output-available"');
+    expect(page).toContain("Stepping through the round");
+    const [, visualizer] = fake.requests;
+    expect(visualizer.body.tools.map((entry: any) => entry.name)).toEqual(["render_visualizer"]);
+    expect(visualizer.body.max_tokens).toBe(9000);
+    expect(visualizer.body.tool_choice).toEqual({ type: "auto", disable_parallel_tool_use: true });
+  });
+
+  it("drops a render call that fails the catalog, and hides Anthropic's failures behind a code", async () => {
+    const { round, token } = game(true);
+    fake.control({ calls: [{ name: "takeaway", args: { text: "Claim it at https://example.test" } }] });
+    const unsafe = await (await post({ sessionToken: token, roundId: round.roundId, design: "catalog", messages: [userMessage("Explain this round.")] })).text();
+    expect(unsafe).toContain('"errorText":"GENUI_FAILED"');
+    expect(unsafe).not.toContain("tool-output-available");
+
+    fake.control({ status: 402 });
+    const body = await (await post({ sessionToken: token, roundId: round.roundId, design: "catalog", messages: [userMessage("Explain this round.")] })).text();
+    expect(body).toContain("GENUI_FAILED");
+    expect(body).not.toContain("fake provider body");
+    expect(logged.mock.calls.map(([line]) => line)).toEqual(["GENUI_RENDER_REJECTED takeaway PROPS_TEXT_UNSAFE", "GENUI_STREAM_FAILED 402"]);
+  });
+
+  it("steps aside without the Anthropic key, whatever OpenRouter key is set, and on a provider it can't name", async () => {
+    const { round, token } = game(true);
+    vi.stubEnv("ANTHROPIC_API_KEY", "");
+    try {
+      const response = await post({ sessionToken: token, roundId: round.roundId, design: "catalog", messages: [userMessage("Explain this round.")] });
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({ reason: "GENUI_UNAVAILABLE" });
+      vi.stubEnv("ANTHROPIC_API_KEY", "test-key-not-real");
+      vi.stubEnv("GENUI_PROVIDER", "openai");
+      expect((await post({ sessionToken: token, roundId: round.roundId, design: "catalog", messages: [userMessage("Explain this round.")] })).status).toBe(503);
+    } finally {
+      vi.stubEnv("ANTHROPIC_API_KEY", "test-key-not-real");
+      vi.stubEnv("GENUI_PROVIDER", "anthropic");
+    }
+    expect(fake.requests).toHaveLength(0);
+  });
+});
+
+describe("the provider choice", () => {
+  it("is OpenRouter unless named otherwise, or implied by an Anthropic key alone", () => {
+    expect(providerFor({})).toBe("openrouter");
+    expect(providerFor({ OPENROUTER_API_KEY: "k" })).toBe("openrouter");
+    expect(providerFor({ ANTHROPIC_API_KEY: "k" })).toBe("anthropic");
+    expect(providerFor({ ANTHROPIC_API_KEY: "k", OPENROUTER_API_KEY: "k" })).toBe("openrouter");
+    expect(providerFor({ ANTHROPIC_API_KEY: "k", OPENROUTER_API_KEY: "" })).toBe("anthropic");
+    expect(providerFor({ GENUI_PROVIDER: "anthropic" })).toBe("anthropic");
+    expect(providerFor({ GENUI_PROVIDER: "openrouter", ANTHROPIC_API_KEY: "k" })).toBe("openrouter");
+    expect(providerFor({ GENUI_PROVIDER: "", ANTHROPIC_API_KEY: "k" })).toBe("anthropic");
+    for (const wrong of ["openai", "Anthropic", "anthropic ", "both"]) expect(providerFor({ GENUI_PROVIDER: wrong }), wrong).toBeNull();
+    expect(apiKeyFor("anthropic", { ANTHROPIC_API_KEY: "k", OPENROUTER_API_KEY: "o" })).toBe("k");
+    expect(apiKeyFor("openrouter", { ANTHROPIC_API_KEY: "k" })).toBeUndefined();
+    expect(apiKeyFor("openrouter", { OPENROUTER_API_KEY: "" })).toBeUndefined();
+  });
+
+  it("reads each provider's own model and reasoning settings, under its prefix", () => {
+    const env = { ANTHROPIC_MODEL_HOST: "claude-sonnet-5-5", ANTHROPIC_REASONING_HOST: "low", OPENROUTER_MODEL_HOST: "anthropic/claude-sonnet-5.5" };
+    expect(modelFor("host", env, "anthropic")).toBe("claude-sonnet-5-5");
+    expect(modelFor("catalog", env, "anthropic")).toBe(DEFAULT_MODELS.anthropic);
+    expect(reasoningFor("host", env, "anthropic")).toEqual({ effort: "low" });
+    expect(reasoningFor("catalog", env, "anthropic")).toEqual({ enabled: false });
+    expect(reasoningFor("catalog", { ...env, ANTHROPIC_REASONING: "medium" }, "anthropic")).toEqual({ effort: "medium" });
+    // With no provider passed, the keys decide.
+    expect(modelFor("host", { ...env, ANTHROPIC_API_KEY: "k" })).toBe("claude-sonnet-5-5");
+    expect(modelFor("host", { ...env, OPENROUTER_API_KEY: "k" })).toBe("anthropic/claude-sonnet-5.5");
+    expect(modelFor("host", { ...env, GENUI_PROVIDER: "nonsense" })).toBe("anthropic/claude-sonnet-5.5");
+    expect(anthropicOptions("host", env)).toEqual({ thinking: { type: "adaptive" }, effort: "low" });
+    expect(anthropicOptions("catalog", env)).toEqual({ thinking: { type: "disabled" } });
+    expect(anthropicOptions("visualizer", {})).toEqual({ thinking: { type: "disabled" }, disableParallelToolUse: true });
+    expect(anthropicOptions("composer", { ANTHROPIC_REASONING: "high" })).toEqual({ thinking: { type: "adaptive" }, effort: "high", disableParallelToolUse: true });
   });
 });

@@ -321,8 +321,11 @@ server exits with status 78.
 | `EXPERIMENT_EVENTS_DIR` | Required: an absolute directory for the event log |
 | `CODEGUESSR_CLIENT_IP_HEADER` | Required: the header the reverse proxy sets to the client's address, such as `X-Forwarded-For`, for rate limits (#98) |
 | `CODEGUESSR_RATE_LIMITS` | Optional: `on`, or a positive multiplier of every rate limit such as `2` or `0.5`; anything else is refused |
-| `OPENROUTER_API_KEY` | Required when `GENUI_ENABLED=1` |
+| `GENUI_PROVIDER` | Optional: `openrouter` or `anthropic`. Unset, `anthropic` when only `ANTHROPIC_API_KEY` is set, else `openrouter` |
+| `OPENROUTER_API_KEY` | Required when `GENUI_ENABLED=1` and the provider is OpenRouter |
+| `ANTHROPIC_API_KEY` | Required when `GENUI_ENABLED=1` and the provider is Anthropic |
 | `OPENROUTER_BASE_URL` | Unset or `https://openrouter.ai/api/v1`, unless `EXPERIMENT_SOURCE` is `agent` or `synthetic` |
+| `ANTHROPIC_BASE_URL` | Unset or `https://api.anthropic.com/v1`, under the same exception |
 | `EXPERIMENT_LAB` | Refused, unless `EXPERIMENT_SOURCE` is `agent` or `synthetic`; lab mode stays off for real games |
 | `EXPERIMENT_DISABLED` | Only known `factor:level` pairs |
 
@@ -375,12 +378,15 @@ the process, so they assume one instance.
 
 ### Generative UI (experimental)
 
-Off by default. With `GENUI_ENABLED=1` and an OpenRouter key, a revealed round
+Off by default. With `GENUI_ENABLED=1` and a key for OpenRouter or for
+Anthropic's own API, a revealed round
 offers an **Explainer**: a model annotates the code, lists the signals that
 pointed to the answer and away from it, and gives a one-line takeaway.
 
 ```bash
 GENUI_ENABLED=1 OPENROUTER_API_KEY=… pnpm --filter @codeguessr/game dev
+# or, with an Anthropic key (its standard store is ~/.config/anthropic/key, mode 0600):
+GENUI_ENABLED=1 ANTHROPIC_API_KEY="$(cat ~/.config/anthropic/key)" pnpm --filter @codeguessr/game dev
 ```
 
 - Each game draws its design at random when it is dealt, and keeps it (see
@@ -404,15 +410,27 @@ GENUI_ENABLED=1 OPENROUTER_API_KEY=… pnpm --filter @codeguessr/game dev
   `OPENROUTER_REASONING_HOST` (likewise `_CATALOG`, `_COMPOSER`, `_VISUALIZER`)
   override the shared setting for that design alone. Playtest run 3 found the
   host the one design worth a stronger model.
-- Set spend limits on the OpenRouter key itself. When the key is refused, the
+- **Anthropic directly.** With `ANTHROPIC_API_KEY` set and no OpenRouter key,
+  or `GENUI_PROVIDER=anthropic`, the game calls Anthropic's Messages API
+  itself, through the AI SDK's Anthropic provider, with no router in between.
+  Its settings mirror OpenRouter's under `ANTHROPIC_`: `ANTHROPIC_MODEL`
+  (default `claude-haiku-5-5`), `ANTHROPIC_REASONING`, and per design
+  `ANTHROPIC_MODEL_HOST` (such as `claude-sonnet-5-5`) and
+  `ANTHROPIC_REASONING_HOST`. Reasoning off sends `thinking: disabled`; Claude
+  Sonnet 5.5 can't switch thinking off, so it gets its lowest setting instead,
+  and an effort runs adaptive thinking at that effort. `GENUI_PROVIDER` names
+  the provider when both keys are set.
+- Set spend limits on the key itself: OpenRouter's credit limit, or the
+  workspace spend limit in the Anthropic Console. When the key is refused, the
   explainer steps aside and the game plays on. A panel that fails offers
   "Try again" once.
 - The model never sees a round's code before you answer, and it can only
   render a fixed set of components whose contents the server checks.
 - Requests ask OpenRouter for providers that neither store nor train on
-  prompts.
-- The browser tests and unit tests use a local stand-in for OpenRouter, so
-  they need no key.
+  prompts. Anthropic's API doesn't train on inputs or outputs and deletes
+  them within 30 days by default; the privacy page says so and links the terms.
+- The browser tests and unit tests use local stand-ins for OpenRouter and
+  for Anthropic's API, so they need no key.
 
 ### The design experiment
 

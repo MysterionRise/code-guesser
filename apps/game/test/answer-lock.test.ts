@@ -183,7 +183,7 @@ describe("one path to the model (#102)", () => {
   });
   // The one module that may call a model; it must build every request from the guard's context.
   const MODEL_MODULE = "genui/model.server.ts";
-  const MODEL_CLIENT = /from\s+["'](?:openai|@copilotkit\/runtime|@anthropic-ai\/sdk|@openrouter\/[^"']+|openrouter[^"']*)["']/u;
+  const MODEL_CLIENT = /from\s+["'](?:openai|@copilotkit\/runtime|@anthropic-ai\/sdk|@ai-sdk\/anthropic|@ai-sdk\/openai-compatible|@openrouter\/[^"']+|openrouter[^"']*)["']/u;
 
   it("lets only the model module import a model client, and only alongside the guard", () => {
     for (const path of files(SOURCE)) {

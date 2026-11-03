@@ -16,8 +16,10 @@ merged Phases 1 and 2. **v1.0** (milestone #4, checklist #130) is merged:
 - agent playtest run 2 and its fixes.
 
 Before the v1.1 launch, [agent playtest run 3](evidence/2026-11-02-agent-playtest-run-3-fun.md) (2026-11-02)
-judged fun for the first time, against a release bar: four of its nine lines failed, and the fixes are in
-progress (#228–#241).
+judged fun for the first time, against a release bar: four of its nine lines failed; the code-side fixes are merged
+(#242–#245) and the data-level ones wait for the next preparation run (#228–#231, #240). The
+[Anthropic live check](evidence/2026-11-03-genui-anthropic-live-check.md) (2026-11-03) ran generative UI through
+Anthropic's own API, the second provider (#246): every design rendered on the first try.
 
 Its [release notes](../releases/v1.0.0.md) cover it all, and the `v1.0.0` tag
 waits for the owner's go-ahead. Its data work replaced Phase 3c's open decisions

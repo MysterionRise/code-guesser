@@ -3,8 +3,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-const { ENVIRONMENT_CODES, OPENROUTER_BASE_URL, checkEnvironment, publicMode } = await import("../src/server/environment.server");
+const { ANTHROPIC_BASE_URL, ENVIRONMENT_CODES, OPENROUTER_BASE_URL, checkEnvironment, publicMode } = await import("../src/server/environment.server");
 const { DEFAULT_BASE_URL } = await import("../src/genui/model.server");
+const { DEFAULT_BASE_URLS } = await import("../src/genui/provider.server");
 const { openGame } = await import("../src/demo/local-real-experiment-session.server");
 const { register } = await import("../src/instrumentation");
 
@@ -43,6 +44,12 @@ const FAILURES = [
   ["OPENROUTER_API_KEY_MISSING", { GENUI_ENABLED: "1" }],
   ["OPENROUTER_BASE_URL_REJECTED", { OPENROUTER_BASE_URL: "http://127.0.0.1:3201/api/v1" }],
   ["OPENROUTER_BASE_URL_REJECTED", { OPENROUTER_BASE_URL: "" }],
+  ["GENUI_PROVIDER_INVALID", { GENUI_PROVIDER: "openai" }],
+  ["GENUI_PROVIDER_INVALID", { GENUI_PROVIDER: "Anthropic" }],
+  ["ANTHROPIC_API_KEY_MISSING", { GENUI_ENABLED: "1", GENUI_PROVIDER: "anthropic" }],
+  ["ANTHROPIC_API_KEY_MISSING", { GENUI_ENABLED: "1", GENUI_PROVIDER: "anthropic", OPENROUTER_API_KEY: "key" }],
+  ["ANTHROPIC_BASE_URL_REJECTED", { ANTHROPIC_BASE_URL: "http://127.0.0.1:3202/v1" }],
+  ["ANTHROPIC_BASE_URL_REJECTED", { ANTHROPIC_BASE_URL: "" }],
   ["EXPERIMENT_LAB_REJECTED", { EXPERIMENT_LAB: "1" }],
   ["EXPERIMENT_LAB_REJECTED", { EXPERIMENT_LAB: "1", EXPERIMENT_SOURCE: "admin" }],
   ["EXPERIMENT_DISABLED_UNKNOWN", { EXPERIMENT_DISABLED: "design:host,design:hologram" }],
@@ -72,6 +79,11 @@ describe("the boot check (#97)", () => {
     expect(checkEnvironment(PUBLIC)).toEqual([]);
     expect(checkEnvironment({ ...PUBLIC, GENUI_ENABLED: "1", OPENROUTER_API_KEY: "key", OPENROUTER_BASE_URL: OPENROUTER_BASE_URL,
       EXPERIMENT_DISABLED: " design:host, theme:arcade ,", CODEGUESSR_CLIENT_IP_HEADER: "CF-Connecting-IP" })).toEqual([]);
+    // Anthropic's own API: named, or implied by its key alone; a named provider needs only its own key.
+    expect(checkEnvironment({ ...PUBLIC, GENUI_ENABLED: "1", ANTHROPIC_API_KEY: "key", ANTHROPIC_BASE_URL: ANTHROPIC_BASE_URL })).toEqual([]);
+    expect(checkEnvironment({ ...PUBLIC, GENUI_ENABLED: "1", GENUI_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "key" })).toEqual([]);
+    expect(checkEnvironment({ ...PUBLIC, GENUI_ENABLED: "1", GENUI_PROVIDER: "openrouter", OPENROUTER_API_KEY: "key", ANTHROPIC_API_KEY: "key" })).toEqual([]);
+    expect(checkEnvironment({ ...PUBLIC, GENUI_PROVIDER: "anthropic" })).toEqual([]);
     for (const limits of ["", "on", "2", "0.5"]) expect(checkEnvironment({ ...PUBLIC, CODEGUESSR_RATE_LIMITS: limits }), limits).toEqual([]);
   });
 
@@ -84,25 +96,32 @@ describe("the boot check (#97)", () => {
   });
 
   it("names every failure at once, in a fixed order", () => {
-    expect(checkEnvironment({ CODEGUESSR_PUBLIC: "1", GENUI_ENABLED: "1", EXPERIMENT_LAB: "1", OPENROUTER_BASE_URL: "http://x", EXPERIMENT_DISABLED: "x:y" }))
+    expect(checkEnvironment({ CODEGUESSR_PUBLIC: "1", GENUI_ENABLED: "1", EXPERIMENT_LAB: "1", OPENROUTER_BASE_URL: "http://x", ANTHROPIC_BASE_URL: "http://y",
+      EXPERIMENT_DISABLED: "x:y" }))
       .toEqual(["CODEGUESSR_SESSION_SECRET_MISSING", "CODEGUESSR_PUBLIC_ORIGIN_MISSING", "CODEGUESSR_STATE_DIR_MISSING", "EXPERIMENT_EVENTS_DIR_MISSING",
-        "CODEGUESSR_CLIENT_IP_HEADER_MISSING", "OPENROUTER_API_KEY_MISSING", "OPENROUTER_BASE_URL_REJECTED", "EXPERIMENT_LAB_REJECTED", "EXPERIMENT_DISABLED_UNKNOWN"]);
+        "CODEGUESSR_CLIENT_IP_HEADER_MISSING", "OPENROUTER_API_KEY_MISSING", "OPENROUTER_BASE_URL_REJECTED", "ANTHROPIC_BASE_URL_REJECTED", "EXPERIMENT_LAB_REJECTED",
+        "EXPERIMENT_DISABLED_UNKNOWN"]);
+    // A provider it can't name is refused on its own; which key is missing can't be said.
+    expect(checkEnvironment({ ...PUBLIC, GENUI_ENABLED: "1", GENUI_PROVIDER: "openai" })).toEqual(["GENUI_PROVIDER_INVALID"]);
   });
 
   it("lets a smoke run tagged non-real use lab mode and a stand-in model", () => {
     for (const source of ["agent", "synthetic"]) {
-      expect(checkEnvironment({ ...PUBLIC, EXPERIMENT_SOURCE: source, EXPERIMENT_LAB: "1", OPENROUTER_BASE_URL: "http://127.0.0.1:3201/api/v1" })).toEqual([]);
+      expect(checkEnvironment({ ...PUBLIC, EXPERIMENT_SOURCE: source, EXPERIMENT_LAB: "1", OPENROUTER_BASE_URL: "http://127.0.0.1:3201/api/v1",
+        ANTHROPIC_BASE_URL: "http://127.0.0.1:3202/v1" })).toEqual([]);
     }
   });
 
-  it("holds real games to the address generative UI uses by default", () => {
+  it("holds real games to the addresses generative UI uses by default", () => {
     expect(OPENROUTER_BASE_URL).toBe(DEFAULT_BASE_URL);
+    expect(OPENROUTER_BASE_URL).toBe(DEFAULT_BASE_URLS.openrouter);
+    expect(ANTHROPIC_BASE_URL).toBe(DEFAULT_BASE_URLS.anthropic);
   });
 
   it("never returns a value, only codes", () => {
     const planted = Object.fromEntries([
       "CODEGUESSR_PUBLIC_ORIGIN", "CODEGUESSR_STATE_DIR", "EXPERIMENT_EVENTS_DIR", "CODEGUESSR_CLIENT_IP_HEADER", "OPENROUTER_BASE_URL", "EXPERIMENT_DISABLED",
-      "CODEGUESSR_RATE_LIMITS",
+      "CODEGUESSR_RATE_LIMITS", "GENUI_PROVIDER", "ANTHROPIC_BASE_URL",
     ].map((name) => [name, `${SENTINEL}:${name}`]));
     const codes = checkEnvironment({ ...planted, CODEGUESSR_PUBLIC: "1", CODEGUESSR_SESSION_SECRET: SENTINEL, GENUI_ENABLED: "1" });
     expect(codes.length).toBeGreaterThan(5);
@@ -114,8 +133,8 @@ describe("the boot check (#97)", () => {
 describe("boot (#97)", () => {
   /** Every variable the check reads, unset first, so the shell running the tests can't change the outcome. */
   const CHECKED = ["CODEGUESSR_PUBLIC", "CODEGUESSR_SESSION_SECRET", "CODEGUESSR_PUBLIC_ORIGIN", "CODEGUESSR_STATE_DIR", "EXPERIMENT_EVENTS_DIR",
-    "CODEGUESSR_CLIENT_IP_HEADER", "CODEGUESSR_RATE_LIMITS", "GENUI_ENABLED", "OPENROUTER_API_KEY", "OPENROUTER_BASE_URL", "EXPERIMENT_SOURCE", "EXPERIMENT_LAB",
-    "EXPERIMENT_DISABLED"];
+    "CODEGUESSR_CLIENT_IP_HEADER", "CODEGUESSR_RATE_LIMITS", "GENUI_ENABLED", "GENUI_PROVIDER", "OPENROUTER_API_KEY", "OPENROUTER_BASE_URL", "ANTHROPIC_API_KEY",
+    "ANTHROPIC_BASE_URL", "EXPERIMENT_SOURCE", "EXPERIMENT_LAB", "EXPERIMENT_DISABLED"];
   const boot = async (env: Record<string, string | undefined>) => {
     for (const name of CHECKED) vi.stubEnv(name, undefined);
     for (const [name, value] of Object.entries({ NEXT_RUNTIME: "nodejs", ...env })) vi.stubEnv(name, value);

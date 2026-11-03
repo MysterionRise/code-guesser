@@ -59,13 +59,14 @@ gate: changing queries, retries, ceilings, deck rules, or running
   language shard, or a repository archive. The Stack v2 stays pinned to
   revision `e565caa3a78c2423bd374333a472b049eb090e47` unless deliberately moved.
 - Credentials come only from standard stores (`~/.cache/huggingface/token`,
-  `gh auth token`, and for generative UI `~/.config/openrouter/key`, mode
+  `gh auth token`, and for generative UI `~/.config/openrouter/key` or `~/.config/anthropic/key`, mode
   0600) through the environment; on the server, only from its secret store, never through `NEXT_PUBLIC_*`. Never log
   or commit tokens, provider bodies, contact data, private email, or source excerpts from failed diagnostics.
 - The control arm plays the frozen local artifact and makes no outbound request. The one exception is opt-in generative
-  UI (`GENUI_ENABLED=1`, #101). Its server route `apps/game/src/app/api/genui/route.ts` calls OpenRouter only through
+  UI (`GENUI_ENABLED=1`, #101). Its server route `apps/game/src/app/api/genui/route.ts` calls the model provider
+  (OpenRouter, or Anthropic's own API; `genui/provider.server.ts`) only through
   the answer-lock guard, for a live game's round. The browser talks only to the game's own origin, never to a model.
-  Spend limits live on the OpenRouter key, not in the app; the app's rate limits and per-game caps fall back to the
+  Spend limits live on the provider's key, not in the app; the app's rate limits and per-game caps fall back to the
   static reveal.
 - Preparation may also call OpenRouter: `pnpm prepare:questions` (#127) writes
   question layers with a model that knows the answer. Its answers are journaled
@@ -210,9 +211,10 @@ gate: changing queries, retries, ceilings, deck rules, or running
 - **Public mode (#97, L4):** `CODEGUESSR_PUBLIC=1` marks a public server, and `checkEnvironment`
   (`apps/game/src/server/environment.server.ts`) holds it to anonymous play:
   - it requires the session secret, an https `CODEGUESSR_PUBLIC_ORIGIN` with no path, absolute `CODEGUESSR_STATE_DIR`
-    and `EXPERIMENT_EVENTS_DIR`, a `CODEGUESSR_CLIENT_IP_HEADER` name, and the OpenRouter key under `GENUI_ENABLED=1`;
-  - it refuses lab mode and an `OPENROUTER_BASE_URL` other than OpenRouter's unless `EXPERIMENT_SOURCE` is `agent` or
-    `synthetic`, and an `EXPERIMENT_DISABLED` pair it doesn't know;
+    and `EXPERIMENT_EVENTS_DIR`, a `CODEGUESSR_CLIENT_IP_HEADER` name, a `GENUI_PROVIDER` it knows, and that provider's
+    key under `GENUI_ENABLED=1` (`OPENROUTER_API_KEY_MISSING` or `ANTHROPIC_API_KEY_MISSING`);
+  - it refuses lab mode and an `OPENROUTER_BASE_URL` or `ANTHROPIC_BASE_URL` other than the provider's own unless
+    `EXPERIMENT_SOURCE` is `agent` or `synthetic`, and an `EXPERIMENT_DISABLED` pair it doesn't know;
   - `src/instrumentation.ts` runs it at boot: each failure prints `GAME_ENVIRONMENT_REJECTED <CODE>`, never a value,
     and the server exits 78. `pnpm test:deploy` (`tests/deploy/`) boots the production build to check that.
   - In public mode `secret()` throws rather than make a secret up, and `labMode()` is off for real games.
@@ -368,6 +370,18 @@ gate: changing queries, retries, ceilings, deck rules, or running
     default `anthropic/claude-haiku-5.5`, `OPENROUTER_BASE_URL`), and asks
     for `data_collection: "deny"`. The tools are the catalog components;
     each call is checked by `parseRenderCall` in its `execute`.
+  - **Anthropic's own API** is the other provider (`genui/provider.server.ts`): `GENUI_PROVIDER=anthropic`, or an
+    `ANTHROPIC_API_KEY` with no OpenRouter key, sends the same request through `@ai-sdk/anthropic` (the AI SDK's
+    first-party Messages API provider, pinned to the installed SDK's own `@ai-sdk/provider` version) to
+    `ANTHROPIC_BASE_URL` (default `https://api.anthropic.com/v1`). Its settings are OpenRouter's under `ANTHROPIC_`
+    (`ANTHROPIC_MODEL`, default `claude-haiku-5-5`, `ANTHROPIC_REASONING`, and per design); `modelFor` and
+    `reasoningFor` take the provider. `anthropicOptions` maps reasoning off to `thinking: disabled` (the provider
+    sends Claude Sonnet 5.5 `between_tools`, its lowest setting, since that model can't switch thinking off, and
+    drops it for a model that always thinks), an effort to adaptive thinking at that effort, and a single-call
+    design to `disable_parallel_tool_use`. `tests/e2e/fake-anthropic.mjs` stands in for the Messages API with the
+    OpenRouter fake's calls; `genui.test.ts` runs the route against both. The standard key store is
+    `~/.config/anthropic/key`; the containment test also keeps `ANTHROPIC_API_KEY` and `api.anthropic.com` out of
+    the browser bundle, and `answer-lock.test.ts` holds `@ai-sdk/anthropic` to the model module.
   - Before the lock it refuses a chat turn that pastes the round's code.
   - The panel (`genui/genui-panel.tsx`) loads lazily on a revealed round and
     renders only checked outputs. Any failure, a 402 from a spent key
@@ -479,7 +493,10 @@ gate: changing queries, retries, ceilings, deck rules, or running
     sometimes wrote several pages at once.
   - Live check, with each explain about $0.0007:
     `docs/review/evidence/2026-10-14-genui-live-check.md`. Run it locally
-    with `GENUI_ENABLED=1 OPENROUTER_API_KEY="$(cat ~/.config/openrouter/key)"`.
+    with `GENUI_ENABLED=1 OPENROUTER_API_KEY="$(cat ~/.config/openrouter/key)"`, or
+    `GENUI_ENABLED=1 ANTHROPIC_API_KEY="$(cat ~/.config/anthropic/key)"` for Anthropic's own API, whose first live
+    check (2026-11-03, `docs/review/evidence/2026-11-03-genui-anthropic-live-check.md`) rendered every design on the
+    first try: Haiku explainers about $0.001 each, a Sonnet host turn about $0.008.
 - The design experiment (#106, #107; v1.0 milestone):
   - **Arms** (`apps/game/src/experiment/arms.ts`): each game draws design ×
     theme × question layer independently at deal time, by committed

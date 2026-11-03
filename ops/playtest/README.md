@@ -14,7 +14,9 @@ their accuracy and "fun" are not a real player's; the real experiment is #106–
 ## Run it
 
 1. **Serve the game** with generative UI and the OpenRouter key from its standard
-   store:
+   store (or `ANTHROPIC_API_KEY="$(cat ~/.config/anthropic/key)"` in its place, to
+   play through Anthropic's own API; the model settings then take the `ANTHROPIC_`
+   prefix, such as `ANTHROPIC_MODEL=claude-sonnet-5-5`):
 
    Lab mode (`EXPERIMENT_LAB=1`) lets players pick a design, theme, and layer
    (`?design=`, `?theme=`, `?layer=`); a production build otherwise draws each

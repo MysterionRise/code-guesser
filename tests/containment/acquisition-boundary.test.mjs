@@ -206,7 +206,7 @@ test("public attribution can enter the browser only through authorized reveal", 
 });
 
 test("the model provider's key and address never reach the browser", () => {
-  const providerFingerprints = [/OPENROUTER_API_KEY/u, /openrouter\.ai/iu, /sk-or-/u, /GENUI_ENABLED/u];
+  const providerFingerprints = [/OPENROUTER_API_KEY/u, /openrouter\.ai/iu, /sk-or-/u, /ANTHROPIC_API_KEY/u, /api\.anthropic\.com/iu, /sk-ant-/u, /GENUI_ENABLED/u];
   const clientFiles = filesUnder(join(built, "static")).filter((path) => textExtensions.has(extname(path)));
   assert.ok(clientFiles.length > 0, "production build emitted no client files");
   for (const path of clientFiles) {

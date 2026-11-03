@@ -52,6 +52,12 @@ or a `NEXT_PUBLIC_*` variable.
   - in OpenRouter's privacy settings, allow only providers with zero data retention (ZDR). The app also asks for
     `data_collection: "deny"` on each request. Check after the first deploy that the model (`OPENROUTER_MODEL`, default
     `anthropic/claude-haiku-5.5`) still has a ZDR endpoint: an explainer that never appears means it has none.
+- **Anthropic key** instead, if generative UI should call Anthropic's own API (`ANTHROPIC_API_KEY`; set
+  `GENUI_PROVIDER=anthropic` too when an OpenRouter key is also present):
+  - make a production key in its own Console workspace with a monthly spend limit; as with OpenRouter, the app has no
+    cap of its own and falls back to the static reveal when the key is refused;
+  - Anthropic's commercial terms apply to the round and the chat it sends: no training on inputs or outputs, and
+    deletion within 30 days by default (the privacy page links both articles). Nothing identifies the player.
 - Dokploy stores the environment encrypted, but anyone who can run `docker service inspect` on the server can read
   it. Keep Docker access to the owner.
 - In the app's **Environment** tab, turn **Create Environment File** off. Otherwise Dokploy writes every variable to a
@@ -114,12 +120,18 @@ container exits with status 78.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `GENUI_ENABLED` | off | `1` turns on generative UI (#101); needs `OPENROUTER_API_KEY` |
+| `GENUI_ENABLED` | off | `1` turns on generative UI (#101); needs `OPENROUTER_API_KEY` or `ANTHROPIC_API_KEY` |
+| `GENUI_PROVIDER` | by the keys | `openrouter` or `anthropic`; unset, Anthropic when only its key is set, else OpenRouter |
 | `OPENROUTER_API_KEY` | none | The production key from [section 2](#2-secrets) |
 | `OPENROUTER_MODEL` | `anthropic/claude-haiku-5.5` | The model generative UI asks |
 | `OPENROUTER_REASONING` | `off` | `low`, `medium`, or `high` asks the model to think at that effort; needed by a model whose endpoint requires reasoning (Claude Sonnet 5.5) |
 | `OPENROUTER_MODEL_HOST`, `OPENROUTER_REASONING_HOST` | the shared setting | The host's own model and reasoning (likewise `_CATALOG`, `_COMPOSER`, `_VISUALIZER`); playtest run 3 recommends `anthropic/claude-sonnet-5.5` with `low` for the host alone (#237) |
 | `OPENROUTER_BASE_URL` | OpenRouter's | Leave unset; a public server refuses any other address for real games |
+| `ANTHROPIC_API_KEY` | none | The Anthropic key from [section 2](#2-secrets), for the Anthropic provider |
+| `ANTHROPIC_MODEL` | `claude-haiku-5-5` | The model generative UI asks under the Anthropic provider |
+| `ANTHROPIC_REASONING` | `off` | As `OPENROUTER_REASONING`; off sends `thinking: disabled` (Claude Sonnet 5.5 gets its lowest setting instead) |
+| `ANTHROPIC_MODEL_HOST`, `ANTHROPIC_REASONING_HOST` | the shared setting | The host's own model and reasoning (likewise `_CATALOG`, `_COMPOSER`, `_VISUALIZER`); `claude-sonnet-5-5` with `low` is run 3's recommendation for the host |
+| `ANTHROPIC_BASE_URL` | Anthropic's | Leave unset; a public server refuses any other address for real games |
 | `EXPERIMENT_DISABLED` | none | `factor:level` pairs to switch off, such as `design:host,theme:arcade`; their weight goes to control |
 | `CODEGUESSR_RATE_LIMITS` | `on` in public mode | A multiplier of every rate limit, such as `2` to loosen or `0.5` to tighten |
 | `EXPERIMENT_SOURCE` | `real` | `synthetic` only for the pre-launch smoke run ([section 8](#8-smoke-test)) |

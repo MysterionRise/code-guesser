@@ -1,13 +1,14 @@
 /**
  * A stand-in for OpenRouter's OpenAI-compatible chat endpoint, for tests only: it streams one round of render
  * tool calls, records every request body so tests can check what a model would have seen, and fails on demand.
+ * `fake-anthropic.mjs` is the same stand-in for Anthropic's own Messages API, sharing the calls below.
  *
  * Run directly (`node tests/e2e/fake-openrouter.mjs`) it listens on FAKE_OPENROUTER_PORT for the browser tests.
  */
 import { createServer } from "node:http";
 import { pathToFileURL } from "node:url";
 
-const DEFAULT_CALLS = Object.freeze({
+export const DEFAULT_CALLS = Object.freeze({
   "after-lock": [
     { name: "takeaway", args: { text: "Read the keywords before the punctuation." } },
     { name: "signal_list", args: { helpful: ["The block keywords"], misleading: ["The familiar operators"] } },
@@ -38,7 +39,7 @@ const DEFAULT_CALLS = Object.freeze({
  * A visualizer page that passes the server's checks by spelling its escapes in pieces, so only the sandbox stands
  * between it and the game: it tries to read the parent page, use storage, and reach this fake over the network.
  */
-const visualizerCall = (port) => [{ name: "render_visualizer", args: {
+export const visualizerCall = (port) => [{ name: "render_visualizer", args: {
   title: "Stepping through the round",
   summary: "A counter that advances one step per press.",
   html: `<p id="status">Step 0</p><button id="step">Step</button><p id="isolation">checking</p><p id="storage">checking</p>
@@ -79,7 +80,7 @@ const toolCallStream = (calls, preface = "") => [
   "data: [DONE]\n\n",
 ].join("");
 
-const readBody = (request) => new Promise((resolve, reject) => {
+export const readBody = (request) => new Promise((resolve, reject) => {
   let text = "";
   request.setEncoding("utf8");
   request.on("data", (part) => { text += part; });

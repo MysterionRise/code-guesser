@@ -52,7 +52,7 @@ test("never sends a journal, a key, local state, the media, or another worktree"
     "ops/playtest/tmp/session.json", "ops/experiment/tmp/events-server/events-2026-10-26.jsonl", "apps/game/src/tmp/x.json",
     ".env", ".env.local", "apps/game/.env.production", "apps/game/src/.env",
     "apps/game/src/key.pem", "apps/game/src/server.key", "apps/game/src/id_ed25519", "ops/poc/stack/credentials/token",
-    "ops/poc/stack/.huggingface/token", "packages/artifact/src/.config/openrouter/key", "apps/game/src/.cache/x",
+    "ops/poc/stack/.huggingface/token", "packages/artifact/src/.config/openrouter/key", "apps/game/src/.config/anthropic/key", "apps/game/src/.cache/x",
     "apps/game/src/state.sqlite", "apps/game/src/state.sqlite-wal", "apps/game/src/events-2026-10-26.jsonl",
     "docs/media/demo.gif", "docs/deploy.md", "README.md", "CLAUDE.md", "apps/game/test/genui.test.ts", "tests/e2e/duel.spec.ts",
     "ops/poc/prepare/index.ts", "ops/deploy/smoke.mjs", "packages/content/src/index.ts", "Dockerfile",
