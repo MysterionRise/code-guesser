@@ -494,7 +494,9 @@ gate: changing queries, retries, ceilings, deck rules, or running
   - Live check, with each explain about $0.0007:
     `docs/review/evidence/2026-10-14-genui-live-check.md`. Run it locally
     with `GENUI_ENABLED=1 OPENROUTER_API_KEY="$(cat ~/.config/openrouter/key)"`, or
-    `GENUI_ENABLED=1 ANTHROPIC_API_KEY="$(cat ~/.config/anthropic/key)"` for Anthropic's own API.
+    `GENUI_ENABLED=1 ANTHROPIC_API_KEY="$(cat ~/.config/anthropic/key)"` for Anthropic's own API, whose first live
+    check (2026-11-03, `docs/review/evidence/2026-11-03-genui-anthropic-live-check.md`) rendered every design on the
+    first try: Haiku explainers about $0.001 each, a Sonnet host turn about $0.008.
 - The design experiment (#106, #107; v1.0 milestone):
   - **Arms** (`apps/game/src/experiment/arms.ts`): each game draws design ×
     theme × question layer independently at deal time, by committed
