@@ -84,8 +84,8 @@ gate: changing queries, retries, ceilings, deck rules, or running
   - Phase 3b on 2026-10-13: #12 curated sources, #13 algorithm, #14 output,
     #15 fix, #16 game UX, #17 go-live, #18 the vertical `demo.gif`.
 - v1.0 (milestone #4, checklist #130) is merged too: #131–#162, from 2026-10-15 to 2026-10-20, on top of the
-  public-app Phases 1 and 2 (#110–#123). Its release notes are `docs/releases/v1.0.0.md`. The `v1.0.0` tag and GitHub
-  release wait for the owner's go-ahead.
+  public-app Phases 1 and 2 (#110–#123). Its release notes are `docs/releases/v1.0.0.md`, and the `v1.0.0` tag and
+  GitHub release went out on 2026-10-20.
 - The game plays profile `ops/poc/profiles/local-real-rounds.v7.json` and
   artifact schema `local-experiment-artifact.v6` from the root-route deck
   chooser (`/?deck=<deck id>`). A
@@ -766,9 +766,11 @@ gate: changing queries, retries, ceilings, deck rules, or running
 
 ## Next steps
 
-1. Finish v1.0 (#130): the `v1.0.0` tag and GitHub release, with the owner's go-ahead. Owner decisions still open:
-   #120 (model per design) and #160 (the algorithm layer's fairness).
-2. The next release, v1.1 (milestone v1.1, checklist #174), planned in `docs/review/2026-10-20-next-phase-plan.md`.
+1. Launch v1.1 (#100, #174): everything but L13 is merged, so what is left is the owner's: L13, the smoke test on the
+   server and day 0 (`docs/deploy.md`), then L14's release notes and the `v1.1.0` tag. Owner decisions still open:
+   #120 (the production model per design; run 3 recommends Sonnet for the host alone) and #160 (the algorithm
+   layer's fairness).
+2. The release in progress, v1.1 (milestone v1.1, checklist #174), planned in `docs/review/2026-10-20-next-phase-plan.md`.
    The owner decided on 2026-10-20:
    - public play on one instance of the owner's own server (hardening #97–#100, #164, #170);
    - async duel challenge links (#173);
@@ -1142,6 +1144,9 @@ pnpm audit --audit-level=high
   - `tests/performance/`: script bytes on a first visit (chooser 125,000, game 135,000), "Round 1 of 5" within
     1,000 ms (1,500 on CI), and a whole game that requests nothing from another origin.
 - `pnpm test:e2e`: the browser scenarios on `next dev`, with the OpenRouter stand-in on `E2E_PORT` + 1.
+- `main` is protected (#27, since 2026-11-04): a merge needs the three CI jobs (Node workspace, Container image, Stack
+  worker) green, and force pushes and deleting `main` are refused. The workflow token is read-only by default, and
+  secret scanning with push protection, Dependabot alerts, and Dependabot security updates are on.
 
 ## Done means
 

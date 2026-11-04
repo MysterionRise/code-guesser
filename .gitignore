@@ -5,6 +5,7 @@ dist/
 playwright-report/
 test-results/
 .worktrees/
+.claude/worktrees/
 *.tsbuildinfo
 .pnpm-store/
 .DS_Store
