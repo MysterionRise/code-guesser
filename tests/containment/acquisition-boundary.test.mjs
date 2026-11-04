@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { extname, join, relative } from "node:path";
 import { before, test } from "node:test";
 
@@ -45,6 +46,22 @@ function scanned(path) {
   if (path !== roundsArtifact) return read(path);
   return JSON.stringify(JSON.parse(read(path)), (key, value) =>
     key === "panes" && Array.isArray(value) ? value.map((pane) => ({ ...pane, text: "" })) : value);
+}
+
+// What must never reach the browser: the model provider's key and address, and the server's own secrets.
+const providerFingerprints = [/OPENROUTER_API_KEY/u, /openrouter\.ai/iu, /sk-or-/u, /ANTHROPIC_API_KEY/u, /api\.anthropic\.com/iu, /sk-ant-/u, /GENUI_ENABLED/u];
+const serverFingerprints = [/CODEGUESSR_SESSION_SECRET/u, /HF_TOKEN/u, /huggingface\.co/iu, /ops\/poc\/prepare/iu];
+
+/** Each fingerprint that a text file under a build's `static` directory holds, one line per file it is found in. */
+function browserLeaks(staticDirectory, fingerprints) {
+  const clientFiles = filesUnder(staticDirectory).filter((path) => textExtensions.has(extname(path)));
+  assert.ok(clientFiles.length > 0, "production build emitted no client files");
+  return clientFiles.flatMap((path) => {
+    const content = read(path);
+    return fingerprints
+      .filter((fingerprint) => fingerprint.test(content))
+      .map((fingerprint) => `${fingerprint} reached the browser through ${relative(root, path)}`);
+  });
 }
 
 function assertContainsNoFingerprint(paths, label) {
@@ -206,29 +223,37 @@ test("public attribution can enter the browser only through authorized reveal", 
 });
 
 test("the model provider's key and address never reach the browser", () => {
-  const providerFingerprints = [/OPENROUTER_API_KEY/u, /openrouter\.ai/iu, /sk-or-/u, /ANTHROPIC_API_KEY/u, /api\.anthropic\.com/iu, /sk-ant-/u, /GENUI_ENABLED/u];
-  const clientFiles = filesUnder(join(built, "static")).filter((path) => textExtensions.has(extname(path)));
-  assert.ok(clientFiles.length > 0, "production build emitted no client files");
-  for (const path of clientFiles) {
-    for (const fingerprint of providerFingerprints) {
-      assert.doesNotMatch(read(path), fingerprint, `${fingerprint} reached the browser through ${relative(root, path)}`);
-    }
-  }
+  assert.deepEqual(browserLeaks(join(built, "static"), providerFingerprints), []);
   const model = read(join(game, "src", "genui", "model.server.ts"));
   assert.match(model, /^import "server-only";/u);
 });
 
 test("the session secret, preparation credentials, and the preparer never reach the browser", () => {
-  const serverFingerprints = [/CODEGUESSR_SESSION_SECRET/u, /HF_TOKEN/u, /huggingface\.co/iu, /ops\/poc\/prepare/iu];
-  const clientFiles = filesUnder(join(built, "static")).filter((path) => textExtensions.has(extname(path)));
-  assert.ok(clientFiles.length > 0, "production build emitted no client files");
-  for (const path of clientFiles) {
-    for (const fingerprint of serverFingerprints) {
-      assert.doesNotMatch(read(path), fingerprint, `${fingerprint} reached the browser through ${relative(root, path)}`);
-    }
-  }
+  assert.deepEqual(browserLeaks(join(built, "static"), serverFingerprints), []);
   for (const path of filesUnder(join(game, "src", "server"))) {
     assert.match(read(path), /^import "server-only";/u, `${relative(root, path)} must be server-only`);
+  }
+});
+
+// The scans above pass on a clean build; this one shows they would fail on a dirty one (#97). It plants every
+// fingerprint in a chunk of a build-shaped directory of its own, so the real build is never touched.
+test("the browser scans catch a secret planted in client code", () => {
+  const planted = mkdtempSync(join(tmpdir(), "codeguessr-containment-"));
+  try {
+    mkdirSync(join(planted, "chunks"));
+    const chunk = join(planted, "chunks", "planted.js");
+    writeFileSync(chunk, [
+      'const openRouter = [process.env.OPENROUTER_API_KEY, "https://openrouter.ai/api/v1", "sk-or-v1-planted"];',
+      'const anthropic = [process.env.ANTHROPIC_API_KEY, "https://api.anthropic.com/v1", "sk-ant-planted"];',
+      "const switches = [process.env.GENUI_ENABLED, process.env.CODEGUESSR_SESSION_SECRET, process.env.HF_TOKEN];",
+      'const preparer = ["https://huggingface.co/datasets", "ops/poc/prepare/index.ts"];',
+    ].join("\n"));
+    for (const fingerprint of [...providerFingerprints, ...serverFingerprints]) {
+      assert.equal(browserLeaks(planted, [fingerprint]).length, 1, `${fingerprint} went unnoticed in a planted chunk`);
+    }
+    assert.throws(() => assertContainsNoFingerprint([chunk], "planted chunk"), /planted chunk leaked through/u);
+  } finally {
+    rmSync(planted, { recursive: true, force: true });
   }
 });
 

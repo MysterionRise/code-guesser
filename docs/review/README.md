@@ -22,7 +22,7 @@ judged fun for the first time, against a release bar: four of its nine lines fai
 Anthropic's own API, the second provider (#246): every design rendered on the first try.
 
 Its [release notes](../releases/v1.0.0.md) cover it all, and the `v1.0.0` tag
-waits for the owner's go-ahead. Its data work replaced Phase 3c's open decisions
+and GitHub release went out on 2026-10-20. Its data work replaced Phase 3c's open decisions
 with the ones in #129.
 
 | Phase | What it did | PRs | Run record |
