@@ -624,6 +624,13 @@ gate: changing queries, retries, ceilings, deck rules, or running
     rebuilds it byte for byte with no network. The v7 data run's
     journal is `run.jsonl.v7-2026-10-21`, the v6 journal
     `run.jsonl.v6-resume-2026-10-19`, the v5 journal `run.jsonl.v5-2026-10-15`.
+  - **The worker lock moved on 2026-11-04:** Dependabot's security alerts on the Stack worker's `uv.lock` (certifi,
+    urllib3, aiohttp, fsspec, datasets 5.0.1, filelock, multidict) were taken by hand, with `LOCK_HASH` in
+    `stack-metadata.ts`. Recorded worker outputs are keyed to the worker's code and lock (`worker-journal.ts`), so
+    every journal above lacks them under the new lock and `--offline` fails with `JOURNAL_MISS` at `STACK_METADATA`.
+    Run one `--resume` first (`HF_TOKEN` and `GITHUB_TOKEN`; the workers re-read live, everything else replays), as
+    on 2026-10-15, then `--offline` again. httpx and pyarrow, the libraries the worker imports, did not move, so the
+    outputs should come back byte-identical; check the hash.
   - The journal holds provider bodies, so it is gitignored and never
     committed; a fresh clone has none, and `--offline` or `--resume` fails
     with `JOURNAL_MISSING`. A fresh run writes its own journal when it ends,
@@ -789,8 +796,8 @@ in the research note or #129.
 
 Iterate on deck rules with
 `STACK_V2_ACKNOWLEDGED_USABLE_REVISION=e565caa3a78c2423bd374333a472b049eb090e47 pnpm prepare:poc --offline`
-(no token, but it needs the local journal above); use `--resume` when a
-change needs responses the journal lacks.
+(no token, but it needs the local journal above, and since the 2026-11-04 worker lock move one `--resume` first);
+use `--resume` when a change needs responses the journal lacks.
 
 Live run (`--fresh` because a journal exists; it renames `run.jsonl` to
 `run.jsonl.<UTC stamp>` and never deletes it):
