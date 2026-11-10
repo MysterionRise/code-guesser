@@ -14,13 +14,13 @@ the model below.
 | Persona | Model | Games | Purpose |
 | --- | --- | --- | --- |
 | regular | Sonnet | exercise three times in a row by "Deal new rounds"; today's five on D−1 and D with the clock faked, then the chooser; mixed on Arcade | repetition, the day streak, replay pull, the chooser's records |
-| commuter | Haiku, phone | language, output, before-after, missing-line on their pinned deals; mixed with the host | layout, pace, the chat and the explainer at 390 px |
+| commuter | Haiku, phone | language, output, before-after, missing-line on their pinned deals; mixed with the host; then the chooser, the duel pages, a refusal page, and the 404 | layout, pace, the chat and the explainer at 390 px, the pages outside a game |
 | duel-pair | Sonnet, two sessions | Ana plays language `d0e1d0e1`, challenges; Ben plays it, sends the result, rematches; Ana opens the result; then the same on today's five | both sides of a duel, tension, verdict copy, rematch, `firstPlay` |
 | streaker | Haiku, Arcade | fix four times, name-function twice, missing-line pinned; the chooser after games 2, 4, and 7 | the streak chase, the 50/50 hint as a decision, the record line |
 | learner | Sonnet | algorithm (catalog, layer on), language (composer, layer on), framework (visualizer), exercise (host), project (composer), algorithm layer off; the four generative games again on the Sonnet server | reveal quality, hint teaching, the layers, the designs, the #120 pilot |
-| blind | Haiku, `blind: true` | every deck on its pinned deal, layer off; algorithm and language with the layer on; guesses at stage 0, 1, and 2; one sighted control | difficulty calibration, the layer-leak regression |
+| blind | Haiku, `blind: true` | algorithm and language with the layer on first, on seeds nothing else plays; then every deck with the layer off; guesses at stage 0, 1, and 2; one sighted control | difficulty calibration, what a layer gives away on unseen rounds |
 | red-team | Haiku | fix and mixed with the host, 14 attacks; tampered duel links and odd addresses | leaks, refusal pages |
-| a11y | Haiku, Contrast | before-after by keyboard, algorithm with the visualizer and the trace stepper, language on a phone; the chooser with records, the challenge intro, the result page | regression, the duel pages and the records by keyboard |
+| a11y | Haiku, Contrast | before-after by keyboard, then its own challenge sent and answered by keyboard; algorithm with the visualizer and the trace stepper, language on a phone; the chooser with records | regression, the duel's forms and the records by keyboard |
 
 | Judge | Model | Writes |
 | --- | --- | --- |
@@ -30,7 +30,7 @@ the model below.
 | judge-explanations | Sonnet | `judge-explanations.md`: claims per design and model, the #120 comparison, the guard, bar line 4-leaks |
 | judge-ux | Sonnet | `judge-ux.md`: phone and duel surfaces, defects by severity, bar lines 4 and 5 |
 
-About 46 games on the Haiku server and 4 on the Sonnet server, 13 subagents, roughly 3.5 hours.
+About 51 games on the Haiku server and 4 on the Sonnet server, 13 subagents, roughly 3.5 hours.
 
 ## Seeds and dates
 
@@ -91,10 +91,11 @@ refuses `"demo"`.
 2. Dry run: one session on the phone viewport, `start` with `"deal": "demo"` on language, `goto /`, `clock`, one
    `aria`, one `GET records`. If any endpoint misbehaves, fix the driver first; never the game.
 3. Compose each persona's prompt: `personas/_common.md` then `personas/<persona>.md`, placeholders filled. Spawn
-   in parallel, with `model` set per the matrix: blind, commuter, streaker on Haiku; regular, learner, duel-pair on
+   in parallel, with `model` set per the matrix: blind, streaker, a11y on Haiku; regular, learner, duel-pair on
    Sonnet. Each prompt ends: "Write `{{RUN}}/<persona>.findings.md` with the Write tool and return one line."
 4. When duel-pair finishes, copy `CHALLENGE_LINK` and `RESULT_LINK` from its "Both sides" section into
-   `run.json`, then spawn red-team and a11y (Haiku) with the links filled in.
+   `run.json`, then spawn red-team and commuter (Haiku) with the links filled in. The a11y player makes its own links
+   by keyboard.
 5. As each persona ends, check that its findings file exists with the fixed headings. If an agent returned text
    instead (run 2's red team did), write the file as the lead from its text and note it in `run.json`.
 6. The reports:
@@ -124,7 +125,7 @@ Every line must hold.
 2. judge-copy: no string classed "repeated, no new information" seen in more than 2 rounds of one game; no jargon
    on the chooser, the verdict, the points note, the answer line, or the completion line.
 3. judge-difficulty: no deck where blind stage-2 accuracy (layer off) is 80% or more; hint 1 lifts blind accuracy
-   by 10 points or more on every deck; algorithm layer-on stage-0 accuracy not above run 2's 70%.
+   by 10 points or more on every deck; algorithm layer-on stage-0 accuracy, on the rounds that show a scaffold, not above run 2's 70%.
 4. judge-ux: zero P0 defects, every P1 filed; every tampered duel link gets a page, not an error. judge-explanations:
    zero leaks (4-leaks).
 5. judge-ux: no regression on run 2's fixed items; the duel pages and the chooser's records reachable by keyboard.
@@ -164,3 +165,8 @@ Body:
   wording), 3 fail (data-level), 4 to 7 pass.
 - Two breaks found by the dry run before play: the driver's seeds import (now `node --import tsx`) and OpenRouter's
   Sonnet 5.5 refusing `reasoning: { enabled: false }` (#227, `OPENROUTER_REASONING=low`).
+- Run 3b (2026-11-10, `main` `03cd25a`, through Anthropic's own API with the host on Claude Sonnet): the parts #241
+  listed as untested. Four players (blind, a11y, commuter, red-team) and two judges (UX, difficulty); 27 games,
+  13 generative calls, about $0.07. Lines 3 (layer clause), 4, 4-leaks, 5, and 7 pass. Scaffolded algorithm rounds
+  at stage 0: 7 of 12; 0 leaks in 13 real attempts; the duel's forms walked by keyboard; twelve polish items (#253).
+  The personas above are as corrected by it. Record: `docs/review/evidence/2026-11-10-agent-playtest-run-3b.md`.

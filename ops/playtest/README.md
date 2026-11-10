@@ -108,9 +108,9 @@ scope, and adds a calibration instrument. Each has a prompt in `personas/`:
 | `duel-pair` | two friends, Ana and Ben, in two sessions: challenge, play, result, rematch, on a seeded deal and on today's five | tension from the opponent's round, the verdict and tie-break copy, what the result page gives the challenger |
 | `streaker` | chases a streak and a best, fast and hint-free when possible | the 50/50 hint as a decision, the end screen's record line, the streak on a card |
 | `learner` | teaches an intro course; buys both hints and uses the design every round, on Haiku and Sonnet explainers | what reveals, hints, layers, and panels teach; claims to doubt; the #120 comparison |
-| `blind` | not a person: a code-blind solver with `blind: true`, guessing at stage 0, after hint 1, and after hint 2 | nothing; it records a tally per round for the difficulty judge |
+| `blind` | not a person: a code-blind solver with `blind: true`, guessing at stage 0, after hint 1, and after hint 2, the layer-on games first on rounds it has not seen | nothing; it records a tally per round for the difficulty judge |
 | `red-team` (run 3) | the host before the lock, disguised code, tampered duel links and odd addresses | leaks and pages that error instead of refusing |
-| `a11y` (run 3) | keyboard and screen reader, on a desktop and a phone; the chooser's records and the duel pages | focus order, announcements, colour-only meaning, run 2's fixes |
+| `a11y` (run 3) | keyboard and screen reader, on a desktop and a phone; the chooser's records, and a challenge sent and answered by keyboard | focus order, announcements, colour-only meaning, run 2's fixes |
 
 ## What a player does
 

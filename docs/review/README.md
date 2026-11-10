@@ -21,6 +21,13 @@ judged fun for the first time, against a release bar: four of its nine lines fai
 [Anthropic live check](evidence/2026-11-03-genui-anthropic-live-check.md) (2026-11-03) ran generative UI through
 Anthropic's own API, the second provider (#246): every design rendered on the first try.
 
+The [next steps review](2026-11-10-next-steps-review.md) (2026-11-10) read the milestones, the pull requests, and
+every open issue with four reviewer agents: v1.1 is finished except for the server, and the next phase it proposes
+is a data-quality release under one new profile version. Its tests are
+[agent playtest run 3b](evidence/2026-11-10-agent-playtest-run-3b.md): the question layers on unseen rounds, the
+duel by keyboard, the phone pages, the answer-lock guard through Anthropic's API, and a pipeline replay after the
+worker's lock moved (#251), which found that a resume on a later day changes the artifact's hash (#252).
+
 Its [release notes](../releases/v1.0.0.md) cover it all, and the `v1.0.0` tag
 and GitHub release went out on 2026-10-20. Its data work replaced Phase 3c's open decisions
 with the ones in #129.
@@ -59,5 +66,7 @@ designs with an anonymous first-party event log.
   decisions.
 - [Next-phase plan](2026-10-20-next-phase-plan.md): v1.1's four tracks (launch,
   data, player features, duels), the owner's decisions, and their order.
+- [Next steps review](2026-11-10-next-steps-review.md): the state on 2026-11-10, the milestones as they
+  are and as proposed, the next phase in ordered batches, and the owner's thirteen open decisions.
 
 Open work is tracked as issues: https://github.com/MysterionRise/code-guesser/issues

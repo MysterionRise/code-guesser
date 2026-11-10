@@ -16,33 +16,43 @@ curl -s -X POST {{DRIVER}}/sessions -d '{"name":"blind-sighted","viewport":"desk
 
 ## Your games, in this order
 
-On `blind`, layer off, each on its pinned deal:
+The layer-on games come first, on two seeds no other game of the run uses, so every round is new to you when a
+layer shows it. (In run 3 the layer-on games replayed rounds the layer-off games had just revealed, and their
+tally could not be read: #241.) Games of one seed share no round.
 
-1. `POST S/start {"deck":"project","deal":"demo","game":0,"design":"off","theme":"terminal","layer":"off"}`
-2. language
-3. before-after
-4. algorithm
-5. output
-6. fix
-7. missing-line
-8. name-function
-9. framework
-10. exercise
+On `blind`, with the layer on:
 
-Then, still on `blind`, with the layer on:
+1. `POST S/start {"deck":"algorithm","deal":"b11d0a15","game":0,"design":"off","theme":"terminal","layer":"on"}`
+2. algorithm, the same seed, `"game":1`
+3. algorithm, the same seed, `"game":2`
+4. algorithm, the same seed, `"game":3`
+5. `POST S/start {"deck":"language","deal":"b11d1a26","game":0,"design":"off","theme":"terminal","layer":"on"}`
+6. language, the same seed, `"game":1`
 
-11. `POST S/start {"deck":"algorithm","deal":"demo","game":0,"design":"off","theme":"terminal","layer":"on"}`
-12. language, demo, layer on
+Then, still on `blind`, with the layer off. Algorithm and language go on with their seeds, so no round repeats; the
+other eight decks play their pinned deals:
+
+7. `POST S/start {"deck":"algorithm","deal":"b11d0a15","game":4,"design":"off","theme":"terminal","layer":"off"}`
+8. `POST S/start {"deck":"language","deal":"b11d1a26","game":2,"design":"off","theme":"terminal","layer":"off"}`
+9. `POST S/start {"deck":"project","deal":"demo","game":0,"design":"off","theme":"terminal","layer":"off"}`
+10. before-after
+11. output
+12. fix
+13. missing-line
+14. name-function
+15. framework
+16. exercise
 
 Then on `blind-sighted`, one sighted control:
 
-13. `POST S/start {"deck":"exercise","design":"off","theme":"terminal","layer":"off"}`, a fresh seed. Read the
+17. `POST S/start {"deck":"exercise","design":"off","theme":"terminal","layer":"off"}`, a fresh seed. Read the
     code and answer each round with your best read, no hints.
 
 ## Each blind round, exactly
 
-1. Read `prompt`, `options` (labels and details), and `scaffold` if the state shows one. Write your stage-0 guess
-   (one label) before anything else.
+1. Read `prompt`, `options` (labels and details), and `scaffold` if the state shows one. Note whether a scaffold
+   is there: in a layer-on game about half of the algorithm rounds carry no layer, and they are tallied apart.
+   Write your stage-0 guess (one label) before anything else, and never change it afterwards.
 2. `POST S/hint`. Read `hints`. Write your stage-1 guess.
 3. `POST S/hint`. Read `hints` and `trace` if shown. Write your stage-2 guess.
 4. `POST S/answer {"label":"<stage-2 guess>"}`. Read `reveal` for the answer. Write all three guesses and the
@@ -55,13 +65,20 @@ that cell and go on. Do not try to see the code another way.
 
 ## Budget
 
-13 games, 0 generative calls, about 7 driver calls a round (up to 45 a game). No screenshots.
+17 games, 0 generative calls, about 7 driver calls a round (up to 45 a game). No screenshots. If you run short of
+room, the six layer-on games and games 7 and 8 come before everything else; say which games you did not play.
 
 ## Your persona section: "Tally"
 
-A table with one row per round: game | deck | layer | round | roundId | options (four labels, joined by " / ") |
-stage 0 | stage 1 | stage 2 | answer | recognised? Then a second table, one row per game: game | deck | layer |
-stage-0 right (of 5) | stage-1 right | stage-2 right. Game 13 fills only the second table, as "sighted".
+Three tables.
+
+1. One row per round: game | deck | layer | round | roundId | scaffold shown? (yes or no) | scaffold, first 120
+   characters | options (four labels, joined by " / ") | stage 0 | stage 1 | stage 2 | answer | recognised?
+2. One row per game: game | deck | layer | rounds with a scaffold | stage-0 right (of 5) | stage-1 right | stage-2
+   right. Game 17 fills only this table, as "sighted".
+3. One row per deck and layer, for algorithm and language: rounds | rounds with a scaffold | stage-0 right, all
+   rounds | stage-0 right, scaffolded rounds only | stage-1 right, all | stage-1 right, scaffolded only | stage-2
+   right, all.
 
 Your Games table still needs every column: `K/R/G` is five letters of G for the blind games; `fun` and
 `fun-if-blind` may be "–". Your Scores table is all "–". Leave "Per deck", "Copy that stuck out", and "Would you
