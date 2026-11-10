@@ -74,7 +74,7 @@ this one: [launch](2026-11-10-next-steps-review/launch.md),
 | none | 25 | run 3's data issues #228–#231, #240, #241, #249; the 2026-10-13 backlog #30, #37, #38, #50, #51, #53, #61, #64, #65, #67, #72, #83, #87, #90, #93; the public-app leftovers #103, #105, #109 |
 | v1.0, public app phases 1 and 2 | 0 | closed |
 
-**Proposed**, if the owner takes decision 1:
+**Since 2026-11-10**, when the owner took decision 1 and created v1.2 and Launch:
 
 | Milestone | Holds | Done when |
 | --- | --- | --- |
@@ -82,6 +82,9 @@ this one: [launch](2026-11-10-next-steps-review/launch.md),
 | v1.2 | the data-quality release: #228, #229, #230, #231, #240, #249, #82, #80, #159, #160; the engineering it needs: #90, #93, #194, #252, and the worker's lock pin (#255); the rounds to refuse (#257) and run 3b's polish items (#253); the quick wins #50 and #65's budget test | run 3's bar lines 1, 1b, 2, and 3 pass on a recheck |
 | Launch | #100, #170, #120, and tests of an Anthropic-only server (#256) | the game is live and a smoke game in each arm records its events |
 | Next | #128 (two designs first), #59 with #147, #60, #61, #64's mode, #105, #81's remainder, #31, #68, #37 | not scheduled |
+
+That is 1, 19, 4, and 11 open issues. Seven more keep no milestone, each an owner decision or parked: #30, #38,
+#51, #53, #67, #72, #83.
 
 ## The next phase, in order
 
@@ -200,7 +203,8 @@ repository.
 
 1. **What is v1.1, now that the server waits?** Keep it open until L13; or tag `v1.1.0` now and give launch its
    own milestone. *Recommended: tag now, launch after v1.2.* v1.0 was tagged the same way ("launch-ready, but
-   still local", `docs/releases/v1.0.0.md:4-5`). It costs one docs PR.
+   still local", `docs/releases/v1.0.0.md:4-5`). It costs one docs PR. **Taken on 2026-11-10:** the owner created the
+   v1.2 and Launch milestones. The tag itself waits for batch 0's docs PR and the owner's go-ahead.
 2. **#120: which model per design in production?** Run 3's pilot: the explainers were level between Haiku and
    Sonnet at 14 to 18 times the cost; the Haiku host gave 3 empty replies in 7 and 2 wrong claims in 38, the
    Sonnet host none. *Recommended: Sonnet for the host alone*, about $0.07 a game against $0.004, named under the
@@ -315,14 +319,14 @@ the owner to read and run.
   braces." is false, three missing-line rounds whose hidden line is a `def` line).
 - **Labels:** #160, #159, and #147 have theirs; "good first issue" is off #68, whose done-when needs the journal
   no fork has.
+- **Milestones:** v1.2 and Launch exist, with the issues moved as in [the table above](#milestones), and #174
+  carries a comment saying so.
 
 43 issues are open after it.
 
 **Still proposed**
 
 - **Closes with this review's PR: #241.**
-- **Milestones**, if decision 1 is taken: create v1.2 and Launch, and move the issues as in the table above. The
-  script's second part does it.
 - **Stale issue text**, worth a comment when each is next touched: #100 ("OpenRouter only", "Open: hosting"), #170
   (`compose.yaml`, Caddy), #120 (its title names the composer and catalog; the pilot found the host), #81, #82,
   and #80 (counts from the v5 pool), #59 and #147 (the 5,000-request premise), #229 ("Blocks release: no", though
