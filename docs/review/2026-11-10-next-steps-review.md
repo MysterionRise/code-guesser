@@ -4,8 +4,9 @@ Reviewed 2026-11-10 at the owner's request: what the milestones are, the open pu
 issues, and multi-agent testing as part of it. Four reviewer agents read the tracker against `main` at `03cd25a`
 (launch, round data, product, engineering). The lead checked their main claims against the code and ran two tests:
 a pipeline replay check and agent playtest run 3b, both in
-[the run 3b record](evidence/2026-11-10-agent-playtest-run-3b.md). Nothing was merged. The tracker changes this review proposes are listed [at the end](#tracker-changes-proposed); the
-owner applied the first part of them the same day.
+[the run 3b record](evidence/2026-11-10-agent-playtest-run-3b.md). Nothing was merged. The tracker changes this
+review proposes are listed [at the end](#tracker-changes-proposed); the owner applied the first part of them the
+same day.
 
 The reviewers' own files, with a verdict and an implementation sketch for every issue in their scope, are beside
 this one: [launch](2026-11-10-next-steps-review/launch.md),
@@ -184,8 +185,8 @@ committed artifact keeps parsing, and each PR merges with no re-pin. Check each 
 
 - **Two more question-layer designs before launch** (#128): Diff lens for before-after and Narrow it down for fix,
   the two decks run 3 called too hard. Eight of ten decks have no layer today. Trace table waits for #159.
-- **Launch.** First, tests of what an Anthropic-only server runs (#256, M): `pnpm test:deploy` plays the designs on the
-  OpenRouter stand-in outside public mode, `pnpm test:container` never sets `GENUI_ENABLED`
+- **Launch.** First, tests of what an Anthropic-only server runs (#256, M): `pnpm test:deploy` plays the designs
+  on the OpenRouter stand-in outside public mode, `pnpm test:container` never sets `GENUI_ENABLED`
   (`tests/container/image.test.mjs`), and `ops/deploy/smoke.mjs` never calls `/api/genui`. So no model call has
   ever been made from the image, with either provider. Then L13 as `docs/deploy.md` describes.
 - **At or after launch:** the recap arm (#105), practice mode as a mode (#64), live duel rooms.
