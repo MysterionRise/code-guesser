@@ -4,8 +4,8 @@ Reviewed 2026-11-10 at the owner's request: what the milestones are, the open pu
 issues, and multi-agent testing as part of it. Four reviewer agents read the tracker against `main` at `03cd25a`
 (launch, round data, product, engineering). The lead checked their main claims against the code and ran two tests:
 a pipeline replay check and agent playtest run 3b, both in
-[the run 3b record](evidence/2026-11-10-agent-playtest-run-3b.md). Nothing was merged, and no issue was closed or
-moved: the tracker changes this review proposes are listed [at the end](#tracker-changes-proposed) for the owner.
+[the run 3b record](evidence/2026-11-10-agent-playtest-run-3b.md). Nothing was merged. The tracker changes this review proposes are listed [at the end](#tracker-changes-proposed); the
+owner applied the first part of them the same day.
 
 The reviewers' own files, with a verdict and an implementation sketch for every issue in their scope, are beside
 this one: [launch](2026-11-10-next-steps-review/launch.md),
@@ -78,8 +78,8 @@ this one: [launch](2026-11-10-next-steps-review/launch.md),
 | Milestone | Holds | Done when |
 | --- | --- | --- |
 | v1.1 | #174 only, then closed | one docs PR finishes the release notes for a local-play release, and `v1.1.0` is tagged |
-| v1.2 | the data-quality release: #228, #229, #230, #231, #240, #249, #82, #80, #159, #160; the engineering it needs: #90, #93, #194, #252, and the worker's lock pin; the quick wins #50 and #65's budget test | run 3's bar lines 1, 1b, 2, and 3 pass on a recheck |
-| Launch | #100, #170, #120, and tests of an Anthropic-only server | the game is live and a smoke game in each arm records its events |
+| v1.2 | the data-quality release: #228, #229, #230, #231, #240, #249, #82, #80, #159, #160; the engineering it needs: #90, #93, #194, #252, and the worker's lock pin (#255); the rounds to refuse (#257) and run 3b's polish items (#253); the quick wins #50 and #65's budget test | run 3's bar lines 1, 1b, 2, and 3 pass on a recheck |
+| Launch | #100, #170, #120, and tests of an Anthropic-only server (#256) | the game is live and a smoke game in each arm records its events |
 | Next | #128 (two designs first), #59 with #147, #60, #61, #64's mode, #105, #81's remainder, #31, #68, #37 | not scheduled |
 
 ## The next phase, in order
@@ -95,7 +95,7 @@ Sizes are the reviewers', from reading the touch points: S is under a day, M a f
 - **README.** `:8` (current release), `:364` (the rate-limit page now says "Too many new games. Wait a minute."),
   `:601-612` (three curated decks listed, seven configured), `:746` ("OpenRouter only"; either provider since
   #246), `:859` (`compose.test.yaml` is gone).
-- **Tracker.** Close #103, #109, and #87 with the evidence under [tracker changes](#tracker-changes-proposed).
+- **Tracker.** #103, #109, and #87 are closed, with the evidence under [tracker changes](#tracker-changes-proposed).
 - **Tag `v1.1.0`** on that PR's merge commit, with the owner's go-ahead, as v1.0.0 was.
 
 ### Batch 1: four engineering changes before any data run
@@ -104,7 +104,7 @@ Sizes are the reviewers', from reading the touch points: S is under a day, M a f
 | --- | --- | --- |
 | **#90**: add `--quiet` to the two `uv run` calls (`stack-metadata.ts:185`, `blob-worker.ts:98`) and their two tests | S | The first thing a fresh checkout or worktree hits. It is PR #95's diff. It does not orphan the journal, since the journal key reads only the script's name. |
 | **#93**: give `StackAccessError` a cause and rethrow run stops (`stack-access.ts:17-22`, `:99-124`) | S | An offline journal miss or a revoked token in preflight prints as `ACCESS_UNAVAILABLE none` today. |
-| **The worker's lock pin** (no issue yet): key recorded worker outputs to the worker's `.py` files alone (`worker-journal.ts:19`), look a request up under the old key too so today's journal still replays, then delete `LOCK_HASH` and `LOCK_MISMATCH` | S | A uv security PR then passes CI like an npm one and costs no live resume. `uv run --locked` still refuses a lock that disagrees with `pyproject.toml`. |
+| **The worker's lock pin** (#255): key recorded worker outputs to the worker's `.py` files alone (`worker-journal.ts:19`), look a request up under the old key too so today's journal still replays, then delete `LOCK_HASH` and `LOCK_MISMATCH` | S | A uv security PR then passes CI like an npm one and costs no live resume. `uv run --locked` still refuses a lock that disagrees with `pyproject.toml`. |
 | **#194 parts 1 and 2**: mark each search query complete in the journal and replay it alone; turn a bare 403 on `/search/commits` into `RATE_LIMIT_CHECKPOINT` | M | Today a resumed run that replays the seven recorded searches and then fails on a new one writes `discoveryComplete: false` (`journal.ts:150-153`, `:198-203`), and the next resume searches all of them live. Fresh searches drift, so the before-after pool could change. |
 
 Also here, any time: **#252**, so that a resume stops moving the hash; **#65's budget test** (a `node --test` file
@@ -140,7 +140,7 @@ committed artifact keeps parsing, and each PR merges with no re-pin. Check each 
 - **#229: hints that rule out nothing.** Before-after: replace hint 2's added and removed counts
   (`before-after-rounds.ts:56-59`). Output and fix: new hint shapes, with the parser's rules gated
   (`packages/artifact/src/artifact.ts:435-441`, `:466`).
-- **Rounds to refuse.** A missing-line gap that is prose or a `def` line (`missing-line-window.ts:104`).
+- **Rounds to refuse (#257).** A missing-line gap that is prose or a `def` line (`missing-line-window.ts:104`).
 - **Option notes in the reveal**, the data half of #64: one sentence per option saying what it is. For algorithm,
   exercise, and framework the sentences exist in the profile and are sold as hint 1 today, which is #228's
   finding; once #228 replaces those hints, the sentences belong in the reveal. It needs the new schema version and
@@ -184,7 +184,7 @@ committed artifact keeps parsing, and each PR merges with no re-pin. Check each 
 
 - **Two more question-layer designs before launch** (#128): Diff lens for before-after and Narrow it down for fix,
   the two decks run 3 called too hard. Eight of ten decks have no layer today. Trace table waits for #159.
-- **Launch.** First, tests of what an Anthropic-only server runs (M): `pnpm test:deploy` plays the designs on the
+- **Launch.** First, tests of what an Anthropic-only server runs (#256, M): `pnpm test:deploy` plays the designs on the
   OpenRouter stand-in outside public mode, `pnpm test:container` never sets `GENUI_ENABLED`
   (`tests/container/image.test.mjs`), and `ops/deploy/smoke.mjs` never calls `/api/genui`. So no model call has
   ever been made from the image, with either provider. Then L13 as `docs/deploy.md` describes.
@@ -226,7 +226,7 @@ repository.
    this phase.*
 9. **#83: credit Stack rounds to the file's last human author?** It changes the credited author on 100 rounds, for
    about 100 requests. *Decide before the data run, since that run re-pins anyway.*
-10. **The worker's lock.** Keep today's hand procedure, or key recorded outputs to the worker's code and delete
+10. **The worker's lock (#255).** Keep today's hand procedure, or key recorded outputs to the worker's code and delete
     `LOCK_HASH`. *Recommended: the second.* And drop `datasets` from the worker: nothing has imported it since
     2026-10-08, and it carried 11 of the 28 alerts (aiohttp, datasets, multidict). One risk: pandas leaves with
     it, and pyarrow uses pandas when present for some timestamps, so the resume in batch 4 is the check.
@@ -297,26 +297,35 @@ The full record is [the run 3b evidence](evidence/2026-11-10-agent-playtest-run-
 
 ## Tracker changes proposed
 
-For the owner to read and run; nothing here has been applied. New issues filed today: #252 (the resume and the
-hash) and #253 (run 3b's polish items).
+The lead filed #252 (the resume and the hash) and #253 (run 3b's polish items). Everything else was a script for
+the owner to read and run.
 
-- **Close as done: #103.** It shipped as the `catalog` design (`apps/game/src/genui/render-catalog.ts:37-84`:
+**Applied by the owner on 2026-11-10**
+
+- **Closed as done: #103.** It shipped as the `catalog` design (`apps/game/src/genui/render-catalog.ts:37-84`:
   `takeaway`, `code_view`, `comparison`). Its `genui_rendered` event never existed; `genui_call`,
   `genui_interaction`, and `genui_fallback` cover it (`apps/game/src/experiment/events.ts`).
-- **Close as superseded: #109** (everything open in it is #100 on #174, or #105) and **#87** (47 of its 66 issues
-  are closed, and it still says generative UI runs on CopilotKit; `docs/review/README.md` and the milestones carry
-  the state). Unpin #87.
-- **Close with this review's PR: #241.**
-- **Milestones**, if decision 1 is taken: create v1.2 and Launch, and move the issues as in the table above.
-- **New issues to file:** the worker's lock pin and unused dependencies (decision 10); tests of an Anthropic-only
-  server; rounds the next data run should refuse or fix (the prose missing-line round
+- **Closed as superseded: #109** (everything open in it is #100 on #174, or #105) and **#87** (47 of its 66 issues
+  are closed, and it still said generative UI runs on CopilotKit; `docs/review/README.md` and the milestones carry
+  the state). #87 is unpinned.
+- **Three issues filed:** #255, the worker's lock pin and unused dependencies (decision 10); #256, tests of an
+  Anthropic-only server; #257, rounds the next data run should refuse or fix (the prose missing-line round
   `local-missing-line-5facdb72…`, the F# round `local-language-66fb3e93…` whose hint 1 "Blocks are wrapped in
   braces." is false, three missing-line rounds whose hidden line is a `def` line).
+- **Labels:** #160, #159, and #147 have theirs; "good first issue" is off #68, whose done-when needs the journal
+  no fork has.
+
+43 issues are open after it.
+
+**Still proposed**
+
+- **Closes with this review's PR: #241.**
+- **Milestones**, if decision 1 is taken: create v1.2 and Launch, and move the issues as in the table above. The
+  script's second part does it.
 - **Stale issue text**, worth a comment when each is next touched: #100 ("OpenRouter only", "Open: hosting"), #170
-  (`compose.yaml`, Caddy), #120 (its title names the composer and catalog; the pilot found the host), #160 and #159
-  (no labels), #81, #82, and #80 (counts from the v5 pool), #59 and #147 (the 5,000-request premise), #68 ("good
-  first issue", though its done-when needs the journal no fork has), #229 ("Blocks release: no", though bar line 3
-  fails on it).
+  (`compose.yaml`, Caddy), #120 (its title names the composer and catalog; the pilot found the host), #81, #82,
+  and #80 (counts from the v5 pool), #59 and #147 (the 5,000-request premise), #229 ("Blocks release: no", though
+  bar line 3 fails on it).
 
 ## Lines in `CLAUDE.md` to correct
 
