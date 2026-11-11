@@ -181,8 +181,10 @@ export const metadataWorkerRequest = (options: StackMetadataOptions): WorkerRequ
   }
   return Object.freeze({
     command: "uv",
+    // `--quiet` keeps uv's own messages off stderr, which is read as the worker's one failure code: on a fresh
+    // checkout uv creates the environment first and says so there (#90).
     args: Object.freeze([
-      "run", "--project", RUNTIME_DIRECTORY, "--locked", "python", WORKER_PATH,
+      "run", "--quiet", "--project", RUNTIME_DIRECTORY, "--locked", "python", WORKER_PATH,
     ]),
     cwd: RUNTIME_DIRECTORY,
     environment: Object.freeze({ PATH: path, HF_TOKEN: token }),

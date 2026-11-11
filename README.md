@@ -710,6 +710,18 @@ never replaces the journal that rebuilds the committed artifact offline, a run
 with no flag refuses to start over one, and `--fresh` sets the old one aside in
 the same ignored directory; renaming it back restores it.
 
+What a resumed run replays, it replays by key:
+
+- **Stack access** is checked live every time. Hugging Face's answer counts
+  the dataset's downloads and likes, which move by the day; an answer that
+  differs from the journal's only in those is accepted as the recorded one, so
+  a resume on a later day builds the same artifact (#252). Any other change
+  is accepted as it came, and the artifact's hash shows it.
+- **Worker outputs** are keyed to the worker's own Python files and what it
+  was asked to read. A change to one of those files makes the next
+  `--resume` read the rows again; a change to the worker's `uv.lock` alone
+  does not (#255).
+
 The journal also keeps failures:
 
 - **Deterministic GitHub answers** such as 404s replay on resume and offline.
