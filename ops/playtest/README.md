@@ -13,10 +13,12 @@ their accuracy and "fun" are not a real player's; the real experiment is #106–
 
 ## Run it
 
-1. **Serve the game** with generative UI and the OpenRouter key from its standard
-   store (or `ANTHROPIC_API_KEY="$(cat ~/.config/anthropic/key)"` in its place, to
-   play through Anthropic's own API; the model settings then take the `ANTHROPIC_`
-   prefix, such as `ANTHROPIC_MODEL=claude-sonnet-5-5`):
+1. **Serve the game** with generative UI and the Anthropic key from its standard
+   store, as run 3b did (or `OPENROUTER_API_KEY="$(cat ~/.config/openrouter/key)"`
+   in its place, to play through OpenRouter's OpenAI-compatible endpoint, as runs
+   1 to 3 did; the model settings then take the `OPENROUTER_` prefix and
+   OpenRouter's names, such as `OPENROUTER_MODEL_HOST=anthropic/claude-sonnet-5.5`
+   with `OPENROUTER_REASONING_HOST=low`):
 
    Lab mode (`EXPERIMENT_LAB=1`) lets players pick a design, theme, and layer
    (`?design=`, `?theme=`, `?layer=`); a production build otherwise draws each
@@ -28,7 +30,7 @@ their accuracy and "fun" are not a real player's; the real experiment is #106–
    pnpm --filter @codeguessr/game build
    cd apps/game && GENUI_ENABLED=1 EXPERIMENT_LAB=1 EXPERIMENT_SOURCE=agent \
      EXPERIMENT_EVENTS_DIR="$PWD/../../ops/playtest/tmp/<run>/events" \
-     OPENROUTER_API_KEY="$(cat ~/.config/openrouter/key)" \
+     ANTHROPIC_API_KEY="$(cat ~/.config/anthropic/key)" \
      node node_modules/next/dist/bin/next start --hostname 127.0.0.1 --port 3300
    ```
 

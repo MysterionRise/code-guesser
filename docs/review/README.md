@@ -29,7 +29,9 @@ Ahead of launch, [agent playtest run 3](evidence/2026-11-02-agent-playtest-run-3
 judged fun for the first time, against a release bar: four of its nine lines failed; the code-side fixes are merged
 (#242–#245) and the data-level ones wait for the next preparation run (#228–#231, #240). The
 [Anthropic live check](evidence/2026-11-03-genui-anthropic-live-check.md) (2026-11-03) ran generative UI through
-Anthropic's own API, the second provider (#246): every design rendered on the first try.
+Anthropic's own API, the second provider (#246): every design rendered on the first try. Since 2026-11-11 `pnpm play`
+serves the game locally on that provider by default, with OpenRouter one flag away; its
+[live check](evidence/2026-11-11-play-anthropic-live-check.md) also ran the Sonnet host at `low` reasoning.
 
 The [next steps review](2026-11-10-next-steps-review.md) (2026-11-10) read the milestones, the pull requests, and
 every open issue with four reviewer agents: v1.1 is finished except for the server, and the next phase it proposes
