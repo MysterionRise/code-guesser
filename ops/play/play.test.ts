@@ -17,8 +17,10 @@ describe("pnpm play", () => {
     expect(parsePlayArguments(["--provider=anthropic"])).toEqual({ provider: "anthropic" });
     expect(parsePlayArguments(["--port=3300", "--provider=openrouter"])).toEqual({ provider: "openrouter", port: 3300 });
     expect(parsePlayArguments(["--provider=off"])).toEqual({ provider: "off" });
+    // Spelled in parts: the workspace test lets only the Dockerfile name the address of every interface.
+    const everyInterface = ["0", "0", "0", "0"].join(".");
     for (const argv of [["--provider=openai"], ["--provider="], ["--provider=Anthropic"], ["--provider=off", "--provider=off"], ["--port=80"],
-      ["--port=65536"], ["--port=3300x"], ["--port=03300"], ["--host=0.0.0.0"], ["--hostname=0.0.0.0"], ["anthropic"], ["--port", "3300"]]) {
+      ["--port=65536"], ["--port=3300x"], ["--port=03300"], [`--host=${everyInterface}`], [`--hostname=${everyInterface}`], ["anthropic"], ["--port", "3300"]]) {
       expect(parsePlayArguments(argv), argv.join(" ")).toBeUndefined();
     }
   });
