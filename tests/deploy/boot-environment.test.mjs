@@ -9,12 +9,33 @@ import { after, before, test } from "node:test";
 
 import { chromium } from "@playwright/test";
 
+import { startFakeAnthropic } from "../e2e/fake-anthropic.mjs";
 import { startFakeOpenRouter } from "../e2e/fake-openrouter.mjs";
 import { ensureProductionBuild, game } from "../production/build.mjs";
 
 const next = join(game, "node_modules", "next", "dist", "bin", "next");
 const SENTINEL = "boot-sentinel-5d1e8b";
 const data = mkdtempSync(join(tmpdir(), "codeguessr-boot-"));
+/** A placeholder for a model provider's key: it holds the sentinel, so no service knows it and no log may print it. */
+const MODEL_KEY = `placeholder-${SENTINEL}`;
+/**
+ * Each model provider's stand-in, the settings that point a server at it, and where a request carries the key (#256).
+ * No setting names the provider: a server takes Anthropic's API when the Anthropic key is the only one it has.
+ */
+const PROVIDERS = Object.freeze([
+  {
+    name: "OpenRouter",
+    fake: startFakeOpenRouter,
+    settings: (port) => ({ OPENROUTER_API_KEY: MODEL_KEY, OPENROUTER_BASE_URL: `http://127.0.0.1:${port}/api/v1` }),
+    key: ({ authorization }) => authorization?.replace(/^Bearer /u, ""),
+  },
+  {
+    name: "Anthropic's API",
+    fake: startFakeAnthropic,
+    settings: (port) => ({ ANTHROPIC_API_KEY: MODEL_KEY, ANTHROPIC_BASE_URL: `http://127.0.0.1:${port}/v1` }),
+    key: ({ apiKey }) => apiKey,
+  },
+]);
 /** A public server configured for anonymous play (#97), with its state and events in a scratch directory. */
 const PUBLIC = Object.freeze({
   CODEGUESSR_PUBLIC: "1",
@@ -93,12 +114,11 @@ test("a public server without its session secret refuses to start, naming the co
   assert.doesNotMatch(`${stdout}${stderr}`, new RegExp(SENTINEL, "u"));
 });
 
-test("the production build plays every generative design under its nonce policy, eval refused, without one violation", async () => {
-  const fake = await startFakeOpenRouter();
+for (const provider of PROVIDERS) test(`the production build plays every generative design on ${provider.name} under its nonce policy, eval refused, without one violation`, async () => {
+  const fake = await provider.fake();
   try {
     const { code, signal, stdout, stderr } = await start({
-      GENUI_ENABLED: "1", OPENROUTER_API_KEY: "fake-key", OPENROUTER_BASE_URL: `http://127.0.0.1:${fake.port}/api/v1`,
-      EXPERIMENT_LAB: "1", EXPERIMENT_SOURCE: "synthetic",
+      GENUI_ENABLED: "1", ...provider.settings(fake.port), EXPERIMENT_LAB: "1", EXPERIMENT_SOURCE: "synthetic",
     }, async (port) => {
       const base = `http://127.0.0.1:${port}`;
       const browser = await chromium.launch();
@@ -128,11 +148,14 @@ test("the production build plays every generative design under its nonce policy,
         await page.getByRole("button", { name: "Send" }).click();
         await page.locator(".genui-host").first().waitFor();
         assert.deepEqual(violations, []);
+        // Each design asked this provider's stand-in once, with the server's key where the provider reads it.
+        assert.deepEqual(fake.requests.map((request) => provider.key(request) === MODEL_KEY), [true, true, true, true]);
       } finally {
         await browser.close();
       }
     });
     assert.ok(code === 0 || signal === "SIGTERM", `the server stopped badly (${code}, ${signal})\n${stdout}\n${stderr}`);
+    assert.doesNotMatch(`${stdout}${stderr}`, new RegExp(SENTINEL, "u"));
   } finally {
     await fake.close();
   }
@@ -160,6 +183,29 @@ test("a configured public server starts, answers its health check, and keeps eac
     } finally {
       database.close();
     }
+  });
+  assert.ok(code === 0 || signal === "SIGTERM", `the server stopped badly (${code}, ${signal})\n${stdout}\n${stderr}`);
+  assert.doesNotMatch(`${stdout}${stderr}`, /GAME_ENVIRONMENT_REJECTED/u);
+  assert.doesNotMatch(`${stdout}${stderr}`, new RegExp(SENTINEL, "u"));
+});
+
+test("a public server with generative UI on starts on an Anthropic key alone, and names that key when Anthropic is asked for without it (#256)", async () => {
+  // Anthropic named as the provider, with only the other provider's key: refused by the missing key's name.
+  const refused = await start({ ...PUBLIC, GENUI_ENABLED: "1", GENUI_PROVIDER: "anthropic", OPENROUTER_API_KEY: MODEL_KEY });
+  assert.equal(refused.code, 78, `expected exit 78\n${refused.stdout}\n${refused.stderr}`);
+  assert.deepEqual(refused.stderr.split("\n").filter((line) => line.startsWith("GAME_ENVIRONMENT_REJECTED ")),
+    ["GAME_ENVIRONMENT_REJECTED ANTHROPIC_API_KEY_MISSING"]);
+  assert.doesNotMatch(`${refused.stdout}${refused.stderr}`, new RegExp(SENTINEL, "u"));
+  // The Anthropic key and nothing else about the model: no OpenRouter key, no GENUI_PROVIDER, no model or address.
+  const { code, signal, stdout, stderr } = await start({ ...PUBLIC, GENUI_ENABLED: "1", ANTHROPIC_API_KEY: MODEL_KEY }, async (port, response) => {
+    assert.equal(response.status, 200);
+    assert.match(await response.text(), /Pick a deck/u);
+    const health = await fetch(`http://127.0.0.1:${port}/api/health`);
+    assert.deepEqual([health.status, await health.text()], [200, "ok"]);
+    // Generative UI is on: its route reads a request, where a server without it answers 404. This server's provider
+    // address is the real one, so the request is one the route refuses by its shape, before any game or model.
+    const shapeless = await fetch(`http://127.0.0.1:${port}/api/genui`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+    assert.deepEqual([shapeless.status, await shapeless.json()], [400, { reason: "BODY_REJECTED" }]);
   });
   assert.ok(code === 0 || signal === "SIGTERM", `the server stopped badly (${code}, ${signal})\n${stdout}\n${stderr}`);
   assert.doesNotMatch(`${stdout}${stderr}`, /GAME_ENVIRONMENT_REJECTED/u);

@@ -836,12 +836,16 @@ What each one checks:
 - The containment test: no acquisition code, provider key, session secret, or
   preparer reaches the production build or the browser.
 - `pnpm test:deploy`: boots the production build in public mode. A missing
-  setting exits 78 with its code, the health check and state store work, rate
-  limits read the proxy's address, and every page plays under the nonce
-  policy with eval refused.
+  setting exits 78 with its code, a server with generative UI on starts on an
+  Anthropic key alone, the health check and state store work, rate limits
+  read the proxy's address, and every page plays under the nonce policy with
+  eval refused, the generative designs once on each model provider's
+  stand-in.
 - `pnpm test:container`: needs Docker. It builds the image, or takes
   `CODEGUESSR_IMAGE`, and runs it in public mode with a throwaway secret and
-  volume.
+  volume. Two more containers, in the pre-launch settings, each make the
+  image's model call against one provider's stand-in, through
+  `ops/deploy/smoke.mjs --genui`.
 - `pnpm test:a11y`: Playwright against `next start` on the production build.
   axe's WCAG 2 A and AA rules read the chooser, About, Credits, Privacy, the
   404, and a duel's intro, game, comparison, and result. They read every

@@ -1,7 +1,8 @@
 /**
  * The deploy smoke test (#170, L13), run against a running game in public mode:
  *
- *   node ops/deploy/smoke.mjs <base-url> [--deck=<id>] [--record] [--rate-limits] [--events=<dir>] [--no-browser]
+ *   node ops/deploy/smoke.mjs <base-url> [--deck=<id>] [--record] [--rate-limits] [--genui] [--events=<dir>]
+ *     [--no-browser]
  *
  * It is safe against the live server: it reads pages, deals one game, and plays it through in Chromium. The game sends
  * `Sec-GPC: 1`, so it records no events, unless `--record` asks for them (the pre-launch run, with
@@ -10,11 +11,17 @@
  * `X-Forwarded-For` from a documentation range, which no response may echo, and no page outside a round may hold an
  * address. It prints one line per check and exits 1 if any fails. Chromium comes from
  * `pnpm exec playwright install chromium`.
+ *
+ * `--genui` is for the pre-launch run with generative UI on (#256): it plays one more round to its reveal and asks
+ * for the catalog explainer, which must render rather than fall back to the static reveal. That is one model call
+ * through the server's own `/api/genui`, with the server's own key (about $0.001). It needs lab mode
+ * (`EXPERIMENT_LAB=1` with `EXPERIMENT_SOURCE=synthetic`), since only there does a game take the design its address
+ * names, and a browser, so it can't go with `--no-browser`.
  */
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
-const USAGE = "usage: node ops/deploy/smoke.mjs <base-url> [--deck=<id>] [--record] [--rate-limits] [--events=<dir>] [--no-browser]";
+const USAGE = "usage: node ops/deploy/smoke.mjs <base-url> [--deck=<id>] [--record] [--rate-limits] [--genui] [--events=<dir>] [--no-browser]";
 /** An address from TEST-NET-2 (RFC 5737), sent as the client's own: a response that holds it echoes a client header. */
 const FORGED = "198.51.100.77";
 /** An IPv4 address, or an IPv6 one written in full or with `::` between hex groups. */
@@ -27,14 +34,14 @@ let base;
 for (const argument of process.argv.slice(2)) {
   const option = /^--(deck|events)=(.+)$/u.exec(argument);
   if (option) options.set(option[1], option[2]);
-  else if (/^--(record|rate-limits|no-browser)$/u.test(argument)) flags.add(argument.slice(2));
+  else if (/^--(record|rate-limits|genui|no-browser)$/u.test(argument)) flags.add(argument.slice(2));
   else if (base === undefined && /^https?:\/\/[^/\s]+$/u.test(argument.replace(/\/$/u, ""))) base = argument.replace(/\/$/u, "");
   else {
     console.error(USAGE);
     process.exit(2);
   }
 }
-if (base === undefined) {
+if (base === undefined || (flags.has("genui") && flags.has("no-browser"))) {
   console.error(USAGE);
   process.exit(2);
 }
@@ -148,39 +155,69 @@ await check("deal", async () => {
   nonceOf(dealt, "the dealt game");
 });
 
+/** Runs `play` on a fresh page in Chromium, with this run's headers; a page error or a policy violation fails it. */
+const inBrowser = async (play) => {
+  const { chromium } = await import("@playwright/test");
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({ extraHTTPHeaders: headers });
+    const page = await context.newPage();
+    const problems = [];
+    page.on("pageerror", (error) => problems.push(`page error: ${error.message}`));
+    await page.exposeFunction("reportCspViolation", (violation) => problems.push(`policy violation: ${violation}`));
+    await page.addInitScript(() => {
+      if (window !== window.top) return;
+      document.addEventListener("securitypolicyviolation", (event) => { void window.reportCspViolation(`${event.violatedDirective} ${event.blockedURI}`); });
+    });
+    page.setDefaultTimeout(30_000);
+    await play(page);
+    expect(problems.length === 0, problems.join("; "));
+  } finally {
+    await browser.close();
+  }
+};
+
 if (!flags.has("no-browser")) {
-  await check("one game in a browser", async () => {
-    const { chromium } = await import("@playwright/test");
-    const browser = await chromium.launch();
-    try {
-      const context = await browser.newContext({ extraHTTPHeaders: headers });
-      const page = await context.newPage();
-      const problems = [];
-      page.on("pageerror", (error) => problems.push(`page error: ${error.message}`));
-      await page.exposeFunction("reportCspViolation", (violation) => problems.push(`policy violation: ${violation}`));
-      await page.addInitScript(() => {
-        if (window !== window.top) return;
-        document.addEventListener("securitypolicyviolation", (event) => { void window.reportCspViolation(`${event.violatedDirective} ${event.blockedURI}`); });
-      });
-      page.setDefaultTimeout(30_000);
-      await page.goto(`${base}/?deck=${encodeURIComponent(deck)}`);
-      await page.getByText("Round 1 of 5").waitFor();
-      // A hint and an answer each go through a server action; the game draws its own theme, layer, and design.
-      await page.locator(".hint-button").first().click();
-      await page.locator(".hints .hint").first().waitFor();
-      for (let round = 1; round <= 5; round += 1) {
-        await page.getByText(`Round ${round} of 5`).waitFor();
-        await page.locator("input[type=radio]").first().check();
-        await page.getByRole("button", { name: "Lock in answer" }).click();
-        await page.locator(".reveal .round-points").waitFor();
-        if (round < 5) await page.getByRole("button", { name: "Next round" }).click();
-      }
-      await page.getByText(/^Run complete: /u).waitFor();
-      expect(problems.length === 0, problems.join("; "));
-    } finally {
-      await browser.close();
+  await check("one game in a browser", () => inBrowser(async (page) => {
+    await page.goto(`${base}/?deck=${encodeURIComponent(deck)}`);
+    await page.getByText("Round 1 of 5").waitFor();
+    // A hint and an answer each go through a server action; the game draws its own theme, layer, and design.
+    await page.locator(".hint-button").first().click();
+    await page.locator(".hints .hint").first().waitFor();
+    for (let round = 1; round <= 5; round += 1) {
+      await page.getByText(`Round ${round} of 5`).waitFor();
+      await page.locator("input[type=radio]").first().check();
+      await page.getByRole("button", { name: "Lock in answer" }).click();
+      await page.locator(".reveal .round-points").waitFor();
+      if (round < 5) await page.getByRole("button", { name: "Next round" }).click();
     }
-  });
+    await page.getByText(/^Run complete: /u).waitFor();
+  }));
+}
+
+if (flags.has("genui")) {
+  // One round of a game dealt the catalog design, which lab mode lets the address pick, played to its reveal and
+  // the explainer offered there. That is the server's first model call, with its own key, model name, and provider
+  // address, none of which the boot check can try.
+  await check("one explainer from the model", () => inBrowser(async (page) => {
+    await page.goto(`${base}/?deck=${encodeURIComponent(deck)}&design=catalog`);
+    await page.getByText("Round 1 of 5").waitFor();
+    await page.locator("input[type=radio]").first().check();
+    await page.getByRole("button", { name: "Lock in answer" }).click();
+    await page.locator(".reveal .round-points").waitFor();
+    const panel = page.locator(".genui-panel[data-genui-design=catalog]");
+    // Outside lab mode a game draws its own design, and with generative UI off every game plays the static reveal.
+    await panel.waitFor({ timeout: 10_000 }).catch(() => {
+      throw new Error("the round has no catalog explainer: --genui needs GENUI_ENABLED=1 and lab mode (EXPERIMENT_LAB=1 with EXPERIMENT_SOURCE=synthetic)");
+    });
+    await panel.getByRole("button", { name: "Explain this round" }).click();
+    // The panel ends one of two ways: ready and showing a view, which is a render call of the model's that passed
+    // its checks, or fallen back. The server gives the model 20 seconds in all, its one retry included.
+    await page.locator(".genui-panel[data-genui-status=fallback], .genui-panel[data-genui-status=ready]:has(.genui-output > :not(.genui-status))")
+      .waitFor({ timeout: 45_000 });
+    expect(await panel.getAttribute("data-genui-status") === "ready",
+      "the explainer fell back to the static reveal: the server's log names why, as GENUI_STREAM_FAILED <status> or GENUI_RENDER_REJECTED <component> <check>");
+  }));
 }
 
 if (flags.has("rate-limits")) {
