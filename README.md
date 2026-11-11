@@ -210,10 +210,7 @@ what it adds:
 Without uv, `pnpm test` still passes: Vitest reports the three tests of
 `ops/poc/prepare/stack-worker-seam.test.ts` as skipped. They hand the real
 Python workers the largest requests the preparer can build, so a change that
-breaks that seam then shows only in CI, which installs uv. With uv, run the
-`uv sync` above before the first `pnpm test`: the seam test expects a silent
-worker, and uv reports the environment it creates, so one of the three fails
-once and passes on the next run.
+breaks that seam then shows only in CI, which installs uv.
 
 [CONTRIBUTING.md](CONTRIBUTING.md) says what a pull request needs.
 

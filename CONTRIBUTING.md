@@ -12,7 +12,7 @@ it covers, and the ports it uses. Run the checks your change touches:
 
 - `pnpm test`, `pnpm typecheck`, and `pnpm --filter @codeguessr/game build`
   need only Node.js and pnpm. With uv installed, `pnpm test` also runs the
-  Node-to-Python seam test, which needs the workers' environment synced first.
+  Node-to-Python seam test against the real workers.
 - `pnpm test:deploy`, `pnpm test:a11y`, `pnpm test:performance`, and
   `pnpm test:e2e` need Playwright's Chromium. Run `pnpm test:e2e` last, since
   `next dev` replaces the production build the other three reuse.
