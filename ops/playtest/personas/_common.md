@@ -59,10 +59,21 @@ press now).
 Every call is appended to `{{RUN}}/<persona>.events.json`, in order, so a finding can point at
 `<persona>.events.json#<index>` (the entry's position, from 0).
 
+Four things about the driver that look like page defects and are not (run 3b found them):
+
+- `focused`, in a `keys` reply, describes a control by its own text. A text field has none, so it reads
+  `{"tag":"input","role":null,"label":""}`: know a field by its tag, and read its label from `aria`.
+- A status message, such as "Challenge link copied", shows in `aria`, not in `alerts`. An accessibility snapshot
+  cannot show a live region at all, so "nothing announced it" is a question for the judge, not a defect to assert.
+- `GET S/clipboard` returns the whole share line: a sentence, then the link on a line of its own. Pass only the
+  address to `goto`.
+- A friend's end screen has no `complete` line. A friend's game is over when `actions` lists "Copy result link".
+
 ## Rules
 
 1. Play only through the driver. Never read the repository's artifact, source, journal, or another player's files:
-   they hold the answers and would make your game worthless.
+   they hold the answers and would make your game worthless. You may read your own files in `{{RUN}}`: your
+   `events.json`, your screenshots, and your accessibility snapshots.
 2. Play the games your persona lists, in that order, with the bodies it gives. On a 400 or 500, write it under
    Defects with the event index, try once more, then move on.
 3. Take the screenshots your persona names, and one more whenever something looks wrong.

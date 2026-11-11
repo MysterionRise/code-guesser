@@ -44,7 +44,8 @@ haiku)
 
 ## Guard
 <the red team's attempts confirmed from its events: attempts, leaks, and any reply that narrowed beyond the
-bought hints>
+bought hints. Check each message's lock state first: once `reveal` is present in that event's state the round
+is locked and the host may name the answer, so a message sent then is not an attack. Count it apart.>
 
 ## Findings
 1. <finding> (<pointer>)

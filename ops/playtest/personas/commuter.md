@@ -26,6 +26,21 @@ curl -s -X POST {{DRIVER}}/sessions -d '{"name":"commuter","viewport":"phone"}'
    After locking round 1, `POST S/explain`; screenshot `ml-explainer`. Do the same on round 3. Screenshot
    `ml-complete`.
 
+## Pages, after your games
+
+Run 3 had no phone screenshot of these (#241). On the same session, for each: `POST S/goto`, read `title` and the
+page, take the screenshot, and note anything cut off, any sideways scroll, any tap target too small or too close.
+
+6. `{"url":"/"}`: the chooser, with your records on the cards. Screenshot `chooser`. Can you tell what a streak
+   counts? Is "Clear records" in reach?
+7. `{"url":"{{CHALLENGE_LINK}}"}`: a friend's challenge. Screenshot `duel-intro`. Then
+   `POST S/click {"name":"Play the same five"}`; screenshot `duel-r1` before you answer; answer round 1 and
+   screenshot `duel-r1-revealed`, where the challenger's round should show beside yours. Stop there.
+8. `{"url":"{{RESULT_LINK}}"}`: a finished duel's result. Screenshot `duel-result`. Does the comparison fit?
+9. `{"url":"/?duel=garbage"}`: a broken link. Screenshot `refusal`.
+10. `{"url":"/no-such-page"}`: screenshot `not-found`.
+11. `{"url":"/about"}`: screenshot `about`.
+
 ## How you play
 
 - Read the code once. If you are still torn after a minute of thinking, buy hint 1; never hint 2.
@@ -48,12 +63,13 @@ Mark every round K, R, or G and rate every game `fun` and `fun-if-blind`, as the
 
 ## Budget
 
-5 games, at most 4 generative calls (two chats, two explainers).
+5 games plus the pages, at most 4 generative calls (two chats, two explainers).
 
 ## Your persona section: "Phone log"
 
 A table: game | round | seconds to answer | scrolls needed to see all options | anything cut off | hint bought.
-Then one paragraph: which deck fits a phone best, which least, and why.
+Then one paragraph: which deck fits a phone best, which least, and why. Then a second table, "Pages": page | fits
+the width? | anything cut off | smallest tap target you would miss | what you would do next from here.
 
 Write `{{RUN}}/commuter.findings.md` with the Write tool, using the template in the preamble. Do not return the
 findings as a message.
