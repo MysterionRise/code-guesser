@@ -387,9 +387,26 @@ offers an **Explainer**: a model annotates the code, lists the signals that
 pointed to the answer and away from it, and gives a one-line takeaway.
 
 ```bash
-GENUI_ENABLED=1 OPENROUTER_API_KEY=… pnpm --filter @codeguessr/game dev
-# or, with an Anthropic key (its standard store is ~/.config/anthropic/key, mode 0600):
+pnpm play                        # Anthropic's own API when its key is at hand, else OpenRouter, else the static game
+pnpm play --provider=openrouter  # the OpenAI-compatible endpoint
+pnpm play --provider=off         # the static game
+```
+
+`pnpm play` (`ops/play/`) runs the game's development server on 127.0.0.1, on
+the first free port from 3000 (`--port=` names one), and prints its address.
+It takes each provider's key from the environment, or else from its standard
+store: `~/.config/anthropic/key` or `~/.config/openrouter/key`, a regular file
+of mode 0600 that it refuses to read otherwise (`PLAY_KEY_MODE`). The server
+gets the chosen provider's key and its name in `GENUI_PROVIDER`; the key is
+never printed or put on a command line. The settings below pass through, as in
+`ANTHROPIC_MODEL_HOST=claude-sonnet-5-5 pnpm play`.
+
+The same by hand, for a server started another way:
+
+```bash
 GENUI_ENABLED=1 ANTHROPIC_API_KEY="$(cat ~/.config/anthropic/key)" pnpm --filter @codeguessr/game dev
+# or, through OpenRouter:
+GENUI_ENABLED=1 OPENROUTER_API_KEY="$(cat ~/.config/openrouter/key)" pnpm --filter @codeguessr/game dev
 ```
 
 - Each game draws its design at random when it is dealt, and keeps it (see
@@ -862,6 +879,7 @@ Each path has a status:
 | `ops/poc/questions` | `prepare:questions`: question layers a model drafts at preparation time, audited by a code-blind solver, journaled, and pinned | live |
 | `ops/demo/record` | Scripted README media recorder | PoC support |
 | `ops/playtest` | The agent playtest driver and protocol | PoC support |
+| `ops/play` | `pnpm play`: the game's development server for local play, with generative UI through Anthropic's API or OpenRouter when a key is in its standard store | PoC support |
 | `ops/experiment` | `experiment:report`: the experiment's report from the event log, with its statistics and pre-registered plan | live |
 | `ops/content` | The `acquire:content` operator command and its policy files. The containment test (`tests/containment/acquisition-boundary.test.mjs`) requires the script to exist | Contract-era |
 | `ops/tsconfig.json` | Type-checks everything under `ops/`; `pnpm typecheck` runs it | PoC support |

@@ -130,7 +130,7 @@ container exits with status 78.
 | `ANTHROPIC_API_KEY` | none | The Anthropic key from [section 2](#2-secrets), for the Anthropic provider |
 | `ANTHROPIC_MODEL` | `claude-haiku-5-5` | The model generative UI asks under the Anthropic provider |
 | `ANTHROPIC_REASONING` | `off` | As `OPENROUTER_REASONING`; off sends `thinking: disabled` (Claude Sonnet 5.5 gets its lowest setting instead) |
-| `ANTHROPIC_MODEL_HOST`, `ANTHROPIC_REASONING_HOST` | the shared setting | The host's own model and reasoning (likewise `_CATALOG`, `_COMPOSER`, `_VISUALIZER`); `claude-sonnet-5-5` with `low` is run 3's recommendation for the host |
+| `ANTHROPIC_MODEL_HOST`, `ANTHROPIC_REASONING_HOST` | the shared setting | The host's own model and reasoning (likewise `_CATALOG`, `_COMPOSER`, `_VISUALIZER`); `claude-sonnet-5-5` with `low` is run 3's recommendation for the host, and that pair answered on the real service on 2026-11-11 ([check](review/evidence/2026-11-11-play-anthropic-live-check.md)) |
 | `ANTHROPIC_BASE_URL` | Anthropic's | Leave unset; a public server refuses any other address for real games |
 | `EXPERIMENT_DISABLED` | none | `factor:level` pairs to switch off, such as `design:host,theme:arcade`; their weight goes to control |
 | `CODEGUESSR_RATE_LIMITS` | `on` in public mode | A multiplier of every rate limit, such as `2` to loosen or `0.5` to tighten |
