@@ -3,7 +3,8 @@
  * tool calls, records every request body so tests can check what a model would have seen, and fails on demand.
  * `fake-anthropic.mjs` is the same stand-in for Anthropic's own Messages API, sharing the calls below.
  *
- * Run directly (`node tests/e2e/fake-openrouter.mjs`) it listens on FAKE_OPENROUTER_PORT for the browser tests.
+ * Run directly (`node tests/e2e/fake-openrouter.mjs`) it listens on FAKE_OPENROUTER_PORT for the browser tests, on
+ * this machine's loopback unless FAKE_OPENROUTER_HOST names another of its addresses.
  */
 import { createServer } from "node:http";
 import { pathToFileURL } from "node:url";
@@ -94,8 +95,12 @@ export const readBody = (request) => new Promise((resolve, reject) => {
  * plain `text` reply with no tool call; a `preface` is plain text sent ahead of the calls, as a model that talks to
  * itself before calling its tools sends;
  * `requests` holds every completion request body received.
+ *
+ * `host` is the address it listens on: loopback, unless something off this machine's loopback must reach it, as the
+ * game's container does in `tests/container/image.test.mjs`, where the fake runs in a container of its own and
+ * listens on that container's name. The visualizer page's network probe always aims at loopback.
  */
-export const startFakeOpenRouter = async (port = 0) => {
+export const startFakeOpenRouter = async (port = 0, host = "127.0.0.1") => {
   const requests = [];
   // Hits from a visualizer page that tried to reach the network; the sandbox should keep this at zero.
   let leaks = 0;
@@ -136,7 +141,7 @@ export const startFakeOpenRouter = async (port = 0) => {
     response.writeHead(404);
     return response.end();
   });
-  await new Promise((resolve) => server.listen(port, "127.0.0.1", resolve));
+  await new Promise((resolve) => server.listen(port, host, resolve));
   const address = server.address();
   return {
     port: typeof address === "object" && address !== null ? address.port : port,
@@ -148,6 +153,6 @@ export const startFakeOpenRouter = async (port = 0) => {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const port = Number(process.env.FAKE_OPENROUTER_PORT ?? 3201);
-  await startFakeOpenRouter(port);
+  await startFakeOpenRouter(port, process.env.FAKE_OPENROUTER_HOST || undefined);
   console.log(`FAKE_OPENROUTER_LISTENING ${port}`);
 }

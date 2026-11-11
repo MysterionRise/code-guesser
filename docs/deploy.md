@@ -303,7 +303,9 @@ node ops/deploy/smoke.mjs http://127.0.0.1:3800
 ```
 
 `pnpm test:container` does the same and more: it builds the image (or uses `CODEGUESSR_IMAGE`), checks that a missing
-secret or volume exits 78, and runs the smoke test and `pull-events.sh` against a public container.
+secret or volume exits 78, and runs the smoke test and `pull-events.sh` against a public container. It also runs the
+image in the pre-launch settings with each model provider's key alone, against a stand-in for that provider in a
+second container, where `smoke.mjs --genui` makes the image's model call; no real key or service is involved.
 
 The build context is only what `.dockerignore` lets in: the game, the artifact parser, the workspace manifests, and
 the entrypoint. A journal, a key, `.env`, the media, or local state never reaches it;

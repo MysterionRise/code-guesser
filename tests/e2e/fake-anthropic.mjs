@@ -4,7 +4,8 @@
  * every request (its key header and body) so tests can check what a model would have seen, and fails on demand.
  * The calls it makes are the OpenRouter fake's, so both providers are tested on the same panels.
  *
- * Run directly (`node tests/e2e/fake-anthropic.mjs`) it listens on FAKE_ANTHROPIC_PORT.
+ * Run directly (`node tests/e2e/fake-anthropic.mjs`) it listens on FAKE_ANTHROPIC_PORT, on this machine's loopback
+ * unless FAKE_ANTHROPIC_HOST names another of its addresses.
  */
 import { createServer } from "node:http";
 import { pathToFileURL } from "node:url";
@@ -52,9 +53,10 @@ const toolCallStream = (calls, preface = "") => {
  * Starts the fake on a port (0 picks a free one). `control` sets what the next message returns, as the OpenRouter
  * fake's does: an HTTP `status` to fail with, the tool `calls` to make every time, a `sequence` of call lists, one per
  * request, or a plain `text` reply; a `preface` is plain text sent ahead of the calls. `requests` holds every request
- * received: its `apiKey` header, its `version` header, and its `body`.
+ * received: its `apiKey` header, its `version` header, and its `body`. `host` is the address it listens on, loopback
+ * unless something off this machine's loopback must reach it, as for the OpenRouter fake.
  */
-export const startFakeAnthropic = async (port = 0) => {
+export const startFakeAnthropic = async (port = 0, host = "127.0.0.1") => {
   const requests = [];
   let leaks = 0;
   let next = { status: 200, calls: null };
@@ -91,7 +93,7 @@ export const startFakeAnthropic = async (port = 0) => {
     response.writeHead(404);
     return response.end();
   });
-  await new Promise((resolve) => server.listen(port, "127.0.0.1", resolve));
+  await new Promise((resolve) => server.listen(port, host, resolve));
   const address = server.address();
   return {
     port: typeof address === "object" && address !== null ? address.port : port,
@@ -103,6 +105,6 @@ export const startFakeAnthropic = async (port = 0) => {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const port = Number(process.env.FAKE_ANTHROPIC_PORT ?? 3202);
-  await startFakeAnthropic(port);
+  await startFakeAnthropic(port, process.env.FAKE_ANTHROPIC_HOST || undefined);
   console.log(`FAKE_ANTHROPIC_LISTENING ${port}`);
 }
