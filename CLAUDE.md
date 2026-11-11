@@ -216,7 +216,9 @@ gate: changing queries, retries, ceilings, deck rules, or running
   - it refuses lab mode and an `OPENROUTER_BASE_URL` or `ANTHROPIC_BASE_URL` other than the provider's own unless
     `EXPERIMENT_SOURCE` is `agent` or `synthetic`, and an `EXPERIMENT_DISABLED` pair it doesn't know;
   - `src/instrumentation.ts` runs it at boot: each failure prints `GAME_ENVIRONMENT_REJECTED <CODE>`, never a value,
-    and the server exits 78. `pnpm test:deploy` (`tests/deploy/`) boots the production build to check that.
+    and the server exits 78. `pnpm test:deploy` (`tests/deploy/`) boots the production build to check that. It also
+    boots a public server with generative UI on and an Anthropic key alone, and plays every generative design once on
+    each provider's stand-in (#256).
   - In public mode `secret()` throws rather than make a secret up, and `labMode()` is off for real games.
     `app/error.tsx` and `app/global-error.tsx` say nothing internal. The `dev` and `start` scripts still bind
     127.0.0.1; only the container (#170) binds 0.0.0.0, which `workspace.test.mjs` checks.
@@ -301,6 +303,12 @@ gate: changing queries, retries, ceilings, deck rules, or running
     (with `Sec-GPC: 1` unless `--record`); `--rate-limits` and `--events=<dir>` are opt-in. `ops/deploy/pull-events.sh
     <ssh-host> <container-or-volume>` copies only the event files. `pnpm test:container` (CI's container job) runs the
     image in public mode and both scripts against it.
+  - `smoke.mjs --genui` (#256) is for the pre-launch run: it plays one round to the catalog explainer, the server's
+    first model call with its own key, and fails when the panel falls back to the static reveal. It needs lab mode
+    to pick the design, and can't go with `--no-browser`. `pnpm test:container` runs it against two more containers
+    in the pre-launch settings, one per provider key. Each provider's stand-in runs in a container of its own on a
+    Docker network the game's container joins, listening on its container's name (`FAKE_OPENROUTER_HOST`,
+    `FAKE_ANTHROPIC_HOST`; loopback otherwise), so the image makes its model call in CI with no real key or service.
 - **Duels (#173: X1 the server, X2 the UI, X3 events v2 and the report):** a finished game of a seeded deal or of today's five
   becomes a challenge link, and a friend's finished game of it a result link.
   - Tokens (`demo/local-real-experiment-duel-token.server.ts`): AES-256-GCM under `deriveKey(context)`, a random
