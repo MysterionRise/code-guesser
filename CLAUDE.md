@@ -508,6 +508,22 @@ gate: changing queries, retries, ceilings, deck rules, or running
     `GENUI_ENABLED=1 ANTHROPIC_API_KEY="$(cat ~/.config/anthropic/key)"` for Anthropic's own API, whose first live
     check (2026-11-03, `docs/review/evidence/2026-11-03-genui-anthropic-live-check.md`) rendered every design on the
     first try: Haiku explainers about $0.001 each, a Sonnet host turn about $0.008.
+  - **Local play (`pnpm play`, `ops/play/`, 2026-11-11):** the owner plays and tests locally on Anthropic's own
+    API, with OpenRouter's OpenAI-compatible endpoint kept beside it. The command runs the game's `dev` script on
+    127.0.0.1, on the first free port from 3000 (`--port=`), and prints `PLAY_GENUI <provider> key=<environment|store>`
+    and `PLAY_SERVER <address>`, never a key.
+    - With no `--provider`, it takes Anthropic when its key is in the environment or its standard store, else
+      OpenRouter, else `off` (the static game); `--provider=anthropic|openrouter|off` names one, and a named
+      provider with no key is `PLAY_KEY_MISSING`.
+    - A store is read only as a regular file of mode 0600 or tighter holding one printable line
+      (`PLAY_KEY_MODE`, `PLAY_KEY_NOT_A_FILE`, `PLAY_KEY_MALFORMED`, `PLAY_KEY_UNREADABLE`); a refused store stops
+      the command and never falls through to the other key. The server gets the chosen provider's key and no other,
+      with `GENUI_PROVIDER` naming it, so the server's own rule for an unnamed provider is untouched.
+    - Model settings pass through (`ANTHROPIC_MODEL_HOST=claude-sonnet-5-5 ANTHROPIC_REASONING_HOST=low pnpm play`).
+      That pair, the one `docs/deploy.md` recommends for the host, answered on the real service on 2026-11-11
+      (`docs/review/evidence/2026-11-11-play-anthropic-live-check.md`).
+    - A test file under `ops/` or anywhere else must spell `0.0.0.0` in parts: the workspace test lets only the
+      Dockerfile hold it, and it reads tracked files, so it passes until the file is added to git.
 - The design experiment (#106, #107; v1.0 milestone):
   - **Arms** (`apps/game/src/experiment/arms.ts`): each game draws design ×
     theme × question layer independently at deal time, by committed
@@ -865,7 +881,12 @@ the `PREPARATION_DECKS` line for which decks published, read a few rounds of
 each deck, run the full verification matrix (the leakage test runs against the
 committed artifact), and re-record the media with `pnpm demo:record`:
 - `demo.gif`, the vertical headline clip, under 10 MB;
-- every other GIF under 4 MB.
+- every other GIF under 4 MB;
+- the MP4 under 6 MB.
+
+`tests/media/budget.test.mjs` holds `docs/media` to those in `pnpm test`, at 1,000,000 bytes a megabyte (#65's test
+half); the recorder's log counts 1,048,576 to its "MB", so compare bytes. Where the clips are stored is still the
+owner's decision.
 
 Add `DEMO_PORT=3300` if another local app holds port 3100. Scenes play fixed deals (`DEAL_SEEDS` in
 `ops/demo/record/scenes.ts`) with lab-mode picks of theme and layer, so a new artifact deals other first rounds: look
@@ -1170,7 +1191,8 @@ pnpm test:container
 pnpm audit --audit-level=high
 ```
 
-- `pnpm test`: the workspace test, then Vitest under `apps/`, `packages/`, and `ops/`, the leakage test among them.
+- `pnpm test`: the workspace test and the media budgets (`tests/media/budget.test.mjs`), then Vitest under `apps/`,
+  `packages/`, and `ops/`, the leakage test among them.
 - The containment test, `pnpm test:deploy`, `pnpm test:a11y`, and `pnpm test:performance` reuse a production build
   newer than its inputs (`ensureProductionBuild` in `tests/production/build.mjs`) and build one otherwise. `next dev`
   replaces it, so `pnpm test:e2e` runs last in CI.
@@ -1188,6 +1210,9 @@ pnpm audit --audit-level=high
 - `main` is protected (#27, since 2026-11-04): a merge needs the three CI jobs (Node workspace, Container image, Stack
   worker) green, and force pushes and deleting `main` are refused. The workflow token is read-only by default, and
   secret scanning with push protection, Dependabot alerts, and Dependabot security updates are on.
+- Outside pull requests (since 2026-11-11): `CONTRIBUTING.md`, `.github/pull_request_template.md`, and `SECURITY.md`
+  say what a change needs, and the README's "Play locally" lists the tools by task (#50). A fork's run reaches no
+  secret and waits for the owner's approval the first time.
 
 ## Done means
 
