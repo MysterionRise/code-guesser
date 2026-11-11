@@ -152,7 +152,7 @@ describe("Stack metadata worker bridge", () => {
     expect(calls[0]).toEqual({
       command: "uv",
       args: [
-        "run", "--project", runtimeDirectory.pathname.replace(/\/$/u, ""), "--locked",
+        "run", "--quiet", "--project", runtimeDirectory.pathname.replace(/\/$/u, ""), "--locked",
         "python", workerPath.pathname,
       ],
       cwd: runtimeDirectory.pathname.replace(/\/$/u, ""),
@@ -276,15 +276,9 @@ describe("Stack metadata worker bridge", () => {
     expect(options.capacity.snapshot().stackMetadataBytes).toBe(4096);
   });
 
-  it("rejects missing uv, a wrong lock, or a wrong Python pin before blobs", async () => {
+  it("rejects missing uv, a wrong Python pin, or a missing runtime file before blobs", async () => {
     await expectBeforeBlob("UV_MISSING", {
       runWorker: async () => { throw Object.assign(new Error("spawn uv ENOENT"), { code: "ENOENT" }); },
-    });
-    await expectBeforeBlob("LOCK_MISMATCH", {
-      readRuntimeFile: async (path: URL) => path.href === lockPath.href
-        ? Buffer.from("tampered lock")
-        : readFile(path),
-      runWorker: async () => { throw new Error("must not spawn"); },
     });
     await expectBeforeBlob("PYTHON_MISMATCH", {
       readRuntimeFile: async (path: URL) => path.href === pythonPath.href
@@ -296,6 +290,20 @@ describe("Stack metadata worker bridge", () => {
       readRuntimeFile: async () => { throw new Error("missing runtime"); },
       runWorker: async () => { throw new Error("must not spawn"); },
     });
+    await expectBeforeBlob("RUNTIME_MISSING", {
+      readRuntimeFile: async (path: URL) => path.href === lockPath.href ? Promise.reject(new Error("no lock")) : readFile(path),
+      runWorker: async () => { throw new Error("must not spawn"); },
+    });
+  });
+
+  it("runs the worker under any lock uv accepts: nothing pins the lock's hash (#255)", async () => {
+    let spawned = 0;
+    const options = await setup({
+      readRuntimeFile: async (path: URL) => path.href === lockPath.href ? Buffer.from("a lock a security update rewrote") : readFile(path),
+      runWorker: async () => { spawned += 1; return { exitCode: 0, stdout: ndjson(metadataRow()), stderr: new Uint8Array() }; },
+    });
+    await collectStackMetadata(options);
+    expect(spawned).toBe(1);
   });
 
   it("rejects unsupported configuration, limits, and blank environment before spawning", async () => {

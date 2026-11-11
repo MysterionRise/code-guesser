@@ -13,7 +13,6 @@ const RUNTIME_DIRECTORY = fileURLToPath(new URL("../stack/", import.meta.url)).r
 const WORKER_PATH = join(RUNTIME_DIRECTORY, "stream_metadata.py");
 const LOCK_PATH = new URL("../stack/uv.lock", import.meta.url);
 const PYTHON_PATH = new URL("../stack/.python-version", import.meta.url);
-const LOCK_HASH = "c48b0f73b74b0634be0be7dde3e7824674e32dfdb52e9ab4c5a8c3da9f841a0c";
 const STDERR_LIMIT = 4096;
 const REVISION = STACK_REVISION;
 const ROW_KEYS = [
@@ -139,18 +138,21 @@ export const runLockedWorker = (request: WorkerRequest): Promise<WorkerResult> =
   child.stdin.end(request.stdin);
 });
 
+/**
+ * The worker's runtime files are there, and its Python is the one the worker is written for. The lock's content is
+ * uv's to hold: `uv run --locked` refuses one that disagrees with `pyproject.toml`, and nothing here pins its hash,
+ * so a security update that changes `uv.lock` alone needs no change beside it (#255).
+ */
 const validateRuntime = async (
   readRuntimeFile: (path: URL) => Promise<Uint8Array>,
 ): Promise<void> => {
   let python: Uint8Array;
-  let lock: Uint8Array;
   try {
-    [python, lock] = await Promise.all([readRuntimeFile(PYTHON_PATH), readRuntimeFile(LOCK_PATH)]);
+    [python] = await Promise.all([readRuntimeFile(PYTHON_PATH), readRuntimeFile(LOCK_PATH)]);
   } catch {
     return fail("RUNTIME_MISSING");
   }
   if (new TextDecoder().decode(python).trim() !== "3.12") fail("PYTHON_MISMATCH");
-  if (createHash("sha256").update(lock).digest("hex") !== LOCK_HASH) fail("LOCK_MISMATCH");
 };
 
 /** What the worker returns of the rows it inspects: a few files of the most-starred repositories, one of others. */
@@ -181,8 +183,10 @@ export const metadataWorkerRequest = (options: StackMetadataOptions): WorkerRequ
   }
   return Object.freeze({
     command: "uv",
+    // `--quiet` keeps uv's own messages off stderr, which is read as the worker's one failure code: on a fresh
+    // checkout uv creates the environment first and says so there (#90).
     args: Object.freeze([
-      "run", "--project", RUNTIME_DIRECTORY, "--locked", "python", WORKER_PATH,
+      "run", "--quiet", "--project", RUNTIME_DIRECTORY, "--locked", "python", WORKER_PATH,
     ]),
     cwd: RUNTIME_DIRECTORY,
     environment: Object.freeze({ PATH: path, HF_TOKEN: token }),

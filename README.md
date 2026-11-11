@@ -724,6 +724,18 @@ never replaces the journal that rebuilds the committed artifact offline, a run
 with no flag refuses to start over one, and `--fresh` sets the old one aside in
 the same ignored directory; renaming it back restores it.
 
+What a resumed run replays, it replays by key:
+
+- **Stack access** is checked live every time. Hugging Face's answer counts
+  the dataset's downloads and likes, which move by the day; an answer that
+  differs from the journal's only in those is accepted as the recorded one, so
+  a resume on a later day builds the same artifact (#252). Any other change
+  is accepted as it came, and the artifact's hash shows it.
+- **Worker outputs** are keyed to the worker's own Python files and what it
+  was asked to read. A change to one of those files makes the next
+  `--resume` read the rows again; a change to the worker's `uv.lock` alone
+  does not (#255).
+
 The journal also keeps failures:
 
 - **Deterministic GitHub answers** such as 404s replay on resume and offline.
@@ -883,7 +895,7 @@ Each path has a status:
 | `ops/deploy` | The image's entrypoint, the deploy smoke test, and `pull-events.sh`; the runbook is `docs/deploy.md` | live |
 | `tests` | The accessibility and performance suites (`tests/accessibility`, `tests/performance`), which `tests/production` runs on the production build; the browser scenarios (`tests/e2e`); containment; boot (`tests/deploy`); and the container image (`tests/container`). CI runs them all | PoC support |
 | `.github/workflows/ci.yml` | CI: a dependency audit that fails on high or critical advisories, then every suite above, with no provider secrets and no live preparation | PoC support |
-| `.github/dependabot.yml` | Monthly version updates for npm and GitHub Actions, minor and patch grouped, npm majors left to hand upgrades, at most five open pull requests per ecosystem; the Stack worker's `uv.lock` gets security updates only, since the worker journal is keyed to it; the image's Node base gets new digests only, its version moving by hand | PoC support |
+| `.github/dependabot.yml` | Monthly version updates for npm and GitHub Actions, minor and patch grouped, npm majors left to hand upgrades, at most five open pull requests per ecosystem; the Stack worker's `uv.lock` gets security updates only, which pass CI by themselves since nothing pins the lock's hash (#255), while its libraries move by hand with a live `--resume`; the image's Node base gets new digests only, its version moving by hand | PoC support |
 | `vitest.config.mts` | Finds `*.test.ts` and `*.test.tsx` under `apps/`, `packages/`, and `ops/`, and compiles JSX with React's automatic runtime, since the tsconfig preserves JSX for Next.js. A test may take 30 s, as the preparer's synchronous composition tests take up to 12 s on CI | PoC support |
 | `playwright.config.ts` | The browser scenarios; starts a dev server on 127.0.0.1 (`E2E_PORT`, default 3000) | PoC support |
 | `playwright.production.config.ts` | The accessibility and performance suites; starts `next start` on the production build at `E2E_PORT` + 10 | PoC support |
