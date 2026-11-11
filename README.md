@@ -197,8 +197,22 @@ launch (#100), which v1.1 is ready for and does not include.
 
 ## Play locally
 
-Prerequisites: Node.js `24.22.0` and pnpm `9.15.9`. `.nvmrc` and `.node-version`
-pin the Node version, so `nvm use` or `fnm use` picks it.
+Prerequisites, by task. Every task needs Play's two, and each later row lists
+what it adds:
+
+| Task | Needs |
+| --- | --- |
+| Play: `pnpm --filter @codeguessr/game dev` | Node.js `24.22.0` and pnpm `9.15.9`. `.nvmrc` and `.node-version` pin the Node version, so `nvm use` or `fnm use` picks it |
+| Verify: the commands under [Verification](#verification) | uv (CI runs `0.9.25`) with Python 3.12 and the workers' locked environment (`uv python install 3.12`, then `uv sync --locked --project ops/poc/stack`), for the worker tests and the Node-to-Python seam test; Playwright's Chromium (`pnpm exec playwright install chromium`), for every suite that opens a browser; Docker, for `pnpm test:container` alone |
+| Prepare: `pnpm prepare:poc` | uv and Python 3.12, which run the Stack workers; the `gh` CLI, signed in, whose `gh auth token` supplies `GITHUB_TOKEN`; a Hugging Face token whose account has accepted the terms of [`bigcode/the-stack-v2`](https://huggingface.co/datasets/bigcode/the-stack-v2) on the dataset's page. [Credentials](#credentials) has the command |
+| Record: `pnpm demo:record` | Playwright's Chromium, and `ffmpeg` on the `PATH` |
+
+Without uv, `pnpm test` still passes: Vitest reports the three tests of
+`ops/poc/prepare/stack-worker-seam.test.ts` as skipped. They hand the real
+Python workers the largest requests the preparer can build, so a change that
+breaks that seam then shows only in CI, which installs uv.
+
+[CONTRIBUTING.md](CONTRIBUTING.md) says what a pull request needs.
 
 ```bash
 pnpm install --frozen-lockfile
