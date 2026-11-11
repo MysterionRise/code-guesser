@@ -20,8 +20,8 @@ data run), each a pool of rounds from which every game deals five:
 - "Which framework?": 32 TodoMVC files; "Which exercise?": 48 Exercism
   reference solutions.
 
-The goal is anonymous public play on one instance of the owner's own server (v1.1, #100). Until #100's launch gates
-close, the game is served on localhost only.
+The goal is anonymous public play on one instance of the owner's own server (the Launch milestone, #100). Until
+launch, the game is served on localhost only.
 
 ## Read first
 
@@ -34,7 +34,9 @@ close, the game is served on localhost only.
 4. `docs/review/2026-10-13-next-sources-plan.md`: the plan for forges beyond
    GitHub (GitLab, Software Heritage) and the era deck.
 5. `README.md`: how to play, prepare, record, and verify.
-6. `docs/releases/v1.0.0.md`: what v1.0 adds, and its known limits.
+6. `docs/releases/v1.1.0.md`: what v1.1 adds, and its known limits (`docs/releases/v1.0.0.md` for v1.0).
+7. `docs/review/2026-11-10-next-steps-review.md`: the milestones, the next phase in ordered batches, and the owner's
+   open decisions.
 
 `docs/gangsta/` is the historical record of the signed-Contract process, which
 was retired on 2026-10-11. Use it for background on why rules exist, not as a
@@ -86,6 +88,10 @@ gate: changing queries, retries, ceilings, deck rules, or running
 - v1.0 (milestone #4, checklist #130) is merged too: #131–#162, from 2026-10-15 to 2026-10-20, on top of the
   public-app Phases 1 and 2 (#110–#123). Its release notes are `docs/releases/v1.0.0.md`, and the `v1.0.0` tag and
   GitHub release went out on 2026-10-20.
+- v1.1 (milestone v1.1, checklist #174) is merged too: #176–#220, the fun pass (#223–#227, #242–#245), then #246,
+  #250, #251, and #254. It is ready for public play and still served locally. Its release notes are
+  `docs/releases/v1.1.0.md`, and the `v1.1.0` tag marks the commit that merged them. Launch (L13) has its own
+  milestone, and the next release is the data-quality one, v1.2 (`docs/review/2026-11-10-next-steps-review.md`).
 - The game plays profile `ops/poc/profiles/local-real-rounds.v7.json` and
   artifact schema `local-experiment-artifact.v6` from the root-route deck
   chooser (`/?deck=<deck id>`). A
@@ -262,7 +268,7 @@ gate: changing queries, retries, ceilings, deck rules, or running
     HMAC-SHA256 under a per-process salt. No header, or no readable address, is one shared key.
     `test/rate-limits.test.ts` holds every other module to that and checks that no log line or stored event holds an
     address.
-  - A limited page shows "Too many new games — wait a minute"; actions refuse with `RATE_LIMITED` (duel actions and pages too); routes answer 429
+  - A limited page shows "Too many new games. Wait a minute."; actions refuse with `RATE_LIMITED` (duel actions and pages too); routes answer 429
     with `Retry-After` (`tooMany`), and genui's per-game caps 429 `GAME_CAP`. The panel and the host report a 429 as
     the `genui_fallback` reason `limited` (added within v1, part of v2) and keep the static reveal.
 - **Credits and privacy (#99, L8):** a site footer in `app/layout.tsx` links `/credits` and `/privacy`. Both are outside any
@@ -488,6 +494,11 @@ gate: changing queries, retries, ceilings, deck rules, or running
       families once a game, the reveal once a game, the host on Sonnet with one offer a round, the dead-frame
       fallback, the phone end screen) and rechecked. #120's pilot: keep Haiku for the catalog, composer, and
       visualizer; the host is the design worth Sonnet (`OPENROUTER_MODEL_HOST`), the owner's setting.
+    - Run 3b (`docs/review/evidence/2026-11-10-agent-playtest-run-3b.md`, 2026-11-10, $0.07 on Anthropic's API): a
+      targeted mini-run for #241's gaps, with the host on Sonnet. Code-blind on rounds it had never seen, the
+      algorithm scaffold lifted a first guess from about chance to 7 of 12, and the deck's static hint 1 took it to
+      18 of 18 (#160, #228). No leak in 13 real attempts before a lock; both duel forms walked by keyboard; 12
+      polish items (#253). The personas now play the layer-on games first, on seeds nothing else deals.
   - Composer and visualizer requests keep only the first panel or page
     (`ONE_ONLY`) and ask for `parallel_tool_calls: false`; live, Haiku
     sometimes wrote several pages at once.
@@ -497,6 +508,22 @@ gate: changing queries, retries, ceilings, deck rules, or running
     `GENUI_ENABLED=1 ANTHROPIC_API_KEY="$(cat ~/.config/anthropic/key)"` for Anthropic's own API, whose first live
     check (2026-11-03, `docs/review/evidence/2026-11-03-genui-anthropic-live-check.md`) rendered every design on the
     first try: Haiku explainers about $0.001 each, a Sonnet host turn about $0.008.
+  - **Local play (`pnpm play`, `ops/play/`, 2026-11-11):** the owner plays and tests locally on Anthropic's own
+    API, with OpenRouter's OpenAI-compatible endpoint kept beside it. The command runs the game's `dev` script on
+    127.0.0.1, on the first free port from 3000 (`--port=`), and prints `PLAY_GENUI <provider> key=<environment|store>`
+    and `PLAY_SERVER <address>`, never a key.
+    - With no `--provider`, it takes Anthropic when its key is in the environment or its standard store, else
+      OpenRouter, else `off` (the static game); `--provider=anthropic|openrouter|off` names one, and a named
+      provider with no key is `PLAY_KEY_MISSING`.
+    - A store is read only as a regular file of mode 0600 or tighter holding one printable line
+      (`PLAY_KEY_MODE`, `PLAY_KEY_NOT_A_FILE`, `PLAY_KEY_MALFORMED`, `PLAY_KEY_UNREADABLE`); a refused store stops
+      the command and never falls through to the other key. The server gets the chosen provider's key and no other,
+      with `GENUI_PROVIDER` naming it, so the server's own rule for an unnamed provider is untouched.
+    - Model settings pass through (`ANTHROPIC_MODEL_HOST=claude-sonnet-5-5 ANTHROPIC_REASONING_HOST=low pnpm play`).
+      That pair, the one `docs/deploy.md` recommends for the host, answered on the real service on 2026-11-11
+      (`docs/review/evidence/2026-11-11-play-anthropic-live-check.md`).
+    - A test file under `ops/` or anywhere else must spell `0.0.0.0` in parts: the workspace test lets only the
+      Dockerfile hold it, and it reads tracked files, so it passes until the file is added to git.
 - The design experiment (#106, #107; v1.0 milestone):
   - **Arms** (`apps/game/src/experiment/arms.ts`): each game draws design ×
     theme × question layer independently at deal time, by committed
@@ -541,7 +568,7 @@ gate: changing queries, retries, ceilings, deck rules, or running
       deal under `Sec-GPC: 1` seals `record: false`;
     - `EXPERIMENT_SOURCE=agent|synthetic` tags playtests and tests.
     - The store is JSONL behind the `EventStore` interface. Node 24 (#21)
-      has `node:sqlite`, but nothing uses it yet.
+      has `node:sqlite`, which the state store uses (#164); events stay JSONL.
   - **Report** (#108, `ops/experiment/`): `pnpm experiment:report` reads one source's raw days with the events
     parser and prints Markdown (`--json=` writes JSON).
     - Each factor's levels are compared on the deal-again rate of completed games: seeded Beta draws
@@ -624,13 +651,30 @@ gate: changing queries, retries, ceilings, deck rules, or running
     rebuilds it byte for byte with no network. The v7 data run's
     journal is `run.jsonl.v7-2026-10-21`, the v6 journal
     `run.jsonl.v6-resume-2026-10-19`, the v5 journal `run.jsonl.v5-2026-10-15`.
-  - **The worker lock moved on 2026-11-04:** Dependabot's security alerts on the Stack worker's `uv.lock` (certifi,
-    urllib3, aiohttp, fsspec, datasets 5.0.1, filelock, multidict) were taken by hand, with `LOCK_HASH` in
-    `stack-metadata.ts`. Recorded worker outputs are keyed to the worker's code and lock (`worker-journal.ts`), so
-    every journal above lacks them under the new lock and `--offline` fails with `JOURNAL_MISS` at `STACK_METADATA`.
-    Run one `--resume` first (`HF_TOKEN` and `GITHUB_TOKEN`; the workers re-read live, everything else replays), as
-    on 2026-10-15, then `--offline` again. httpx and pyarrow, the libraries the worker imports, did not move, so the
-    outputs should come back byte-identical; check the hash.
+  - **The worker's lock is not pinned (#255, 2026-11-11):** recorded worker outputs are keyed to the worker's own
+    Python files (`worker-journal.ts`), and nothing holds the hash of `ops/poc/stack/uv.lock`. A Dependabot security
+    update that changes the lock alone passes CI and costs no live run; `uv run --locked` still refuses a lock that
+    disagrees with `pyproject.toml`. Both `uv run` calls pass `--quiet` (#90), so on a fresh checkout uv's
+    "Creating virtual environment" never reaches the stderr read as a worker's failure code.
+    - Outputs recorded before #255 are keyed to the source and the lock together. While the worker's source is the
+      one of `03cd25a`, an output missing under today's key is looked up under that old one (`LEGACY_WORKER_CODE`),
+      so `run.jsonl` (a copy as `run.jsonl.v7-lock-2026-11-10`) still rebuilds `847e7512…` offline. The first change
+      to a worker `.py` file ends that by itself: one `--resume` re-reads the rows (`HF_TOKEN` and `GITHUB_TOKEN`;
+      everything else replays), and the constant can go.
+    - How it got here: the lock moved by hand on 2026-11-04 (#251: certifi, urllib3, aiohttp, fsspec, datasets
+      5.0.1, filelock, multidict), which orphaned every recorded output under the key of the time. The resume of
+      2026-11-10 recorded them again: 324 of 325 came back byte-identical, and the other differs only in a byte
+      counter that never reaches the artifact.
+    - The worker imports httpx and pyarrow, and lazily boto3, botocore, and huggingface_hub. It still declares
+      `datasets`, which nothing imports; that goes with the next change to a worker file (#255's third step), since
+      either costs the same live resume.
+  - **A resume on a later day keeps the hash (#252, 2026-11-11):** preflight's dataset-info response is fetched live
+    on every resume, and it carries Hugging Face's `downloads` and `likes`. Its hash feeds the snapshot id, which
+    stamps every round. A live answer that differs from the journal's only in those two fields is accepted as the
+    recording (`ACCESS_COUNTERS` in `runtime.ts`, `earlier` in `journal.ts`), so the snapshot stays; any other
+    change is accepted as it came and moves the hash. The resume of 2026-11-10 ran before this and published
+    `97fa9b74…` for no visible change; `run.jsonl` keeps the 2026-10-26 recording of that response, and the journal
+    as fetched that day is `run.jsonl.v7-lock-rerecorded-2026-11-10`.
   - The journal holds provider bodies, so it is gitignored and never
     committed; a fresh clone has none, and `--offline` or `--resume` fails
     with `JOURNAL_MISSING`. A fresh run writes its own journal when it ends,
@@ -773,23 +817,25 @@ gate: changing queries, retries, ceilings, deck rules, or running
 
 ## Next steps
 
-1. Launch v1.1 (#100, #174): everything but L13 is merged, so what is left is the owner's: L13, the smoke test on the
-   server and day 0 (`docs/deploy.md`), then L14's release notes and the `v1.1.0` tag. Owner decisions still open:
-   #120 (the production model per design; run 3 recommends Sonnet for the host alone) and #160 (the algorithm
-   layer's fairness).
-2. The release in progress, v1.1 (milestone v1.1, checklist #174), planned in `docs/review/2026-10-20-next-phase-plan.md`.
-   The owner decided on 2026-10-20:
-   - public play on one instance of the owner's own server (hardening #97–#100, #164, #170);
-   - async duel challenge links (#173);
-   - bigger pools from the current sources in profile v7 (#165–#167);
-   - Node 24 (#21);
-   - shipping on after launch, with every player-visible change dated (#169).
-3. After v1.1: the deferred decks, "Spot the vulnerable line" (#59) and "Which era?" (#60), and the other four
-   question-layer designs (#128). Live duel rooms and practice mode (#64) come later too.
-4. Phase 3c, in `docs/review/2026-10-13-next-sources-plan.md`: other forges
+1. The data-quality release, v1.2 (milestone v1.2), planned in `docs/review/2026-11-10-next-steps-review.md`:
+   - one engineering change still open before any data run: #194, discovery that resumes per query (#90, #93,
+     #252, and #255's first two steps merged on 2026-11-11);
+   - the owner's decision on what a hint is for (#82), which blocks #228 and #229;
+   - hints and reveal sentences under a new profile version beside v7 (#228–#231, #240, #257), the question layers
+     (#159, #160), and one re-pin, rechecked against run 3's bar.
+2. Launch (milestone Launch: #100, #170, #120, #256): the owner's server, the smoke test on it, and day 0
+   (`docs/deploy.md`). The owner deferred the server on 2026-11-04, and the review recommends launch follow v1.2.
+   Owner decisions still open: #120 (the production model per design; run 3 recommends Sonnet for the host alone)
+   and which provider launch uses.
+3. v1.1 (milestone v1.1, checklist #174) is merged and released as `v1.1.0`. It was planned in
+   `docs/review/2026-10-20-next-phase-plan.md`: the hardening for public play, duel challenge links, profile v7,
+   Node 24, and a dated change log for every player-visible change after launch (#169).
+4. Later (milestone Next): the deferred decks, "Spot the vulnerable line" (#59) and "Which era?" (#60), and the
+   other four question-layer designs (#128). Live duel rooms and practice mode (#64) come later too.
+5. Phase 3c, in `docs/review/2026-10-13-next-sources-plan.md`: other forges
    (GitLab, Software Heritage). It has open decisions (licence allowlist,
    accounts) to settle with the user first.
-5. The research note's backlog: guess the commit message (the user said "not
+6. The research note's backlog: guess the commit message (the user said "not
    now"), vulnerable or fixed.
 
 Ask before widening the licence allowlist, raising the request ceiling past 10,000 (`ops/poc/limits.json`; the owner
@@ -798,7 +844,7 @@ in the research note or #129.
 
 Iterate on deck rules with
 `STACK_V2_ACKNOWLEDGED_USABLE_REVISION=e565caa3a78c2423bd374333a472b049eb090e47 pnpm prepare:poc --offline`
-(no token, but it needs the local journal above, and since the 2026-11-04 worker lock move one `--resume` first);
+(no token, but it needs the local journal above);
 use `--resume` when a change needs responses the journal lacks.
 
 Live run (`--fresh` because a journal exists; it renames `run.jsonl` to
@@ -835,7 +881,12 @@ the `PREPARATION_DECKS` line for which decks published, read a few rounds of
 each deck, run the full verification matrix (the leakage test runs against the
 committed artifact), and re-record the media with `pnpm demo:record`:
 - `demo.gif`, the vertical headline clip, under 10 MB;
-- every other GIF under 4 MB.
+- every other GIF under 4 MB;
+- the MP4 under 6 MB.
+
+`tests/media/budget.test.mjs` holds `docs/media` to those in `pnpm test`, at 1,000,000 bytes a megabyte (#65's test
+half); the recorder's log counts 1,048,576 to its "MB", so compare bytes. Where the clips are stored is still the
+owner's decision.
 
 Add `DEMO_PORT=3300` if another local app holds port 3100. Scenes play fixed deals (`DEAL_SEEDS` in
 `ops/demo/record/scenes.ts`) with lab-mode picks of theme and layer, so a new artifact deals other first rounds: look
@@ -898,8 +949,11 @@ when the preparer throws a code this section does not name.
   `RELEASE_MISMATCH`, `TERMS_CHANGED`, `PROFILE_MISMATCH` (The Stack v2 moved
   from what the profile pins); `ACCESS_*`, `CARD_*` (access is no longer
   granted, or the access check or dataset card could not be fetched or read).
-  Preflight reports every transport failure, an offline journal miss
-  included, as `ACCESS_UNAVAILABLE` or `CARD_UNAVAILABLE`.
+  Preflight reports a failed request as `ACCESS_UNAVAILABLE` or
+  `CARD_UNAVAILABLE` with the answer's status class (#93): `4xx` for a refused
+  token, `5xx` for the Hub down, `none` for a timeout or an unreadable body.
+  An offline journal miss, an interruption, and a spent budget are reported
+  as themselves.
 - Stack metadata worker:
   - `WORKER_EXIT_<CODE>`: the worker exited non-zero with its own stable code
     (`WORKER_UNEXPECTED` for an unmapped exception). A bare `WORKER_EXIT`
@@ -910,8 +964,9 @@ when the preparer throws a code this section does not name.
   - `ROW_*`, `OUTPUT_MALFORMED`, `OUTPUT_NONCANONICAL`, `COUNTERS_REJECTED`,
     `WORKER_STDERR`: output that broke its contract. `METADATA_BYTES`,
     `METADATA_CAPACITY`, `TEMPORARY_DISK`: its budgets.
-  - `UV_MISSING`, `WORKER_START_FAILED`, `RUNTIME_MISSING`, `PYTHON_MISMATCH`,
-    `LOCK_MISMATCH`: the locked Python runtime could not start.
+  - `UV_MISSING`, `WORKER_START_FAILED`, `RUNTIME_MISSING`, `PYTHON_MISMATCH`:
+    the locked Python runtime could not start. A lock that disagrees with
+    `pyproject.toml` is uv's to refuse, and shows as a bare `WORKER_EXIT`.
 - `GITHUB_SEARCH_*`: the discovery check that rejected a search response.
   `INCOMPLETE`, `TOTAL_CHANGED`, `ITEM_COUNT`, and `DUPLICATE` are provider
   inconsistencies; `SHAPE`, `IDENTITY`, and `DATE` are record drift;
@@ -1136,7 +1191,8 @@ pnpm test:container
 pnpm audit --audit-level=high
 ```
 
-- `pnpm test`: the workspace test, then Vitest under `apps/`, `packages/`, and `ops/`, the leakage test among them.
+- `pnpm test`: the workspace test and the media budgets (`tests/media/budget.test.mjs`), then Vitest under `apps/`,
+  `packages/`, and `ops/`, the leakage test among them.
 - The containment test, `pnpm test:deploy`, `pnpm test:a11y`, and `pnpm test:performance` reuse a production build
   newer than its inputs (`ensureProductionBuild` in `tests/production/build.mjs`) and build one otherwise. `next dev`
   replaces it, so `pnpm test:e2e` runs last in CI.
@@ -1154,6 +1210,9 @@ pnpm audit --audit-level=high
 - `main` is protected (#27, since 2026-11-04): a merge needs the three CI jobs (Node workspace, Container image, Stack
   worker) green, and force pushes and deleting `main` are refused. The workflow token is read-only by default, and
   secret scanning with push protection, Dependabot alerts, and Dependabot security updates are on.
+- Outside pull requests (since 2026-11-11): `CONTRIBUTING.md`, `.github/pull_request_template.md`, and `SECURITY.md`
+  say what a change needs, and the README's "Play locally" lists the tools by task (#50). A fork's run reaches no
+  secret and waits for the owner's approval the first time.
 
 ## Done means
 

@@ -197,8 +197,22 @@ launch (#100), which v1.1 is ready for and does not include.
 
 ## Play locally
 
-Prerequisites: Node.js `24.22.0` and pnpm `9.15.9`. `.nvmrc` and `.node-version`
-pin the Node version, so `nvm use` or `fnm use` picks it.
+Prerequisites, by task. Every task needs Play's two, and each later row lists
+what it adds:
+
+| Task | Needs |
+| --- | --- |
+| Play: `pnpm --filter @codeguessr/game dev` | Node.js `24.22.0` and pnpm `9.15.9`. `.nvmrc` and `.node-version` pin the Node version, so `nvm use` or `fnm use` picks it |
+| Verify: the commands under [Verification](#verification) | uv (CI runs `0.9.25`) with Python 3.12 and the workers' locked environment (`uv python install 3.12`, then `uv sync --locked --project ops/poc/stack`), for the worker tests and the Node-to-Python seam test; Playwright's Chromium (`pnpm exec playwright install chromium`), for every suite that opens a browser; Docker, for `pnpm test:container` alone |
+| Prepare: `pnpm prepare:poc` | uv and Python 3.12, which run the Stack workers; the `gh` CLI, signed in, whose `gh auth token` supplies `GITHUB_TOKEN`; a Hugging Face token whose account has accepted the terms of [`bigcode/the-stack-v2`](https://huggingface.co/datasets/bigcode/the-stack-v2) on the dataset's page. [Credentials](#credentials) has the command |
+| Record: `pnpm demo:record` | Playwright's Chromium, and `ffmpeg` on the `PATH` |
+
+Without uv, `pnpm test` still passes: Vitest reports the three tests of
+`ops/poc/prepare/stack-worker-seam.test.ts` as skipped. They hand the real
+Python workers the largest requests the preparer can build, so a change that
+breaks that seam then shows only in CI, which installs uv.
+
+[CONTRIBUTING.md](CONTRIBUTING.md) says what a pull request needs.
 
 ```bash
 pnpm install --frozen-lockfile
@@ -727,6 +741,18 @@ never replaces the journal that rebuilds the committed artifact offline, a run
 with no flag refuses to start over one, and `--fresh` sets the old one aside in
 the same ignored directory; renaming it back restores it.
 
+What a resumed run replays, it replays by key:
+
+- **Stack access** is checked live every time. Hugging Face's answer counts
+  the dataset's downloads and likes, which move by the day; an answer that
+  differs from the journal's only in those is accepted as the recorded one, so
+  a resume on a later day builds the same artifact (#252). Any other change
+  is accepted as it came, and the artifact's hash shows it.
+- **Worker outputs** are keyed to the worker's own Python files and what it
+  was asked to read. A change to one of those files makes the next
+  `--resume` read the rows again; a change to the worker's `uv.lock` alone
+  does not (#255).
+
 The journal also keeps failures:
 
 - **Deterministic GitHub answers** such as 404s replay on resume and offline.
@@ -887,7 +913,7 @@ Each path has a status:
 | `ops/deploy` | The image's entrypoint, the deploy smoke test, and `pull-events.sh`; the runbook is `docs/deploy.md` | live |
 | `tests` | The accessibility and performance suites (`tests/accessibility`, `tests/performance`), which `tests/production` runs on the production build; the browser scenarios (`tests/e2e`); containment; boot (`tests/deploy`); and the container image (`tests/container`). CI runs them all | PoC support |
 | `.github/workflows/ci.yml` | CI: a dependency audit that fails on high or critical advisories, then every suite above, with no provider secrets and no live preparation | PoC support |
-| `.github/dependabot.yml` | Monthly version updates for npm and GitHub Actions, minor and patch grouped, npm majors left to hand upgrades, at most five open pull requests per ecosystem; the Stack worker's `uv.lock` gets security updates only, since the worker journal is keyed to it; the image's Node base gets new digests only, its version moving by hand | PoC support |
+| `.github/dependabot.yml` | Monthly version updates for npm and GitHub Actions, minor and patch grouped, npm majors left to hand upgrades, at most five open pull requests per ecosystem; the Stack worker's `uv.lock` gets security updates only, which pass CI by themselves since nothing pins the lock's hash (#255), while its libraries move by hand with a live `--resume`; the image's Node base gets new digests only, its version moving by hand | PoC support |
 | `vitest.config.mts` | Finds `*.test.ts` and `*.test.tsx` under `apps/`, `packages/`, and `ops/`, and compiles JSX with React's automatic runtime, since the tsconfig preserves JSX for Next.js. A test may take 30 s, as the preparer's synchronous composition tests take up to 12 s on CI | PoC support |
 | `playwright.config.ts` | The browser scenarios; starts a dev server on 127.0.0.1 (`E2E_PORT`, default 3000) | PoC support |
 | `playwright.production.config.ts` | The accessibility and performance suites; starts `next start` on the production build at `E2E_PORT` + 10 | PoC support |

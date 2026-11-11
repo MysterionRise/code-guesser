@@ -146,6 +146,41 @@ describe("run journal", () => {
     expect(offline.hashes).toEqual(resumed.hashes);
   });
 
+  it("keeps the recorded access answer on resume when only its download and like counters moved (#252)", async () => {
+    const profile = await loadProfile();
+    const path = journalPath();
+    const info = { id: "bigcode/the-stack-v2", sha: "e".repeat(40), gated: "auto", downloads: 10_338, likes: 661,
+      cardData: { extra_gated_fields: { Email: "text" } }, author: { email: "owner@example.test" } };
+    const answering = (body: unknown) => {
+      const state = { calls: 0 };
+      const fetchLike = (async () => { state.calls += 1; return new Response(JSON.stringify(body), {
+        status: 200, headers: { "content-type": "application/json" } }); }) as typeof fetch;
+      return { state, fetchLike };
+    };
+    const recorded = await runRequests(profile, "fresh", path, answering(info).fetchLike, [accessRequest]);
+
+    // A day later the counters have moved, by a digit too: the check still runs live, and the run accepts the recording.
+    const moved = answering({ ...info, downloads: 111_917, likes: 675 });
+    const resumed = await runRequests(profile, "resume", path, moved.fetchLike, [accessRequest]);
+    expect(moved.state.calls).toBe(1);
+    expect(resumed.summary).toEqual({ mode: "resume", replayed: 0, live: 1 });
+    expect(resumed.hashes).toEqual(recorded.hashes);
+    expect(resumed.snapshot.responseBytes).toBe(recorded.snapshot.responseBytes);
+    expect(resumed.values[0]).toMatchObject({ downloads: 10_338, likes: 661 });
+    // The journal still holds one answer, the first, so an offline replay accepts the same hash.
+    expect(readFileSync(path, "utf8").split("\n").filter((line) => line.includes("huggingFace"))).toHaveLength(1);
+    expect((await runRequests(profile, "offline", path, refusingFetch, [accessRequest])).hashes).toEqual(recorded.hashes);
+
+    // Anything else that changed is accepted as it came: the hash moves, and the journal records the new answer.
+    const changed = await runRequests(profile, "resume", path, answering({ ...info, gated: "manual" }).fetchLike, [accessRequest]);
+    expect(changed.hashes).not.toEqual(recorded.hashes);
+    expect(changed.values[0]).toMatchObject({ gated: "manual" });
+    expect((await runRequests(profile, "offline", path, refusingFetch, [accessRequest])).hashes).toEqual(changed.hashes);
+    // A counter nested deeper is part of the answer, not one of its counters.
+    const nested = await runRequests(profile, "resume", path, answering({ ...info, gated: "manual", cardData: { likes: 1 } }).fetchLike, [accessRequest]);
+    expect(nested.hashes).not.toEqual(changed.hashes);
+  });
+
   it("searches live on resume when the recorded run did not finish discovery", async () => {
     const profile = await loadProfile();
     const path = journalPath();
@@ -294,5 +329,42 @@ describe("run journal", () => {
     const replayed = await journaledWorker(offline, async () => { throw new Error("WORKER_SPAWNED"); }, "code")(later);
     expect(new TextDecoder().decode(replayed.stdout)).toBe("row\n{\"counters\":{}}\n");
     await expect(journaledWorker(offline, run, "changed-code")(later)).rejects.toMatchObject({ code: "JOURNAL_MISS" });
+  });
+
+  it("replays an output recorded under the source-and-lock key while the worker's source is unchanged (#255)", async () => {
+    const path = journalPath();
+    const request: WorkerRequest = { command: "uv", args: ["run", "/x/fetch_blob.py"], cwd: "/x", environment: {},
+      stdin: `${JSON.stringify({ row: "r", limits: { requestLimit: 3 } })}\n`, stdoutByteLimit: 1000, stderrByteLimit: 10 };
+    const output = (text: string): WorkerResult => ({ exitCode: 0, stdout: new TextEncoder().encode(text), stderr: new Uint8Array() });
+    const spawned = async (): Promise<WorkerResult> => { throw new Error("WORKER_SPAWNED"); };
+    const legacy = { code: "source", codeAndLock: "source-and-lock" };
+    const text = async (result: Promise<WorkerResult>): Promise<string> => new TextDecoder().decode((await result).stdout);
+    // The journal of a run before #255: its one output sits under the old key.
+    const before = openJournal({ mode: "fresh", path });
+    await journaledWorker(before, async () => output("old\n"), "source-and-lock", legacy)(request);
+    before.finish();
+
+    // The same source finds it offline and on resume, without running the worker, and the journal keeps it.
+    expect(await text(journaledWorker(openJournal({ mode: "offline", path }), spawned, "source", legacy)(request))).toBe("old\n");
+    const resumed = openJournal({ mode: "resume", path });
+    expect(await text(journaledWorker(resumed, spawned, "source", legacy)(request))).toBe("old\n");
+    expect(resumed.finish()).toEqual({ mode: "resume", replayed: 1, live: 0 });
+    expect(await text(journaledWorker(openJournal({ mode: "offline", path }), spawned, "source", legacy)(request))).toBe("old\n");
+
+    // A changed source finds nothing: offline that is a miss, and a resumed run reads again and records under its own key.
+    await expect(journaledWorker(openJournal({ mode: "offline", path }), spawned, "new-source", legacy)(request))
+      .rejects.toMatchObject({ code: "JOURNAL_MISS" });
+    const rerun = openJournal({ mode: "resume", path });
+    expect(await text(journaledWorker(rerun, async () => output("new\n"), "new-source", legacy)(request))).toBe("new\n");
+    expect(rerun.finish()).toEqual({ mode: "resume", replayed: 0, live: 1 });
+    expect(await text(journaledWorker(openJournal({ mode: "offline", path }), spawned, "new-source", legacy)(request))).toBe("new\n");
+
+    // An output under today's key outranks one under the old key.
+    const both = openJournal({ mode: "resume", path });
+    await journaledWorker(both, spawned, "source", legacy)(request);
+    both.record({ key: workerJournalKey(request, "source"), policy: "fixed", sha256: sha256(new TextEncoder().encode("today\n")),
+      byteLength: 6, encoding: "text", body: "today\n" });
+    both.finish();
+    expect(await text(journaledWorker(openJournal({ mode: "offline", path }), spawned, "source", legacy)(request))).toBe("today\n");
   });
 });
