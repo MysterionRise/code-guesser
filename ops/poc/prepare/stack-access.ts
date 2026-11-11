@@ -1,4 +1,6 @@
 import { STACK_DATASET, STACK_RELEASE, STACK_REVISION } from "../limits";
+import { CapacityError } from "./capacity";
+import { runStop } from "./diagnostics";
 import type { CrawlProfile } from "./profile";
 import type { BoundedTransport } from "./transport";
 
@@ -15,8 +17,9 @@ const TERMS_MARKERS = [
 ] as const;
 
 export class StackAccessError extends Error {
-  public constructor(public readonly code: string) {
-    super(code);
+  /** `cause` is the request failure behind an `_UNAVAILABLE` code; the failure line takes its status class from it. */
+  public constructor(public readonly code: string, cause?: unknown) {
+    super(code, cause === undefined ? undefined : { cause });
     this.name = "StackAccessError";
   }
 }
@@ -96,6 +99,17 @@ const latestRelease = (card: string): string => {
   return match?.[1] ?? fail("CARD_RESPONSE_MALFORMED");
 };
 
+/**
+ * Reports a failed access request (#93). A run stop (an offline journal miss, an interruption) and a spent budget
+ * pass through as themselves. Anything else keeps the request's fixed code and carries the failure as its cause,
+ * so the failure line names the status class too: a refused token reads `ACCESS_UNAVAILABLE 4xx`, the Hub down
+ * `5xx`, and a timeout or an unreadable body `none`.
+ */
+const unavailable = (code: string, error: unknown): never => {
+  if (error instanceof CapacityError || runStop(error) !== undefined) throw error;
+  throw new StackAccessError(code, error);
+};
+
 const requestMetadata = async (transport: BoundedTransport): Promise<unknown> => {
   try {
     return await transport.requestJson({
@@ -104,8 +118,8 @@ const requestMetadata = async (transport: BoundedTransport): Promise<unknown> =>
       url: METADATA_URL,
       headers: { accept: "application/json" },
     });
-  } catch {
-    return fail("ACCESS_UNAVAILABLE");
+  } catch (error) {
+    return unavailable("ACCESS_UNAVAILABLE", error);
   }
 };
 
@@ -118,8 +132,8 @@ const requestCard = async (transport: BoundedTransport): Promise<string> => {
       headers: { accept: "text/plain; charset=utf-8" },
     });
     return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-  } catch {
-    return fail("CARD_UNAVAILABLE");
+  } catch (error) {
+    return unavailable("CARD_UNAVAILABLE", error);
   }
 };
 

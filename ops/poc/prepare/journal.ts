@@ -11,7 +11,8 @@ import { canonicalBytes } from "./canonical";
  * - `fresh` replays nothing and records everything. It never replaces a journal: `--fresh` sets one aside first.
  * - `resume` replays deterministic responses (repository, commit, tree, blob, and licence GETs, and
  *   worker outputs) and fetches the rest live: the Hugging Face access check always, and search pages
- *   unless the recorded run finished discovery.
+ *   unless the recorded run finished discovery. A live access answer that differs from the recorded one only
+ *   in its download and like counters keeps the recording, so the resumed run builds the same snapshot (#252).
  * - `offline` replays everything and fails with `JOURNAL_MISS` instead of touching the network.
  *
  * The journal lives in a gitignored directory and is never logged. Structured `email` fields are
@@ -58,6 +59,14 @@ export interface RunJournal {
   readonly mode: JournalMode;
   /** The recorded entry to replay, or `undefined` to go live. Offline, a missing entry throws `JOURNAL_MISS`. */
   take(key: string, policy: ReplayPolicy): JournalEntry | undefined;
+  /** Whether a `fixed` take of this key would replay, without taking it: offline, a missing key never throws here. */
+  has(key: string): boolean;
+  /**
+   * The JSON answer the loaded journal holds for this key, whatever its policy, when `body` is that answer apart
+   * from the named top-level fields; `undefined` when none was recorded or anything else differs. It takes
+   * nothing: the caller records the answer it accepts.
+   */
+  earlier(key: string, body: unknown, apart: ReadonlySet<string>): JournalEntry | undefined;
   /** Keeps a response the run fetched live and accepted. */
   record(entry: Readonly<{ key: string; policy: ReplayPolicy; sha256: string; byteLength: number; encoding: JournalEncoding; body: unknown }>): void;
   /** Marks discovery finished, so a resumed run may replay this run's search pages. */
@@ -94,6 +103,12 @@ export const redactEmails = (value: unknown): unknown => {
 
 const storedBytes = (encoding: JournalEncoding, body: unknown): Uint8Array =>
   encoding === "json" || encoding === "failure" ? canonicalBytes(body) : new TextEncoder().encode(String(body));
+
+/** A JSON object without the named top-level fields; anything else as it is. */
+const without = (value: unknown, apart: ReadonlySet<string>): unknown =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+    ? Object.fromEntries(Object.entries(value).filter(([key]) => !apart.has(key))) : value;
+const sameBytes = (left: Uint8Array, right: Uint8Array): boolean => Buffer.from(left).equals(Buffer.from(right));
 
 /** Decodes a replayed entry into the value a live request would have returned. */
 export const decodeEntry = (entry: JournalEntry): unknown => {
@@ -182,6 +197,13 @@ export const openJournal = (options: Readonly<{ mode: JournalMode; path: string 
       if (!consumed.has(entry)) { consumed.add(entry); kept.push(entry); }
       replayed += 1;
       return entry;
+    },
+    has: (key) => fixed.has(key),
+    earlier: (key, body, apart) => {
+      // Compared as stored, so a redacted field never reads as a difference.
+      const asked = canonicalBytes(without(redactEmails(body), apart));
+      return loaded.entries.find((entry) => entry.key === key && entry.encoding === "json"
+        && sameBytes(canonicalBytes(without(entry.body, apart)), asked));
     },
     record: ({ key, policy, sha256: accepted, byteLength, encoding, body }) => {
       if (options.mode === "offline") fail("JOURNAL_OFFLINE_RECORD");

@@ -84,6 +84,8 @@ const reusable = (request: RequestInput): boolean =>
 const replayPolicy = (request: RequestInput): ReplayPolicy =>
   reusable(request) ? "fixed" : request.provider === "github" && new URL(request.url).pathname === SEARCH_PATH ? "sequence" : "offline";
 const sha256 = (bytes: Uint8Array): string => createHash("sha256").update(bytes).digest("hex");
+/** Fields of Hugging Face's dataset info that move by the day and that the access check never reads (#252). */
+const ACCESS_COUNTERS: ReadonlySet<string> = new Set(["downloads", "likes"]);
 /** Answers that say what the provider holds (missing, gone, unprocessable), not how it is doing; rate limits are excluded. */
 const DETERMINISTIC_STATUSES = new Set([404, 409, 410, 422, 451]);
 const deterministicStatus = (request: RequestInput, error: unknown): number | undefined =>
@@ -178,9 +180,20 @@ export const createPreparationRuntime = (
         byteLength = recorded.byteLength;
       } else {
         value = kind === "json" ? await base.requestJson(input, page) : await base.requestBytes(input, page);
-        const bytes = kind === "json" ? canonicalBytes(value) : value as Uint8Array;
-        accepted = sha256(bytes);
-        byteLength = bytes.byteLength;
+        // The access check is asked again on every resume, and its answer counts downloads and likes. One that
+        // differs from the recording only in those is accepted as the recording, so the run builds the same
+        // snapshot; any other difference is accepted as it came, and the snapshot shows it (#252).
+        const earlier = kind === "json" && input.provider === "huggingFace" && policy === "offline"
+          ? journal?.earlier(key, value, ACCESS_COUNTERS) : undefined;
+        if (earlier !== undefined) {
+          value = decodeEntry(earlier);
+          accepted = earlier.sha256;
+          byteLength = earlier.byteLength;
+        } else {
+          const bytes = kind === "json" ? canonicalBytes(value) : value as Uint8Array;
+          accepted = sha256(bytes);
+          byteLength = bytes.byteLength;
+        }
       }
       lease.complete(byteLength);
       if (!recorded) {

@@ -1,6 +1,14 @@
 import { readFile } from "node:fs/promises";
 
-import { parseCrawlProfile, type CrawlProfile } from "./profile";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { CapacityError, createCapacityMeter } from "./capacity";
+import { failureDiagnostic, runStop } from "./diagnostics";
+import { JOURNAL_SCHEMA, openJournal } from "./journal";
+import { MAINSTREAM_LANGUAGES, parseCrawlProfile, type CrawlProfile } from "./profile";
+import { createPreparationRuntime, RunInterruptedError } from "./runtime";
 import { preflightStackAccess, StackAccessError } from "./stack-access";
 import { createBoundedTransport, type BoundedTransport } from "./transport";
 
@@ -214,6 +222,48 @@ describe("Stack access preflight", () => {
     };
     await expect(preflightStackAccess(await run({ transport: badCard })))
       .rejects.toMatchObject({ code: "CARD_UNAVAILABLE", message: "CARD_UNAVAILABLE" });
+  });
+
+  it("keeps the status class of a failed request, and passes a run stop or a spent budget through (#93)", async () => {
+    const profile = await loadProfile();
+    const runtimeFor = (fetchLike: typeof fetch, journal?: ReturnType<typeof openJournal>, signal?: AbortSignal) =>
+      createPreparationRuntime(profile, { PATH: "/bin", HF_TOKEN: "revoked-token" }, createCapacityMeter({ limits: profile.capacity,
+        githubQueryIds: profile.github.queries.map(({ id }) => id), stackLanguages: MAINSTREAM_LANGUAGES }), fetchLike, journal,
+      signal ? { signal } : {});
+    const answering = (status: number, body = "{}") => (async () => new Response(body, { status,
+      headers: { "content-type": "application/json" } })) as typeof fetch;
+    const failed = async (transport: BoundedTransport): Promise<unknown> =>
+      preflightStackAccess(await run({ transport })).then(() => undefined, (error: unknown) => error);
+
+    // A refused token and a Hub that is down keep the request's code, now with the answer's status class.
+    const refused = await failed(runtimeFor(answering(401)).transport);
+    expect(refused).toMatchObject({ name: "StackAccessError", code: "ACCESS_UNAVAILABLE", message: "ACCESS_UNAVAILABLE" });
+    expect(failureDiagnostic(refused)).toEqual({ code: "ACCESS_UNAVAILABLE", statusClass: "4xx" });
+    expect(failureDiagnostic(await failed(runtimeFor(answering(503)).transport))).toEqual({ code: "ACCESS_UNAVAILABLE", statusClass: "5xx" });
+    // The card's request reports the same way, under its own code.
+    let calls = 0;
+    const cardRefused = (async () => (calls += 1) === 1
+      ? new Response(JSON.stringify(metadata()), { status: 200, headers: { "content-type": "application/json" } })
+      : new Response("", { status: 403, headers: { "content-type": "text/plain; charset=utf-8" } })) as typeof fetch;
+    expect(failureDiagnostic(await failed(runtimeFor(cardRefused).transport))).toEqual({ code: "CARD_UNAVAILABLE", statusClass: "4xx" });
+    // A failure with no answer has no status class.
+    const unreachable = (async () => { throw new Error("Bearer secret"); }) as typeof fetch;
+    expect(failureDiagnostic(await failed(runtimeFor(unreachable).transport))).toEqual({ code: "ACCESS_UNAVAILABLE", statusClass: "none" });
+
+    // An offline replay of a journal with no access check is a journal miss, not an access failure.
+    const path = join(mkdtempSync(join(tmpdir(), "codeguessr-access-")), "run.jsonl");
+    writeFileSync(path, `${JSON.stringify({ schema: JOURNAL_SCHEMA, discoveryComplete: true, entries: 0 })}\n`);
+    const missed = await failed(runtimeFor(unreachable, openJournal({ mode: "offline", path })).transport);
+    expect(missed).toMatchObject({ code: "JOURNAL_MISS" });
+    expect(missed).not.toBeInstanceOf(StackAccessError);
+    // An interruption during the check stops the run as itself.
+    const interrupted = await failed(runtimeFor(answering(200), undefined, AbortSignal.abort()).transport);
+    expect(interrupted).toBeInstanceOf(RunInterruptedError);
+    expect(runStop(interrupted)).toBe(interrupted);
+    // A spent request budget is reported as the budget.
+    const spent = new CapacityError("REQUEST_COUNT");
+    expect(await failed({ requestJson: async () => { throw spent; }, requestBytes: async () => Buffer.from(card()) })).toBe(spent);
+    expect(await failed({ requestJson: async () => metadata(), requestBytes: async () => { throw spent; } })).toBe(spent);
   });
 
   it("exposes stable preflight errors", () => {

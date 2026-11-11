@@ -12,16 +12,29 @@ const RUNTIME_DIRECTORY = fileURLToPath(new URL("../stack/", import.meta.url));
 const BUDGET_FIELDS = new Set(["requestLimit", "networkByteLimit", "temporaryDiskBytes", "limits"]);
 
 let workerCodeHash: string | undefined;
-/** Worker source and lock file: a worker change invalidates its recorded outputs. */
+/** The worker's own source: a change to it invalidates its recorded outputs. Its lock is not part of it (#255). */
 const currentWorkerCode = (): string => {
   if (workerCodeHash === undefined) {
     const hash = createHash("sha256");
-    const files = readdirSync(RUNTIME_DIRECTORY).filter((name) => (name.endsWith(".py") && !name.startsWith("test_")) || name === "uv.lock").sort();
+    const files = readdirSync(RUNTIME_DIRECTORY).filter((name) => name.endsWith(".py") && !name.startsWith("test_")).sort();
     for (const name of files) hash.update(name).update("\0").update(readFileSync(join(RUNTIME_DIRECTORY, name))).update("\0");
     workerCodeHash = hash.digest("hex");
   }
   return workerCodeHash;
 };
+
+/**
+ * Outputs recorded before #255 are keyed to the worker's source and its `uv.lock` together. `code` is the source
+ * of that time by today's hash, and `codeAndLock` the hash those outputs carry (both computed on `03cd25a`). While
+ * the source still hashes to `code`, an output missing under today's key is looked up under the old one, so the
+ * journals of 2026-11-10 and before replay. The first change to a worker file ends that by itself: no recorded
+ * output fits the new source, and this constant can go.
+ */
+export interface LegacyWorkerCode { readonly code: string; readonly codeAndLock: string }
+export const LEGACY_WORKER_CODE: LegacyWorkerCode = Object.freeze({
+  code: "3da86663b8c3adad6a50474c37816de73fe409a94558015b8022feae91c0a0f9",
+  codeAndLock: "e1ea008b2f0ca74a80c44e29b782a82f166cdd7643cb048539006760b3ccc39e",
+});
 
 /** The worker, its code, and what it was asked to read, without the budget fields. */
 export const workerJournalKey = (request: WorkerRequest, codeHash: string = currentWorkerCode()): string => {
@@ -45,15 +58,19 @@ const workerReason = (stderr: Uint8Array): string | undefined => {
 /**
  * Replays a recorded worker output, or runs the worker and records it. A successful output replays on resume
  * and offline; a failure with a reason code replays only offline, so a resumed run tries the worker again.
- * Node still validates and meters the replayed output exactly as a live one.
+ * Node still validates and meters the replayed output exactly as a live one. A new output is recorded under
+ * today's key, the worker's source alone.
  */
 export const journaledWorker = (
   journal: RunJournal,
   run: (request: WorkerRequest) => Promise<WorkerResult> = runLockedWorker,
-  codeHash?: string,
+  codeHash: string = currentWorkerCode(),
+  legacy: LegacyWorkerCode = LEGACY_WORKER_CODE,
 ) => async (request: WorkerRequest): Promise<WorkerResult> => {
   const key = workerJournalKey(request, codeHash);
-  const recorded = journal.take(key, "fixed");
+  // An output recorded under the source-and-lock key replays while the source is the one it was recorded with.
+  const earlier = codeHash === legacy.code ? workerJournalKey(request, legacy.codeAndLock) : undefined;
+  const recorded = journal.take(earlier !== undefined && !journal.has(key) && journal.has(earlier) ? earlier : key, "fixed");
   if (recorded?.encoding === "failure") {
     const { exitCode, reason } = recorded.body as { exitCode: number; reason: string };
     return { exitCode, stdout: new Uint8Array(), stderr: new TextEncoder().encode(`${reason}\n`) };

@@ -43,7 +43,7 @@ describe("selected-blob worker bridge", () => {
 
     expect(request).toEqual({
       command: "uv",
-      args: ["run", "--project", runtimeDirectory, "--locked", "python", workerPath],
+      args: ["run", "--quiet", "--project", runtimeDirectory, "--locked", "python", workerPath],
       cwd: runtimeDirectory,
       environment: {
         PATH: "/project/bin", HOME: "/external/home", AWS_ACCESS_KEY_ID: "id", AWS_SECRET_ACCESS_KEY: "secret",
