@@ -268,13 +268,21 @@ Its options:
   `EXPERIMENT_SOURCE=synthetic`.
 - `--rate-limits` sends beacons until one gets a 429 with `Retry-After`. It spends this client's beacon allowance for
   a minute, so run it before launch.
+- `--genui` plays one more round to its reveal, asks for the catalog explainer, and fails unless a panel from the
+  model renders in place of the static reveal. That is one real model call through the server's own `/api/genui`,
+  about $0.001 on the default model. It needs lab mode to pick the design, so it is for the pre-launch run with
+  `GENUI_ENABLED=1`: in the launch settings a game draws its own design, and the check fails whenever that isn't the
+  catalog explainer. It can't go with `--no-browser`.
 - `--events=<dir>` also reads pulled event files and fails on any address-shaped string.
 - `--deck=<id>` picks the deck (default `project`); `--no-browser` skips the game.
 
 **Before launch (L13),** with DNS and TLS in place:
 
 1. Deploy with `EXPERIMENT_SOURCE=synthetic` and `EXPERIMENT_LAB=1` added: the one time lab mode is on in production.
-2. `node ops/deploy/smoke.mjs https://codeguessr.example --record --rate-limits`.
+2. `node ops/deploy/smoke.mjs https://codeguessr.example --record --rate-limits`. With generative UI on, add
+   `--genui`: the server's first model call, with its own key and model names, which the boot check can't try. If
+   the explainer falls back, the logs name the provider's status (`GENUI_STREAM_FAILED <status>`) or the check a
+   call failed (`GENUI_RENDER_REJECTED <component> <check>`).
 3. Play one game per design, theme, and layer with lab picks (`?design=`, `?theme=`, `?layer=`), by hand or with
    `ops/playtest/driver.mjs`. Restart the service mid-game: the game continues, and a stale token gets `STALE_STEP`.
 4. Pull the events; `pnpm experiment:report --dir=<dir> --source=synthetic` shows every arm, and
